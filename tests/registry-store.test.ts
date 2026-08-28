@@ -239,4 +239,20 @@ describe("RegistryStore — índice SQLite (corp.db)", () => {
       expect(statSync(join(wsPath, ".opencorp", "registries", c)).isDirectory()).toBe(true);
     }
   });
+
+  it("workspace recém-criado já lista as categorias padrão vazias (sem sqlite)", async () => {
+    const home = await mkdtemp(join(tmpdir(), "opencorp-reg-fresh-"));
+    raizes.push(home);
+    const manager = new WorkspaceManager({ homeDir: home, cwd: home });
+    const ws = await manager.criar("corp-fresh");
+    const store = new RegistryStore();
+    const grupos = await store.listarCategorias(ws.path);
+    const nomes = grupos.map((g) => g.categoria);
+    for (const c of ["chats", "documentos", "execucoes", "agentes", "custos", "logs", "custom"]) {
+      expect(nomes).toContain(c);
+    }
+    for (const g of grupos) {
+      expect(g.registros).toHaveLength(0);
+    }
+  });
 });

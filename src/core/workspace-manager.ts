@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { AgentStore, type AgenteResumo } from "./agent-store.js";
 import { WorkspaceError } from "./errors.js";
+import { RegistryStore } from "./registry-store.js";
 import { SettingsStore } from "./settings-store.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
 import { expandTilde, opencorpHome } from "../utils/paths.js";
@@ -67,6 +68,7 @@ export class WorkspaceManager {
   private readonly workspacesRootOverride?: string;
   private readonly store: SettingsStore;
   private readonly agentes: AgentStore;
+  private readonly registros = new RegistryStore();
 
   constructor(opts: ManagerOptions = {}) {
     this.homeDir = opts.homeDir ?? opencorpHome();
@@ -207,6 +209,7 @@ export class WorkspaceManager {
     const criado_em = new Date().toISOString();
     const ativo = estado.ativo ?? id;
     try {
+      await this.registros.garantirCategorias(destino);
       await this.gravarEstado({
         version: 1,
         ativo,

@@ -66,10 +66,6 @@ export function registerRegistryCommand(program: Command): void {
           return;
         }
         const grupos = await store.listarCategorias(ws.path);
-        if (grupos.every((g) => g.registros.length === 0)) {
-          console.log("nenhum registro — crie com: opencorp registry create <cat>/<id> -d \"...\"");
-          return;
-        }
         for (const g of grupos) {
           console.log(`${g.categoria} (${g.registros.length} registro(s))`);
           for (const meta of g.registros) {
