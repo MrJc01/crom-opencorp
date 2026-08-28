@@ -79,13 +79,17 @@ describe("AgentStore — clone/listar/carregar", () => {
     await store.criar(ws.path, "auditor", {});
     const journalPath = join(ws.path, ".opencorp", "registries", "agentes", "agentes-log", "journal.jsonl");
     const antes = readFileSync(journalPath, "utf8");
-    expect(antes.trim().split("\n")).toHaveLength(1);
+    const linhasAntes = antes.trim().split("\n");
+    expect(linhasAntes).toHaveLength(2);
+    expect(linhasAntes[0]).toContain('"evento":"criado"');
+    expect(linhasAntes[1]).toContain('"evento":"criado"');
     await store.clonar(ws.path, "auditor", "auditor-rapido");
     const depois = readFileSync(journalPath, "utf8");
     const linhas = depois.trim().split("\n");
-    expect(linhas).toHaveLength(2);
-    expect(linhas[0]).toBe(antes.trim().split("\n")[0]);
-    expect(linhas[1]).toContain('"evento":"clonado"');
+    expect(linhas).toHaveLength(3);
+    expect(linhas[0]).toBe(linhasAntes[0]);
+    expect(linhas[1]).toBe(linhasAntes[1]);
+    expect(linhas[2]).toContain('"evento":"clonado"');
     expect(existsSync(join(ws.path, ".opencorp", "agents", "auditor-rapido.md"))).toBe(true);
   });
 

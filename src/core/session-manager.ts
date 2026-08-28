@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
-import { appendFile, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -8,8 +8,9 @@ import type { Agente } from "../schemas/agent.js";
 import { AgentStore } from "./agent-store.js";
 import { SessionError } from "./errors.js";
 import { OpenCodeBridge } from "./opencode-bridge.js";
+import { RegistryStore, type MetaRegistro } from "./registry-store.js";
 import { WorkspaceManager } from "./workspace-manager.js";
-import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
+import { mkdirRecursive } from "../utils/fs-safe.js";
 
 export type StatusExecucao = "executando" | "concluido" | "falhou" | "cancelado";
 
@@ -47,28 +48,6 @@ export interface ResumoExecucao {
   exit_code: number | null;
 }
 
-interface MetaExecucao {
-  id: string;
-  categoria: "execucoes";
-  descricao: string;
-  criado_por: string;
-  criado_em: string;
-  atualizado_em: string;
-  permissoes: { leitura: string[]; escrita: string[]; modificacao_meta: string[] };
-  tags: string[];
-  referencias: string[];
-  extras: {
-    status: StatusExecucao;
-    modelo: string;
-    ordem: string;
-    pid: number | null;
-    fim: string | null;
-    exit_code: number | null;
-    duracao_ms: number | null;
-    log: string;
-  };
-}
-
 function msg(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
 }
@@ -83,6 +62,7 @@ function gerarId(prefixo: string): string {
 export class SessionManager {
   private readonly workspaces: WorkspaceManager;
   private readonly agentes: AgentStore;
+  private readonly registros = new RegistryStore();
   private readonly bridge = new OpenCodeBridge();
 
   constructor(opts: { homeDir?: string; cwd?: string; templatesDir?: string } = {}) {
@@ -113,6 +93,7 @@ export class SessionManager {
     }
     const modelo = opcoes.model ?? ag.frontmatter.model;
     await this.validarOrcamentoStub(ws.path, ag.frontmatter);
+    await this.registros.garantirCategorias(ws.path);
 
     const id = gerarId("exec");
     const logRelativo = `logs/${id}.log`;
@@ -133,16 +114,27 @@ export class SessionManager {
       log: logRelativo,
     };
 
-    await mkdirRecursive(this.dirExecucoes(ws.path));
-    await this.journalizar(ws.path, id, {
-      ts: new Date().toISOString(),
-      por: ag.frontmatter.id,
-      evento: "iniciado",
-      resumo: `ordem: ${ordem.slice(0, 160)}`,
-      modelo,
-      workspace: ws.id,
+    await this.registros.criar(ws.path, {
+      categoria: "execucoes",
+      id,
+      descricao: `Ordem: ${ordem.slice(0, 160)}`,
+      criadoPor: registro.agente,
+      tags: ["sessao"],
+      eventoInicial: {
+        evento: "iniciado",
+        resumo: `ordem: ${ordem.slice(0, 160)} · modelo: ${modelo}`,
+      },
+      extras: {
+        status: "executando",
+        modelo,
+        ordem,
+        pid: null,
+        fim: null,
+        exit_code: null,
+        duracao_ms: null,
+        log: logRelativo,
+      },
     });
-    await this.gravarMeta(ws.path, registro);
 
     await this.bridge.sincronizarAgente(ws.path, ag.frontmatter, ag.corpo);
 
@@ -170,12 +162,13 @@ export class SessionManager {
       });
     } catch (erro) {
       const falha = `não foi possível iniciar o opencode: ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
-      await this.finalizar(ws.path, registro, "falhou", null, Date.now() - inicio.getTime(), falha);
+      await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, "");
       throw new SessionError(falha);
     }
     if (child.pid) {
       registro.pid = child.pid;
-      await this.gravarMeta(ws.path, registro);
+      const meta = await this.registros.lerMeta(ws.path, "execucoes", id);
+      await this.salvarExtras(ws.path, meta, registro);
     }
 
     const logStream = createWriteStream(logPath, { flags: "a" });
@@ -199,7 +192,7 @@ export class SessionManager {
     } catch (erro) {
       logStream.end();
       const falha = `não foi possível executar o opencode: ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
-      await this.finalizar(ws.path, registro, "falhou", null, Date.now() - inicio.getTime(), falha);
+      await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, captura.join(""));
       throw new SessionError(falha);
     }
     logStream.end();
@@ -216,35 +209,25 @@ export class SessionManager {
     registro.status = status;
     registro.exit_code = res.exitCode ?? null;
     registro.duracao_ms = duracao;
-    await this.finalizar(ws.path, registro, status, registro.exit_code, duracao, captura.join("").slice(0, 400));
+    await this.finalizar(
+      ws,
+      registro,
+      ag.frontmatter,
+      status,
+      registro.exit_code,
+      duracao,
+      captura.join("").slice(0, 400),
+      captura.join(""),
+    );
     return registro;
   }
 
   async listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<ResumoExecucao[]> {
-    const dir = this.dirExecucoes(wsPath);
-    if (!existsSync(dir)) return [];
-    const saida: ResumoExecucao[] = [];
-    for (const entrada of readdirSync(dir, { withFileTypes: true })) {
-      if (!entrada.isDirectory() || !entrada.name.startsWith("exec-")) continue;
-      const metaPath = join(dir, entrada.name, "meta.json");
-      if (!existsSync(metaPath)) continue;
-      try {
-        const meta = JSON.parse(await readFile(metaPath, "utf8")) as MetaExecucao;
-        if (filtro?.agente && meta.criado_por !== filtro.agente) continue;
-        saida.push({
-          id: meta.id,
-          agente: meta.criado_por,
-          modelo: meta.extras?.modelo ?? "-",
-          status: meta.extras?.status ?? "executando",
-          inicio: meta.criado_em,
-          duracao_ms: meta.extras?.duracao_ms ?? null,
-          exit_code: meta.extras?.exit_code ?? null,
-        });
-      } catch {
-        continue;
-      }
-    }
-    return saida.sort((a, b) => b.inicio.localeCompare(a.inicio));
+    const metas = await this.registros.listar(wsPath, "execucoes");
+    return metas
+      .filter((meta) => !filtro?.agente || meta.criado_por === filtro.agente)
+      .map((meta) => this.paraResumo(meta))
+      .sort((a, b) => b.inicio.localeCompare(a.inicio));
   }
 
   async caminhoLog(wsPath: string, id: string): Promise<string> {
@@ -259,126 +242,118 @@ export class SessionManager {
     return readFile(await this.caminhoLog(wsPath, id), "utf8");
   }
 
+  async transcriptDe(wsPath: string, id: string): Promise<string> {
+    const registro = await this.registros.obter(wsPath, "chats", id);
+    return registro.conteudo ?? "";
+  }
+
   async matar(wsPath: string, id: string): Promise<void> {
-    const meta = await this.lerMeta(wsPath, id);
-    const extras = meta.extras;
-    if (!extras || extras.status !== "executando") {
+    let meta: MetaRegistro;
+    try {
+      meta = await this.registros.lerMeta(wsPath, "execucoes", id);
+    } catch {
+      throw new SessionError(`sessão "${id}" não encontrada (registries/execucoes)`);
+    }
+    const extras = (meta.extras ?? {}) as Record<string, unknown>;
+    if (extras.status !== "executando") {
       throw new SessionError(
-        `sessão "${id}" não está em execução (status: ${extras?.status ?? "desconhecido"})`,
+        `sessão "${id}" não está em execução (status: ${String(extras.status ?? "desconhecido")})`,
       );
     }
-    if (!extras.pid) {
+    const pid = extras.pid as number | null;
+    if (!pid) {
       throw new SessionError(`sessão "${id}" não tem pid registrado — não é possível matar`);
     }
     let viva = true;
     try {
-      process.kill(extras.pid, 0);
+      process.kill(pid, 0);
     } catch {
       viva = false;
     }
     if (!viva) {
-      throw new SessionError(`o processo da sessão "${id}" (pid ${extras.pid}) não está mais vivo`);
+      throw new SessionError(`o processo da sessão "${id}" (pid ${pid}) não está mais vivo`);
     }
     try {
-      process.kill(extras.pid, "SIGTERM");
+      process.kill(pid, "SIGTERM");
     } catch (erro) {
-      throw new SessionError(`não foi possível matar o pid ${extras.pid}: ${msg(erro)}`);
+      throw new SessionError(`não foi possível matar o pid ${pid}: ${msg(erro)}`);
     }
-    const registro = await this.registroDeMeta(meta);
+    const registro = await this.paraRegistro(meta);
     registro.status = "cancelado";
     registro.fim = new Date().toISOString();
     registro.duracao_ms = Date.now() - Date.parse(registro.inicio);
-    await this.finalizar(wsPath, registro, "cancelado", null, registro.duracao_ms, "cancelada via session kill");
+    await this.finalizar(
+      { path: wsPath, id: "" },
+      registro,
+      null,
+      "cancelado",
+      null,
+      registro.duracao_ms,
+      "cancelada via session kill",
+      "",
+    );
   }
 
-  private dirExecucoes(wsPath: string): string {
-    return join(wsPath, ".opencorp", "registries", "execucoes");
-  }
-
-  private dirDe(wsPath: string, id: string): string {
-    return join(this.dirExecucoes(wsPath), id);
-  }
-
-  private async validarOrcamentoStub(_wsPath: string, _agente: Agente): Promise<void> {}
-
-  private async gravarMeta(wsPath: string, registro: RegistroExecucao): Promise<void> {
-    const dir = this.dirDe(wsPath, registro.id);
-    mkdirSync(dir, { recursive: true });
-    const agora = new Date().toISOString();
-    const anterior = existsSync(join(dir, "meta.json"))
-      ? (JSON.parse(await readFile(join(dir, "meta.json"), "utf8")) as MetaExecucao)
-      : null;
-    const meta: MetaExecucao = {
-      id: registro.id,
-      categoria: "execucoes",
-      descricao: `Ordem: ${registro.ordem.slice(0, 160)}`,
-      criado_por: registro.agente,
-      criado_em: anterior?.criado_em ?? registro.inicio,
-      atualizado_em: agora,
-      permissoes: { leitura: ["*"], escrita: [registro.agente], modificacao_meta: [] },
-      tags: ["execucao"],
-      referencias: [],
-      extras: {
-        status: registro.status,
-        modelo: registro.modelo,
-        ordem: registro.ordem,
-        pid: registro.pid,
-        fim: registro.fim,
-        exit_code: registro.exit_code,
-        duracao_ms: registro.duracao_ms,
-        log: registro.log,
-      },
-    };
-    await writeFileAtomic(join(dir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`);
-  }
-
-  private async lerMeta(wsPath: string, id: string): Promise<MetaExecucao> {
-    const metaPath = join(this.dirDe(wsPath, id), "meta.json");
-    if (!existsSync(metaPath)) {
-      throw new SessionError(`sessão "${id}" não encontrada em ${this.dirExecucoes(wsPath)}`);
-    }
-    return JSON.parse(await readFile(metaPath, "utf8")) as MetaExecucao;
-  }
-
-  private async registroDeMeta(meta: MetaExecucao): Promise<RegistroExecucao> {
+  private paraResumo(meta: MetaRegistro): ResumoExecucao {
+    const extras = (meta.extras ?? {}) as Record<string, unknown>;
     return {
       id: meta.id,
       agente: meta.criado_por,
-      modelo: meta.extras?.modelo ?? "-",
-      ordem: meta.extras?.ordem ?? "",
+      modelo: String(extras.modelo ?? "-"),
+      status: (extras.status as StatusExecucao) ?? "executando",
       inicio: meta.criado_em,
-      fim: meta.extras?.fim ?? null,
-      status: meta.extras?.status ?? "executando",
-      exit_code: meta.extras?.exit_code ?? null,
-      duracao_ms: meta.extras?.duracao_ms ?? null,
-      pid: meta.extras?.pid ?? null,
-      log: meta.extras?.log ?? `logs/${meta.id}.log`,
+      duracao_ms: (extras.duracao_ms as number | null) ?? null,
+      exit_code: (extras.exit_code as number | null) ?? null,
     };
   }
 
-  private async journalizar(
-    wsPath: string,
-    id: string,
-    evento: Record<string, unknown>,
-  ): Promise<void> {
-    const dir = this.dirDe(wsPath, id);
-    mkdirSync(dir, { recursive: true });
-    await appendFile(join(dir, "journal.jsonl"), `${JSON.stringify(evento)}\n`, "utf8");
+  private async paraRegistro(meta: MetaRegistro): Promise<RegistroExecucao> {
+    const extras = (meta.extras ?? {}) as Record<string, unknown>;
+    return {
+      id: meta.id,
+      agente: meta.criado_por,
+      modelo: String(extras.modelo ?? "-"),
+      ordem: String(extras.ordem ?? ""),
+      inicio: meta.criado_em,
+      fim: (extras.fim as string | null) ?? null,
+      status: (extras.status as StatusExecucao) ?? "executando",
+      exit_code: (extras.exit_code as number | null) ?? null,
+      duracao_ms: (extras.duracao_ms as number | null) ?? null,
+      pid: (extras.pid as number | null) ?? null,
+      log: String(extras.log ?? `logs/${meta.id}.log`),
+    };
+  }
+
+  private async salvarExtras(wsPath: string, meta: MetaRegistro, registro: RegistroExecucao): Promise<void> {
+    meta.extras = {
+      ...(meta.extras ?? {}),
+      status: registro.status,
+      modelo: registro.modelo,
+      ordem: registro.ordem,
+      pid: registro.pid,
+      fim: registro.fim,
+      exit_code: registro.exit_code,
+      duracao_ms: registro.duracao_ms,
+      log: registro.log,
+    };
+    await this.registros.salvarMeta(wsPath, "execucoes", registro.id, meta);
   }
 
   private async finalizar(
-    wsPath: string,
+    ws: { path: string; id: string },
     registro: RegistroExecucao,
+    agente: Agente | null,
     status: StatusExecucao,
     exitCode: number | null,
     duracaoMs: number,
     resumo: string,
+    captura: string,
   ): Promise<void> {
     registro.status = status;
     registro.exit_code = exitCode;
     registro.duracao_ms = duracaoMs;
     registro.fim = registro.fim ?? new Date().toISOString();
-    await this.journalizar(wsPath, registro.id, {
+    await this.registros.anexarEvento(ws.path, "execucoes", registro.id, {
       ts: new Date().toISOString(),
       por: "opencorp",
       evento: "finalizado",
@@ -387,6 +362,28 @@ export class SessionManager {
       duracao_ms: duracaoMs,
       resumo,
     });
-    await this.gravarMeta(wsPath, registro);
+    const meta = await this.registros.lerMeta(ws.path, "execucoes", registro.id);
+    await this.salvarExtras(ws.path, meta, registro);
+    await this.registros.registrarSessao(ws.path, {
+      id: registro.id,
+      agente: registro.agente,
+      modelo: registro.modelo,
+      inicio: registro.inicio,
+      fim: registro.fim,
+      custo_usd: null,
+      status: registro.status,
+    });
+    if (captura !== "" || agente !== null) {
+      await this.registros.garantirRegistro(ws.path, {
+        categoria: "chats",
+        id: registro.id,
+        descricao: `transcript da sessão ${registro.id} (${registro.agente} · ${registro.modelo})`,
+        criadoPor: registro.agente,
+        tags: ["sessao", "transcript"],
+        conteudo: captura,
+      });
+    }
   }
+
+  private async validarOrcamentoStub(_wsPath: string, _agente: Agente): Promise<void> {}
 }

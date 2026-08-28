@@ -96,6 +96,17 @@ describe("SessionManager.rodar (execa mockado — nunca roda opencode real)", ()
     const eventos = journal.trim().split("\n").map((l) => JSON.parse(l));
     expect(eventos.map((e) => e.evento)).toEqual(["iniciado", "finalizado"]);
     expect(eventos[1].status).toBe("concluido");
+
+    const transcript = readFileSync(
+      join(ws.path, ".opencorp", "registries", "chats", r.id, "conteudo.md"),
+      "utf8",
+    );
+    expect(transcript).toContain("trabalho feito");
+    const chatsMeta = JSON.parse(
+      readFileSync(join(ws.path, ".opencorp", "registries", "chats", r.id, "meta.json"), "utf8"),
+    );
+    expect(chatsMeta.categoria).toBe("chats");
+    expect(chatsMeta.criado_por).toBe("executor-padrao");
   });
 
   it("--model sobrepõe o modelo do agente; --session e --title são repassados", async () => {

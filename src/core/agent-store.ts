@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
-import { appendFile } from "node:fs/promises";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -11,6 +10,7 @@ import {
 } from "../schemas/agent.js";
 import { AgentError } from "./errors.js";
 import { OpenCodeBridge } from "./opencode-bridge.js";
+import { RegistryStore } from "./registry-store.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
 
 export interface AgenteResumo {
@@ -65,6 +65,7 @@ export function serializarAgenteMd(agente: Agente, corpo: string): string {
 export class AgentStore {
   private readonly templatesDir: string;
   private readonly bridge = new OpenCodeBridge();
+  private readonly registros = new RegistryStore();
 
   constructor(opts: { templatesDir?: string } = {}) {
     this.templatesDir =
@@ -189,32 +190,17 @@ export class AgentStore {
   }
 
   async registrarEvento(wsPath: string, ev: EventoAgente): Promise<void> {
-    const dir = join(wsPath, ".opencorp", "registries", "agentes", "agentes-log");
-    mkdirSync(dir, { recursive: true });
-    const metaPath = join(dir, "meta.json");
-    if (!existsSync(metaPath)) {
-      const agora = new Date().toISOString();
-      await writeFileAtomic(
-        metaPath,
-        `${JSON.stringify(
-          {
-            id: "agentes-log",
-            categoria: "agentes",
-            descricao: "histórico de criação e modificação de agentes do workspace",
-            criado_por: "opencorp",
-            criado_em: agora,
-            atualizado_em: agora,
-            permissoes: { leitura: ["*"], escrita: ["opencorp"], modificacao_meta: [] },
-            tags: ["agentes", "auditoria"],
-            referencias: [],
-          },
-          null,
-          2,
-        )}\n`,
-      );
-    }
-    const linha = `${JSON.stringify({ ts: new Date().toISOString(), por: "opencorp", ...ev })}\n`;
-    await appendFile(join(dir, "journal.jsonl"), linha, "utf8");
+    await this.registros.garantirRegistro(wsPath, {
+      categoria: "agentes",
+      id: "agentes-log",
+      descricao: "histórico de criação e modificação de agentes do workspace",
+      criadoPor: "opencorp",
+    });
+    await this.registros.anexarEvento(wsPath, "agentes", "agentes-log", {
+      ts: new Date().toISOString(),
+      por: "opencorp",
+      ...ev,
+    });
   }
 }
 

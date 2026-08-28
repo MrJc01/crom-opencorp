@@ -6,6 +6,7 @@ import { registerAgentCommand } from "./commands/agent.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerRunCommand } from "./commands/run.js";
 import { registerSessionCommand } from "./commands/session.js";
+import { registerRegistryCommand } from "./commands/registry.js";
 import { registerSettingsCommand } from "./commands/settings.js";
 import { registerWorkspaceCommands } from "./commands/workspace.js";
 import { notImplementedAction } from "./placeholder.js";
@@ -48,56 +49,7 @@ export function buildProgram(): Command {
 
   registerSessionCommand(program);
 
-  const registry = program.command("registry").description("registros globais por categoria");
-  registry
-    .command("list")
-    .argument("[categoria]", "filtra por categoria")
-    .description("lista categorias/registros")
-    .action(notImplementedAction("opencorp registry list"));
-  registry
-    .command("create")
-    .argument("<cat-id>", "categoria/id (ex.: notas/reuniao-0828)")
-    .requiredOption("-d, --descricao <texto>", "descrição clara do registro")
-    .option("--perm-leitura <lista>", "quem pode ler (padrão: *)")
-    .option("--perm-escrita <lista>", "quem pode escrever")
-    .description("cria um registro")
-    .action(notImplementedAction("opencorp registry create"));
-  registry
-    .command("get")
-    .argument("<cat-id>", "categoria/id do registro")
-    .description("mostra um registro")
-    .action(notImplementedAction("opencorp registry get"));
-  registry
-    .command("update")
-    .argument("<cat-id>", "categoria/id do registro")
-    .option("--conteudo <texto>", "novo conteúdo")
-    .option("--conteudo-arquivo <arquivo>", "novo conteúdo a partir de um arquivo")
-    .option("--descricao <texto>", "nova descrição")
-    .description("atualiza um registro (via journal)")
-    .action(notImplementedAction("opencorp registry update"));
-  registry
-    .command("log")
-    .argument("<cat-id>", "categoria/id do registro")
-    .argument("<anotacao>", "anotação a anexar no journal")
-    .description("anexa uma anotação no journal")
-    .action(notImplementedAction("opencorp registry log"));
-  registry
-    .command("perms")
-    .argument("<cat-id>", "categoria/id do registro")
-    .option("--leitura <lista>", "lista de leitura")
-    .option("--escrita <lista>", "lista de escrita")
-    .option("--meta <lista>", "lista de modificação de meta")
-    .description("ajusta as permissões do registro")
-    .action(notImplementedAction("opencorp registry perms"));
-  registry
-    .command("search")
-    .argument("<termo>", "termo de busca")
-    .description("busca por texto no índice SQLite")
-    .action(notImplementedAction("opencorp registry search"));
-  registry
-    .command("reindex")
-    .description("reconstrói o SQLite a partir das pastas")
-    .action(notImplementedAction("opencorp registry reindex"));
+  registerRegistryCommand(program);
 
   const approvals = program.command("approvals").description("fila HITL (humano no loop)");
   approvals

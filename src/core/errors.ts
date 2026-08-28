@@ -11,3 +11,4 @@ export class OpencorpError extends Error {
 export class WorkspaceError extends OpencorpError {}
 export class AgentError extends OpencorpError {}
 export class SessionError extends OpencorpError {}
+export class RegistryError extends OpencorpError {}
