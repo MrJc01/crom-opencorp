@@ -41,7 +41,7 @@ Regras do implementador:
 | 0 | Leitura e bootstrap do ambiente | ✅ | 2026-08-28 | n/a |
 | 1 | Esqueleto CLI + doctor | ✅ | 2026-08-28 | tests/ETAPA-01 (PASS 5/5) |
 | 2 | Settings (painel de configurações CLI) | ✅ | 2026-08-28 | tests/ETAPA-02 (PASS 6/0/1 SKIP) |
-| 3 | Workspaces | ⬜ | — | tests/ETAPA-03 |
+| 3 | Workspaces | ✅ | 2026-08-28 | tests/ETAPA-03 (PASS 9/9) |
 | 4 | Agentes + sessões OpenCode | ⬜ | — | tests/ETAPA-04 |
 | 5 | Registros | ⬜ | — | tests/ETAPA-05 |
 | 6 | Templates + subcorp | ⬜ | — | tests/ETAPA-06 |
