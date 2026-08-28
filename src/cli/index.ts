@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { registerAgentCommand } from "./commands/agent.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
+import { registerRunCommand } from "./commands/run.js";
+import { registerSessionCommand } from "./commands/session.js";
 import { registerSettingsCommand } from "./commands/settings.js";
 import { registerWorkspaceCommands } from "./commands/workspace.js";
 import { notImplementedAction } from "./placeholder.js";
@@ -36,13 +38,7 @@ export function buildProgram(): Command {
     .description("prepara um repositório: estrutura, settings global e template default")
     .action(notImplementedAction("opencorp init"));
 
-  program
-    .command("run")
-    .argument("<ordem>", "instrução enviada ao agente do workspace ativo")
-    .option("--agent <id>", "agente executor (padrão: executor-padrao)")
-    .option("--model <provider/model>", "sobrepõe o modelo do agente")
-    .description("atalho de agent run no workspace ativo")
-    .action(notImplementedAction("opencorp run"));
+  registerRunCommand(program);
 
   registerSettingsCommand(program);
 
@@ -50,22 +46,7 @@ export function buildProgram(): Command {
 
   registerAgentCommand(program);
 
-  const session = program.command("session").description("sessões OpenCode");
-  session
-    .command("list")
-    .option("--agent <id>", "filtra por agente")
-    .description("lista sessões vivas/históricas")
-    .action(notImplementedAction("opencorp session list"));
-  session
-    .command("log")
-    .argument("<id>", "id da sessão")
-    .description("imprime a transcrição da sessão")
-    .action(notImplementedAction("opencorp session log"));
-  session
-    .command("kill")
-    .argument("<id>", "id da sessão")
-    .description("encerra a sessão")
-    .action(notImplementedAction("opencorp session kill"));
+  registerSessionCommand(program);
 
   const registry = program.command("registry").description("registros globais por categoria");
   registry

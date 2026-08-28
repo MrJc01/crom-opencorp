@@ -1,21 +1,15 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { AgentStore, type AgenteResumo } from "./agent-store.js";
+import { WorkspaceError } from "./errors.js";
 import { SettingsStore } from "./settings-store.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
 import { expandTilde, opencorpHome } from "../utils/paths.js";
 
-export class WorkspaceError extends Error {
-  readonly exitCode: number;
-
-  constructor(mensagem: string, opts: { exitCode?: number } = {}) {
-    super(mensagem);
-    this.name = "WorkspaceError";
-    this.exitCode = opts.exitCode ?? 1;
-  }
-}
+export { WorkspaceError };
 
 export interface RegistroWorkspace {
   id: string;
@@ -34,21 +28,13 @@ export interface InfoWorkspace extends RegistroWorkspace {
   existe: boolean;
 }
 
-export interface ResumoAgente {
-  id: string;
-  role?: string;
-  category?: string;
-  model?: string;
-  permissions?: string;
-}
-
 export interface OrigemValor {
   valor: unknown;
   origem: string;
 }
 
 export interface DetalhesWorkspace extends InfoWorkspace {
-  agentes: ResumoAgente[];
+  agentes: AgenteResumo[];
   orcamento: { daily_usd: OrigemValor; per_agent_usd: OrigemValor };
   seguranca: string | null;
 }
@@ -80,6 +66,7 @@ export class WorkspaceManager {
   private readonly templatesDir: string;
   private readonly workspacesRootOverride?: string;
   private readonly store: SettingsStore;
+  private readonly agentes: AgentStore;
 
   constructor(opts: ManagerOptions = {}) {
     this.homeDir = opts.homeDir ?? opencorpHome();
@@ -89,6 +76,7 @@ export class WorkspaceManager {
       join(dirname(fileURLToPath(import.meta.url)), "..", "..", "templates");
     this.workspacesRootOverride = opts.workspacesRoot;
     this.store = new SettingsStore({ homeDir: this.homeDir, cwd: this.cwd });
+    this.agentes = new AgentStore({ templatesDir: this.templatesDir });
   }
 
   estadoPath(): string {
@@ -250,24 +238,9 @@ export class WorkspaceManager {
     return this.infoDe({ ...estado, ativo: id }, registro, path);
   }
 
-  async listarAgentes(id?: string): Promise<ResumoAgente[]> {
+  async listarAgentes(id?: string): Promise<AgenteResumo[]> {
     const info = await this.resolver(id);
-    const dir = join(info.path, ".opencorp", "agents");
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir)
-      .filter((f) => f.endsWith(".md"))
-      .map((f) => {
-        const conteudo = readFileSync(join(dir, f), "utf8");
-        const fm = parseFrontmatterSimples(conteudo);
-        return {
-          id: typeof fm.id === "string" && fm.id.length > 0 ? fm.id : basename(f, ".md"),
-          role: typeof fm.role === "string" ? fm.role : undefined,
-          category: typeof fm.category === "string" ? fm.category : undefined,
-          model: typeof fm.model === "string" ? fm.model : undefined,
-          permissions: typeof fm.permissions === "string" ? fm.permissions : undefined,
-        };
-      })
-      .sort((a, b) => a.id.localeCompare(b.id));
+    return this.agentes.listar(info.path);
   }
 
   async detalhar(id?: string): Promise<DetalhesWorkspace> {
@@ -330,15 +303,3 @@ export class WorkspaceManager {
   }
 }
 
-export function parseFrontmatterSimples(conteudo: string): Record<string, string> {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(conteudo);
-  if (!m) return {};
-  const campos: Record<string, string> = {};
-  for (const linha of m[1]!.split(/\r?\n/)) {
-    const par = /^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/.exec(linha);
-    if (par) {
-      campos[par[1]!] = par[2]!.trim();
-    }
-  }
-  return campos;
-}
