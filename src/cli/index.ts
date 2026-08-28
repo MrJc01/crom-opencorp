@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { registerDoctorCommand } from "./commands/doctor.js";
+import { registerSettingsCommand } from "./commands/settings.js";
 import { notImplementedAction } from "./placeholder.js";
 
 const require = createRequire(import.meta.url);
@@ -46,40 +47,7 @@ export function buildProgram(): Command {
     .description("atalho de agent run no workspace ativo")
     .action(notImplementedAction("opencorp run"));
 
-  const settings = program.command("settings").description("painel de configurações (global e workspace)");
-  settings.action(notImplementedAction("opencorp settings (painel TUI)"));
-  settings
-    .command("list")
-    .option("--scope <escopo>", "global | workspace")
-    .description("dump completo com a origem de cada chave")
-    .action(notImplementedAction("opencorp settings list"));
-  settings
-    .command("get")
-    .argument("<chave>", "chave (ex.: budget.daily_usd)")
-    .description("lê uma chave resolvendo o merge dos níveis")
-    .action(notImplementedAction("opencorp settings get"));
-  settings
-    .command("set")
-    .argument("<chave>", "chave a alterar")
-    .argument("<valor>", "novo valor")
-    .option("--scope <escopo>", "global | workspace")
-    .description("grava uma chave no escopo indicado")
-    .action(notImplementedAction("opencorp settings set"));
-  settings
-    .command("edit")
-    .option("--scope <escopo>", "global | workspace")
-    .description("abre $EDITOR no JSON de settings")
-    .action(notImplementedAction("opencorp settings edit"));
-  settings
-    .command("path")
-    .description("imprime os caminhos dos arquivos de settings")
-    .action(notImplementedAction("opencorp settings path"));
-  settings
-    .command("reset")
-    .argument("<chave>", "chave a restaurar para o default")
-    .option("--scope <escopo>", "global | workspace")
-    .description("restaura o default de uma chave")
-    .action(notImplementedAction("opencorp settings reset"));
+  registerSettingsCommand(program);
 
   const workspace = program.command("workspace").description("workspaces (corps) isolados");
   workspace
