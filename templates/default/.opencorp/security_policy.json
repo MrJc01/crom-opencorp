@@ -1,0 +1,7 @@
+{
+  "level": "standard",
+  "blocklist": ["rm -rf", "shutdown", "reboot", "curl * | bash", "git push --force"],
+  "allowlist_extra": ["git", "node", "npm", "python3", "pytest"],
+  "network_allowlist": ["registry.npmjs.org", "github.com", "pypi.org"],
+  "hitl_patterns": ["git push", "npm publish", "DROP ", "DELETE FROM", "email"]
+}

@@ -1,0 +1,344 @@
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { z } from "zod";
+import { SettingsStore } from "./settings-store.js";
+import { writeFileAtomic } from "../utils/fs-safe.js";
+import { expandTilde, opencorpHome } from "../utils/paths.js";
+
+export class WorkspaceError extends Error {
+  readonly exitCode: number;
+
+  constructor(mensagem: string, opts: { exitCode?: number } = {}) {
+    super(mensagem);
+    this.name = "WorkspaceError";
+    this.exitCode = opts.exitCode ?? 1;
+  }
+}
+
+export interface RegistroWorkspace {
+  id: string;
+  criado_em: string;
+}
+
+export interface EstadoWorkspaces {
+  version: number;
+  ativo: string | null;
+  workspaces: RegistroWorkspace[];
+}
+
+export interface InfoWorkspace extends RegistroWorkspace {
+  path: string;
+  ativo: boolean;
+  existe: boolean;
+}
+
+export interface ResumoAgente {
+  id: string;
+  role?: string;
+  category?: string;
+  model?: string;
+  permissions?: string;
+}
+
+export interface OrigemValor {
+  valor: unknown;
+  origem: string;
+}
+
+export interface DetalhesWorkspace extends InfoWorkspace {
+  agentes: ResumoAgente[];
+  orcamento: { daily_usd: OrigemValor; per_agent_usd: OrigemValor };
+  seguranca: string | null;
+}
+
+const ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+const estadoSchema = z.object({
+  version: z.number().int().default(1),
+  ativo: z.string().nullable().default(null),
+  workspaces: z
+    .array(z.object({ id: z.string().min(1), criado_em: z.string().min(1) }))
+    .default([]),
+});
+
+function msg(erro: unknown): string {
+  return erro instanceof Error ? erro.message : String(erro);
+}
+
+export interface ManagerOptions {
+  homeDir?: string;
+  cwd?: string;
+  templatesDir?: string;
+  workspacesRoot?: string;
+}
+
+export class WorkspaceManager {
+  private readonly homeDir: string;
+  private readonly cwd: string;
+  private readonly templatesDir: string;
+  private readonly workspacesRootOverride?: string;
+  private readonly store: SettingsStore;
+
+  constructor(opts: ManagerOptions = {}) {
+    this.homeDir = opts.homeDir ?? opencorpHome();
+    this.cwd = opts.cwd ?? process.cwd();
+    this.templatesDir =
+      opts.templatesDir ??
+      join(dirname(fileURLToPath(import.meta.url)), "..", "..", "templates");
+    this.workspacesRootOverride = opts.workspacesRoot;
+    this.store = new SettingsStore({ homeDir: this.homeDir, cwd: this.cwd });
+  }
+
+  estadoPath(): string {
+    return join(this.homeDir, ".opencorp", "workspaces.json");
+  }
+
+  private async raiz(): Promise<string> {
+    if (this.workspacesRootOverride) return this.workspacesRootOverride;
+    const r = await this.store.get("paths.workspaces_root");
+    return expandTilde(String(r.valor), this.homeDir);
+  }
+
+  private async lerEstado(): Promise<EstadoWorkspaces> {
+    const p = this.estadoPath();
+    if (!existsSync(p)) return { version: 1, ativo: null, workspaces: [] };
+    let json: unknown;
+    try {
+      json = JSON.parse(readFileSync(p, "utf8"));
+    } catch (erro) {
+      throw new WorkspaceError(`JSON inválido em ${p}: ${msg(erro)}`, { exitCode: 2 });
+    }
+    const parsed = estadoSchema.safeParse(json);
+    if (!parsed.success) {
+      const iss = parsed.error.issues[0]!;
+      const chave = iss.path.join(".");
+      throw new WorkspaceError(
+        `estado de workspaces inválido em ${p} → ${chave || "(raiz)"}: ${iss.message}`,
+        { exitCode: 2 },
+      );
+    }
+    return parsed.data as EstadoWorkspaces;
+  }
+
+  private async gravarEstado(estado: EstadoWorkspaces): Promise<void> {
+    await writeFileAtomic(this.estadoPath(), `${JSON.stringify(estado, null, 2)}\n`);
+  }
+
+  private infoDe(estado: EstadoWorkspaces, registro: RegistroWorkspace, path: string): InfoWorkspace {
+    return {
+      ...registro,
+      path,
+      ativo: estado.ativo === registro.id,
+      existe: existsSync(path),
+    };
+  }
+
+  async listar(): Promise<InfoWorkspace[]> {
+    const estado = await this.lerEstado();
+    const raiz = await this.raiz();
+    return estado.workspaces
+      .map((w) => this.infoDe(estado, w, join(raiz, w.id)))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  async resolver(id?: string): Promise<InfoWorkspace> {
+    const estado = await this.lerEstado();
+    let registro: RegistroWorkspace | undefined;
+    if (id !== undefined && id.length > 0) {
+      registro = estado.workspaces.find((w) => w.id === id);
+      if (!registro) {
+        throw new WorkspaceError(
+          `workspace "${id}" não encontrado — veja "opencorp workspace list" ou crie com "opencorp workspace create ${id}"`,
+        );
+      }
+    } else if (estado.ativo) {
+      registro = estado.workspaces.find((w) => w.id === estado.ativo);
+      if (!registro) {
+        throw new WorkspaceError(
+          `workspace ativo "${estado.ativo}" não está mais registrado — use "opencorp use <id>"`,
+        );
+      }
+    } else {
+      throw new WorkspaceError(
+        'nenhum workspace ativo — use "opencorp use <id>" ou passe --workspace <id>',
+      );
+    }
+    const raiz = await this.raiz();
+    return this.infoDe(estado, registro, join(raiz, registro.id));
+  }
+
+  async atual(): Promise<InfoWorkspace | null> {
+    const estado = await this.lerEstado();
+    if (!estado.ativo) return null;
+    const registro = estado.workspaces.find((w) => w.id === estado.ativo);
+    if (!registro) return null;
+    const raiz = await this.raiz();
+    return this.infoDe(estado, registro, join(raiz, registro.id));
+  }
+
+  async criar(id: string, opts: { template?: string } = {}): Promise<InfoWorkspace> {
+    if (!ID_RE.test(id) || id.length > 64) {
+      throw new WorkspaceError(
+        `id de workspace inválido: "${id}" — use kebab-case (letras minúsculas, números e hífens; ex.: corp-principal, no máximo 64 caracteres)`,
+      );
+    }
+    const template = opts.template ?? "default";
+    const templateDir = join(this.templatesDir, template);
+    if (!existsSync(templateDir)) {
+      const disponiveis = existsSync(this.templatesDir)
+        ? readdirSync(this.templatesDir).filter((d) => existsSync(join(this.templatesDir, d)))
+        : [];
+      throw new WorkspaceError(
+        `template "${template}" não encontrado em ${this.templatesDir} (disponíveis: ${disponiveis.join(", ") || "nenhum"})`,
+      );
+    }
+    const estado = await this.lerEstado();
+    if (estado.workspaces.some((w) => w.id === id)) {
+      throw new WorkspaceError(
+        `workspace "${id}" já existe — veja "opencorp workspace list" (ids precisam ser únicos)`,
+      );
+    }
+    const raiz = await this.raiz();
+    const destino = join(raiz, id);
+    if (existsSync(destino)) {
+      throw new WorkspaceError(
+        `já existe uma pasta em ${destino} — escolha outro id ou remova a pasta antes`,
+      );
+    }
+    const tmp = join(raiz, `.${id}.tmp-${process.pid}-${randomUUID()}`);
+    try {
+      mkdirSync(raiz, { recursive: true });
+      cpSync(templateDir, tmp, { recursive: true });
+      renameSync(tmp, destino);
+    } catch (erro) {
+      rmSync(tmp, { recursive: true, force: true });
+      throw new WorkspaceError(`não foi possível criar o workspace "${id}": ${msg(erro)}`);
+    }
+    const criado_em = new Date().toISOString();
+    const ativo = estado.ativo ?? id;
+    try {
+      await this.gravarEstado({
+        version: 1,
+        ativo,
+        workspaces: [...estado.workspaces, { id, criado_em }],
+      });
+    } catch (erro) {
+      rmSync(destino, { recursive: true, force: true });
+      throw erro;
+    }
+    return { id, criado_em, path: destino, ativo: ativo === id, existe: true };
+  }
+
+  async usar(id: string): Promise<InfoWorkspace> {
+    const estado = await this.lerEstado();
+    const registro = estado.workspaces.find((w) => w.id === id);
+    if (!registro) {
+      throw new WorkspaceError(
+        `workspace "${id}" não encontrado — veja "opencorp workspace list" ou crie com "opencorp workspace create ${id}"`,
+      );
+    }
+    const raiz = await this.raiz();
+    const path = join(raiz, registro.id);
+    if (!existsSync(path)) {
+      throw new WorkspaceError(
+        `a pasta do workspace "${id}" não foi encontrada em ${path} — ele pode ter sido movido ou apagado fora do opencorp; recrie ou remova o registro`,
+      );
+    }
+    await this.gravarEstado({ ...estado, ativo: id });
+    return this.infoDe({ ...estado, ativo: id }, registro, path);
+  }
+
+  async listarAgentes(id?: string): Promise<ResumoAgente[]> {
+    const info = await this.resolver(id);
+    const dir = join(info.path, ".opencorp", "agents");
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => {
+        const conteudo = readFileSync(join(dir, f), "utf8");
+        const fm = parseFrontmatterSimples(conteudo);
+        return {
+          id: typeof fm.id === "string" && fm.id.length > 0 ? fm.id : basename(f, ".md"),
+          role: typeof fm.role === "string" ? fm.role : undefined,
+          category: typeof fm.category === "string" ? fm.category : undefined,
+          model: typeof fm.model === "string" ? fm.model : undefined,
+          permissions: typeof fm.permissions === "string" ? fm.permissions : undefined,
+        };
+      })
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  async detalhar(id?: string): Promise<DetalhesWorkspace> {
+    const info = await this.resolver(id);
+    const agentes = await this.listarAgentes(info.id);
+    const daily = await this.store.get("budget.daily_usd", { workspaceDir: info.path });
+    const perAgent = await this.store.get("budget.per_agent_usd", { workspaceDir: info.path });
+    const policyPath = join(info.path, ".opencorp", "security_policy.json");
+    let seguranca: string | null = null;
+    if (existsSync(policyPath)) {
+      try {
+        const policy = JSON.parse(readFileSync(policyPath, "utf8")) as { level?: unknown };
+        if (typeof policy.level === "string") seguranca = policy.level;
+      } catch {
+        seguranca = null;
+      }
+    }
+    return {
+      ...info,
+      agentes,
+      orcamento: {
+        daily_usd: { valor: daily.valor, origem: daily.origem },
+        per_agent_usd: { valor: perAgent.valor, origem: perAgent.origem },
+      },
+      seguranca,
+    };
+  }
+
+  async deletar(id: string, opts: { sim?: boolean } = {}): Promise<{ path: string; removidoPasta: boolean; eraAtivo: boolean }> {
+    if (!opts.sim) {
+      throw new WorkspaceError(
+        `exclusão de "${id}" precisa de confirmação — responda ao prompt ou passe -y/--force`,
+      );
+    }
+    const estado = await this.lerEstado();
+    const registro = estado.workspaces.find((w) => w.id === id);
+    if (!registro) {
+      throw new WorkspaceError(
+        `workspace "${id}" não encontrado — veja "opencorp workspace list"`,
+      );
+    }
+    const eraAtivo = estado.ativo === id;
+    const raiz = await this.raiz();
+    const path = join(raiz, id);
+    let removidoPasta = false;
+    if (existsSync(path)) {
+      try {
+        rmSync(path, { recursive: true, force: true });
+        removidoPasta = true;
+      } catch (erro) {
+        throw new WorkspaceError(`não foi possível remover a pasta ${path}: ${msg(erro)}`);
+      }
+    }
+    await this.gravarEstado({
+      version: 1,
+      ativo: eraAtivo ? null : estado.ativo,
+      workspaces: estado.workspaces.filter((w) => w.id !== id),
+    });
+    return { path, removidoPasta, eraAtivo };
+  }
+}
+
+export function parseFrontmatterSimples(conteudo: string): Record<string, string> {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(conteudo);
+  if (!m) return {};
+  const campos: Record<string, string> = {};
+  for (const linha of m[1]!.split(/\r?\n/)) {
+    const par = /^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/.exec(linha);
+    if (par) {
+      campos[par[1]!] = par[2]!.trim();
+    }
+  }
+  return campos;
+}

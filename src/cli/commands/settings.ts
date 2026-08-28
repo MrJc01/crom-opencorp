@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import type { Command } from "commander";
+import { opencorpHome } from "../../utils/paths.js";
 import { SettingsError, SettingsStore, formatarValor, type Scope } from "../../core/settings-store.js";
 import { settingsSchema } from "../../schemas/settings.js";
 import { writeFileAtomic } from "../../utils/fs-safe.js";
@@ -33,7 +33,7 @@ interface OpcoesEscopo {
 }
 
 export function registerSettingsCommand(program: Command): void {
-  const store = new SettingsStore({ homeDir: homedir(), cwd: process.cwd() });
+  const store = new SettingsStore({ homeDir: opencorpHome(), cwd: process.cwd() });
 
   const grupo = program
     .command("settings")
@@ -49,7 +49,6 @@ export function registerSettingsCommand(program: Command): void {
     .command("list")
     .description("dump completo com a origem de cada chave")
     .option("--scope <escopo>", "global | workspace (sem flag: merge workspace+global)")
-    .option("--workspace <id>", "id do workspace (para escopo workspace)")
     .option("--json", "imprime as entradas em JSON")
     .action((opts: OpcoesEscopo & { json?: boolean }) =>
       comErros(async () => {
@@ -70,7 +69,6 @@ export function registerSettingsCommand(program: Command): void {
     .argument("<chave>", "chave (ex.: budget.daily_usd)")
     .description("lê uma chave resolvendo o merge dos níveis")
     .option("--scope <escopo>", "global | workspace (sem flag: merge)")
-    .option("--workspace <id>", "id do workspace (para escopo workspace)")
     .option("--verbose", "indica também a origem do valor")
     .option("--json", "imprime o valor em JSON")
     .action((chave: string, opts: OpcoesEscopo & { verbose?: boolean; json?: boolean }) =>
@@ -94,7 +92,6 @@ export function registerSettingsCommand(program: Command): void {
     .argument("<valor>", "novo valor (aceita true/false, número ou JSON)")
     .description("grava uma chave no escopo indicado (padrão: global)")
     .option("--scope <escopo>", "global | workspace (padrão: global)")
-    .option("--workspace <id>", "id do workspace (para escopo workspace)")
     .action((chave: string, valor: string, opts: OpcoesEscopo) =>
       comErros(async () => {
         const escopo = escopoValido(opts.scope);
@@ -107,7 +104,6 @@ export function registerSettingsCommand(program: Command): void {
     .command("edit")
     .description("abre $EDITOR no JSON do escopo (exige terminal)")
     .option("--scope <escopo>", "global | workspace (padrão: global)")
-    .option("--workspace <id>", "id do workspace (para escopo workspace)")
     .action((opts: OpcoesEscopo) =>
       comErros(async () => {
         if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -147,7 +143,6 @@ export function registerSettingsCommand(program: Command): void {
     .command("path")
     .description("imprime os caminhos dos arquivos de settings")
     .option("--scope <escopo>", "global | workspace (padrão: ambos)")
-    .option("--workspace <id>", "id do workspace (para escopo workspace)")
     .action((opts: OpcoesEscopo) =>
       comErros(async () => {
         const escopo = escopoValido(opts.scope);
@@ -170,7 +165,6 @@ export function registerSettingsCommand(program: Command): void {
     .argument("<chave>", "chave ou seção a restaurar para o default")
     .description("remove a chave do escopo (o default/volta ao nível inferior entra em vigor)")
     .option("--scope <escopo>", "global | workspace (padrão: global)")
-    .option("--workspace <id>", "id do workspace (para escopo workspace)")
     .action((chave: string, opts: OpcoesEscopo) =>
       comErros(async () => {
         const escopo = escopoValido(opts.scope);

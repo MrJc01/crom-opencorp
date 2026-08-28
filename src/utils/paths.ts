@@ -11,3 +11,11 @@ export function resolvePath(caminho: string, base = process.cwd()): string {
   const expandido = expandTilde(caminho);
   return isAbsolute(expandido) ? expandido : resolve(base, expandido);
 }
+
+export function opencorpHome(): string {
+  const env = process.env.OPENCORP_HOME;
+  if (env !== undefined && env.trim().length > 0) {
+    return resolve(env.trim());
+  }
+  return homedir();
+}

@@ -2,8 +2,10 @@ import { Command, CommanderError } from "commander";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { registerAgentCommand } from "./commands/agent.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerSettingsCommand } from "./commands/settings.js";
+import { registerWorkspaceCommands } from "./commands/workspace.js";
 import { notImplementedAction } from "./placeholder.js";
 
 const require = createRequire(import.meta.url);
@@ -25,19 +27,14 @@ export function buildProgram(): Command {
       "Sistema Operacional de Empresas Autônomas — orquestra sessões OpenCode em workspaces governados",
     )
     .version(resolveVersion(), "--version", "imprime a versão do opencorp")
-    .helpOption("-h, --help", "mostra a ajuda do comando");
+    .helpOption("-h, --help", "mostra a ajuda do comando")
+    .option("--workspace <id>", "opera no workspace indicado em vez do ativo");
 
   program
     .command("init")
     .argument("[dir]", "diretório alvo (padrão: .)")
     .description("prepara um repositório: estrutura, settings global e template default")
     .action(notImplementedAction("opencorp init"));
-
-  program
-    .command("use")
-    .argument("<id>", "id do workspace ativo (kebab-case)")
-    .description("define o workspace ativo")
-    .action(notImplementedAction("opencorp use"));
 
   program
     .command("run")
@@ -49,80 +46,9 @@ export function buildProgram(): Command {
 
   registerSettingsCommand(program);
 
-  const workspace = program.command("workspace").description("workspaces (corps) isolados");
-  workspace
-    .command("create")
-    .argument("<id>", "id do workspace (kebab-case)")
-    .option("--template <tpl>", "template base (padrão: default)")
-    .description("cria um workspace a partir de um template")
-    .action(notImplementedAction("opencorp workspace create"));
-  workspace
-    .command("list")
-    .description("lista os workspaces conhecidos")
-    .action(notImplementedAction("opencorp workspace list"));
-  workspace
-    .command("show")
-    .argument("[id]", "id do workspace (padrão: ativo)")
-    .description("mostra detalhes de um workspace")
-    .action(notImplementedAction("opencorp workspace show"));
-  workspace
-    .command("delete")
-    .argument("<id>", "id do workspace a remover")
-    .description("remove um workspace (pede confirmação)")
-    .action(notImplementedAction("opencorp workspace delete"));
-  workspace
-    .command("current")
-    .description("mostra o workspace ativo")
-    .action(notImplementedAction("opencorp workspace current"));
+  registerWorkspaceCommands(program);
 
-  const agent = program.command("agent").description("CRUD e execução de agentes");
-  agent
-    .command("create")
-    .argument("<id>", "id do agente (kebab-case)")
-    .option("--from <agente>", "clona a estrutura de outro agente")
-    .option("--model <provider/model>", "modelo padrão do agente")
-    .description("cria um agente (.md com frontmatter)")
-    .action(notImplementedAction("opencorp agent create"));
-  agent
-    .command("list")
-    .option("--categoria <categoria>", "ceo | secretario | operario | custom")
-    .description("lista os agentes do workspace ativo")
-    .action(notImplementedAction("opencorp agent list"));
-  agent
-    .command("show")
-    .argument("<id>", "id do agente")
-    .description("mostra a definição do agente")
-    .action(notImplementedAction("opencorp agent show"));
-  agent
-    .command("edit")
-    .argument("<id>", "id do agente")
-    .description("abre $EDITOR no .md do agente")
-    .action(notImplementedAction("opencorp agent edit"));
-  agent
-    .command("clone")
-    .argument("<origem>", "agente de origem")
-    .argument("<destino>", "id do novo agente")
-    .description("clona um agente")
-    .action(notImplementedAction("opencorp agent clone"));
-  agent
-    .command("run")
-    .argument("<id>", "id do agente")
-    .argument("<ordem>", "instrução para o agente")
-    .option("--model <provider/model>", "sobrepõe o modelo do agente")
-    .option("--session <id>", "continua uma sessão existente")
-    .option("--file <arquivo>", "lê a ordem de um arquivo")
-    .description("executa uma ordem em uma sessão OpenCode")
-    .action(notImplementedAction("opencorp agent run"));
-  agent
-    .command("history")
-    .argument("<id>", "id do agente")
-    .description("últimas execuções (registries/execucoes)")
-    .action(notImplementedAction("opencorp agent history"));
-  agent
-    .command("cost")
-    .argument("<id>", "id do agente")
-    .description("gasto acumulado (registries/custos)")
-    .action(notImplementedAction("opencorp agent cost"));
+  registerAgentCommand(program);
 
   const session = program.command("session").description("sessões OpenCode");
   session

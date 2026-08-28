@@ -3,3 +3,4 @@ dist/
 workspaces/
 .opencorp/
 *.log
+!templates/default/.opencorp/

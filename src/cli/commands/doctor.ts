@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { runDoctor, type CheckStatus } from "../../core/doctor.js";
+import { opencorpHome } from "../../utils/paths.js";
 
 const ICONES: Record<CheckStatus, string> = {
   ok: "✔",
@@ -16,7 +17,7 @@ export function registerDoctorCommand(program: Command): void {
     )
     .option("--json", "imprime o resultado em JSON (machine-readable)")
     .action(async (opts: { json?: boolean }) => {
-      const resultado = await runDoctor();
+      const resultado = await runDoctor({ homeDir: opencorpHome() });
       if (opts.json) {
         console.log(JSON.stringify(resultado, null, 2));
       } else {
