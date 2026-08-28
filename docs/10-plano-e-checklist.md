@@ -42,7 +42,7 @@ Regras do implementador:
 | 1 | Esqueleto CLI + doctor | ✅ | 2026-08-28 | tests/ETAPA-01 (PASS 5/5) |
 | 2 | Settings (painel de configurações CLI) | ✅ | 2026-08-28 | tests/ETAPA-02 (PASS 6/0/1 SKIP) |
 | 3 | Workspaces | ✅ | 2026-08-28 | tests/ETAPA-03 (PASS 9/9) |
-| 4 | Agentes + sessões OpenCode | ⬜ | — | tests/ETAPA-04 |
+| 4 | Agentes + sessões OpenCode | ✅ | 2026-08-28 | tests/ETAPA-04 (PASS 8/8) |
 | 5 | Registros | ⬜ | — | tests/ETAPA-05 |
 | 6 | Templates + subcorp | ⬜ | — | tests/ETAPA-06 |
 | 7 | Segurança + orçamento | ⬜ | — | tests/ETAPA-07 |
