@@ -6,8 +6,10 @@ import { registerAgentCommand } from "./commands/agent.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerRunCommand } from "./commands/run.js";
 import { registerSessionCommand } from "./commands/session.js";
-import { registerRegistryCommand } from "./commands/registry.js";
 import { registerSettingsCommand } from "./commands/settings.js";
+import { registerRegistryCommand } from "./commands/registry.js";
+import { registerSubcorpCommand } from "./commands/subcorp.js";
+import { registerTemplateCommand } from "./commands/template.js";
 import { registerWorkspaceCommands } from "./commands/workspace.js";
 import { notImplementedAction } from "./placeholder.js";
 
@@ -81,46 +83,9 @@ export function buildProgram(): Command {
     .description("define os tetos de orçamento")
     .action(notImplementedAction("opencorp budget set"));
 
-  const template = program.command("template").description("templates de workspace (.corp)");
-  template
-    .command("list")
-    .description("lista os templates disponíveis")
-    .action(notImplementedAction("opencorp template list"));
-  template
-    .command("create")
-    .argument("<id>", "id do novo template")
-    .description("cria um template")
-    .action(notImplementedAction("opencorp template create"));
-  template
-    .command("export")
-    .argument("<ws>", "workspace a exportar")
-    .option("-o, --output <arquivo>", "arquivo .corp de saída")
-    .description("empacota um workspace em .corp")
-    .action(notImplementedAction("opencorp template export"));
-  template
-    .command("import")
-    .argument("<fonte>", "pasta | arquivo.corp | url")
-    .option("--as <id>", "id do template importado")
-    .description("importa um template")
-    .action(notImplementedAction("opencorp template import"));
+  registerTemplateCommand(program);
 
-  const subcorp = program.command("subcorp").description("workspaces filhos delegáveis");
-  subcorp
-    .command("add")
-    .argument("<fonte>", "path ou template do subcorp")
-    .requiredOption("--as <id>", "id do subcorp")
-    .option("--perm <nivel>", "read | ask | write", "read")
-    .description("importa um subcorp com permissões limitadas")
-    .action(notImplementedAction("opencorp subcorp add"));
-  subcorp
-    .command("list")
-    .description("lista os subcorps do workspace")
-    .action(notImplementedAction("opencorp subcorp list"));
-  subcorp
-    .command("remove")
-    .argument("<id>", "id do subcorp")
-    .description("remove um subcorp")
-    .action(notImplementedAction("opencorp subcorp remove"));
+  registerSubcorpCommand(program);
 
   const test = program.command("test").description("teste cego (QA black-box via OpenCode)");
   test

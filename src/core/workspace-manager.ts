@@ -1,6 +1,6 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { AgentStore, type AgenteResumo } from "./agent-store.js";
@@ -175,15 +175,10 @@ export class WorkspaceManager {
       );
     }
     const template = opts.template ?? "default";
-    const templateDir = join(this.templatesDir, template);
-    if (!existsSync(templateDir)) {
-      const disponiveis = existsSync(this.templatesDir)
-        ? readdirSync(this.templatesDir).filter((d) => existsSync(join(this.templatesDir, d)))
-        : [];
-      throw new WorkspaceError(
-        `template "${template}" não encontrado em ${this.templatesDir} (disponíveis: ${disponiveis.join(", ") || "nenhum"})`,
-      );
-    }
+    const templateDir = this.resolverTemplateDir(template);
+    const ehPacote =
+      existsSync(join(templateDir, "template.json")) || existsSync(join(templateDir, "agents"));
+    const skeletonDir = ehPacote ? join(this.templatesDir, "default") : templateDir;
     const estado = await this.lerEstado();
     if (estado.workspaces.some((w) => w.id === id)) {
       throw new WorkspaceError(
@@ -200,7 +195,7 @@ export class WorkspaceManager {
     const tmp = join(raiz, `.${id}.tmp-${process.pid}-${randomUUID()}`);
     try {
       mkdirSync(raiz, { recursive: true });
-      cpSync(templateDir, tmp, { recursive: true });
+      cpSync(skeletonDir, tmp, { recursive: true });
       renameSync(tmp, destino);
     } catch (erro) {
       rmSync(tmp, { recursive: true, force: true });
@@ -209,7 +204,11 @@ export class WorkspaceManager {
     const criado_em = new Date().toISOString();
     const ativo = estado.ativo ?? id;
     try {
+      if (ehPacote) {
+        await this.aplicarPacote(destino, templateDir);
+      }
       await this.registros.garantirCategorias(destino);
+      await this.registros.reindexar(destino);
       await this.gravarEstado({
         version: 1,
         ativo,
@@ -220,6 +219,47 @@ export class WorkspaceManager {
       throw erro;
     }
     return { id, criado_em, path: destino, ativo: ativo === id, existe: true };
+  }
+
+  private resolverTemplateDir(template: string): string {
+    if (template.includes("/") || template.includes("\\")) {
+      const abs = resolve(template);
+      if (existsSync(abs) && statSync(abs).isDirectory()) return abs;
+      throw new WorkspaceError(`template não encontrado no caminho "${template}" (${abs})`);
+    }
+    const usuario = join(this.homeDir, ".opencorp", "templates", template);
+    const projeto = join(this.templatesDir, template);
+    if (existsSync(projeto)) return projeto;
+    if (existsSync(usuario)) return usuario;
+    const disponiveis = new Set<string>();
+    for (const dir of [this.templatesDir, join(this.homeDir, ".opencorp", "templates")]) {
+      if (existsSync(dir)) {
+        for (const d of readdirSync(dir, { withFileTypes: true })) {
+          if (d.isDirectory()) disponiveis.add(d.name);
+        }
+      }
+    }
+    throw new WorkspaceError(
+      `template "${template}" não encontrado (disponíveis: ${[...disponiveis].sort().join(", ") || "nenhum"})`,
+    );
+  }
+
+  private async aplicarPacote(destino: string, pkgDir: string): Promise<void> {
+    const origemAgents = join(pkgDir, "agents");
+    const origemRegistries = join(pkgDir, "registries");
+    if (existsSync(origemAgents)) {
+      cpSync(origemAgents, join(destino, ".opencorp", "agents"), { recursive: true });
+    }
+    if (existsSync(origemRegistries)) {
+      cpSync(origemRegistries, join(destino, ".opencorp", "registries"), { recursive: true });
+    }
+    for (const arquivo of ["config.json", "security_policy.json"]) {
+      const origem = join(pkgDir, arquivo);
+      if (existsSync(origem)) {
+        copyFileSync(origem, join(destino, ".opencorp", arquivo));
+      }
+    }
+    await this.agentes.sincronizarTodos(destino);
   }
 
   async usar(id: string): Promise<InfoWorkspace> {

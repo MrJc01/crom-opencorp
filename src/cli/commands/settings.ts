@@ -13,6 +13,10 @@ function escopoValido(escopo: string | undefined): Scope | undefined {
   throw new SettingsError(`escopo inválido: "${escopo}" (use global | workspace)`, { exitCode: 1 });
 }
 
+function wsDe(program: Command, opts: { workspace?: string }): string | undefined {
+  return opts.workspace ?? (program.opts() as { workspace?: string }).workspace;
+}
+
 async function comErros(fn: () => Promise<void>): Promise<void> {
   try {
     await fn();
@@ -53,7 +57,7 @@ export function registerSettingsCommand(program: Command): void {
     .action((opts: OpcoesEscopo & { json?: boolean }) =>
       comErros(async () => {
         const escopo = escopoValido(opts.scope);
-        const entradas = await store.list({ scope: escopo, workspaceId: opts.workspace });
+        const entradas = await store.list({ scope: escopo, workspaceId: wsDe(program, opts) });
         if (opts.json) {
           console.log(JSON.stringify(entradas, null, 2));
           return;
@@ -74,7 +78,7 @@ export function registerSettingsCommand(program: Command): void {
     .action((chave: string, opts: OpcoesEscopo & { verbose?: boolean; json?: boolean }) =>
       comErros(async () => {
         const escopo = escopoValido(opts.scope);
-        const r = await store.get(chave, { scope: escopo, workspaceId: opts.workspace });
+        const r = await store.get(chave, { scope: escopo, workspaceId: wsDe(program, opts) });
         if (opts.json) {
           console.log(JSON.stringify(r.valor ?? null, null, 2));
         } else if (opts.verbose) {
@@ -95,7 +99,7 @@ export function registerSettingsCommand(program: Command): void {
     .action((chave: string, valor: string, opts: OpcoesEscopo) =>
       comErros(async () => {
         const escopo = escopoValido(opts.scope);
-        const r = await store.set(chave, valor, { scope: escopo, workspaceId: opts.workspace });
+        const r = await store.set(chave, valor, { scope: escopo, workspaceId: wsDe(program, opts) });
         console.log(`ok: ${chave} = ${formatarValor(r.depois)} — salvo em ${r.path}`);
       }),
     );
@@ -118,7 +122,7 @@ export function registerSettingsCommand(program: Command): void {
           });
         }
         const escopo = escopoValido(opts.scope);
-        const alvo = await store.caminhoDoEscopo({ scope: escopo, workspaceId: opts.workspace });
+        const alvo = await store.caminhoDoEscopo({ scope: escopo, workspaceId: wsDe(program, opts) });
         if (!existsSync(alvo.path)) {
           const defaults = settingsSchema.parse({});
           await writeFileAtomic(alvo.path, `${JSON.stringify(defaults, null, 2)}\n`);
@@ -134,7 +138,7 @@ export function registerSettingsCommand(program: Command): void {
             exitCode: res.status ?? 1,
           });
         }
-        await store.revalidar({ scope: escopo, workspaceId: opts.workspace });
+        await store.revalidar({ scope: escopo, workspaceId: wsDe(program, opts) });
         console.log(`ok: ${alvo.rotulo} (${alvo.path}) é válido`);
       }),
     );
@@ -146,7 +150,7 @@ export function registerSettingsCommand(program: Command): void {
     .action((opts: OpcoesEscopo) =>
       comErros(async () => {
         const escopo = escopoValido(opts.scope);
-        const caminhos = await store.paths({ scope: escopo, workspaceId: opts.workspace });
+        const caminhos = await store.paths({ scope: escopo, workspaceId: wsDe(program, opts) });
         if (escopo !== "workspace") {
           console.log(`global: ${caminhos.global}`);
         }
@@ -168,7 +172,7 @@ export function registerSettingsCommand(program: Command): void {
     .action((chave: string, opts: OpcoesEscopo) =>
       comErros(async () => {
         const escopo = escopoValido(opts.scope);
-        const r = await store.reset(chave, { scope: escopo, workspaceId: opts.workspace });
+        const r = await store.reset(chave, { scope: escopo, workspaceId: wsDe(program, opts) });
         if (r.changed) {
           console.log(
             `ok: "${chave}" removida de ${r.path} — valor em vigor: ${formatarValor(r.valor)} (${r.origem})`,

@@ -52,7 +52,7 @@ export function registerRunCommand(program: Command): void {
             session: opts.session,
             file: opts.file,
             title: opts.title,
-            workspaceId: opts.workspace,
+            workspaceId: (program.opts() as { workspace?: string }).workspace ?? opts.workspace,
           });
           console.log(
             `\n[opencorp] sessão ${r.id} — status: ${r.status} · exit: ${r.exit_code ?? "?"} · duração: ${((r.duracao_ms ?? 0) / 1000).toFixed(1)}s · log: ${r.log}`,

@@ -15,6 +15,10 @@ function reportar(erro: unknown): void {
   process.exitCode = 1;
 }
 
+function wsDe(program: Command, opts: { workspace?: string }): string | undefined {
+  return opts.workspace ?? (program.opts() as { workspace?: string }).workspace;
+}
+
 async function comErros(fn: () => Promise<void>): Promise<void> {
   try {
     await fn();
@@ -38,8 +42,8 @@ export function registerRegistryCommand(program: Command): void {
   const store = new RegistryStore();
   const agentes = new AgentStore();
 
-  async function workspaceAlvo(workspaceId?: string) {
-    return manager.resolver(workspaceId);
+  function workspaceAlvo(opts: { workspace?: string }) {
+    return manager.resolver(wsDe(program, opts));
   }
 
   async function ceosDe(wsPath: string): Promise<string[]> {
@@ -55,7 +59,7 @@ export function registerRegistryCommand(program: Command): void {
     .description("lista categorias com contagem e seus registros")
     .action((categoria: string | undefined, opts: { workspace?: string }) =>
       comErros(async () => {
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvo(opts);
         await store.garantirCategorias(ws.path);
         if (categoria) {
           const registros = await store.listar(ws.path, categoria);
@@ -86,7 +90,7 @@ export function registerRegistryCommand(program: Command): void {
     .action((catId: string, opts: { descricao: string; permLeitura: string; permEscrita: string; por: string; workspace?: string }) =>
       comErros(async () => {
         const { categoria, id } = dividirCatId(catId);
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvo(opts);
         const meta = await store.criar(ws.path, {
           categoria,
           id,
@@ -107,7 +111,7 @@ export function registerRegistryCommand(program: Command): void {
     .action((catId: string, opts: { workspace?: string }) =>
       comErros(async () => {
         const { categoria, id } = dividirCatId(catId);
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvo(opts);
         const r = await store.obter(ws.path, categoria, id);
         console.log(`id:          ${r.meta.id}`);
         console.log(`categoria:   ${r.meta.categoria}`);
@@ -139,7 +143,7 @@ export function registerRegistryCommand(program: Command): void {
     .action((catId: string, opts: { conteudo?: string; conteudoArquivo?: string; descricao?: string; por: string; workspace?: string }) =>
       comErros(async () => {
         const { categoria, id } = dividirCatId(catId);
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvo(opts);
         let conteudo = opts.conteudo;
         if (opts.conteudoArquivo) {
           if (!existsSync(opts.conteudoArquivo)) {
@@ -166,7 +170,7 @@ export function registerRegistryCommand(program: Command): void {
     .action((catId: string, anotacao: string, opts: { por: string; workspace?: string }) =>
       comErros(async () => {
         const { categoria, id } = dividirCatId(catId);
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvo(opts);
         await store.anotar(ws.path, categoria, id, opts.por, anotacao);
         console.log(`ok: anotação anexada ao journal de "${categoria}/${id}"`);
       }),
@@ -183,7 +187,7 @@ export function registerRegistryCommand(program: Command): void {
     .action((catId: string, opts: { leitura?: string; escrita?: string; meta?: string; por: string; workspace?: string }) =>
       comErros(async () => {
         const { categoria, id } = dividirCatId(catId);
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvo(opts);
         const meta = await store.perms(ws.path, categoria, id, opts.por, {
           leitura: splitLista(opts.leitura),
           escrita: splitLista(opts.escrita),
@@ -199,7 +203,7 @@ export function registerRegistryCommand(program: Command): void {
     .description("busca por texto no índice SQLite")
     .action((termo: string, opts: { workspace?: string }) =>
       comErros(async () => {
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvo(opts);
         const resultados = await store.buscar(ws.path, termo);
         if (resultados.length === 0) {
           console.log(`nenhum resultado para "${termo}"`);
@@ -217,7 +221,7 @@ export function registerRegistryCommand(program: Command): void {
     .description("reconstrói o SQLite (corp.db) varrendo as pastas — a verdade são os arquivos")
     .action((opts: { workspace?: string }) =>
       comErros(async () => {
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvo(opts);
         const r = await store.reindexar(ws.path);
         console.log(`ok: índice reconstruído — ${r.registros} registro(s), ${r.eventos} evento(s) de journal, ${r.sessoes} sessão(ões)`);
       }),

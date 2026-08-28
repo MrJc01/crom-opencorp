@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { execa } from "execa";
 import type { Agente } from "../schemas/agent.js";
@@ -11,6 +11,7 @@ import { OpenCodeBridge } from "./opencode-bridge.js";
 import { RegistryStore, type MetaRegistro } from "./registry-store.js";
 import { WorkspaceManager } from "./workspace-manager.js";
 import { mkdirRecursive } from "../utils/fs-safe.js";
+import { resolvePath } from "../utils/paths.js";
 
 export type StatusExecucao = "executando" | "concluido" | "falhou" | "cancelado";
 
@@ -22,6 +23,7 @@ export interface OpcoesRun {
   session?: string;
   title?: string;
   workspaceId?: string;
+  workspaceDir?: string;
 }
 
 export interface RegistroExecucao {
@@ -75,9 +77,19 @@ export class SessionManager {
   }
 
   async rodar(opcoes: OpcoesRun): Promise<RegistroExecucao> {
-    const ws = await this.workspaces.resolver(opcoes.workspaceId);
-    if (!ws.existe) {
-      throw new SessionError(`a pasta do workspace "${ws.id}" não existe (${ws.path})`);
+    let ws: { path: string; id: string; existe: boolean };
+    if (opcoes.workspaceDir) {
+      const dir = resolvePath(opcoes.workspaceDir);
+      if (!existsSync(join(dir, ".opencorp"))) {
+        throw new SessionError(`workspace do subcorp inválido: ${dir} não contém .opencorp/`);
+      }
+      ws = { path: dir, id: basename(dir), existe: true };
+    } else {
+      const info = await this.workspaces.resolver(opcoes.workspaceId);
+      if (!info.existe) {
+        throw new SessionError(`a pasta do workspace "${info.id}" não existe (${info.path})`);
+      }
+      ws = info;
     }
     const ag = await this.agentes.carregar(ws.path, opcoes.agente);
     let ordem = opcoes.ordem ?? "";

@@ -13,6 +13,10 @@ function reportar(erro: unknown): void {
   process.exitCode = 1;
 }
 
+function wsDe(program: Command, opts: { workspace?: string }): string | undefined {
+  return opts.workspace ?? (program.opts() as { workspace?: string }).workspace;
+}
+
 async function comErros(fn: () => Promise<void>): Promise<void> {
   try {
     await fn();
@@ -30,8 +34,8 @@ export function registerSessionCommand(program: Command): void {
   const manager = new WorkspaceManager();
   const sessoes = new SessionManager();
 
-  async function workspaceAlvo(workspaceId?: string) {
-    return manager.resolver(workspaceId);
+  function workspaceAlvo(opts: { workspace?: string }) {
+    return manager.resolver(wsDe(program, opts));
   }
 
   const session = program.command("session").description("sessões OpenCode registradas");
@@ -42,7 +46,7 @@ export function registerSessionCommand(program: Command): void {
     .description("lista as execuções registradas (registries/execucoes)")
     .action((opts: { agent?: string; workspace?: string }) =>
       comErros(async () => {
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvo(opts);
         const registros = await sessoes.listarExecucoes(ws.path, { agente: opts.agent });
         if (registros.length === 0) {
           console.log(`nenhuma sessão registrada (workspace: "${ws.id}")`);
@@ -63,7 +67,7 @@ export function registerSessionCommand(program: Command): void {
     .description("mostra a captura de terminal da sessão")
     .action((id: string, opts: { workspace?: string }) =>
       comErros(async () => {
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvo(opts);
         process.stdout.write(await sessoes.logDe(ws.path, id));
       }),
     );
@@ -74,7 +78,7 @@ export function registerSessionCommand(program: Command): void {
     .description("mata o processo da sessão, se estiver vivo")
     .action((id: string, opts: { workspace?: string }) =>
       comErros(async () => {
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvo(opts);
         await sessoes.matar(ws.path, id);
         console.log(`ok: sessão "${id}" recebeu SIGTERM`);
       }),

@@ -4,6 +4,7 @@ import type { Command } from "commander";
 import { AgentError } from "../../core/errors.js";
 import { SessionManager } from "../../core/session-manager.js";
 import { AgentStore } from "../../core/agent-store.js";
+import { SubcorpStore } from "../../core/subcorp-store.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
 import { notImplementedAction } from "../placeholder.js";
 
@@ -18,12 +19,24 @@ function reportar(erro: unknown): void {
   process.exitCode = 1;
 }
 
+function wsDe(program: Command, opts: { workspace?: string }): string | undefined {
+  return opts.workspace ?? (program.opts() as { workspace?: string }).workspace;
+}
+
 async function comErros(fn: () => Promise<void>): Promise<void> {
   try {
     await fn();
   } catch (erro) {
     reportar(erro);
   }
+}
+
+function dividirRefSubcorp(ref: string): { subcorpId: string; agenteId: string } {
+  const partes = ref.split("/");
+  if (partes.length !== 2 || partes[0]!.length === 0 || partes[1]!.length === 0) {
+    throw new AgentError(`referência inválida "${ref}" — use <subcorp>/<agente>`);
+  }
+  return { subcorpId: partes[0]!, agenteId: partes[1]! };
 }
 
 function formatarDuracao(ms: number | null): string {
@@ -35,6 +48,11 @@ export function registerAgentCommand(program: Command): void {
   const manager = new WorkspaceManager();
   const store = new AgentStore();
   const sessoes = new SessionManager();
+  const subcorps = new SubcorpStore();
+
+  function workspaceAlvoId(opts: { workspace?: string }) {
+    return manager.resolver(wsDe(program, opts));
+  }
 
   async function workspaceAlvo(workspaceId?: string) {
     const ws = await manager.resolver(workspaceId);
@@ -56,7 +74,7 @@ export function registerAgentCommand(program: Command): void {
     .description("cria um agente (.md com frontmatter) a partir de outro")
     .action((id: string, opts: { from?: string; model?: string; workspace?: string }) =>
       comErros(async () => {
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvoId(opts);
         const r = await store.criar(ws.path, id, { de: opts.from, model: opts.model });
         console.log(`ok: agente "${r.frontmatter.id}" criado em ${r.path}`);
         console.log(`ok: agente opencode gerado em ${ws.path}/.opencorp/opencode/agent/${r.frontmatter.id}.md`);
@@ -69,12 +87,29 @@ export function registerAgentCommand(program: Command): void {
     .description("lista os agentes do workspace ativo")
     .action((opts: { categoria?: string; workspace?: string }) =>
       comErros(async () => {
-        const ws = await workspaceAlvo(opts.workspace);
-        let agentes = await store.listar(ws.path);
-        if (opts.categoria) {
-          agentes = agentes.filter((a) => a.category === opts.categoria);
+        const ws = await workspaceAlvoId(opts);
+        const agentes = [...(await store.listar(ws.path))];
+        for (const entrada of await subcorps.listar(ws.path)) {
+          for (const agenteId of entrada.exposed_agents) {
+            try {
+              const ag = await store.carregar(entrada.source, agenteId);
+              agentes.push({
+                id: `${entrada.id}/${ag.frontmatter.id}`,
+                role: ag.frontmatter.role,
+                category: ag.frontmatter.category,
+                model: ag.frontmatter.model,
+                permissions: ag.frontmatter.permissions,
+                budget_daily_usd: ag.frontmatter.budget.daily_usd,
+              });
+            } catch {
+              continue;
+            }
+          }
         }
-        if (agentes.length === 0) {
+        const filtrados = opts.categoria
+          ? agentes.filter((a) => a.category === opts.categoria)
+          : agentes;
+        if (filtrados.length === 0) {
           console.log(`nenhum agente em ${store.dirAgentes(ws.path)} (workspace: "${ws.id}")`);
           return;
         }
@@ -98,8 +133,16 @@ export function registerAgentCommand(program: Command): void {
     .description("mostra a definição completa do agente")
     .action((id: string, opts: { workspace?: string }) =>
       comErros(async () => {
-        const ws = await workspaceAlvo(opts.workspace);
-        const r = await store.carregar(ws.path, id);
+        const ws = await workspaceAlvoId(opts);
+        let carregado;
+        if (id.includes("/")) {
+          const { subcorpId, agenteId } = dividirRefSubcorp(id);
+          const alvo = await subcorps.resolverParaConsulta(ws.path, subcorpId, agenteId);
+          carregado = await store.carregar(alvo.source, agenteId);
+        } else {
+          carregado = await store.carregar(ws.path, id);
+        }
+        const r = carregado;
         console.log(`arquivo:      ${r.path}`);
         console.log(`id:           ${r.frontmatter.id}`);
         console.log(`role:         ${r.frontmatter.role}`);
@@ -121,7 +164,7 @@ export function registerAgentCommand(program: Command): void {
     .description("abre $EDITOR no .md do agente")
     .action((id: string, opts: { workspace?: string }) =>
       comErros(async () => {
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvoId(opts);
         if (!process.stdin.isTTY || !process.stdout.isTTY) {
           throw new AgentError('"agent edit" precisa de um terminal (TTY) para abrir o $EDITOR');
         }
@@ -155,7 +198,7 @@ export function registerAgentCommand(program: Command): void {
     .description("clona um agente existente do workspace")
     .action((origem: string, destino: string, opts: { workspace?: string }) =>
       comErros(async () => {
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvoId(opts);
         const r = await store.clonar(ws.path, origem, destino);
         console.log(`ok: agente "${origem}" clonado como "${r.frontmatter.id}" em ${r.path}`);
       }),
@@ -183,14 +226,24 @@ export function registerAgentCommand(program: Command): void {
         },
       ) =>
         comErros(async () => {
+          let agenteId = id;
+          let workspaceDir: string | undefined;
+          if (id.includes("/")) {
+            const { subcorpId, agenteId: subAgenteId } = dividirRefSubcorp(id);
+            const wsPai = await workspaceAlvo(wsDe(program, opts));
+            const alvo = await subcorps.resolverParaRun(wsPai.path, subcorpId, subAgenteId);
+            agenteId = alvo.agenteId;
+            workspaceDir = alvo.source;
+          }
           const r = await sessoes.rodar({
-            agente: id,
+            agente: agenteId,
             ordem,
             model: opts.model,
             session: opts.session,
             file: opts.file,
             title: opts.title,
-            workspaceId: opts.workspace,
+            workspaceId: workspaceDir ? undefined : wsDe(program, opts),
+            workspaceDir,
           });
           console.log(
             `\n[opencorp] sessão ${r.id} — status: ${r.status} · exit: ${r.exit_code ?? "?"} · duração: ${formatarDuracao(r.duracao_ms)} · log: ${r.log}`,
@@ -205,7 +258,7 @@ export function registerAgentCommand(program: Command): void {
     .description("últimas execuções do agente (registries/execucoes)")
     .action((id: string, opts: { workspace?: string }) =>
       comErros(async () => {
-        const ws = await workspaceAlvo(opts.workspace);
+        const ws = await workspaceAlvoId(opts);
         const registros = await sessoes.listarExecucoes(ws.path, { agente: id });
         if (registros.length === 0) {
           console.log(`nenhuma execução registrada para "${id}" (workspace: "${ws.id}")`);

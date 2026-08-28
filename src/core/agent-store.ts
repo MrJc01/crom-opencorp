@@ -189,6 +189,13 @@ export class AgentStore {
     });
   }
 
+  async sincronizarTodos(wsPath: string): Promise<void> {
+    for (const resumo of await this.listar(wsPath)) {
+      const carregado = await this.carregar(wsPath, resumo.id);
+      await this.bridge.sincronizarAgente(wsPath, carregado.frontmatter, carregado.corpo);
+    }
+  }
+
   async registrarEvento(wsPath: string, ev: EventoAgente): Promise<void> {
     await this.registros.garantirRegistro(wsPath, {
       categoria: "agentes",
