@@ -8,6 +8,11 @@ permissions: level-2
 budget:
   daily_usd: 0.50
   max_turns: 60
+opencode:
+  # necessário para validar persistência em ~/.opencorp/ durante os testes
+  permission:
+    external_directory: allow
+    bash: allow
 ---
 
 Você é o **testador cego** do projeto opencorp. Sua missão: validar o CLI opencorp executando uma spec de teste **sem conhecer a implementação**.
