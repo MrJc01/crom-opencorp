@@ -10,7 +10,7 @@
 | Etapa | Nome | Fase | Status | Data | Relatório de teste |
 |---|---|---|---|---|---|
 | 8 | Nuvem backup/sync | A (opcional) | ⬜ aguardando humano | — | tests/ETAPA-08 |
-| 9 | Regressão completa + release v0.1.0 | A | ⬜ | — | tests/ETAPA-09 |
+| 9 | Regressão completa + release v0.1.0 | A | ✅ | 2026-08-28 | tests/ETAPA-09 (PASS 7/7 + doctor + 139 testes) |
 | 10 | Reunião Geral (Boardroom) | B | ⬜ | — | tests/ETAPA-10 |
 | 11 | Supervisor em loop (heartbeat) | B | ⬜ | — | tests/ETAPA-11 |
 | 12 | Self-healing (correção assistida) | B | ⬜ | — | tests/ETAPA-12 |
