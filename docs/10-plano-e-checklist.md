@@ -43,7 +43,7 @@ Regras do implementador:
 | 2 | Settings (painel de configurações CLI) | ✅ | 2026-08-28 | tests/ETAPA-02 (PASS 6/0/1 SKIP) |
 | 3 | Workspaces | ✅ | 2026-08-28 | tests/ETAPA-03 (PASS 9/9) |
 | 4 | Agentes + sessões OpenCode | ✅ | 2026-08-28 | tests/ETAPA-04 (PASS 8/8) |
-| 5 | Registros | ⬜ | — | tests/ETAPA-05 |
+| 5 | Registros | ✅ | 2026-08-28 | tests/ETAPA-05 (PASS 9/9, ciclo 2 após 1 fix) |
 | 6 | Templates + subcorp | ⬜ | — | tests/ETAPA-06 |
 | 7 | Segurança + orçamento | ⬜ | — | tests/ETAPA-07 |
 | 8 | Nuvem backup/sync (opcional) | ⬜ | — | tests/ETAPA-08 |
