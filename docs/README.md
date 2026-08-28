@@ -31,8 +31,9 @@
 | 07 | [Segurança e custos](07-seguranca-custos.md) | Guardrails, permissões, budget, HITL |
 | 08 | [Referência CLI](08-cli-referencia.md) | Todos os comandos do `opencorp` |
 | 09 | [Testes cegos](09-testes-cegos.md) | Protocolo de QA com modelos leves/free |
-| **10** | [**Plano e checklist por etapas**](10-plano-e-checklist.md) | **Plano sequencial para o agente executar** |
+| **10** | [**Plano Fase A (concluída)**](10-plano-e-checklist.md) | Etapas 0–7 ✅ — histórico e protocolo |
 | 11 | [Nuvem: backup e sync](11-nuvem-backup-sync.md) | Estratégia de backup/sincronização (opcional) |
+| **12** | [**Plano Fase B/C (ATUAL)**](12-plano-fase-b-c.md) | **Plano ativo: fechamento A + Boardroom + Supervisor + Flows + Web** |
 
 ### Pastas auxiliares
 

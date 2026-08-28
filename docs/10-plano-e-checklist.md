@@ -1,6 +1,8 @@
-# 10 — Plano e Checklist por Etapas (DOCUMENTO MESTRE DO AGENTE)
+# 10 — Plano e Checklist por Etapas (FASE A — CONCLUÍDA)
 
-> **Se você é o agente implementador: comece aqui e siga na ordem.** Cada etapa abaixo só pode ser marcada como concluída após passar o **teste cego** correspondente (ver `09-testes-cegos.md`). Não pule etapas. Não marque checkbox sem evidência.
+> ⚠️ **Fase A concluída em 2026-08-28 (etapas 0–7, todas com teste cego PASS).**
+> **O plano ativo de continuação está em [`12-plano-fase-b-c.md`](12-plano-fase-b-c.md) — comece por lá.**
+> Este documento é mantido como registro do protocolo e das etapas da Fase A.
 
 ---
 
