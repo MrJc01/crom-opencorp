@@ -8,6 +8,8 @@ import { registerRunCommand } from "./commands/run.js";
 import { registerSessionCommand } from "./commands/session.js";
 import { registerSettingsCommand } from "./commands/settings.js";
 import { registerRegistryCommand } from "./commands/registry.js";
+import { registerApprovalsCommand } from "./commands/approvals.js";
+import { registerBudgetCommand } from "./commands/budget.js";
 import { registerSubcorpCommand } from "./commands/subcorp.js";
 import { registerTemplateCommand } from "./commands/template.js";
 import { registerWorkspaceCommands } from "./commands/workspace.js";
@@ -53,35 +55,9 @@ export function buildProgram(): Command {
 
   registerRegistryCommand(program);
 
-  const approvals = program.command("approvals").description("fila HITL (humano no loop)");
-  approvals
-    .command("list")
-    .description("lista as aprovações pendentes")
-    .action(notImplementedAction("opencorp approvals list"));
-  approvals
-    .command("approve")
-    .argument("<id>", "id da aprovação")
-    .description("aprova uma ação pendente")
-    .action(notImplementedAction("opencorp approvals approve"));
-  approvals
-    .command("reject")
-    .argument("<id>", "id da aprovação")
-    .option("--motivo <texto>", "motivo da rejeição")
-    .description("rejeita uma ação pendente")
-    .action(notImplementedAction("opencorp approvals reject"));
+  registerApprovalsCommand(program);
 
-  const budget = program.command("budget").description("orçamento e consumo");
-  budget
-    .command("status")
-    .option("--workspace <id>", "workspace alvo (padrão: ativo)")
-    .description("mostra consumo e tetos")
-    .action(notImplementedAction("opencorp budget status"));
-  budget
-    .command("set")
-    .option("--daily-usd <valor>", "teto diário do workspace em USD")
-    .option("--per-agent-usd <valor>", "teto diário por agente em USD")
-    .description("define os tetos de orçamento")
-    .action(notImplementedAction("opencorp budget set"));
+  registerBudgetCommand(program);
 
   registerTemplateCommand(program);
 

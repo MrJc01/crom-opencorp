@@ -3,6 +3,7 @@ import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { settingsSchema, type Settings } from "../schemas/settings.js";
+import { parseSecurityPolicyTexto } from "../schemas/security-policy.js";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { expandTilde } from "../utils/paths.js";
 
@@ -32,6 +33,8 @@ export interface DoctorOptions {
   cwd?: string;
   settingsPath?: string;
   workspaceRoots?: string[];
+  securityPolicyPath?: string;
+  budgetPath?: string;
 }
 
 export function errorMessage(erro: unknown): string {
@@ -259,13 +262,85 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
 
   checks.push(await checkWritableDir(join(home, ".opencorp")));
 
+  if (options.securityPolicyPath !== undefined) {
+    checks.push(await checarPolicy(options.securityPolicyPath));
+  } else {
+    checks.push({
+      id: "policy",
+      label: "security_policy.json",
+      status: "info",
+      detail: "nenhum workspace ativo — policy não verificada",
+    });
+  }
+  if (options.budgetPath !== undefined) {
+    checks.push(await checarBudget(options.budgetPath));
+  } else {
+    checks.push({
+      id: "budget",
+      label: "budget.json",
+      status: "info",
+      detail: "nenhum workspace ativo — budget não verificado",
+    });
+  }
+
   const falhas = checks.filter((c) => c.status === "fail");
   const ok = falhas.length === 0;
   const exitCode: 0 | 1 | 2 = ok
     ? 0
-    : falhas.some((c) => c.id === "settings")
+    : falhas.some((c) => ["settings", "policy", "budget"].includes(c.id))
       ? 2
       : 1;
 
   return { checks, ok, exitCode };
+}
+
+export async function checarPolicy(path: string): Promise<DoctorCheck> {
+  const base = { id: "policy", label: "security_policy.json" } as const;
+  if (!existsSync(path)) {
+    return {
+      ...base,
+      status: "info",
+      detail: `${path} não encontrado (ok — sem policy, guard usa policy vazia)`,
+    };
+  }
+  try {
+    parseSecurityPolicyTexto(await readFile(path, "utf8"), path);
+  } catch (erro) {
+    return {
+      ...base,
+      status: "fail",
+      detail: erro instanceof Error ? erro.message : String(erro),
+    };
+  }
+  return { ...base, status: "ok", detail: `${path} válido` };
+}
+
+export async function checarBudget(path: string): Promise<DoctorCheck> {
+  const base = { id: "budget", label: "budget.json" } as const;
+  if (!existsSync(path)) {
+    return {
+      ...base,
+      status: "info",
+      detail: `${path} não encontrado (ok — sem consumo registrado)`,
+    };
+  }
+  try {
+    const dados = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    const diaOk = dados.dia === null || typeof dados.dia === "string";
+    if (!diaOk || typeof dados.workspace_usd_hoje !== "number") {
+      return {
+        ...base,
+        status: "fail",
+        detail: `budget.json inválido em ${path} → campos obrigatórios "dia" (string|null) e "workspace_usd_hoje" (number)`,
+      };
+    }
+    const semConsumo = dados.dia === null ? " (sem consumo)" : ` (dia ${dados.dia})`;
+    return { ...base, status: "ok", detail: `${path} válido${semConsumo}` };
+  } catch (erro) {
+    return {
+      ...base,
+      status: "fail",
+      detail: `budget.json inválido em ${path}: ${erro instanceof Error ? erro.message : String(erro)}`,
+    };
+  }
 }

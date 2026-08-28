@@ -1,5 +1,7 @@
+import { join } from "node:path";
 import type { Command } from "commander";
 import { runDoctor, type CheckStatus } from "../../core/doctor.js";
+import { WorkspaceManager } from "../../core/workspace-manager.js";
 import { opencorpHome } from "../../utils/paths.js";
 
 const ICONES: Record<CheckStatus, string> = {
@@ -17,7 +19,17 @@ export function registerDoctorCommand(program: Command): void {
     )
     .option("--json", "imprime o resultado em JSON (machine-readable)")
     .action(async (opts: { json?: boolean }) => {
-      const resultado = await runDoctor({ homeDir: opencorpHome() });
+      let securityPolicyPath: string | undefined;
+      let budgetPath: string | undefined;
+      try {
+        const ws = await new WorkspaceManager().resolver();
+        securityPolicyPath = join(ws.path, ".opencorp", "security_policy.json");
+        budgetPath = join(ws.path, ".opencorp", "budget.json");
+      } catch {
+        securityPolicyPath = undefined;
+        budgetPath = undefined;
+      }
+      const resultado = await runDoctor({ homeDir: opencorpHome(), securityPolicyPath, budgetPath });
       if (opts.json) {
         console.log(JSON.stringify(resultado, null, 2));
       } else {

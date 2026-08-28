@@ -5,8 +5,8 @@ import { AgentError } from "../../core/errors.js";
 import { SessionManager } from "../../core/session-manager.js";
 import { AgentStore } from "../../core/agent-store.js";
 import { SubcorpStore } from "../../core/subcorp-store.js";
+import { BudgetManager } from "../../core/budget-manager.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
-import { notImplementedAction } from "../placeholder.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -37,6 +37,10 @@ function dividirRefSubcorp(ref: string): { subcorpId: string; agenteId: string }
     throw new AgentError(`referência inválida "${ref}" — use <subcorp>/<agente>`);
   }
   return { subcorpId: partes[0]!, agenteId: partes[1]! };
+}
+
+function usd(valor: number): string {
+  return `US$ ${valor.toFixed(4)}`;
 }
 
 function formatarDuracao(ms: number | null): string {
@@ -276,6 +280,19 @@ export function registerAgentCommand(program: Command): void {
   agent
     .command("cost")
     .argument("<id>", "id do agente")
-    .description("gasto acumulado (registries/custos — etapa 7)")
-    .action(notImplementedAction("opencorp agent cost"));
+    .description("gasto estimado acumulado do agente (registries/custos)")
+    .action((id: string, opts: { workspace?: string }) =>
+      comErros(async () => {
+        const ws = await workspaceAlvoId(opts);
+        const budget = new BudgetManager();
+        const acumulado = await budget.acumuladoPorAgente(ws.path, id);
+        console.log(`agente:      ${id}`);
+        console.log(`hoje:        ${usd(acumulado.hoje)}`);
+        console.log(`acumulado:   ${usd(acumulado.total)} em ${acumulado.dias} dia(s) com consumo`);
+        console.log(`média/dia:   ${usd(acumulado.media)}`);
+        if (acumulado.total === 0) {
+          console.log("(custos são estimados por turnos × preço do modelo — ver budget status)");
+        }
+      }),
+    );
 }

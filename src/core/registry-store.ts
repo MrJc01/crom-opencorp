@@ -289,20 +289,29 @@ export class RegistryStore {
     }
   }
 
+  async eventoAuditoria(
+    wsPath: string,
+    ev: { por: string; evento: string; resumo: string } & Record<string, unknown>,
+  ): Promise<void> {
+    await this.garantirRegistro(wsPath, {
+      categoria: "logs",
+      id: "audit-log",
+      descricao: "eventos de auditoria: permissões negadas, bloqueios e violações do RegistryStore",
+      criadoPor: "opencorp",
+    });
+    await this.anexarEvento(wsPath, "logs", "audit-log", {
+      ts: new Date().toISOString(),
+      ...ev,
+    });
+  }
+
   private async registrarAuditoria(
     wsPath: string,
     acao: string,
     meta: MetaRegistro,
     por: string,
   ): Promise<void> {
-    await this.garantirRegistro(wsPath, {
-      categoria: "logs",
-      id: "audit-log",
-      descricao: "eventos de auditoria: permissões negadas e bloqueios do RegistryStore",
-      criadoPor: "opencorp",
-    });
-    await this.anexarEvento(wsPath, "logs", "audit-log", {
-      ts: new Date().toISOString(),
+    await this.eventoAuditoria(wsPath, {
       por,
       evento: "acesso_negado",
       acao,

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import { basename, join } from "node:path";
@@ -10,10 +10,14 @@ import { SessionError } from "./errors.js";
 import { OpenCodeBridge } from "./opencode-bridge.js";
 import { RegistryStore, type MetaRegistro } from "./registry-store.js";
 import { WorkspaceManager } from "./workspace-manager.js";
+import { ApprovalsStore } from "./approvals-store.js";
+import { BudgetManager } from "./budget-manager.js";
+import { avaliar, casaPadrao } from "./security-guard.js";
+import { parseSecurityPolicyTexto } from "../schemas/security-policy.js";
 import { mkdirRecursive } from "../utils/fs-safe.js";
-import { resolvePath } from "../utils/paths.js";
+import { opencorpHome, resolvePath } from "../utils/paths.js";
 
-export type StatusExecucao = "executando" | "concluido" | "falhou" | "cancelado";
+export type StatusExecucao = "executando" | "concluido" | "falhou" | "cancelado" | "hitl_pendente";
 
 export interface OpcoesRun {
   agente: string;
@@ -24,6 +28,7 @@ export interface OpcoesRun {
   title?: string;
   workspaceId?: string;
   workspaceDir?: string;
+  pularGuard?: boolean;
 }
 
 export interface RegistroExecucao {
@@ -62,14 +67,25 @@ function gerarId(prefixo: string): string {
 }
 
 export class SessionManager {
+  private readonly homeDir: string;
   private readonly workspaces: WorkspaceManager;
   private readonly agentes: AgentStore;
   private readonly registros = new RegistryStore();
+  private readonly approvals = new ApprovalsStore();
   private readonly bridge = new OpenCodeBridge();
 
   constructor(opts: { homeDir?: string; cwd?: string; templatesDir?: string } = {}) {
+    this.homeDir = opts.homeDir ?? opencorpHome();
     this.workspaces = new WorkspaceManager(opts);
     this.agentes = new AgentStore({ templatesDir: opts.templatesDir });
+  }
+
+  private carregarPolicy(wsPath: string) {
+    const path = join(wsPath, ".opencorp", "security_policy.json");
+    if (!existsSync(path)) {
+      return parseSecurityPolicyTexto("{}", path);
+    }
+    return parseSecurityPolicyTexto(readFileSync(path, "utf8"), path);
   }
 
   async workspaceDe(workspaceId?: string) {
@@ -104,7 +120,91 @@ export class SessionManager {
       throw new SessionError("ordem vazia — informe a instrução (ou use --file)");
     }
     const modelo = opcoes.model ?? ag.frontmatter.model;
-    await this.validarOrcamentoStub(ws.path, ag.frontmatter);
+
+    const policy = this.carregarPolicy(ws.path);
+    if (!opcoes.pularGuard) {
+      const pre = avaliar(ordem, policy, ag.frontmatter.permissions);
+      if (pre.acao === "bloqueado") {
+        const idBloqueio = gerarId("exec");
+        await this.registros.garantirCategorias(ws.path);
+        await this.registros.criar(ws.path, {
+          categoria: "execucoes",
+          id: idBloqueio,
+          descricao: `Ordem: ${ordem.slice(0, 160)}`,
+          criadoPor: ag.frontmatter.id,
+          tags: ["sessao", "bloqueada"],
+          eventoInicial: {
+            evento: "bloqueado",
+            resumo: `SecurityGuard: ${pre.motivo}`,
+          },
+          extras: {
+            status: "falhou",
+            modelo,
+            ordem,
+            pid: null,
+            fim: new Date().toISOString(),
+            exit_code: 3,
+            duracao_ms: 0,
+            log: "",
+          },
+        });
+        await this.registros.eventoAuditoria(ws.path, {
+          por: ag.frontmatter.id,
+          evento: "bloqueado_pre_voo",
+          resumo: pre.motivo,
+          padrao: pre.padrao ?? "",
+          ordem: ordem.slice(0, 160),
+        });
+        throw new SessionError(`bloqueado pelo SecurityGuard: ${pre.motivo}`, { exitCode: 3 });
+      }
+      if (pre.acao === "hitl") {
+        const idHitl = gerarId("exec");
+        await this.registros.garantirCategorias(ws.path);
+        await this.registros.criar(ws.path, {
+          categoria: "execucoes",
+          id: idHitl,
+          descricao: `Ordem: ${ordem.slice(0, 160)}`,
+          criadoPor: ag.frontmatter.id,
+          tags: ["sessao", "hitl"],
+          eventoInicial: {
+            evento: "hitl_pendente",
+            resumo: `SecurityGuard: ${pre.motivo}`,
+          },
+          extras: {
+            status: "hitl_pendente",
+            modelo,
+            ordem,
+            pid: null,
+            fim: null,
+            exit_code: null,
+            duracao_ms: null,
+            log: "",
+          },
+        });
+        const pendencia = await this.approvals.criar(ws.path, {
+          ordem,
+          agente: ag.frontmatter.id,
+          modelo,
+          padrao: pre.padrao ?? "",
+          origem: "pre-voo",
+          motivo_guard: pre.motivo,
+          workspace_id: ws.id,
+          workspace_path: ws.path,
+          exec_id: idHitl,
+        });
+        throw new SessionError(
+          `HITL: a ordem casa com "${pre.padrao}" e aguarda aprovação humana — pendência ${pendencia.id} (opencorp approvals list)`,
+          { exitCode: 5 },
+        );
+      }
+    }
+
+    const budget = new BudgetManager({ homeDir: this.homeDir });
+    const orcamento = await budget.podeExecutar(ws.path, ag.frontmatter.id);
+    if (!orcamento.ok) {
+      throw new SessionError(`recusada pelo BudgetManager: ${orcamento.motivo}`, { exitCode: 4 });
+    }
+
     await this.registros.garantirCategorias(ws.path);
 
     const id = gerarId("exec");
@@ -174,7 +274,7 @@ export class SessionManager {
       });
     } catch (erro) {
       const falha = `não foi possível iniciar o opencode: ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
-      await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, "");
+      await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, "", null);
       throw new SessionError(falha);
     }
     if (child.pid) {
@@ -204,7 +304,7 @@ export class SessionManager {
     } catch (erro) {
       logStream.end();
       const falha = `não foi possível executar o opencode: ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
-      await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, captura.join(""));
+      await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, captura.join(""), null);
       throw new SessionError(falha);
     }
     logStream.end();
@@ -221,6 +321,23 @@ export class SessionManager {
     registro.status = status;
     registro.exit_code = res.exitCode ?? null;
     registro.duracao_ms = duracao;
+
+    const textoCaptura = captura.join("");
+    const custo = budget.estimarCusto(
+      await budget.carregar(ws.path),
+      modelo,
+      duracao,
+      textoCaptura,
+    );
+    const consumo = await budget.registrarConsumo(ws.path, ag.frontmatter.id, custo, {
+      modelo,
+      duracao_ms: duracao,
+    });
+    if (consumo.aviso80) {
+      console.log(
+        `\n[opencorp] ⚠ aviso: consumo atingiu 80% do orçamento (${ag.frontmatter.id} ou workspace) — veja "opencorp budget status"`,
+      );
+    }
     await this.finalizar(
       ws,
       registro,
@@ -228,9 +345,58 @@ export class SessionManager {
       status,
       registro.exit_code,
       duracao,
-      captura.join("").slice(0, 400),
-      captura.join(""),
+      textoCaptura.slice(0, 400),
+      textoCaptura,
+      custo,
     );
+
+    if (!opcoes.pularGuard) {
+      const posHitl = policy.hitl_patterns.find((padrao) => casaPadrao(padrao, textoCaptura));
+      if (posHitl) {
+        const pendencia = await this.approvals.criar(ws.path, {
+          ordem,
+          agente: ag.frontmatter.id,
+          modelo,
+          padrao: posHitl,
+          origem: "pos-voo",
+          motivo_guard: `transcript da sessão contém o padrão de HITL "${posHitl}" — requer revisão humana`,
+          workspace_id: ws.id,
+          workspace_path: ws.path,
+          exec_id: registro.id,
+        });
+        await this.registros.anexarEvento(ws.path, "execucoes", registro.id, {
+          ts: new Date().toISOString(),
+          por: "security-guard",
+          evento: "hitl_pos_voo",
+          padrao: posHitl,
+          resumo: `pendência ${pendencia.id} criada para revisão humana`,
+        });
+        throw new SessionError(
+          `HITL pós-voo: o transcript contém "${posHitl}" — pendência ${pendencia.id} criada para revisão humana (exit 5)`,
+          { exitCode: 5 },
+        );
+      }
+      const posBloq = policy.blocklist.find((padrao) => casaPadrao(padrao, textoCaptura));
+      if (posBloq) {
+        await this.registros.eventoAuditoria(ws.path, {
+          por: ag.frontmatter.id,
+          evento: "padrao_bloqueado_pos_voo",
+          resumo: `transcript contém padrão da blocklist "${posBloq}" — execução já ocorreu dentro do opencode; registrada para auditoria`,
+          padrao: posBloq,
+          ordem: ordem.slice(0, 160),
+        });
+        await this.registros.anexarEvento(ws.path, "execucoes", registro.id, {
+          ts: new Date().toISOString(),
+          por: "security-guard",
+          evento: "violacao_pos_voo",
+          padrao: posBloq,
+          resumo: "transcript contém padrão da blocklist — auditoria (a sessão já tinha corrido)",
+        });
+        console.log(
+          `\n[opencorp] ⚠ auditoria: o transcript contém o padrão de blocklist "${posBloq}" — evento registrado em registries/logs/audit-log`,
+        );
+      }
+    }
     return registro;
   }
 
@@ -303,6 +469,7 @@ export class SessionManager {
       registro.duracao_ms,
       "cancelada via session kill",
       "",
+      null,
     );
   }
 
@@ -360,6 +527,7 @@ export class SessionManager {
     duracaoMs: number,
     resumo: string,
     captura: string,
+    custoUsd: number | null = null,
   ): Promise<void> {
     registro.status = status;
     registro.exit_code = exitCode;
@@ -382,7 +550,7 @@ export class SessionManager {
       modelo: registro.modelo,
       inicio: registro.inicio,
       fim: registro.fim,
-      custo_usd: null,
+      custo_usd: custoUsd,
       status: registro.status,
     });
     if (captura !== "" || agente !== null) {
@@ -397,5 +565,4 @@ export class SessionManager {
     }
   }
 
-  private async validarOrcamentoStub(_wsPath: string, _agente: Agente): Promise<void> {}
 }
