@@ -9,6 +9,7 @@ import { AgentStore } from "./agent-store.js";
 import { SessionError } from "./errors.js";
 import { OpenCodeBridge } from "./opencode-bridge.js";
 import { RegistryStore, type MetaRegistro } from "./registry-store.js";
+import { eventBus } from "./event-bus.js";
 import { WorkspaceManager } from "./workspace-manager.js";
 import { ApprovalsStore } from "./approvals-store.js";
 import { BudgetManager } from "./budget-manager.js";
@@ -32,6 +33,7 @@ export interface OpcoesRun {
   tags?: string[];
   referencias?: string[];
   tipo?: string;
+  execId?: string;
 }
 
 export interface ResultadoRun extends RegistroExecucao {
@@ -65,6 +67,10 @@ export interface ResumoExecucao {
 
 function msg(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
+}
+
+export function gerarIdExecucao(prefixo = "exec"): string {
+  return gerarId(prefixo);
 }
 
 function gerarId(prefixo: string): string {
@@ -215,7 +221,7 @@ export class SessionManager {
 
     await this.registros.garantirCategorias(ws.path);
 
-    const id = gerarId("exec");
+    const id = opcoes.execId ?? gerarId("exec");
     const logRelativo = `logs/${id}.log`;
     const logPath = join(ws.path, logRelativo);
     await mkdirRecursive(join(ws.path, "logs"));
@@ -257,6 +263,7 @@ export class SessionManager {
         ...(opcoes.tipo ? { tipo: opcoes.tipo } : {}),
       },
     });
+    eventBus.emit("sessao-inicio", { exec_id: id, agente: registro.agente, modelo });
 
     await this.bridge.sincronizarAgente(ws.path, ag.frontmatter, ag.corpo);
 
@@ -543,6 +550,13 @@ export class SessionManager {
     registro.exit_code = exitCode;
     registro.duracao_ms = duracaoMs;
     registro.fim = registro.fim ?? new Date().toISOString();
+    eventBus.emit("sessao-fim", {
+      exec_id: registro.id,
+      agente: registro.agente,
+      status,
+      exit_code: exitCode,
+      duracao_ms: duracaoMs,
+    });
     await this.registros.anexarEvento(ws.path, "execucoes", registro.id, {
       ts: new Date().toISOString(),
       por: "opencorp",

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { FlowError } from "./errors.js";
 import { RegistryStore } from "./registry-store.js";
+import { eventBus } from "./event-bus.js";
 import { SessionManager, type OpcoesRun, type ResultadoRun } from "./session-manager.js";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
@@ -258,12 +259,12 @@ export class FlowStore {
   async executar(
     wsPath: string,
     flowId: string,
-    opts: { entrada?: string; model?: string } = {},
+    opts: { entrada?: string; model?: string; execId?: string } = {},
   ): Promise<{ execId: string; status: "concluido" | "falhou"; nos: NoExecInfo[]; contextoFinal: string }> {
     const flow = await this.obter(wsPath, flowId);
     await this.registros.garantirCategorias(wsPath);
     const entrada = opts.entrada ?? "";
-    const execId = gerarId("exec");
+    const execId = opts.execId ?? gerarId("exec");
     const nosInfo: NoExecInfo[] = flow.nos.map((n) => ({
       id: n.id,
       tipo: n.tipo,
@@ -302,6 +303,7 @@ export class FlowStore {
         contexto_final: "",
       },
     });
+    eventBus.emit("flow-inicio", { flow: flowId, exec_id: execId, entrada });
 
     let contexto = entrada;
     let atual: NoFlow | undefined = flow.nos.find((n) => n.tipo === "manual");
@@ -334,12 +336,14 @@ export class FlowStore {
             throw new FlowError(`nó "${no.id}" (agente) falhou: ${msg(erro)}`);
           }
           if (resultado.exit_code !== 0) {
+            eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "falhou", exec_id: resultado.id });
             await marcarNo(no.id, "falhou", resultado.id);
             throw new FlowError(
               `nó "${no.id}" (agente ${config.agente}) falhou — exec ${resultado.id}, exit ${resultado.exit_code}`,
             );
           }
           contexto = resultado.captura?.trim() ?? "";
+          eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok", exec_id: resultado.id });
           await marcarNo(no.id, "ok", resultado.id);
         } else if (no.tipo === "saida") {
           const config = no.config as { registro: string };
@@ -393,6 +397,7 @@ export class FlowStore {
       await this.registros.salvarMeta(wsPath, "execucoes", execId, meta);
     }
 
+    eventBus.emit("flow-fim", { flow: flowId, exec_id: execId, status, motivo });
     await this.registros.garantirRegistro(wsPath, {
       categoria: "flows",
       id: flowId,

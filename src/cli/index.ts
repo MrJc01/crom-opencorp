@@ -14,6 +14,7 @@ import { registerMeetingCommand } from "./commands/meeting.js";
 import { registerSubcorpCommand } from "./commands/subcorp.js";
 import { registerFlowCommand } from "./commands/flow.js";
 import { registerSupervisorCommand } from "./commands/supervisor.js";
+import { registerServeCommand } from "./commands/serve.js";
 import { registerTemplateCommand } from "./commands/template.js";
 import { registerWorkspaceCommands } from "./commands/workspace.js";
 import { notImplementedAction } from "./placeholder.js";
@@ -71,6 +72,8 @@ export function buildProgram(): Command {
   registerSupervisorCommand(program);
 
   registerFlowCommand(program);
+
+  registerServeCommand(program);
 
   const test = program.command("test").description("teste cego (QA black-box via OpenCode)");
   test

@@ -8,6 +8,7 @@ import { MeetingError } from "./errors.js";
 import { SessionManager } from "./session-manager.js";
 import { RegistryStore, type MetaRegistro } from "./registry-store.js";
 import { SettingsStore } from "./settings-store.js";
+import { eventBus } from "./event-bus.js";
 import { WorkspaceManager } from "./workspace-manager.js";
 import type { OpcoesRun, ResultadoRun } from "./session-manager.js";
 import type { AgenteArquivo } from "../schemas/agent.js";
@@ -86,6 +87,7 @@ export interface OpcoesIniciar {
   model?: string;
   workspaceId?: string;
   workspaceDir?: string;
+  id?: string;
 }
 
 const MODELO_POR_AGENTE = "(modelo de cada agente)";
@@ -211,7 +213,8 @@ export class MeetingManager {
     const moderador = cfg.moderator;
     const moderacao: Moderacao = participantes.includes(moderador) ? "moderador" : "rotacao-fixa";
     const modelo = opcoes.model ?? MODELO_POR_AGENTE;
-    const id = gerarIdReuniao();
+    const id = opcoes.id ?? gerarIdReuniao();
+    eventBus.emit("reuniao-inicio", { reuniao_id: id, pauta: opcoes.pauta.slice(0, 120), participantes });
     const abertura = this.agora();
     await this.registros.garantirCategorias(ws.path);
 
@@ -380,6 +383,7 @@ export class MeetingManager {
           `## Turno ${sala.turno} — ${falante}\n\n${resultado.captura.trim()}\n\n`,
         );
         await this.salvarSala(ws.path, sala);
+        eventBus.emit("reuniao-turno", { reuniao_id: id, turno: sala.turno, falante });
         console.log(
           `[reunião ${id}] fala registrada (exec ${resultado.id} · ${(resultado.duracao_ms ?? 0) / 1000}s · custo estimado US$ ${resultado.custo_usd?.toFixed(6) ?? "?"})`,
         );
@@ -414,6 +418,7 @@ export class MeetingManager {
     );
     await this.salvarSala(ws.path, sala);
     console.log(`[reunião ${id}] encerrada (${sala.status}) — ${sala.motivo_fim}`);
+    eventBus.emit("reuniao-fim", { reuniao_id: id, status: sala.status, motivo: sala.motivo_fim, turnos: sala.turno });
 
     await this.gerarAta(ws, sala);
     return sala;
