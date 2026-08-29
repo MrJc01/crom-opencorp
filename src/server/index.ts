@@ -15,9 +15,8 @@ import { MeetingManager } from "../core/meeting-manager.js";
 import { TaskStore, type Task } from "../core/task-store.js";
 import { Scheduler } from "../core/scheduler.js";
 import type { Agenda } from "../core/scheduler.js";
-import { HookStore, TriggersStore, type Hook, type AlvoHook, type PayloadHook } from "../core/hook-store.js";
+import { HookStore, type Hook, type AlvoHook, type PayloadHook } from "../core/hook-store.js";
 import { TaskError, SchedulerError, HookError } from "../core/errors.js";
-import { opencorpHome } from "../utils/paths.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
 
@@ -323,8 +322,6 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
       },
     },
   });
-  const triggers = new TriggersStore();
-  const homeDirTrigger = opcoes.homeDir ?? opencorpHome();
   const sessoes: SessaoApi = opcoes.sessoes ?? (new SessionManager(base) as unknown as SessaoApi);
 
   const token = opcoes.token ?? randomBytes(24).toString("hex");
@@ -333,37 +330,6 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
     const id = url.searchParams.get("workspace") ?? opcoes.workspace ?? undefined;
     return workspaces.resolver(id) as unknown as { id: string; path: string };
   }
-
-  // ── triggers declarativos: evento interno → ação ──
-  eventBus.on((ev) => {
-    if (ev.tipo.startsWith("hook.")) return; // evita recursão
-    try {
-      const casados = triggers.casar(homeDirTrigger, ev.tipo, ev.dados);
-      for (const t of casados) {
-        void (async () => {
-          try {
-            const wsAlvo = (await workspaces.resolver(t.workspace)) as unknown as { id: string; path: string };
-            await hooks.executar(wsAlvo.path, {
-              id: t.id,
-              nome: `trigger:${t.id}`,
-              token: "",
-              metodos: [],
-              respond: "imediato",
-              dedup_seg: 0,
-              ativo: true,
-              alvo: t.alvo,
-              workspace: t.workspace ?? "",
-              criado_em: "",
-            }, { corpo: { ...ev.dados, evento: ev.tipo }, query: {} });
-          } catch {
-            /* trigger falhou — registrado nos logs do processo */
-          }
-        })();
-      }
-    } catch {
-      /* triggers: ignora falha de avaliação */
-    }
-  });
 
   const server: Server = createServer((req, res) => {
     void (async () => {

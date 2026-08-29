@@ -1,0 +1,62 @@
+import { opencorpHome } from "../utils/paths.js";
+import { eventBus } from "./event-bus.js";
+import { HookStore, TriggersStore, type Hook } from "./hook-store.js";
+import { WorkspaceManager } from "./workspace-manager.js";
+
+const emAndamento = new Set<Promise<unknown>>();
+
+export function pendentesTriggers(): Promise<unknown>[] {
+  return [...emAndamento];
+}
+
+export function instalarTriggers(opcoes: { homeDir?: string } = {}): void {
+  const homeDir = opcoes.homeDir ?? opencorpHome();
+  const triggers = new TriggersStore();
+  const hooks = new HookStore({
+    executores: {
+      agentRun: async (agente: string, ordem: string, wsPath: string) => {
+        const { SessionManager } = await import("./session-manager.js");
+        const r = await new SessionManager({ homeDir, cwd: wsPath }).rodar({ agente, ordem, workspaceDir: wsPath });
+        return { id: r.id, captura: r.captura };
+      },
+      flowRun: async (flow: string, entrada: string, wsPath: string) => {
+        const { FlowStore } = await import("./flow-store.js");
+        const r = await new FlowStore({ homeDir, cwd: wsPath }).executar(wsPath, flow, { entrada });
+        return { id: r.execId, captura: r.contextoFinal };
+      },
+    },
+  });
+
+  eventBus.on((ev) => {
+    if (ev.tipo.startsWith("hook.") || ev.tipo.startsWith("trigger.")) return; // evita recursão
+    let casados;
+    try {
+      casados = triggers.casar(homeDir, ev.tipo, ev.dados);
+    } catch {
+      return;
+    }
+    for (const t of casados) {
+      const p = (async () => {
+        const ws = (await new WorkspaceManager({ homeDir }).resolver(t.workspace)) as unknown as {
+          id: string;
+          path: string;
+        };
+        const hook: Hook = {
+          id: t.id,
+          nome: `trigger:${t.id}`,
+          token: "",
+          metodos: [],
+          respond: "imediato",
+          dedup_seg: 0,
+          ativo: true,
+          alvo: t.alvo,
+          workspace: t.workspace ?? "",
+          criado_em: "",
+        };
+        await hooks.executar(ws.path, hook, { corpo: { ...ev.dados, evento: ev.tipo }, query: {} });
+      })();
+      emAndamento.add(p);
+      void p.catch(() => undefined).finally(() => emAndamento.delete(p));
+    }
+  });
+}

@@ -23,6 +23,7 @@ import { registerTemplateCommand } from "./commands/template.js";
 import { registerWorkspaceCommands } from "./commands/workspace.js";
 import { registerTestCommand } from "./commands/test.js";
 import { notImplementedAction } from "./placeholder.js";
+import { instalarTriggers, pendentesTriggers } from "../core/trigger-runner.js";
 
 const require = createRequire(import.meta.url);
 
@@ -152,10 +153,12 @@ function handleCommanderError(err: CommanderError): void {
 }
 
 export async function main(argv: string[] = process.argv): Promise<void> {
+  instalarTriggers();
   const program = buildProgram();
   program.exitOverride();
   try {
     await program.parseAsync(argv);
+    await Promise.allSettled(pendentesTriggers());
   } catch (err) {
     if (err instanceof CommanderError) {
       handleCommanderError(err);
