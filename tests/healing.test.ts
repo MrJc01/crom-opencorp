@@ -171,7 +171,7 @@ describe("Supervisor — self-healing", () => {
     expect(t1.checks.execucoes_falhas).toBe(0);
   });
 
-  it("cadeia encerrada: correção de sucesso não gera nova tentativa", async () => {
+  it("cadeia encerrada: correção de sucesso não gera nova tentativa e marca healing_ok no estado", async () => {
     const { home, wsPath } = await ambiente();
     falhaFake(wsPath, "exec-orig", { healing_tentativas: 1 });
     falhaFake(wsPath, "exec-correcao-ok", {
@@ -184,6 +184,29 @@ describe("Supervisor — self-healing", () => {
     const t1 = await sup.tick(wsPath);
     expect(rodar).not.toHaveBeenCalled();
     expect(t1.ordens).toHaveLength(0);
+    expect(t1.escalacoes).toHaveLength(0);
+    const estado = await sup.lerEstado(wsPath);
+    expect(estado.chaves_tratadas).toContain("healing_ok:exec-orig");
+    const t2 = await sup.tick(wsPath);
+    expect(t2.ordens).toHaveLength(0);
+    expect(rodar).not.toHaveBeenCalled();
+  });
+
+  it("cadeia continua quando a correção ANTERIOR falhou (tentativa conta até max_retries)", async () => {
+    const { home, wsPath } = await ambiente();
+    falhaFake(wsPath, "exec-orig-f", { healing_tentativas: 1 });
+    falhaFake(wsPath, "exec-correcao-falha", {
+      tipo: "healing",
+      referencias: ["exec-orig-f"],
+      status: "falhou",
+    });
+    const { rodar } = sessaoFalsa();
+    const sup = new Supervisor({ homeDir: home, cwd: home, sessoes: { rodar } });
+    const t1 = await sup.tick(wsPath);
+    expect(rodar).toHaveBeenCalledTimes(1);
+    const chamada = (rodar as ReturnType<typeof vi.fn>).mock.calls[0]![0] as OpcoesRun;
+    expect(chamada.referencias).toEqual(["exec-orig-f"]);
+    expect(chamada.tipo).toBe("healing");
     expect(t1.escalacoes).toHaveLength(0);
   });
 });

@@ -190,9 +190,11 @@ export class Supervisor {
 
   private async coletar(
     wsPath: string,
+    estado: EstadoSupervisor,
     healing: { enabled: boolean; max_retries: number },
-  ): Promise<{ problemas: Problema[]; checks: Checks }> {
+  ): Promise<{ problemas: Problema[]; checks: Checks; fechadas: string[] }> {
     const problemas: Problema[] = [];
+    const fechadas: string[] = [];
     const checks: Checks = {
       execucoes_falhas: 0,
       approvals_pendentes: 0,
@@ -217,13 +219,17 @@ export class Supervisor {
         });
         continue;
       }
+      if (estado.chaves_tratadas.includes(`healing_ok:${meta.id}`)) continue;
       const tentativas = Number(extrasMeta.healing_tentativas ?? 0);
       const correcoes = execucoes.filter((m) => {
         const e = (m.extras ?? {}) as Record<string, unknown>;
-        return e.tipo === "healing" && Array.isArray(m.referencias) && m.referencias.includes(meta.id);
+        const peloHealingOrigem = e.healing_origem === meta.id;
+        const pelaReferencia = Array.isArray(m.referencias) && m.referencias.includes(meta.id);
+        return e.tipo === "healing" && (peloHealingOrigem || pelaReferencia);
       });
       const ultima = correcoes.sort((a, b) => b.criado_em.localeCompare(a.criado_em))[0];
       if (ultima && ((ultima.extras ?? {}) as Record<string, unknown>).status === "concluido") {
+        fechadas.push(`healing_ok:${meta.id}`);
         continue;
       }
       if (tentativas >= healing.max_retries) {
@@ -312,15 +318,15 @@ export class Supervisor {
         // journal ilegível — próxima tentativa
       }
     }
-    return { problemas, checks };
+    return { problemas, checks, fechadas };
   }
 
   async tick(wsPath: string): Promise<ResultadoTick> {
     const inicioTick = this.agora();
     const estado = await this.lerEstado(wsPath);
     const healing = await this.healingCfg(wsPath);
-    const { problemas, checks } = await this.coletar(wsPath, healing);
-    const tratadas = new Set(estado.chaves_tratadas);
+    const { problemas, checks, fechadas } = await this.coletar(wsPath, estado, healing);
+    const tratadas = new Set([...estado.chaves_tratadas, ...fechadas]);
     const maxOrdens = await this.maxOrdensPorTick(wsPath);
 
     const ordens: OrdemEmitida[] = [];
