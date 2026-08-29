@@ -61,6 +61,7 @@ export interface OpcoesCriar {
   dados?: unknown;
   tags?: string[];
   referencias?: string[];
+  tipo?: string;
   extras?: Record<string, unknown>;
   eventoInicial?: { evento: string; resumo: string };
 }
@@ -172,6 +173,7 @@ export class RegistryStore {
       tags: opts.tags ?? [],
       referencias: opts.referencias ?? [],
     };
+    if (opts.tipo) meta.extras = { ...(meta.extras ?? {}), tipo: opts.tipo };
     if (opts.extras) meta.extras = opts.extras;
 
     mkdirRecursive(dir);

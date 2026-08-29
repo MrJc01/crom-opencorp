@@ -24,7 +24,7 @@ describe("spawnDaemon (start daemonizado)", () => {
     const logPath = join(tmpdir(), "opencorp-daemon-", "supervisor-daemon.log");
     raizes.push(join(tmpdir(), "opencorp-daemon-"));
     const pid = await spawnDaemon(
-      ["node", "bin/opencorp.mjs", "supervisor", "start", "--foreground"],
+      ["node", "bin/opencorp.mjs", "supervisor", "start", "--foreground", "--interval", "1", "--workspace", "corp-x"],
       logPath,
     );
     expect(pid).toBe(4242);
@@ -34,6 +34,10 @@ describe("spawnDaemon (start daemonizado)", () => {
     expect(args).toContain("supervisor");
     expect(args).toContain("start");
     expect(args).toContain("--foreground");
+    expect(args).toContain("--interval");
+    expect(args[args.indexOf("--interval") + 1]).toBe("1");
+    expect(args).toContain("--workspace");
+    expect(args[args.indexOf("--workspace") + 1]).toBe("corp-x");
     expect(opts.detached).toBe(true);
     expect(opts.stdio[0]).toBe("ignore");
     expect(typeof opts.stdio[1]).toBe("number");

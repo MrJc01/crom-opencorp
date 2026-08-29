@@ -47,7 +47,17 @@ export function registerSupervisorCommand(program: Command): void {
         const ws = await manager.resolver(wsDe(opts));
         if (!opts.foreground) {
           const logPath = join(ws.path, "logs", "supervisor-daemon.log");
+          let intervaloResolvido: number | undefined;
+          if (opts.interval !== undefined) {
+            intervaloResolvido = Number(opts.interval);
+            if (!Number.isFinite(intervaloResolvido) || intervaloResolvido < 1) {
+              console.error("erro: --interval deve ser um número de minutos >= 1");
+              process.exitCode = 1;
+              return;
+            }
+          }
           const args = [process.argv[1]!, "supervisor", "start", "--foreground"];
+          if (intervaloResolvido !== undefined) args.push("--interval", String(intervaloResolvido));
           if (opts.workspace) args.push("--workspace", opts.workspace);
           if (opts.interval !== undefined) args.push("--interval", opts.interval);
           const pid = await spawnDaemon(args, logPath);
