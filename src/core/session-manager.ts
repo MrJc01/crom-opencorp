@@ -34,6 +34,8 @@ export interface OpcoesRun {
   referencias?: string[];
   tipo?: string;
   execId?: string;
+  /** mata o opencode se exceder (ms) — status "falhou" com nota de timeout */
+  timeoutMs?: number;
 }
 
 export interface ResultadoRun extends RegistroExecucao {
@@ -288,6 +290,7 @@ export class SessionManager {
         buffer: false,
         reject: false,
         stdin: "ignore",
+        ...(opcoes.timeoutMs ? { timeout: opcoes.timeoutMs, killSignal: "SIGTERM" as const } : {}),
       });
     } catch (erro) {
       const falha = `não foi possível iniciar o opencode: ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
@@ -328,7 +331,7 @@ export class SessionManager {
 
     const fim = new Date();
     const duracao = fim.getTime() - inicio.getTime();
-    const res = resultado as unknown as { exitCode?: number | null; killed?: boolean };
+    const res = resultado as unknown as { exitCode?: number | null; killed?: boolean; timedOut?: boolean };
     const status: StatusExecucao = res.killed
       ? "cancelado"
       : res.exitCode === 0
@@ -362,7 +365,9 @@ export class SessionManager {
       status,
       registro.exit_code,
       duracao,
-      textoCaptura.slice(0, 400),
+      res.timedOut
+        ? `timeout de ${Math.round((opcoes.timeoutMs ?? 0) / 1000)}s excedido — opencode morto (modelo travado?)`
+        : textoCaptura.slice(0, 400),
       textoCaptura,
       custo,
     );

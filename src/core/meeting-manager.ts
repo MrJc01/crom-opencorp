@@ -336,6 +336,7 @@ export class MeetingManager {
           transcript.conteudo ?? "",
         );
         console.log(`[reunião ${id}] turno ${sala.turno + 1}/${sala.max_turnos} — falante: ${falante} · foco: ${instrucao}`);
+        const restanteMs = Math.max(30_000, Math.round(cfg.max_minutes * 60_000 - decorridoMin * 60_000));
         let resultado: ResultadoRun;
         try {
           resultado = await this.sessoes.rodar({
@@ -344,6 +345,7 @@ export class MeetingManager {
             model: sala.modelo === MODELO_POR_AGENTE ? undefined : sala.modelo,
             workspaceDir: ws.path,
             tags: [`reuniao:${id}`],
+            timeoutMs: restanteMs,
           });
         } catch (erro) {
           falhasConsecutivas += 1;
@@ -622,6 +624,7 @@ export class MeetingManager {
         workspaceDir: ws.path,
         pularGuard: true,
         tags: [`reuniao:${sala.id}`, "ata"],
+        timeoutMs: 5 * 60_000,
       });
     } catch (erro) {
       sala.ata = "falhou";
