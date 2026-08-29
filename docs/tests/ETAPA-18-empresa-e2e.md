@@ -22,24 +22,27 @@ Jornada real de um cliente fundando uma empresa com opencorp, do zero até ver t
 - Esperado: exit 0; os dois novos agentes aparecem em `agent list` com o modelo free.
 
 ### 3. Reunião de diretoria (CEO decide com base na pauta)
-- Comando: `node bin/opencorp.mjs meeting start "defina 3 próximos passos para lançar um app de tarefas e delegue cada passo" --agentes ceo-documentos,executor-padrao --model opencode/nemotron-3-ultra-free`
-- Esperado: exit 0; reunião encerra sozinha (sem travar); `meeting list` mostra `encerrada`; `meeting show <id>` exibe transcript com turnos identificados e conteúdo específico da pauta (não genérico).
+- Comando (rode em background — a reunião bloqueia por até `meeting.max_minutes`, e turnos de modelos free podem levar minutos):
+  1. `nohup node bin/opencorp.mjs meeting start "defina 3 próximos passos para lançar um app de tarefas e delegue cada passo" --agentes ceo-documentos,executor-padrao --model opencode/nemotron-3-ultra-free > /tmp/meeting-18.log 2>&1 &`
+  2. A cada 45s: `node bin/opencorp.mjs meeting list` — aguarde até o status sair de `em-andamento` (teto de espera: 10 min). NÃO mate o processo.
+- Esperado: a reunião encerra sozinha (`encerrada` por max_turnos/tempo, ou `encerrada-partial` apenas se você mesmo usou `meeting end`); `meeting show <id>` exibe transcript com ≥ 1 turno identificado e conteúdo específico da pauta (não genérico).
 
 ### 4. Ata com decisões e delegação
 - Comando: localize a ata (via saída do meeting ou `registry list documentos`) e leia o arquivo em `registries/documentos/atas/`.
 - Esperado: a ata contém seções `## Decisões` e `## Tarefas delegadas`; cada tarefa aponta um agente (@) e uma ação concreta; as decisões citam o app de tarefas (específico, não genérico).
 
 ### 5. Cliente manda executar uma tarefa da ata
-- Comando: escolha 1 tarefa delegada (ex.: escrever especificação) e execute como cliente:
-  `node bin/opencorp.mjs run "<texto da tarefa escolhida, reescrito como ordem: produza o arquivo sandbox/<artefato>.md com o conteúdo pedido>" --model opencode/nemotron-3-ultra-free`
-- Esperado: exit 0; o arquivo do artefato existe em `sandbox/` com conteúdo real coerente com a tarefa (não vazio, não placeholder).
+- Comando (em background, com polling — runs free levam minutos):
+  1. Escolha 1 tarefa delegada e lance: `nohup node bin/opencorp.mjs run "<texto da tarefa reescrito como ordem: produza o arquivo sandbox/<artefato>.md com o conteúdo pedido>" --model opencode/nemotron-3-ultra-free > /tmp/run-18.log 2>&1 &`
+  2. A cada 45s: `node bin/opencorp.mjs session list` — aguarde a execução sair de `executando` (teto 10 min).
+- Esperado: execução finaliza com status `concluido`; o arquivo do artefato existe em `sandbox/` com conteúdo real coerente com a tarefa (não vazio, não placeholder).
 
 ### 6. Prestação de contas
 - Comandos:
   1. `node bin/opencorp.mjs registry list documentos`
   2. `node bin/opencorp.mjs budget status`
-  3. `node bin/opencorp.mjs session list` (ou equivalente que mostre execuções)
-- Esperado: ata registrada em `registry list`; `budget status` mostra gasto acumulado > 0; execuções da reunião e do run aparecem com status de conclusão.
+  3. `node bin/opencorp.mjs session list`
+- Esperado: ata registrada em `registry list`; `budget status` mostra gasto acumulado > 0; nenhuma execução presa em `executando` (execuções concluídas mostram status/exit/duração; execuções mortas sem finalizar aparecem como falha reconciliada, não eternamente `executando`).
 
 ### 7. Fechar a empresa (limpeza)
 - Comando: `node bin/opencorp.mjs workspace delete test-startup --force`

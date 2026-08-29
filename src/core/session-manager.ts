@@ -424,10 +424,47 @@ export class SessionManager {
 
   async listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<ResumoExecucao[]> {
     const metas = await this.registros.listar(wsPath, "execucoes");
-    return metas
-      .filter((meta) => !filtro?.agente || meta.criado_por === filtro.agente)
+    const filtradas = metas.filter((meta) => !filtro?.agente || meta.criado_por === filtro.agente);
+    for (const meta of filtradas) {
+      await this.reconciliarZombie(wsPath, meta);
+    }
+    return filtradas
       .map((meta) => this.paraResumo(meta))
       .sort((a, b) => b.inicio.localeCompare(a.inicio));
+  }
+
+  /** execução "executando" cujo processo morreu sem finalizar → marca status final (zombie) */
+  private async reconciliarZombie(wsPath: string, meta: MetaRegistro): Promise<void> {
+    const extras = (meta.extras ?? {}) as Record<string, unknown>;
+    if (extras.status !== "executando") return;
+    const pid = extras.pid as number | null;
+    if (!pid) return;
+    let viva = true;
+    try {
+      process.kill(pid, 0);
+    } catch {
+      viva = false;
+    }
+    if (viva) return;
+    const inicio = Date.parse(meta.criado_em);
+    const duracao = Number.isFinite(inicio) ? Date.now() - inicio : 0;
+    const registro = await this.paraRegistro(meta);
+    registro.status = "falhou";
+    registro.fim = new Date().toISOString();
+    registro.duracao_ms = duracao;
+    registro.exit_code = null;
+    await this.finalizar(
+      { path: wsPath, id: "" },
+      registro,
+      null,
+      "falhou",
+      null,
+      duracao,
+      `zombie: processo (pid ${pid}) morreu sem finalizar — reconciliado em ${registro.fim}`,
+      "",
+      null,
+    );
+    meta.extras = { ...extras, status: "falhou", duracao_ms: duracao, fim: registro.fim };
   }
 
   async caminhoLog(wsPath: string, id: string): Promise<string> {
