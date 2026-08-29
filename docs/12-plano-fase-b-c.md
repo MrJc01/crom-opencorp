@@ -11,7 +11,7 @@
 |---|---|---|---|---|---|
 | 8 | Nuvem backup/sync | A (opcional) | ⬜ aguardando humano | — | tests/ETAPA-08 |
 | 9 | Regressão completa + release v0.1.0 | A | ✅ | 2026-08-28 | tests/ETAPA-09 (PASS 7/7 + doctor + 139 testes) |
-| 10 | Reunião Geral (Boardroom) | B | ⬜ | — | tests/ETAPA-10 |
+| 10 | Reunião Geral (Boardroom) | B | ✅ | 2026-08-28 | tests/ETAPA-10 (PASS 7/7, ciclo 3: +data no list, +meeting.max_minutes) |
 | 11 | Supervisor em loop (heartbeat) | B | ⬜ | — | tests/ETAPA-11 |
 | 12 | Self-healing (correção assistida) | B | ⬜ | — | tests/ETAPA-12 |
 | 13 | Flows declarativos (canvas em arquivo) | B | ⬜ | — | tests/ETAPA-13 |
