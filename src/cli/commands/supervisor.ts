@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { Command } from "commander";
-import { Supervisor, estaRodando, lerPidfile, gravarPidfile, removerPidfile, pidPath, pidVivo } from "../../core/supervisor.js";
+import { Supervisor, spawnDaemon, estaRodando, lerPidfile, gravarPidfile, removerPidfile, pidPath, pidVivo } from "../../core/supervisor.js";
 import { RegistryStore } from "../../core/registry-store.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
 
@@ -39,10 +40,32 @@ export function registerSupervisorCommand(program: Command): void {
   supervisor
     .command("start")
     .option("--interval <minutos>", "intervalo entre ticks em minutos (padrão: settings supervisor.interval_minutes)")
-    .description("inicia o loop do supervisor (fica em primeiro plano; pare com opencorp supervisor stop)")
-    .action((opts: { interval?: string; workspace?: string }) =>
+    .option("--foreground", "roda em primeiro plano (debug) — padrão: daemonizado em background")
+    .description("inicia o loop do supervisor (daemonizado; pare com opencorp supervisor stop)")
+    .action((opts: { interval?: string; foreground?: boolean; workspace?: string }) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(opts));
+        if (!opts.foreground) {
+          const logPath = join(ws.path, "logs", "supervisor-daemon.log");
+          const args = [process.argv[1]!, "supervisor", "start", "--foreground"];
+          if (opts.workspace) args.push("--workspace", opts.workspace);
+          const pid = await spawnDaemon(args, logPath);
+          let confirmado = false;
+          for (let i = 0; i < 20; i++) {
+            await dormir(100);
+            const info = await lerPidfile(ws.path);
+            if (info && info.pid === pid) {
+              confirmado = true;
+              break;
+            }
+          }
+          if (!confirmado) {
+            console.log("aviso: o filho ainda não gravou o pidfile — verifique o log do daemon");
+          }
+          console.log(`ok: supervisor iniciado em background (pid ${pid}) — logs: ${logPath}`);
+          console.log("pare com: opencorp supervisor stop");
+          return;
+        }
         if (await estaRodando(ws.path)) {
           const pid = await lerPidfile(ws.path);
           console.error(

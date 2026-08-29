@@ -1,12 +1,14 @@
-import { existsSync } from "node:fs";
+import { existsSync, openSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { spawn } from "node:child_process";
 import { SessionManager } from "./session-manager.js";
 import { ApprovalsStore } from "./approvals-store.js";
 import { BudgetManager } from "./budget-manager.js";
 import { RegistryStore, type MetaRegistro } from "./registry-store.js";
 import { SettingsStore } from "./settings-store.js";
 import { opencorpHome } from "../utils/paths.js";
+import { mkdirRecursive } from "../utils/fs-safe.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
 
 const LIMITE_APROVACAO_MIN = 30;
@@ -90,6 +92,17 @@ export interface PidInfo {
 
 function msg(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
+}
+
+export async function spawnDaemon(argv: string[], logPath: string): Promise<number> {
+  await mkdirRecursive(dirname(logPath));
+  const logFd = openSync(logPath, "a");
+  const child = spawn(process.execPath, argv, {
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+  });
+  child.unref();
+  return child.pid ?? 0;
 }
 
 export function pidPath(wsPath: string): string {

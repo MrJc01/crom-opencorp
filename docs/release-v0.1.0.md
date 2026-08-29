@@ -32,6 +32,7 @@ CLI (commander, `bin/opencorp.mjs` → `src/cli`) chama o core puro (`src/core`:
 - **Custo é heurístico.** `custo = turnos × preço/turno` (turnos = linhas de ferramenta `←` do transcript + 1), com preços embutidos por modelo e override em `budget.json.precos`. Não há leitura de tokens reais do opencode ainda.
 - **Agente `level-1` não executa comandos** — por contrato (doc 07). O secretário, por exemplo, só lê e conversa.
 - **Subcorp `write` cross-corp não implementado.** A flag é aceita e armazenada, mas escrever em registros do subcorp a partir do pai chega em etapa futura; hoje `ask` já permite invocar agentes do subcorp e `read` só permite listar/mostrar.
+- **Self-healing dispara em execuções com status `falhou` apenas** (bloqueio do SecurityGuard, orçamento, HITL, spawn/timeout). Falha semântica dentro de sessão concluída (o agente tenta algo que falha mas encerra a sessão com exit 0) não gera `falhou` e não aciona o healing — limitação v1.
 - **`opencorp test blind` não existe como comando.** O teste cego é disparado manualmente via `opencode run --agent testador-cego` (ver `.opencode/agent/testador-cego.md`); os relatórios ficam em `.opencorp/reports/testes/`.
 - **Estado externo ao CLI** (plataforma): `approvals` vive em `<ws>/.opencorp/approvals/` e não sobrevive a remoção manual da pasta; o índice SQLite é derivado e reconstruível com `registry reindex`.
 
