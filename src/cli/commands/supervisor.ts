@@ -49,6 +49,7 @@ export function registerSupervisorCommand(program: Command): void {
           const logPath = join(ws.path, "logs", "supervisor-daemon.log");
           const args = [process.argv[1]!, "supervisor", "start", "--foreground"];
           if (opts.workspace) args.push("--workspace", opts.workspace);
+          if (opts.interval !== undefined) args.push("--interval", opts.interval);
           const pid = await spawnDaemon(args, logPath);
           let confirmado = false;
           for (let i = 0; i < 20; i++) {
