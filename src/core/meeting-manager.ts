@@ -19,7 +19,8 @@ export type Moderacao = "moderador" | "rotacao-fixa";
 export const PARTICIPANTES_PADRAO = ["ceo-documentos", "ceo-estrategia", "secretario"];
 
 export interface ConfigMeeting {
-  max_turns: number;
+  max_turnos: number;
+  max_minutes: number;
   per_agent_usd: number;
   moderator: string;
 }
@@ -76,6 +77,7 @@ export interface MeetingManagerOptions {
   templatesDir?: string;
   sessoes?: SessaoLike;
   budget?: BudgetManager;
+  agora?: () => Date;
 }
 
 export interface OpcoesIniciar {
@@ -96,6 +98,7 @@ export class MeetingManager {
   private readonly store: SettingsStore;
   private readonly sessoes: SessaoLike;
   private readonly budget: BudgetManager;
+  private readonly agora: () => Date;
   private sinalInterrupcao = false;
 
   constructor(opts: MeetingManagerOptions = {}) {
@@ -105,6 +108,7 @@ export class MeetingManager {
     this.store = new SettingsStore({ homeDir: this.homeDir, cwd: opts.cwd });
     this.sessoes = opts.sessoes ?? new SessionManager(opts);
     this.budget = opts.budget ?? new BudgetManager({ homeDir: this.homeDir, cwd: opts.cwd });
+    this.agora = opts.agora ?? (() => new Date());
   }
 
   solicitarInterrupcao(): void {
@@ -113,10 +117,12 @@ export class MeetingManager {
 
   private async cfgMeeting(workspaceDir: string): Promise<ConfigMeeting> {
     const maxTurns = await this.store.get("meeting.max_turns", { workspaceDir });
+    const maxMinutes = await this.store.get("meeting.max_minutes", { workspaceDir });
     const perAgent = await this.store.get("meeting.per_agent_usd", { workspaceDir });
     const moderator = await this.store.get("meeting.moderator", { workspaceDir });
     return {
-      max_turns: Number(maxTurns.valor),
+      max_turnos: Number(maxTurns.valor),
+      max_minutes: Number(maxMinutes.valor),
       per_agent_usd: Number(perAgent.valor),
       moderator: String(moderator.valor),
     };
@@ -206,6 +212,7 @@ export class MeetingManager {
     const moderacao: Moderacao = participantes.includes(moderador) ? "moderador" : "rotacao-fixa";
     const modelo = opcoes.model ?? MODELO_POR_AGENTE;
     const id = gerarIdReuniao();
+    const abertura = this.agora();
     await this.registros.garantirCategorias(ws.path);
 
     const sala: SalaInfo = {
@@ -215,11 +222,11 @@ export class MeetingManager {
       moderator: moderador,
       moderacao,
       modelo,
-      max_turnos: cfg.max_turns,
+      max_turnos: cfg.max_turnos,
       turno: 0,
       status: "em-andamento",
       motivo_fim: null,
-      criado_em: new Date().toISOString(),
+      criado_em: abertura.toISOString(),
       encerrada_em: null,
       ata: null,
     };
@@ -262,6 +269,12 @@ export class MeetingManager {
 
     try {
       while (sala.turno < sala.max_turnos && motivoFim === null) {
+        const decorridoMin = (this.agora().getTime() - abertura.getTime()) / 60000;
+        if (decorridoMin >= cfg.max_minutes) {
+          statusFinal = "encerrada";
+          motivoFim = `tempo máximo (${cfg.max_minutes} min) atingido`;
+          break;
+        }
         if (this.sinalInterrupcao) {
           statusFinal = "encerrada-partial";
           motivoFim = "interrompida pelo humano (SIGINT)";

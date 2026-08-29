@@ -372,3 +372,78 @@ describe("MeetingManager — listar", () => {
     expect(salas[0]!.pauta).toBe("pauta de teste");
   });
 });
+
+describe("MeetingManager — teto de tempo (meeting.max_minutes)", () => {
+  function stubAta(wsPath: string): ReturnType<typeof stubSessao> {
+    return stubSessao((chamada) => {
+      if (chamada.opcoes.ordem?.includes("TAREFA INTERNA DO SISTEMA")) {
+        const m = /registries\/documentos\/atas\/ATA-[\w-]+\.md/.exec(chamada.opcoes.ordem)!;
+        mkdirSync(join(wsPath, "registries", "documentos", "atas"), { recursive: true });
+        writeFileSync(join(wsPath, m[0]!), "# ATA — Reunião\n\n## Decisões\npor tempo\n");
+        return "ata escrita";
+      }
+      return `fala de ${chamada.opcoes.agente}`;
+    });
+  }
+
+  it("tempo esgotado antes de um turno → encerrada com motivo de tempo e ata gerada", async () => {
+    const { home, wsPath } = await ambiente();
+    const { sessao, chamadas } = stubAta(wsPath);
+    await new SettingsStore({ homeDir: home, cwd: home }).set("meeting.max_minutes", "1", {
+      scope: "workspace",
+      workspaceDir: wsPath,
+    });
+    const base = new Date("2026-08-28T12:00:00Z");
+    let chamadaRelogio = 0;
+    const mm = new MeetingManager({
+      homeDir: home,
+      cwd: home,
+      sessoes: sessao,
+      agora: () => {
+        chamadaRelogio += 1;
+        return chamadaRelogio === 1 ? base : new Date(base.getTime() + 11 * 60000);
+      },
+    });
+    const sala = await mm.iniciar({
+      pauta: "pauta longa que não vai caber no tempo",
+      agentes: "ceo-documentos,executor-padrao",
+      model: "opencode/hy3-free",
+      workspaceDir: wsPath,
+    });
+    expect(sala.status).toBe("encerrada");
+    expect(sala.motivo_fim).toBe("tempo máximo (1 min) atingido");
+    expect(sala.turno).toBe(0);
+    expect(sala.ata).toContain("ATA-");
+    expect(existsSync(join(wsPath, ".opencorp", "registries", "chats", sala.id))).toBe(true);
+    expect(readFileSync(join(wsPath, ".opencorp", "registries", "chats", sala.id, "conteudo.md"), "utf8")).toContain("Status final: encerrada");
+    expect(execaCallCount(chamadas)).toBe(1);
+  });
+
+  it("max_turnos vence quando o tempo não estoura (o que vier primeiro)", async () => {
+    const { home, wsPath } = await ambiente();
+    const { sessao } = stubAta(wsPath);
+    const store = new SettingsStore({ homeDir: home, cwd: home });
+    await store.set("meeting.max_turns", "2", { scope: "workspace", workspaceDir: wsPath });
+    await store.set("meeting.max_minutes", "6", { scope: "workspace", workspaceDir: wsPath });
+    const base = new Date("2026-08-28T12:00:00Z");
+    const mm = new MeetingManager({
+      homeDir: home,
+      cwd: home,
+      sessoes: sessao,
+      agora: () => base,
+    });
+    const sala = await mm.iniciar({
+      pauta: "pauta rápida",
+      agentes: "ceo-documentos,executor-padrao",
+      model: "opencode/hy3-free",
+      workspaceDir: wsPath,
+    });
+    expect(sala.status).toBe("encerrada");
+    expect(sala.motivo_fim).toBe("max_turnos (2) atingido");
+    expect(sala.turno).toBe(2);
+  });
+});
+
+function execaCallCount(chamadas: Chamada[]): number {
+  return chamadas.length;
+}
