@@ -103,8 +103,8 @@
 
 | Etapa | Tema | Status |
 |---|---|---|
-| 19 | Task Board + Chat interno (docs/14) | `implementada — bateria cega pendente` |
-| 20 | Scheduler | `implementada — bateria cega pendente` |
+| 19 | Task Board + Chat interno (docs/14) | `concluída — PASS 5/5 (nemotron-550b, 1º ciclo)` |
+| 20 | Scheduler | `concluída — PASS 5/5 (nemotron-550b, 1º ciclo)` |
 | 20 | Scheduler | `pendente` |
 | 21 | Webhooks & Triggers | `pendente` |
 | 22 | Tools / MCP | `pendente` |

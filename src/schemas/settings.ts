@@ -3,7 +3,7 @@ import { z } from "zod";
 export const settingsSchema = z.object({
   version: z.number().int().default(1),
   default_model: z.string().min(1).default("opencode/nemotron-3-ultra-free"),
-  test_model: z.string().min(1).default("opencode/hy3-free"),
+  test_model: z.string().min(1).default("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"),
   secretary: z
     .object({
       agent: z.string().min(1).default("secretario"),
@@ -37,7 +37,7 @@ export const settingsSchema = z.object({
   tests: z
     .object({
       blind: z.boolean().default(true),
-      test_model: z.string().min(1).default("opencode/hy3-free"),
+      test_model: z.string().min(1).default("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"),
       reports_dir: z.string().min(1).default(".opencorp/reports/testes"),
       rotation: z
         .array(z.string().min(1))
