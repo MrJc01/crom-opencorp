@@ -1,7 +1,7 @@
 ---
 description: Implementador de etapas opencorp — escreve código + testes unitários de UM chunk por sessão, sem execuções reais de LLM.
 mode: all
-model: opencode/nemotron-3-ultra-free
+model: openrouter/minimax/minimax-m3:free
 permission:
   bash: allow
   edit: allow

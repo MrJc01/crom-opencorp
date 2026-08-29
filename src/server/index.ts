@@ -13,7 +13,9 @@ import { SettingsError, SettingsStore } from "../core/settings-store.js";
 import { FlowStore, type SessaoFlow } from "../core/flow-store.js";
 import { MeetingManager } from "../core/meeting-manager.js";
 import { TaskStore, type Task } from "../core/task-store.js";
-import { TaskError } from "../core/errors.js";
+import { Scheduler } from "../core/scheduler.js";
+import type { Agenda } from "../core/scheduler.js";
+import { TaskError, SchedulerError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
 
@@ -199,6 +201,7 @@ function statusHttpDe(erro: unknown): number {
   if (code === 4) return 402;
   if (code === 5) return 409;
   if (erro instanceof TaskError) return (erro as TaskError).status ?? 400;
+  if (erro instanceof SchedulerError) return 400;
   if (erro instanceof RegistryError || erro instanceof WorkspaceError || erro instanceof AgentError) return 422;
   return 500;
 }
@@ -291,6 +294,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   const flows = new FlowStore({ ...base, sessoes: opcoes.sessoes as unknown as SessaoFlow | undefined });
   const meetings = new MeetingManager({ ...base, sessoes: opcoes.sessoes as never });
   const tasks = new TaskStore();
+  const scheduler = new Scheduler({ homeDir: opcoes.homeDir });
   const sessoes: SessaoApi = opcoes.sessoes ?? (new SessionManager(base) as unknown as SessaoApi);
 
   const token = opcoes.token ?? randomBytes(24).toString("hex");
@@ -637,6 +641,58 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           enviar(res, 201, t);
           return;
         }
+        if (rota === "/schedules" && req.method === "GET") {
+          enviar(res, 200, await scheduler.listar());
+          return;
+        }
+        if (rota === "/schedules" && req.method === "POST") {
+          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+          const agenda: Agenda =
+            corpo.agenda_tipo === "cron"
+              ? { tipo: "cron", valor: String(corpo.agenda_valor ?? "") }
+              : corpo.agenda_tipo === "data_unica"
+                ? { tipo: "data_unica", valor: String(corpo.agenda_valor ?? "") }
+                : { tipo: "intervalo_min", valor: Number(corpo.agenda_valor ?? 0) };
+          const j = await scheduler.criar({
+            nome: String(corpo.nome ?? ""),
+            agenda,
+            args: Array.isArray(corpo.args) ? (corpo.args as unknown[]).map(String) : String(corpo.args ?? "").split(/\s+/).filter(Boolean),
+            workspace: corpo.workspace !== undefined ? String(corpo.workspace) : (await resolverWs(url)).id,
+            graca_min: typeof corpo.graca_min === "number" ? corpo.graca_min : undefined,
+          });
+          enviar(res, 201, j);
+          return;
+        }
+        const mSched = /^\/schedules\/([^/]+)$/.exec(rota);
+        if (mSched) {
+          const id = decodeURIComponent(mSched[1]!);
+          if (req.method === "GET") {
+            enviar(res, 200, await scheduler.obter(id));
+            return;
+          }
+          if (req.method === "PATCH") {
+            const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+            if (corpo.ativo === false) {
+              enviar(res, 200, await scheduler.pausar(id));
+            } else if (corpo.ativo === true) {
+              enviar(res, 200, await scheduler.retomar(id));
+            } else {
+              enviar(res, 400, { erro: "use {ativo: true|false}" });
+            }
+            return;
+          }
+          if (req.method === "DELETE") {
+            await scheduler.excluir(id);
+            enviar(res, 200, { ok: true, id });
+            return;
+          }
+          if (req.method === "POST") {
+            const { resultado } = await scheduler.runNow(id);
+            enviar(res, 200, { ok: true, resultado });
+            return;
+          }
+        }
+
         if (rota === "/tasks/colunas" && req.method === "GET") {
           const ws = await resolverWs(url);
           enviar(res, 200, await tasks.colunas(ws.path));

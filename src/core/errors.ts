@@ -25,4 +25,5 @@ export class TaskError extends OpencorpError {
     this.status = opts.status;
   }
 }
+export class SchedulerError extends OpencorpError {}
 export class ApprovalError extends OpencorpError {}

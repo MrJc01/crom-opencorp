@@ -14,6 +14,7 @@ import { registerMeetingCommand } from "./commands/meeting.js";
 import { registerSubcorpCommand } from "./commands/subcorp.js";
 import { registerFlowCommand } from "./commands/flow.js";
 import { registerTaskCommand } from "./commands/task.js";
+import { registerScheduleCommands } from "./commands/schedule.js";
 import { registerSupervisorCommand } from "./commands/supervisor.js";
 import { registerServeCommand } from "./commands/serve.js";
 import { registerWebCommand } from "./commands/web.js";
@@ -77,6 +78,8 @@ export function buildProgram(): Command {
   registerFlowCommand(program);
 
   registerTaskCommand(program);
+
+  registerScheduleCommands(program);
 
   registerServeCommand(program);
 
