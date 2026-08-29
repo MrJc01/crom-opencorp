@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
-import { join } from "node:path";
+import { join, resolve, relative, isAbsolute } from "node:path";
+import { stat, readdir, readFile } from "node:fs/promises";
 import { WorkspaceManager } from "../core/workspace-manager.js";
 import { AgentStore } from "../core/agent-store.js";
 import { SessionManager, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
@@ -17,6 +18,48 @@ const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
 import { createRequire } from "node:module";
 
+/** Definição de rotas para documentação OpenAPI e sugestões de 404 */
+interface DefinicaoRota {
+  method: string;
+  path: string;
+  descricao: string;
+  corpo?: boolean;
+  publico?: boolean;
+}
+
+const ROUTES: DefinicaoRota[] = [
+  { method: "GET", path: "/health", descricao: "Verifica saúde do servidor e versão", publico: true },
+  { method: "GET", path: "/doc", descricao: "Especificação OpenAPI 3.0 de todas as rotas", publico: true },
+  { method: "GET", path: "/workspaces", descricao: "Lista workspaces disponíveis" },
+  { method: "POST", path: "/workspaces", descricao: "Cria novo workspace", corpo: true },
+  { method: "GET", path: "/workspaces/current", descricao: "Retorna workspace atual" },
+  { method: "GET", path: "/agents", descricao: "Lista agentes do workspace" },
+  { method: "POST", path: "/agents", descricao: "Cria novo agente", corpo: true },
+  { method: "POST", path: "/agents/:id/run", descricao: "Executa agente com ordem", corpo: true },
+  { method: "GET", path: "/sessions", descricao: "Lista execuções/sessões" },
+  { method: "GET", path: "/sessions/:id/log", descricao: "Retorna log de uma execução" },
+  { method: "GET", path: "/registries/:categoria", descricao: "Lista registros de uma categoria" },
+  { method: "POST", path: "/registries/:categoria", descricao: "Cria registro em uma categoria", corpo: true },
+  { method: "GET", path: "/registries/:categoria/:id", descricao: "Obtém um registro específico" },
+  { method: "PUT", path: "/registries/:categoria/:id", descricao: "Atualiza conteúdo de um registro", corpo: true },
+  { method: "GET", path: "/approvals", descricao: "Lista aprovações pendentes" },
+  { method: "POST", path: "/approvals/:id/approve", descricao: "Aprova uma solicitação" },
+  { method: "POST", path: "/approvals/:id/reject", descricao: "Rejeita uma solicitação", corpo: true },
+  { method: "GET", path: "/budget/status", descricao: "Status e limites do orçamento" },
+  { method: "POST", path: "/budget/set", descricao: "Define limites de orçamento", corpo: true },
+  { method: "GET", path: "/settings", descricao: "Lista configurações" },
+  { method: "GET", path: "/settings/:chave", descricao: "Obtém uma configuração específica" },
+  { method: "PUT", path: "/settings", descricao: "Define uma configuração", corpo: true },
+  { method: "GET", path: "/flows", descricao: "Lista flows disponíveis" },
+  { method: "POST", path: "/flows", descricao: "Cria novo flow", corpo: true },
+  { method: "GET", path: "/flows/:id", descricao: "Obtém detalhes de um flow" },
+  { method: "POST", path: "/flows/:id/run", descricao: "Executa um flow", corpo: true },
+  { method: "POST", path: "/meetings", descricao: "Inicia nova reunião", corpo: true },
+  { method: "POST", path: "/meetings/:id/stop", descricao: "Solicita interrupção de reunião ativa" },
+  { method: "GET", path: "/events", descricao: "Stream SSE de eventos do servidor" },
+  { method: "GET", path: "/files", descricao: "Lista diretório ou lê arquivo do workspace", publico: false },
+];
+
 export interface SessaoApi {
   rodar(opcoes: OpcoesRun): Promise<ResultadoRun>;
   listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<unknown[]>;
@@ -31,6 +74,94 @@ export interface ApiServerOptions {
   workspace?: string;
 }
 
+
+/** Gera especificação OpenAPI 3.0 a partir do array ROUTES */
+function gerarOpenApiSpec(): object {
+  const paths: Record<string, object> = {};
+  for (const rota of ROUTES) {
+    const pathKey = rota.path;
+    if (!paths[pathKey]) paths[pathKey] = {};
+    const method = rota.method.toLowerCase();
+    const isPublic = rota.publico === true;
+    (paths[pathKey] as Record<string, object>)[method] = {
+      summary: rota.descricao,
+      operationId: `${method}_${pathKey.replace(/[/:]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "")}`,
+      security: isPublic ? [] : [{ bearerAuth: [] }],
+      responses: {
+        "200": { description: "Sucesso", content: { "application/json": { schema: { type: "object" } } } },
+        "401": { description: "Token ausente ou inválido" },
+        "404": { description: "Não encontrado" },
+        "500": { description: "Erro interno" },
+      },
+      ...(rota.corpo && {
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { type: "object" } } },
+        },
+      }),
+    };
+  }
+  return {
+    openapi: "3.0.3",
+    info: { title: "opencorp API", version, description: "API REST do opencorp — sistema operacional de empresas autônomas" },
+    servers: [{ url: "http://localhost", description: "Servidor local (porta dinâmica)" }],
+    components: {
+      securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } },
+    },
+    paths,
+  };
+}
+
+/** Calcula similaridade simples entre strings (Levenshtein aproximado) para sugestões de 404 */
+function similaridade(a: string, b: string): number {
+  const al = a.toLowerCase();
+  const bl = b.toLowerCase();
+  if (al === bl) return 1;
+  if (al.includes(bl) || bl.includes(al)) return 0.8;
+  let matches = 0;
+  for (let i = 0; i < Math.min(al.length, bl.length); i++) if (al[i] === bl[i]) matches++;
+  return matches / Math.max(al.length, bl.length);
+}
+
+/** Sugere rotas parecidas para mensagem de erro 404 */
+function sugerirRotas(rota: string, max = 3): string[] {
+  return ROUTES
+    .map((r) => ({ path: r.path, score: similaridade(rota, r.path) }))
+    .filter((r) => r.score > 0.3)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, max)
+    .map((r) => r.path);
+}
+
+/** Valida e resolve caminho dentro do workspace (anti path-traversal) */
+async function resolverCaminhoWorkspace(wsPath: string, pathParam: string): Promise<string> {
+  const base = resolve(wsPath);
+  const solicitado = pathParam ? decodeURIComponent(pathParam) : "";
+  // Normaliza: remove prefixo "./" e múltiplos // — mas preserva dot-files (.opencorp)
+  const normalizado = solicitado.replace(/^\.\//, "").replace(/\/+/g, "/");
+  const alvo = resolve(base, normalizado);
+  // Verifica se está dentro do workspace (path traversal protection)
+  const relativo = relative(base, alvo);
+  if (relativo.startsWith("..") || isAbsolute(relativo)) {
+    throw new WorkspaceError("caminho fora do workspace (path traversal bloqueado)", { exitCode: 3 });
+  }
+  return alvo;
+}
+
+/** Lê arquivo com limite de 512KB, retorna {tipo, conteudo} ou {tipo, conteudo: null, motivo} */
+async function lerArquivoWorkspace(alvo: string): Promise<{ tipo: "arquivo"; conteudo: string | null; motivo?: string }> {
+  const info = await stat(alvo);
+  if (info.size > 512 * 1024) {
+    return { tipo: "arquivo", conteudo: null, motivo: "arquivo excede 512KB" };
+  }
+  const ext = alvo.slice(alvo.lastIndexOf(".")).toLowerCase();
+  const extPermitidas = [".md", ".json", ".txt", ".jsonl", ".log"];
+  if (!extPermitidas.includes(ext)) {
+    return { tipo: "arquivo", conteudo: null, motivo: "binário" };
+  }
+  const conteudo = await readFile(alvo, "utf8");
+  return { tipo: "arquivo", conteudo };
+}
 
 function statusHttpDe(erro: unknown): number {
   const code = (erro as { exitCode?: number }).exitCode;
@@ -148,6 +279,11 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
       }
       if (rota === "/health") {
         enviar(res, 200, { ok: true, versao: version });
+        return;
+      }
+      // GET /doc — público (sem auth), retorna OpenAPI 3.0
+      if (rota === "/doc" && req.method === "GET") {
+        enviar(res, 200, gerarOpenApiSpec());
         return;
       }
       if ((req.headers.authorization ?? "") !== `Bearer ${token}`) {
@@ -358,6 +494,61 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
+        // ── GET /files — lista diretório ou lê arquivo do workspace
+        if (rota === "/files" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const pathParam = url.searchParams.get("path") ?? "";
+          try {
+            const alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+            const info = await stat(alvo);
+            if (info.isDirectory()) {
+              const entradas = await readdir(alvo, { withFileTypes: true });
+              const itensComTamanho = await Promise.all(
+                entradas.map(async (e) => {
+                  const fullPath = join(alvo, e.name);
+                  let tamanho = 0;
+                  try {
+                    const st = await stat(fullPath);
+                    tamanho = st.size;
+                  } catch {}
+                  return { nome: e.name, tipo: e.isDirectory() ? "dir" : "arquivo", tamanho };
+                })
+              );
+              enviar(res, 200, { tipo: "dir", itens: itensComTamanho });
+            } else {
+              const resultado = await lerArquivoWorkspace(alvo);
+              enviar(res, 200, resultado);
+            }
+          } catch (erro) {
+            if (erro instanceof WorkspaceError && erro.exitCode === 3) {
+              enviar(res, 403, { erro: "caminho fora do workspace (path traversal bloqueado)" });
+            } else if ((erro as NodeJS.ErrnoException).code === "ENOENT") {
+              enviar(res, 404, { erro: "arquivo ou diretório não encontrado" });
+            } else {
+              throw erro;
+            }
+          }
+          return;
+        }
+
+        // ── POST /meetings/:id/stop — solicita interrupção de reunião ativa
+        const mMeetingStop = /^\/meetings\/([^/]+)\/stop$/.exec(rota);
+        if (mMeetingStop && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const meetingId = decodeURIComponent(mMeetingStop[1]!);
+          // Verifica se existe reunião ativa no workspace
+          const reunioes = await meetings.listar(ws.path);
+          const ativa = reunioes.find((r) => r.id === meetingId && r.status === "em-andamento");
+          if (!ativa) {
+            enviar(res, 409, { erro: "nenhuma reunião ativa neste servidor" });
+            return;
+          }
+          // Solicita interrupção
+          meetings.solicitarInterrupcao();
+          enviar(res, 200, { ok: true, detalhe: `interrupção solicitada para reunião ${meetingId}` });
+          return;
+        }
+
         // ── SSE ─────────────────────────────────────────────────────
         if (rota === "/events" && req.method === "GET") {
           res.writeHead(200, {
@@ -378,7 +569,9 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
-        enviar(res, 404, { erro: `rota não encontrada: ${rota}` });
+        const sugestoes = sugerirRotas(rota);
+        const msg = sugestoes.length > 0 ? `rota não encontrada: ${rota} — rotas similares: ${sugestoes.join(", ")}` : `rota não encontrada: ${rota}`;
+        enviar(res, 404, { erro: msg, sugestoes });
       } catch (erro) {
         enviarErro(res, erro);
       }
