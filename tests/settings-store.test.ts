@@ -48,7 +48,7 @@ describe("SettingsStore — get/set", () => {
     const home = await tmpDir();
     const store = storeEm(home);
     const r = await store.get("test_model");
-    expect(r.valor).toBe("opencode/hy3-free");
+    expect(r.valor).toBe("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free");
     expect(r.origem).toBe("default");
   });
 
@@ -139,7 +139,7 @@ describe("SettingsStore — merge de níveis", () => {
       origem: "default",
     });
     expect(await store.get("test_model", { workspaceDir: ws })).toMatchObject({
-      valor: "opencode/hy3-free",
+      valor: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
       origem: "default",
     });
   });
@@ -211,9 +211,9 @@ describe("SettingsStore — reset", () => {
     await store.set("test_model", "x/y");
     const r = await store.reset("test_model");
     expect(r.changed).toBe(true);
-    expect(r.valor).toBe("opencode/hy3-free");
+    expect(r.valor).toBe("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free");
     expect(r.origem).toBe("default");
-    expect(await store.get("test_model")).toMatchObject({ valor: "opencode/hy3-free", origem: "default" });
+    expect(await store.get("test_model")).toMatchObject({ valor: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free", origem: "default" });
   });
 
   it("reset de seção no workspace faz cair no valor global", async () => {

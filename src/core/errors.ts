@@ -26,4 +26,5 @@ export class TaskError extends OpencorpError {
   }
 }
 export class SchedulerError extends OpencorpError {}
+export class HookError extends OpencorpError {}
 export class ApprovalError extends OpencorpError {}

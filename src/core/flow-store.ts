@@ -10,7 +10,7 @@ import { opencorpHome } from "../utils/paths.js";
 
 export const nosFlowSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "use kebab-case para o id do nó"),
-  tipo: z.enum(["manual", "agente", "saida", "condicao"]),
+  tipo: z.enum(["manual", "agente", "saida", "condicao", "webhook"]),
   config: z.record(z.string(), z.unknown()).default({}),
 });
 
@@ -174,6 +174,11 @@ export class FlowStore {
           throw new FlowError(
             `flow inválido${onde("")}: nó "saida" "${no.id}" precisa de config.registro no formato "categoria/id" (ex.: "documentos/relatorios")`,
           );
+        }
+      }
+      if (no.tipo === "webhook") {
+        if (typeof config.url !== "string" || config.url.length === 0) {
+          throw new FlowError(`flow inválido${onde("")}: nó "webhook" "${no.id}" precisa de config.url`);
         }
       }
       if (no.tipo === "condicao") {
@@ -361,6 +366,37 @@ export class FlowStore {
             `[${this.agora().toISOString()}] contexto do nó de saída:\n${contexto}\n\n`,
           );
           await marcarNo(no.id, "ok");
+        } else if (no.tipo === "webhook") {
+          const config = no.config as { url: string; metodo?: string; corpo?: string; headers?: Record<string, string> };
+          const metodo = (config.metodo ?? "POST").toUpperCase();
+          const corpo = metodo === "GET" || metodo === "HEAD" ? undefined : (config.corpo ?? "").replaceAll("{{entrada}}", contexto);
+          let resposta = "";
+          let ultimoErro: unknown = null;
+          let sucesso = false;
+          for (let tentativa = 0; tentativa < 3; tentativa++) {
+            try {
+              const resp = await fetch(config.url, {
+                method: metodo,
+                headers: { "content-type": "application/json", ...(config.headers ?? {}) },
+                body: corpo,
+              });
+              resposta = (await resp.text()).slice(0, 4096);
+              ultimoErro = null;
+              sucesso = resp.ok;
+              if (!resp.ok) ultimoErro = new FlowError(`HTTP ${resp.status}: ${resposta.slice(0, 120)}`);
+              break;
+            } catch (erro) {
+              ultimoErro = erro;
+              if (tentativa < 2) await new Promise((r) => setTimeout(r, 1000 * 2 ** tentativa));
+            }
+          }
+          if (!sucesso) {
+            await marcarNo(no.id, "falhou", null);
+            throw new FlowError(`nó "${no.id}" (webhook) falhou: ${msg(ultimoErro)}`);
+          }
+          contexto = resposta;
+          eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok" });
+          await marcarNo(no.id, "ok", null);
         } else if (no.tipo === "condicao") {
           const config = no.config as { chave: string; entao: string; senao: string };
           const casou = contexto.includes(config.chave);

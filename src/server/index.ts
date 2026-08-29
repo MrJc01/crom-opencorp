@@ -15,7 +15,9 @@ import { MeetingManager } from "../core/meeting-manager.js";
 import { TaskStore, type Task } from "../core/task-store.js";
 import { Scheduler } from "../core/scheduler.js";
 import type { Agenda } from "../core/scheduler.js";
-import { TaskError, SchedulerError } from "../core/errors.js";
+import { HookStore, TriggersStore, type Hook, type AlvoHook, type PayloadHook } from "../core/hook-store.js";
+import { TaskError, SchedulerError, HookError } from "../core/errors.js";
+import { opencorpHome } from "../utils/paths.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
 
@@ -63,6 +65,11 @@ const ROUTES: DefinicaoRota[] = [
   { method: "POST", path: "/meetings/:id/stop", descricao: "Solicita interrupção de reunião ativa" },
   { method: "GET", path: "/events", descricao: "Stream SSE de eventos do servidor" },
   { method: "GET", path: "/files", descricao: "Lista diretório ou lê arquivo do workspace", publico: false },
+  { method: "GET", path: "/hooks", descricao: "Lista hooks do workspace" },
+  { method: "POST", path: "/hooks", descricao: "Cria hook de entrada", corpo: true },
+  { method: "GET", path: "/hooks/:id", descricao: "Detalhes do hook (inclui token)" },
+  { method: "DELETE", path: "/hooks/:id", descricao: "Exclui hook" },
+  { method: "POST", path: "/hooks/:workspace/:id", descricao: "Disparo público do hook (header x-opencorp-token)" },
 ];
 
 export interface SessaoApi {
@@ -202,6 +209,7 @@ function statusHttpDe(erro: unknown): number {
   if (code === 5) return 409;
   if (erro instanceof TaskError) return (erro as TaskError).status ?? 400;
   if (erro instanceof SchedulerError) return 400;
+  if (erro instanceof HookError) return ((erro as unknown as { status?: number }).status ?? 400);
   if (erro instanceof RegistryError || erro instanceof WorkspaceError || erro instanceof AgentError) return 422;
   return 500;
 }
@@ -268,6 +276,9 @@ export function iniciarPollExecucoes(
             vistos.set(meta.id, status);
             if (anterior !== undefined || status !== "executando") {
               eventBus.emit("sessao", { id: meta.id, agente: meta.criado_por, status, origem: "poll" });
+              if (status === "concluido" || status === "falhou") {
+                eventBus.emit("sessao.concluida", { id: meta.id, agente: meta.criado_por, status });
+              }
             }
           }
         }
@@ -295,6 +306,25 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   const meetings = new MeetingManager({ ...base, sessoes: opcoes.sessoes as never });
   const tasks = new TaskStore();
   const scheduler = new Scheduler({ homeDir: opcoes.homeDir });
+  const hooks = new HookStore({
+    executores: {
+      agentRun: async (agente: string, ordem: string, wsPath: string) => {
+        const r = await sessoes.rodar({
+          agente,
+          ordem,
+          workspaceDir: wsPath,
+          execId: gerarIdExec(),
+        } as OpcoesRun);
+        return { id: r.id, captura: r.captura };
+      },
+      flowRun: async (flow: string, entrada: string, wsPath: string) => {
+        const r = await flows.executar(wsPath, flow, { entrada });
+        return { id: r.execId, captura: r.contextoFinal };
+      },
+    },
+  });
+  const triggers = new TriggersStore();
+  const homeDirTrigger = opcoes.homeDir ?? opencorpHome();
   const sessoes: SessaoApi = opcoes.sessoes ?? (new SessionManager(base) as unknown as SessaoApi);
 
   const token = opcoes.token ?? randomBytes(24).toString("hex");
@@ -303,6 +333,37 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
     const id = url.searchParams.get("workspace") ?? opcoes.workspace ?? undefined;
     return workspaces.resolver(id) as unknown as { id: string; path: string };
   }
+
+  // ── triggers declarativos: evento interno → ação ──
+  eventBus.on((ev) => {
+    if (ev.tipo.startsWith("hook.")) return; // evita recursão
+    try {
+      const casados = triggers.casar(homeDirTrigger, ev.tipo, ev.dados);
+      for (const t of casados) {
+        void (async () => {
+          try {
+            const wsAlvo = (await workspaces.resolver(t.workspace)) as unknown as { id: string; path: string };
+            await hooks.executar(wsAlvo.path, {
+              id: t.id,
+              nome: `trigger:${t.id}`,
+              token: "",
+              metodos: [],
+              respond: "imediato",
+              dedup_seg: 0,
+              ativo: true,
+              alvo: t.alvo,
+              workspace: t.workspace ?? "",
+              criado_em: "",
+            }, { corpo: { ...ev.dados, evento: ev.tipo }, query: {} });
+          } catch {
+            /* trigger falhou — registrado nos logs do processo */
+          }
+        })();
+      }
+    } catch {
+      /* triggers: ignora falha de avaliação */
+    }
+  });
 
   const server: Server = createServer((req, res) => {
     void (async () => {
@@ -332,7 +393,11 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         return;
       }
       const tokenQuery = url.searchParams.get("token") ?? "";
-      const autenticado = (req.headers.authorization ?? "") === `Bearer ${token}` || tokenQuery === token;
+      const rotaHookPublica = /^\/hooks\/[^/]+\/[^/]+$/.test(rota);
+      const autenticado =
+        (req.headers.authorization ?? "") === `Bearer ${token}` ||
+        tokenQuery === token ||
+        rotaHookPublica; // rota pública de disparo tem auth própria (x-opencorp-token)
       if (!autenticado) {
         enviar(res, 401, { erro: "token ausente ou inválido — Authorization: Bearer <token>" });
         return;
@@ -691,6 +756,75 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             enviar(res, 200, { ok: true, resultado });
             return;
           }
+        }
+
+        if (rota === "/hooks" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          enviar(res, 200, hooks.listar(ws.path));
+          return;
+        }
+        if (rota === "/hooks" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+          const alvo = corpo.alvo as AlvoHook;
+          const h = await hooks.criar(ws.path, ws.id, {
+            nome: String(corpo.nome ?? ""),
+            alvo,
+            respond: corpo.respond as "imediato" | "final" | undefined,
+            dedup_seg: typeof corpo.dedup_seg === "number" ? corpo.dedup_seg : undefined,
+          });
+          enviar(res, 201, { ...h, url: `/hooks/${ws.id}/${h.id}` });
+          return;
+        }
+        const mHook = /^\/hooks\/([^/]+)$/.exec(rota);
+        if (mHook && req.method === "GET") {
+          const ws = await resolverWs(url);
+          enviar(res, 200, hooks.obter(ws.path, decodeURIComponent(mHook[1]!)));
+          return;
+        }
+        if (mHook && req.method === "DELETE") {
+          const ws = await resolverWs(url);
+          await hooks.excluir(ws.path, decodeURIComponent(mHook[1]!));
+          enviar(res, 200, { ok: true, id: mHook[1] });
+          return;
+        }
+        // ── rota PÚBLICA de disparo (auth por token do hook) ──
+        const mHookPublico = /^\/hooks\/([^/]+)\/([^/]+)$/.exec(rota);
+        if (mHookPublico && (req.method === "POST" || req.method === "GET")) {
+          const wsId = decodeURIComponent(mHookPublico[1]!);
+          const hookId = decodeURIComponent(mHookPublico[2]!);
+          const ws = await workspaces.resolver(wsId) as unknown as { id: string; path: string };
+          const h: Hook = hooks.obter(ws.path, hookId);
+          if (!h.metodos.includes(req.method ?? "POST")) {
+            enviar(res, 405, { erro: `método ${req.method} não permitido (aceitos: ${h.metodos.join(", ")})` });
+            return;
+          }
+          const tokenRecebido = req.headers["x-opencorp-token"] ?? url.searchParams.get("token") ?? "";
+          if (tokenRecebido !== h.token) {
+            enviar(res, 401, { erro: "token do hook ausente ou inválido" });
+            return;
+          }
+          let corpoPayload: Record<string, unknown> = {};
+          if (req.method === "POST") {
+            try {
+              corpoPayload = ((await lerCorpo(req)) ?? {}) as Record<string, unknown>;
+            } catch {
+              corpoPayload = {};
+            }
+          }
+          const query: Record<string, string> = {};
+          url.searchParams.forEach((v, k) => {
+            if (k !== "token") query[k] = v;
+          });
+          const payload: PayloadHook = { corpo: corpoPayload, query };
+          if (h.respond === "final") {
+            const r = await hooks.disparar(ws.path, h, payload);
+            enviar(res, 200, { ok: true, exec_id: r.exec_id, resultado: r.resultado.slice(0, 4096) });
+          } else {
+            void hooks.disparar(ws.path, h, payload).catch(() => undefined);
+            enviar(res, 202, { ok: true, modo: "imediato" });
+          }
+          return;
         }
 
         if (rota === "/tasks/colunas" && req.method === "GET") {

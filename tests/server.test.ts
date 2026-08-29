@@ -451,3 +451,103 @@ describe("API Server — Tasks", () => {
     expect(json as string[]).toEqual(expect.arrayContaining(["backlog", "fazendo", "bloqueado", "feito"]));
   });
 });
+
+describe("API Server — Hooks", () => {
+  let home: string;
+  let token = "t3";
+  let port: number;
+  let fetchApi: ReturnType<typeof makeFetch>;
+  let server: ReturnType<typeof createApiServer>["server"];
+
+  beforeAll(async () => {
+    home = await tmpDir();
+    const fakeSessoes: SessaoApi = {
+      rodar: async (op) => ({
+        id: op.execId,
+        status: "concluido",
+        exit_code: 0,
+        captura: "ok-agente",
+        agente: op.agente,
+        ordem: op.ordem,
+      }),
+    } as unknown as SessaoApi;
+    const criado = createApiServer({ homeDir: home, cwd: home, token, sessoes: fakeSessoes });
+    server = criado.server;
+    token = criado.token;
+    server.listen(0, "127.0.0.1");
+    port = await criado.porta;
+    fetchApi = makeFetch(port, token);
+    await new Promise((r) => setTimeout(r, 100));
+    await fetchApi("/workspaces", { method: "POST", body: JSON.stringify({ id: "corp-hooks" }) });
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  it("POST /hooks cria, rota pública dispara com token e dedup bloqueia repetido", async () => {
+    const criado = await fetchApi("/hooks?workspace=corp-hooks", {
+      method: "POST",
+      body: JSON.stringify({
+        nome: "alerta",
+        respond: "final",
+        alvo: { tipo: "task_create", titulo: "Do hook: {{repo}}" },
+      }),
+    });
+    expect(criado.status).toBe(201);
+    const hook = criado.json as { id: string; token: string; url: string };
+    expect(hook.token).toMatch(/^hk_/);
+    expect(hook.url).toBe(`/hooks/corp-hooks/${hook.id}`);
+
+    const semToken = await fetchApi(`/hooks/corp-hooks/${hook.id}`, { method: "POST", body: JSON.stringify({ repo: "a" }) });
+    expect(semToken.status).toBe(401);
+
+    const dispara = await fetch(`http://127.0.0.1:${port}/hooks/corp-hooks/${hook.id}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-opencorp-token": hook.token },
+      body: JSON.stringify({ repo: "web-api" }),
+    });
+    expect(dispara.status).toBe(200);
+    const json = (await dispara.json()) as { exec_id: string; resultado: string };
+    expect(json.exec_id).toMatch(/^tsk-/);
+    expect(json.resultado).toContain("Do hook: web-api");
+
+    const repetido = await fetch(`http://127.0.0.1:${port}/hooks/corp-hooks/${hook.id}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-opencorp-token": hook.token },
+      body: JSON.stringify({ repo: "web-api" }),
+    });
+    expect(repetido.status).toBe(409);
+  });
+
+  it("rota pública em modo imediato retorna 202 e hook inexistente 404", async () => {
+    const criado = await fetchApi("/hooks?workspace=corp-hooks", {
+      method: "POST",
+      body: JSON.stringify({ nome: "rapido", respond: "imediato", dedup_seg: 0, alvo: { tipo: "task_create", titulo: "Async: {{x}}" } }),
+    });
+    const hook = criado.json as { id: string; token: string };
+    const res = await fetch(`http://127.0.0.1:${port}/hooks/corp-hooks/${hook.id}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-opencorp-token": hook.token },
+      body: JSON.stringify({ x: 1 }),
+    });
+    expect(res.status).toBe(202);
+    const fantasma = await fetch(`http://127.0.0.1:${port}/hooks/corp-hooks/hook-nada`, {
+      method: "POST",
+      headers: { "x-opencorp-token": "qualquer" },
+      body: "{}",
+    });
+    expect(fantasma.status).toBe(404);
+  });
+
+  it("GET /hooks lista e DELETE remove", async () => {
+    const lista = await fetchApi("/hooks?workspace=corp-hooks");
+    expect(lista.status).toBe(200);
+    const hooks = lista.json as { id: string }[];
+    expect(hooks.length).toBeGreaterThanOrEqual(2);
+    const del = await fetchApi(`/hooks/${hooks[0]!.id}?workspace=corp-hooks`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+    const depois = (await (await fetchApi("/hooks?workspace=corp-hooks")).json) as { id: string }[];
+    expect(depois.find((h) => h.id === hooks[0]!.id)).toBeUndefined();
+  });
+});
