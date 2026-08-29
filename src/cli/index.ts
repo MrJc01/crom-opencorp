@@ -10,6 +10,7 @@ import { registerSettingsCommand } from "./commands/settings.js";
 import { registerRegistryCommand } from "./commands/registry.js";
 import { registerApprovalsCommand } from "./commands/approvals.js";
 import { registerBudgetCommand } from "./commands/budget.js";
+import { registerMeetingCommand } from "./commands/meeting.js";
 import { registerSubcorpCommand } from "./commands/subcorp.js";
 import { registerTemplateCommand } from "./commands/template.js";
 import { registerWorkspaceCommands } from "./commands/workspace.js";
@@ -58,6 +59,8 @@ export function buildProgram(): Command {
   registerApprovalsCommand(program);
 
   registerBudgetCommand(program);
+
+  registerMeetingCommand(program);
 
   registerTemplateCommand(program);
 

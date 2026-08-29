@@ -76,6 +76,30 @@ describe("gerarAgenteOpencode", () => {
     expect(saida).toContain("  write: false");
     expect(saida).toContain("permission:\n  edit: deny\n  bash: deny\n  webfetch: deny");
   });
+
+  it("level-1 com write nas tools (ceo-documentos) mantém edit: allow para produzir documentos", () => {
+    const ceo = parseAgenteMd(`---
+id: ceo-documentos
+role: CEO Documentador
+category: ceo
+model: opencode/grok-code
+tools: [read, write, registry]
+permissions: level-1
+budget:
+  daily_usd: 2.00
+  max_turns: 50
+memory:
+  reads: [documentos]
+  writes: [documentos]
+---
+
+Você é o CEO Documentador.
+`);
+    const saida = gerarAgenteOpencode(ceo.frontmatter, ceo.corpo);
+    expect(saida).toContain("  write: true");
+    expect(saida).toContain("  bash: false");
+    expect(saida).toContain("permission:\n  edit: allow\n  bash: deny\n  webfetch: deny");
+  });
 });
 
 describe("OpenCodeBridge.sincronizarAgente", () => {

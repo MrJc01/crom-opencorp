@@ -55,6 +55,13 @@ export const settingsSchema = z.object({
       verbose: z.boolean().default(false),
     })
     .prefault({}),
+  meeting: z
+    .object({
+      max_turns: z.number().int().min(1).default(12),
+      per_agent_usd: z.number().nonnegative().default(0.5),
+      moderator: z.string().min(1).default("secretario"),
+    })
+    .prefault({}),
 });
 
 export type Settings = z.infer<typeof settingsSchema>;

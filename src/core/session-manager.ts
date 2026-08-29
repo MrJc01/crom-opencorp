@@ -29,6 +29,12 @@ export interface OpcoesRun {
   workspaceId?: string;
   workspaceDir?: string;
   pularGuard?: boolean;
+  tags?: string[];
+}
+
+export interface ResultadoRun extends RegistroExecucao {
+  captura: string;
+  custo_usd: number | null;
 }
 
 export interface RegistroExecucao {
@@ -92,7 +98,7 @@ export class SessionManager {
     return this.workspaces.resolver(workspaceId);
   }
 
-  async rodar(opcoes: OpcoesRun): Promise<RegistroExecucao> {
+  async rodar(opcoes: OpcoesRun): Promise<ResultadoRun> {
     let ws: { path: string; id: string; existe: boolean };
     if (opcoes.workspaceDir) {
       const dir = resolvePath(opcoes.workspaceDir);
@@ -231,7 +237,7 @@ export class SessionManager {
       id,
       descricao: `Ordem: ${ordem.slice(0, 160)}`,
       criadoPor: registro.agente,
-      tags: ["sessao"],
+      tags: ["sessao", ...(opcoes.tags ?? [])],
       eventoInicial: {
         evento: "iniciado",
         resumo: `ordem: ${ordem.slice(0, 160)} · modelo: ${modelo}`,
@@ -397,7 +403,7 @@ export class SessionManager {
         );
       }
     }
-    return registro;
+    return { ...registro, captura: textoCaptura, custo_usd: custo };
   }
 
   async listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<ResumoExecucao[]> {

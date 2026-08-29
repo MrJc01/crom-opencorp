@@ -67,11 +67,14 @@ export function avaliar(
   nivelAgente: NivelAgente,
 ): Avaliacao {
   if (nivelAgente === "level-1") {
-    return {
-      acao: "bloqueado",
-      motivo: `agente level-1 (leitura) não executa comandos — pedido: ${comando.slice(0, 120)}`,
-      padrao: "level-1",
-    };
+    const pedeExecucao = /\b(execute|executar|rode|rodar|bash)\b/i.test(comando);
+    if (pedeExecucao) {
+      return {
+        acao: "bloqueado",
+        motivo: `agente level-1 (leitura) não executa comandos — pedido: ${comando.slice(0, 120)}`,
+        padrao: "level-1",
+      };
+    }
   }
   for (const padrao of policy.blocklist) {
     if (casaPadrao(padrao, comando)) {

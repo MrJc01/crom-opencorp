@@ -19,10 +19,16 @@ const TOOLS_OPENCODE = [
   "doom_loop",
 ] as const;
 
-function permissoesParaOpencode(permissoes: Agente["permissions"]): Record<string, string> {
-  if (permissoes === "level-1") return { edit: "deny", bash: "deny", webfetch: "deny" };
-  if (permissoes === "level-2") return { edit: "allow", bash: "allow", webfetch: "deny" };
-  return { edit: "allow", bash: "allow", webfetch: "allow" };
+function permissoesParaOpencode(agente: Agente): Record<string, string> {
+  const editaArquivos = agente.tools.includes("write") || agente.tools.includes("edit");
+  const edit = editaArquivos ? "allow" : "deny";
+  if (agente.permissions === "level-1") {
+    return { edit, bash: "deny", webfetch: "deny" };
+  }
+  if (agente.permissions === "level-2") {
+    return { edit, bash: "allow", webfetch: "deny" };
+  }
+  return { edit, bash: "allow", webfetch: "allow" };
 }
 
 function yamlString(valor: string): string {
@@ -40,7 +46,7 @@ export function gerarAgenteOpencode(agente: Agente, corpo: string): string {
     linhas.push(`  ${tool}: ${agente.tools.includes(tool) ? "true" : "false"}`);
   }
   linhas.push("permission:");
-  for (const [chave, valor] of Object.entries(permissoesParaOpencode(agente.permissions))) {
+  for (const [chave, valor] of Object.entries(permissoesParaOpencode(agente))) {
     linhas.push(`  ${chave}: ${valor}`);
   }
   linhas.push("---", "");

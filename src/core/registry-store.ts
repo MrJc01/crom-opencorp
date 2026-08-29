@@ -448,6 +448,23 @@ export class RegistryStore {
     return "";
   }
 
+  async appendConteudo(wsPath: string, categoria: string, id: string, texto: string): Promise<void> {
+    const dir = this.registroDir(wsPath, categoria, id);
+    mkdirRecursive(dir);
+    await appendFile(join(dir, "conteudo.md"), texto, "utf8");
+    const meta = await this.lerMeta(wsPath, categoria, id);
+    this.db(wsPath).upsertRegistro({
+      id: meta.id,
+      categoria: meta.categoria,
+      descricao: meta.descricao,
+      criado_por: meta.criado_por,
+      criado_em: meta.criado_em,
+      atualizado_em: meta.atualizado_em,
+      tags: meta.tags.join(","),
+      conteudo: await this.lerConteudoIndexavel(wsPath, categoria, id),
+    });
+  }
+
   async listarCategorias(wsPath: string): Promise<{ categoria: string; registros: MetaRegistro[] }[]> {
     const raiz = this.raiz(wsPath);
     if (!existsSync(raiz)) return [];

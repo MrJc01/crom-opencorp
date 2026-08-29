@@ -51,6 +51,12 @@ const SECOES: Secao[] = [
     chaves: ["tests.blind", "tests.model", "tests.reports_dir", "tests.max_fix_cycles"],
   },
   {
+    id: "reunioes",
+    label: "Reuniões",
+    hint: "turnos, orçamento por agente, moderador",
+    chaves: ["meeting.max_turns", "meeting.per_agent_usd", "meeting.moderator"],
+  },
+  {
     id: "avancado",
     label: "Avançado",
     hint: "tema, verbose, versão",

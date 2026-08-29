@@ -15,4 +15,5 @@ export class RegistryError extends OpencorpError {}
 export class TemplateError extends OpencorpError {}
 export class SubcorpError extends OpencorpError {}
 export class BudgetError extends OpencorpError {}
+export class MeetingError extends OpencorpError {}
 export class ApprovalError extends OpencorpError {}

@@ -77,10 +77,13 @@ describe("SecurityGuard — avaliar", () => {
     expect(r.padrao).toBe("git push");
   });
 
-  it("level-1 bloqueia QUALQUER comando", () => {
-    const r = avaliar("echo hi", POLICY, "level-1");
+  it("level-1: bloqueia ordem que pede execução; conversa/tarefa de documento passa (enforcement real fica no opencode: bash deny)", () => {
+    const r = avaliar("execute: echo hi", POLICY, "level-1");
     expect(r.acao).toBe("bloqueado");
     expect(r.motivo).toContain("level-1");
+    expect(avaliar("execute: rm -rf /x", POLICY, "level-1").acao).toBe("bloqueado");
+    expect(avaliar("resuma os registros de custos para o humano", POLICY, "level-1").acao).toBe("permitido");
+    expect(avaliar("escreva a ata da reunião", POLICY, "level-1").acao).toBe("permitido");
   });
 
   it("policy strict: só executáveis da allowlist (base + extra) passam", () => {

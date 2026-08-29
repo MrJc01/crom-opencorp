@@ -96,7 +96,7 @@ export class BudgetManager {
     return Math.round(turnos * this.precoPorTurno(estado, modelo) * 1e6) / 1e6;
   }
 
-  async limites(wsPath: string): Promise<LimitesBudget> {
+  async limites(wsPath: string, overrides?: Partial<LimitesBudget>): Promise<LimitesBudget> {
     const daily = await this.store.get("budget.daily_usd", { workspaceDir: wsPath });
     const perAgent = await this.store.get("budget.per_agent_usd", { workspaceDir: wsPath });
     const pause = await this.store.get("budget.pause_on_exceed", { workspaceDir: wsPath });
@@ -104,12 +104,17 @@ export class BudgetManager {
       daily_usd: Number(daily.valor),
       per_agent_usd: Number(perAgent.valor),
       pause_on_exceed: Boolean(pause.valor),
+      ...overrides,
     };
   }
 
-  async podeExecutar(wsPath: string, agente: string): Promise<{ ok: boolean; motivo?: string }> {
+  async podeExecutar(
+    wsPath: string,
+    agente: string,
+    overrides?: Partial<LimitesBudget>,
+  ): Promise<{ ok: boolean; motivo?: string }> {
     const estado = await this.carregar(wsPath);
-    const limites = await this.limites(wsPath);
+    const limites = await this.limites(wsPath, overrides);
     if (!limites.pause_on_exceed) return { ok: true };
     const menorPreco = Math.min(
       ...Object.values(PRECOS_POR_TURNO),
