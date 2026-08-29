@@ -35,7 +35,8 @@
 
 ### ETAPA 19 · Task Board (kanban interno dos agentes) — status: `pendente`
 - **Core**: `task-store.ts` — CRUD em corp-db; card: `{id, titulo, descricao, coluna, pos, prioridade, labels[], responsavel(agente|humano), due, workspace, criado_por, criado_em, atualizado_em}`; mover com reordenação por `pos`; atividade no journal; eventos `task.criada/movida/atribuida/concluida` no eventBus.
-- **CLI**: `opencorp task create|list|show|move|assign|label|delete|columns`.
+- **Chat interno da task** (ver docs/14): tabela `task_mensagens` (autor humano/agente/sistema, tipos comentario/handoff/artefato/decisao, menciona, refs); `opencorp task chat <id> [--msg] [--de]`; bundle de contexto compactado a cada spawn; lock/lease anti-colisão; guardas básicas (rate limit por hora + loop guard); eventos SSE do chat.
+- **CLI**: `opencorp task create|list|show|move|assign|label|delete|columns|chat`.
 - **Integração agente**: doc de prompt — agentes usam `opencorp task ...` via shell (o SecurityGuard já audita); hook: sessão de agente concluída com `--task <id>` move o card e anexa o resumo.
 - **API**: `GET/POST /tasks`, `GET/PATCH/DELETE /tasks/:id` (+ `/move`), eventos SSE.
 - **Web**: colunas kanban arrastáveis no UI existente (view `/tasks`).
@@ -71,14 +72,18 @@
 - **Agente construtor**: prompt de agente `app-builder` — usuário descreve o app, agente escreve/valida o spec e mostra preview.
 - **Aceite**: app "Painel de Tarefas" seed renderiza kanban ao vivo; formulário move um card de verdade; spec inválido é rejeitado com erro claro; apps versionados em git do workspace.
 
-### ETAPA 24 · Bateria final e v0.3.0 — status: `pendente`
+### ETAPA 24 · Orquestração multi-agente — status: `pendente`
+- Usa chat da 19 + triggers da 21 + tools da 22 (ver docs/14): padrões declarativos **pipeline, fan-out/fan-in com barreira (`bloqueado_por`), revisão cruzada, debate**; supervisor como orquestrador padrão; spawn por menção com as 3 guardas (loop, rate, lease).
+- **CLI**: `opencorp team create|list|show|run` (config do padrão + agentes + artefatos); escala humano automática nas violações.
+
+### ETAPA 25 · Bateria final e v0.3.0 — status: `pendente`
 - Specs cegas novas (19–23) + regressão `opencorp test blind all`; `doctor` cobre scheduler/hooks/apps; `README` e `docs/README.md` atualizados; tag **v0.3.0**.
 
 ## 4 · Ordem e dependências
 
 ```
-19 Tasks ──► 20 Scheduler ──► 21 Webhooks/Triggers ──► 22 Tools/MCP ──► 23 Mini-apps ──► 24 v0.3.0
-    └──────────────── 22 expõe tudo como tools; 23 consome tudo nos widgets ────────────┘
+19 Tasks+Chat ──► 20 Scheduler ──► 21 Webhooks/Triggers ──► 22 Tools/MCP ──► 23 Mini-apps ──► 24 Orquestração ──► 25 v0.3.0
+    └────────── 22 expõe tudo como tools; 23 consome tudo nos widgets; 24 usa 19+21+22 ──────────┘
 ```
 - 19 antes de 20/21 porque scheduler e hooks criam/atualizam tasks.
 - 22 depois do 21 pois built-ins incluem `flow.run` e hooks.
@@ -98,9 +103,10 @@
 
 | Etapa | Tema | Status |
 |---|---|---|
-| 19 | Task Board | `pendente` |
+| 19 | Task Board + Chat interno (docs/14) | `pendente` |
 | 20 | Scheduler | `pendente` |
 | 21 | Webhooks & Triggers | `pendente` |
 | 22 | Tools / MCP | `pendente` |
 | 23 | Mini-apps | `pendente` |
-| 24 | Bateria final v0.3.0 | `pendente` |
+| 24 | Orquestração multi-agente (docs/14) | `pendente` |
+| 25 | Bateria final v0.3.0 | `pendente` |
