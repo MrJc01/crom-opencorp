@@ -117,24 +117,28 @@ describe("Supervisor — tick (a) falhas → ordem cega", () => {
     expect(eventos[0].evento).toBe("tick");
     expect((eventos[0].ordens as unknown[]) ?? []).toHaveLength(1);
     const estado = await sup.lerEstado(wsPath);
-    expect(estado.chaves_tratadas).toContain("execucao_falha:exec-f1");
+    expect(estado.chaves_tratadas).toContain("execucao_falha:exec-f1:healing:1");
     expect(estado.ultimo_tick).toBeTruthy();
   });
 
-  it("dedup: mesma falha não reemite (memória entre ticks e entre instâncias)", async () => {
-    const { home, wsPath } = await ambiente();
+  it("dedup: retries esgotados → escala-humano uma única vez (memória entre instâncias)", async () => {
+    const { home, wsPath, store } = await ambiente();
     await criarExecucaoFalha(wsPath, "exec-f2");
+    await store.set("healing.max_retries", "1", { scope: "workspace", workspaceDir: wsPath });
     const rodar = sessaoFalsa();
     const supA = new Supervisor({ homeDir: home, cwd: home, sessoes: { rodar } });
-    await supA.tick(wsPath);
+    await supA.tick(wsPath); // corrige (healing:1)
     expect(rodar).toHaveBeenCalledTimes(1);
-    // nova instância = "restart": estado persistido deve evitar reemissão
+    // nova instância = "restart": estado persistido evita reemissão
     const supB = new Supervisor({ homeDir: home, cwd: home, sessoes: { rodar } });
-    const t2 = await supB.tick(wsPath);
+    const t2 = await supB.tick(wsPath); // tentativas 1 >= max 1 → escala
     expect(rodar).toHaveBeenCalledTimes(1);
     expect(t2.ordens).toHaveLength(0);
-    expect(t2.ignorados).toContain("execucao_falha:exec-f2");
-    expect((await supB.lerEstado(wsPath)).chaves_tratadas).toContain("execucao_falha:exec-f2");
+    expect(t2.escalacoes).toHaveLength(1);
+    const t3 = await supB.tick(wsPath); // já escalada → nada
+    expect(rodar).toHaveBeenCalledTimes(1);
+    expect(t3.escalacoes).toHaveLength(0);
+    expect(t3.ignorados).toHaveLength(0);
   });
 
 
@@ -152,8 +156,9 @@ describe("Supervisor — tick (a) falhas → ordem cega", () => {
     const t2 = await sup.tick(wsPath);
     expect(t2.ordens).toHaveLength(2);
     const t3 = await sup.tick(wsPath);
-    expect(t3.ordens).toHaveLength(1);
-    expect(rodar).toHaveBeenCalledTimes(5);
+    expect(t3.ordens).toHaveLength(2);
+    expect(t3.escalacoes).toHaveLength(2);
+    expect(rodar).toHaveBeenCalledTimes(6);
   });
 
   it("orçamento insuficiente (rodar exit 4) → recusa registrada, sem emitir e sem marcar (retenta depois)", async () => {
@@ -296,6 +301,6 @@ describe("Supervisor — pidfile/lock", () => {
     const sup1 = new Supervisor({ homeDir: home, cwd: home, sessoes: { rodar } });
     await sup1.tick(wsPath);
     const sup2 = new Supervisor({ homeDir: home, cwd: home, sessoes: { rodar } });
-    expect((await sup2.lerEstado(wsPath)).chaves_tratadas).toContain("execucao_falha:exec-restart");
+    expect((await sup2.lerEstado(wsPath)).chaves_tratadas).toContain("execucao_falha:exec-restart:healing:1");
   });
 });

@@ -38,9 +38,10 @@ export interface Problema {
   tipo: TipoProblema;
   chave: string;
   detalhe: string;
-  acao: "ordem" | "registrar";
+  acao: "ordem" | "registrar" | "escalar";
   agente?: string;
   ordem?: string;
+  healing?: { execOriginal: string };
 }
 
 export interface Checks {
@@ -69,6 +70,7 @@ export interface ResultadoTick {
   checks: Checks;
   ordens: OrdemEmitida[];
   recusas: Recusa[];
+  escalacoes: { problema: string; detalhe: string }[];
   ignorados: string[];
 }
 
@@ -186,7 +188,10 @@ export class Supervisor {
     );
   }
 
-  private async coletar(wsPath: string): Promise<{ problemas: Problema[]; checks: Checks }> {
+  private async coletar(
+    wsPath: string,
+    healing: { enabled: boolean; max_retries: number },
+  ): Promise<{ problemas: Problema[]; checks: Checks }> {
     const problemas: Problema[] = [];
     const checks: Checks = {
       execucoes_falhas: 0,
@@ -198,14 +203,48 @@ export class Supervisor {
 
     const execucoes = await this.registros.listar(wsPath, "execucoes");
     for (const meta of extrairFalhas(execucoes)) {
+      const extrasMeta = (meta.extras ?? {}) as Record<string, unknown>;
+      if (extrasMeta.tipo === "healing") continue;
+      if (extrasMeta.healing_escala_humano === true) continue;
       checks.execucoes_falhas += 1;
+      const detalhe = `execução ${meta.id} falhou — ${meta.descricao.slice(0, 120)}`;
+      if (!healing.enabled) {
+        problemas.push({
+          tipo: "execucao_falha",
+          chave: `execucao_falha:${meta.id}`,
+          detalhe: `${detalhe} (healing desabilitado — apenas registrado)`,
+          acao: "registrar",
+        });
+        continue;
+      }
+      const tentativas = Number(extrasMeta.healing_tentativas ?? 0);
+      const correcoes = execucoes.filter((m) => {
+        const e = (m.extras ?? {}) as Record<string, unknown>;
+        return e.tipo === "healing" && Array.isArray(m.referencias) && m.referencias.includes(meta.id);
+      });
+      const ultima = correcoes.sort((a, b) => b.criado_em.localeCompare(a.criado_em))[0];
+      if (ultima && ((ultima.extras ?? {}) as Record<string, unknown>).status === "concluido") {
+        continue;
+      }
+      if (tentativas >= healing.max_retries) {
+        problemas.push({
+          tipo: "execucao_falha",
+          chave: `escala_humano:${meta.id}:${tentativas}`,
+          detalhe: `${detalhe} — ${tentativas} tentativa(s) de correção esgotada(s), escala para humano`,
+          acao: "escalar",
+          healing: { execOriginal: meta.id },
+        });
+        continue;
+      }
+      const contexto = await this.contextoFalha(wsPath, meta.id);
       problemas.push({
         tipo: "execucao_falha",
-        chave: `execucao_falha:${meta.id}`,
-        detalhe: `execução ${meta.id} falhou — ${meta.descricao.slice(0, 120)}`,
+        chave: `execucao_falha:${meta.id}:healing:${tentativas + 1}`,
+        detalhe: `${detalhe} — correção assistida (tentativa ${tentativas + 1}/${healing.max_retries})`,
         acao: "ordem",
         agente: "executor-padrao",
-        ordem: `investigue e registre a causa provável da execução falha "${meta.id}" (detalhes em registries/execucoes/${meta.id}/) — anote o resultado em registries/logs/; NÃO reproduza o problema`,
+        ordem: contexto.ordem,
+        healing: { execOriginal: meta.id },
       });
     }
 
@@ -279,12 +318,14 @@ export class Supervisor {
   async tick(wsPath: string): Promise<ResultadoTick> {
     const inicioTick = this.agora();
     const estado = await this.lerEstado(wsPath);
-    const { problemas, checks } = await this.coletar(wsPath);
+    const healing = await this.healingCfg(wsPath);
+    const { problemas, checks } = await this.coletar(wsPath, healing);
     const tratadas = new Set(estado.chaves_tratadas);
     const maxOrdens = await this.maxOrdensPorTick(wsPath);
 
     const ordens: OrdemEmitida[] = [];
     const recusas: Recusa[] = [];
+    const escalacoes: { problema: string; detalhe: string }[] = [];
     const ignorados: string[] = [];
     let emitidas = 0;
 
@@ -297,6 +338,28 @@ export class Supervisor {
         tratadas.add(problema.chave);
         continue;
       }
+      if (problema.acao === "escalar") {
+        const original = await this.registros.lerMeta(wsPath, "execucoes", problema.healing!.execOriginal);
+        const extrasOriginal = (original.extras ?? {}) as Record<string, unknown>;
+        extrasOriginal.healing_escala_humano = true;
+        original.extras = extrasOriginal;
+        await this.registros.salvarMeta(wsPath, "execucoes", original.id, original);
+        await this.registros.anexarEvento(wsPath, "execucoes", original.id, {
+          ts: this.agora().toISOString(),
+          por: "supervisor",
+          evento: "escala_humano",
+          resumo: problema.detalhe,
+        });
+        await this.registros.eventoAuditoria(wsPath, {
+          por: "supervisor",
+          evento: "escala_humano",
+          resumo: problema.detalhe,
+          execucao: original.id,
+        });
+        escalacoes.push({ problema: problema.chave, detalhe: problema.detalhe });
+        tratadas.add(problema.chave);
+        continue;
+      }
       if (emitidas >= maxOrdens) continue;
       try {
         const r = await this.sessoes.rodar({
@@ -306,10 +369,25 @@ export class Supervisor {
           workspaceDir: wsPath,
           pularGuard: true,
           tags: ["supervisor"],
+          ...(problema.healing ? { referencias: [problema.healing.execOriginal], tipo: "healing" } : {}),
         });
         tratadas.add(problema.chave);
         emitidas += 1;
         ordens.push({ problema: problema.chave, agente: problema.agente!, ordem: problema.ordem!, exec_id: r.id });
+        if (problema.healing) {
+          const original = await this.registros.lerMeta(wsPath, "execucoes", problema.healing.execOriginal);
+          const extrasOriginal = (original.extras ?? {}) as Record<string, unknown>;
+          extrasOriginal.healing_tentativas = Number(extrasOriginal.healing_tentativas ?? 0) + 1;
+          original.extras = extrasOriginal;
+          await this.registros.salvarMeta(wsPath, "execucoes", original.id, original);
+          await this.registros.anexarEvento(wsPath, "execucoes", original.id, {
+            ts: this.agora().toISOString(),
+            por: "supervisor",
+            evento: "healing_disparado",
+            correcao: r.id,
+            resumo: `correção assistida disparada (tentativa ${extrasOriginal.healing_tentativas}/${healing.max_retries})`,
+          });
+        }
       } catch (erro) {
         recusas.push({ problema: problema.chave, motivo: msg(erro) });
       }
@@ -322,6 +400,7 @@ export class Supervisor {
       checks,
       ordens,
       recusas,
+      escalacoes,
       ignorados,
     };
     await this.registros.garantirRegistro(wsPath, {
@@ -334,10 +413,11 @@ export class Supervisor {
       ts: em,
       por: "supervisor",
       evento: "tick",
-      resumo: `falhas ${checks.execucoes_falhas} · approvals ${checks.approvals_pendentes} (${checks.approvals_antigas} antigas) · budget80 ${checks.budget_80} · tarefas ${checks.tarefas_delegadas} — ordens ${ordens.length}, recusas ${recusas.length}, ignorados ${ignorados.length}`,
+      resumo: `falhas ${checks.execucoes_falhas} · approvals ${checks.approvals_pendentes} (${checks.approvals_antigas} antigas) · budget80 ${checks.budget_80} · tarefas ${checks.tarefas_delegadas} — ordens ${ordens.length}, recusas ${recusas.length}, escalações ${escalacoes.length}, ignorados ${ignorados.length}`,
       checks,
       ordens,
       recusas,
+      escalacoes,
       ignorados,
     });
     await this.gravarEstado(wsPath, { ultimo_tick: em, chaves_tratadas: [...tratadas] });
@@ -346,6 +426,45 @@ export class Supervisor {
       await gravarPidfile(wsPath, { ...pid, ultimo_tick: em });
     }
     return resultado;
+  }
+
+  private async healingCfg(wsPath: string): Promise<{ enabled: boolean; max_retries: number }> {
+    const enabled = await this.store.get("healing.enabled", { workspaceDir: wsPath });
+    const retries = await this.store.get("healing.max_retries", { workspaceDir: wsPath });
+    return { enabled: Boolean(enabled.valor), max_retries: Math.max(0, Number(retries.valor) || 0) };
+  }
+
+  private async contextoFalha(
+    wsPath: string,
+    execId: string,
+  ): Promise<{ ordem: string; transcriptTrecho: string; logTrecho: string }> {
+    let transcript = "";
+    try {
+      transcript = (await this.registros.obter(wsPath, "chats", execId)).conteudo ?? "";
+    } catch {
+      transcript = "";
+    }
+    let logTrecho = "";
+    const logPath = join(wsPath, "logs", `${execId}.log`);
+    if (existsSync(logPath)) {
+      try {
+        logTrecho = (await readFile(logPath, "utf8")).slice(-1500);
+      } catch {
+        logTrecho = "";
+      }
+    }
+    const ordem = [
+      "TAREFA DE CORREÇÃO (self-healing): a execução registrada abaixo falhou.",
+      "Corrija a CAUSA RAIZ do problema (não apenas o sintoma) e REGISTRE o resultado em registries/logs/.",
+      `Referência da execução original: registries/execucoes/${execId}/`,
+      "",
+      "=== TRANSCRIPT DA EXECUÇÃO FALHA (registries/chats) ===",
+      transcript ? transcript.slice(-2000) : "(sem transcript)",
+      "",
+      "=== TRECHO FINAL DO LOG (logs) ===",
+      logTrecho || "(sem log capturado)",
+    ].join("\n");
+    return { ordem, transcriptTrecho: transcript.slice(-2000), logTrecho };
   }
 
   private async maxOrdensPorTick(wsPath: string): Promise<number> {

@@ -70,6 +70,12 @@ export const settingsSchema = z.object({
       max_orders_per_tick: z.number().int().min(1).default(3),
     })
     .prefault({}),
+  healing: z
+    .object({
+      enabled: z.boolean().default(true),
+      max_retries: z.number().int().min(0).default(2),
+    })
+    .prefault({}),
 });
 
 export type Settings = z.infer<typeof settingsSchema>;

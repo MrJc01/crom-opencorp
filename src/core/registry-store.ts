@@ -60,6 +60,7 @@ export interface OpcoesCriar {
   conteudo?: string;
   dados?: unknown;
   tags?: string[];
+  referencias?: string[];
   extras?: Record<string, unknown>;
   eventoInicial?: { evento: string; resumo: string };
 }
@@ -169,7 +170,7 @@ export class RegistryStore {
         modificacao_meta: dedupe([...ceos]),
       },
       tags: opts.tags ?? [],
-      referencias: [],
+      referencias: opts.referencias ?? [],
     };
     if (opts.extras) meta.extras = opts.extras;
 

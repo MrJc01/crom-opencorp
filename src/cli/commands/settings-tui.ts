@@ -63,6 +63,12 @@ const SECOES: Secao[] = [
     chaves: ["supervisor.interval_minutes", "supervisor.enabled", "supervisor.max_orders_per_tick"],
   },
   {
+    id: "healing",
+    label: "Self-healing",
+    hint: "habilitado, tentativas máximas por execução",
+    chaves: ["healing.enabled", "healing.max_retries"],
+  },
+  {
     id: "avancado",
     label: "Avançado",
     hint: "tema, verbose, versão",

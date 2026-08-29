@@ -30,6 +30,8 @@ export interface OpcoesRun {
   workspaceDir?: string;
   pularGuard?: boolean;
   tags?: string[];
+  referencias?: string[];
+  tipo?: string;
 }
 
 export interface ResultadoRun extends RegistroExecucao {
@@ -238,6 +240,7 @@ export class SessionManager {
       descricao: `Ordem: ${ordem.slice(0, 160)}`,
       criadoPor: registro.agente,
       tags: ["sessao", ...(opcoes.tags ?? [])],
+      referencias: opcoes.referencias,
       eventoInicial: {
         evento: "iniciado",
         resumo: `ordem: ${ordem.slice(0, 160)} · modelo: ${modelo}`,
@@ -251,6 +254,7 @@ export class SessionManager {
         exit_code: null,
         duracao_ms: null,
         log: logRelativo,
+        ...(opcoes.tipo ? { tipo: opcoes.tipo } : {}),
       },
     });
 
