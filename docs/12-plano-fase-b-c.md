@@ -141,13 +141,27 @@ Contrato (adicionar ao doc 02 após aprovação):
 
 **Objetivo:** a pele da Fase C v1: monitorar, conversar e configurar.
 
-- [ ] `web/` (Next.js + Tailwind): `opencorp web` serve a UI e aponta para a API da etapa 14 (token configurado no primeiro acesso)
-- [ ] Páginas: (1) Workspaces (switcher + criação), (2) Agentes (lista + show + run com ordem), (3) Execuções (tabela + log da sessão), (4) Chat do Secretário (envia ordem, mostra resposta), (5) Custos (budget status + histórico), (6) Approvals (aprovar/rejeitar), (7) **Painel de configurações** (formulários gerados do schema zod — mesma fonte da doc 06)
-- [ ] Live updates via SSE (`/events`) — no mínimo execuções e approvals
-- [ ] Nenhuma lógica de negócio na web: só chama a API
+- [x] `opencorp web` (vanilla JS + Tailwind CDN em `web-dist/`, sem build): serve a UI na raiz, token via `~/.opencorp/secrets.json`, abre browser (`--no-open`, `--port`)
+- [x] Páginas v1 (single-page): Workspaces (switcher + criação), Execuções (tabela), Approvals (aprovar/rejeitar), Agentes (lista), Custos, log SSE
+- [x] Live updates via SSE (`/events`) — execuções e approvals
+- [ ] Páginas completas: log da sessão por execução, chat do Secretário, painel de configurações gerado do schema zod
+- [ ] Nenhuma lógica de negócio na web: só chama a API (mantido)
 - [ ] Testes unitários mínimos de componentes + build de produção ok
 
 **Teste cego:** `docs/tests/ETAPA-15-web.md` (validação via curl/HTML — visual humano fica para aceite final) · **Commit:** `feat(web): painel web v1 sobre a API`
+
+---
+
+## ETAPA 18 — Cliente cria empresa (E2E) ✅ mecanismo / ⏳ bateria cega
+
+**Objetivo:** validar a jornada real do cliente: fundar empresa → contratar especialistas → reunião de diretoria → ata com delegação → executar tarefa → prestação de contas → fechar empresa.
+
+- [x] Spec `docs/tests/ETAPA-18-empresa-e2e.md`
+- [x] Fix: modelos default dos agentes (grok-code quebrado / gemini paid) → `opencode/nemotron-3-ultra-free`
+- [x] Fix: `timeoutMs` por turno de reunião — modelo travado não pendura mais a reunião (meeting-manager + session-manager)
+- [x] Fix: reconciliação de zombies — execuções mortas sem finalizar saem de "executando" eterno
+- [x] Validação ao vivo (4 ciclos): reunião com 10 turnos reais, auto-encerramento por max_minutes, ata com decisões/delegação de qualidade, MVP construído pelo executor a partir da ata
+- [ ] Bateria cega PASS (testador precisa de timeout ≥ 45min com nemotron; FAIL atual 3/7 é mecânica do harness, não do sistema)
 
 ---
 
