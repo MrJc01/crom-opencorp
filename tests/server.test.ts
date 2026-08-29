@@ -346,3 +346,108 @@ describe("API Server — REST + SSE", () => {
     expect(json).toHaveProperty("erro", "nenhuma reunião ativa neste servidor");
   });
 });
+describe("API Server — Tasks", () => {
+  let home: string;
+  let token = "t2";
+  let port: number;
+  let fetchApi: ReturnType<typeof makeFetch>;
+  let server: ReturnType<typeof createApiServer>["server"];
+
+  beforeAll(async () => {
+    home = await tmpDir();
+    const fakeSessoes: SessaoApi = {
+      rodar: async (op) => ({
+        id: op.execId,
+        status: "concluido",
+        exit_code: 0,
+        captura: "ok",
+        agente: op.agentId,
+        ordem: op.ordem,
+      }),
+    } as unknown as SessaoApi;
+    const criado = createApiServer({ homeDir: home, cwd: home, token, sessoes: fakeSessoes });
+    server = criado.server;
+    token = criado.token;
+    server.listen(0, "127.0.0.1");
+    port = await criado.porta;
+    fetchApi = makeFetch(port, token);
+    await new Promise((r) => setTimeout(r, 100));
+    await fetchApi("/workspaces", { method: "POST", body: JSON.stringify({ id: "corp-tasks" }) });
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  it("POST /tasks cria task e GET /tasks lista", async () => {
+    const { status: cStatus, json: cJson } = await fetchApi("/tasks?workspace=corp-tasks", {
+      method: "POST",
+      body: JSON.stringify({ titulo: "Primeira via API", labels: ["api"], responsavel: "agente:executor-padrao" }),
+    });
+    expect(cStatus).toBe(201);
+    const task = cJson as { id: string; titulo: string; coluna: string; responsavel: string };
+    expect(task.id).toMatch(/^tsk-/);
+    expect(task.coluna).toBe("backlog");
+    expect(task.responsavel).toBe("agente:executor-padrao");
+
+    const { status: lStatus, json: lJson } = await fetchApi("/tasks?workspace=corp-tasks");
+    expect(lStatus).toBe(200);
+    expect((lJson as { titulo: string }[]).some((t) => t.titulo === "Primeira via API")).toBe(true);
+  });
+
+  it("GET /tasks/:id inclui bloqueada, PATCH move/atribui, DELETE exclui", async () => {
+    const dep = (await (await fetchApi("/tasks?workspace=corp-tasks", { method: "POST", body: JSON.stringify({ titulo: "Dep" }) })).json) as { id: string };
+    const pai = (await (await fetchApi("/tasks?workspace=corp-tasks", {
+      method: "POST",
+      body: JSON.stringify({ titulo: "Pai", bloqueado_por: [dep.id] }),
+    })).json) as { id: string };
+    const g1 = await fetchApi(`/tasks/${pai.id}?workspace=corp-tasks`);
+    expect(g1.status).toBe(200);
+    expect((g1.json as { bloqueada: boolean }).bloqueada).toBe(true);
+
+    const p1 = await fetchApi(`/tasks/${pai.id}?workspace=corp-tasks`, {
+      method: "PATCH",
+      body: JSON.stringify({ coluna: "fazendo", responsavel: "agente:analista" }),
+    });
+    expect(p1.status).toBe(200);
+    expect((p1.json as { coluna: string }).coluna).toBe("fazendo");
+    expect((p1.json as { responsavel: string }).responsavel).toBe("agente:analista");
+
+    const d = await fetchApi(`/tasks/${pai.id}?workspace=corp-tasks`, { method: "DELETE" });
+    expect(d.status).toBe(200);
+    const g2 = await fetchApi(`/tasks/${pai.id}?workspace=corp-tasks`);
+    expect(g2.status).toBe(404);
+  });
+
+  it("POST /tasks/:id/chat posta mensagem com menções e GET lista", async () => {
+    const t = (await (await fetchApi("/tasks?workspace=corp-tasks", { method: "POST", body: JSON.stringify({ titulo: "Com chat" }) })).json) as { id: string };
+    const m1 = await fetchApi(`/tasks/${t.id}/chat?workspace=corp-tasks`, {
+      method: "POST",
+      body: JSON.stringify({ autor: "humano", corpo: "por favor @analista revisar" }),
+    });
+    expect(m1.status).toBe(201);
+    expect((m1.json as { menciona: string[] }).menciona).toEqual(["agente:analista"]);
+    const m2 = await fetchApi(`/tasks/${t.id}/chat?workspace=corp-tasks`, {
+      method: "POST",
+      body: JSON.stringify({ autor: "agente:analista", corpo: "revisado", tipo: "handoff" }),
+    });
+    expect(m2.status).toBe(201);
+    const chat = await fetchApi(`/tasks/${t.id}/chat?workspace=corp-tasks`);
+    expect((chat.json as { autor: string }[]).map((m) => m.autor)).toEqual(["humano", "agente:analista"]);
+  });
+
+  it("POST /tasks sem titulo retorna erro e task inexistente 404", async () => {
+    const semTitulo = await fetchApi("/tasks?workspace=corp-tasks", { method: "POST", body: JSON.stringify({}) });
+    expect(semTitulo.status).toBe(400);
+    const fantasma = await fetchApi("/tasks/tsk-nada");
+    expect(fantasma.status).toBe(404);
+    const chatFantasma = await fetchApi("/tasks/tsk-nada/chat");
+    expect(chatFantasma.status).toBe(404);
+  });
+
+  it("GET /tasks/colunas lista colunas padrão", async () => {
+    const { status, json } = await fetchApi("/tasks/colunas");
+    expect(status).toBe(200);
+    expect(json as string[]).toEqual(expect.arrayContaining(["backlog", "fazendo", "bloqueado", "feito"]));
+  });
+});

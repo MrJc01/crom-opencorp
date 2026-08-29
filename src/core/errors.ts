@@ -17,4 +17,12 @@ export class SubcorpError extends OpencorpError {}
 export class BudgetError extends OpencorpError {}
 export class FlowError extends OpencorpError {}
 export class MeetingError extends OpencorpError {}
+export class TaskError extends OpencorpError {
+  readonly status?: number;
+
+  constructor(mensagem: string, opts: { exitCode?: number; status?: number } = {}) {
+    super(mensagem, opts);
+    this.status = opts.status;
+  }
+}
 export class ApprovalError extends OpencorpError {}

@@ -12,6 +12,8 @@ import { ApprovalsStore } from "../core/approvals-store.js";
 import { SettingsError, SettingsStore } from "../core/settings-store.js";
 import { FlowStore, type SessaoFlow } from "../core/flow-store.js";
 import { MeetingManager } from "../core/meeting-manager.js";
+import { TaskStore, type Task } from "../core/task-store.js";
+import { TaskError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
 
@@ -196,6 +198,7 @@ function statusHttpDe(erro: unknown): number {
   if (code === 3) return 403;
   if (code === 4) return 402;
   if (code === 5) return 409;
+  if (erro instanceof TaskError) return (erro as TaskError).status ?? 400;
   if (erro instanceof RegistryError || erro instanceof WorkspaceError || erro instanceof AgentError) return 422;
   return 500;
 }
@@ -287,6 +290,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   const settings = new SettingsStore(base);
   const flows = new FlowStore({ ...base, sessoes: opcoes.sessoes as unknown as SessaoFlow | undefined });
   const meetings = new MeetingManager({ ...base, sessoes: opcoes.sessoes as never });
+  const tasks = new TaskStore();
   const sessoes: SessaoApi = opcoes.sessoes ?? (new SessionManager(base) as unknown as SessaoApi);
 
   const token = opcoes.token ?? randomBytes(24).toString("hex");
@@ -605,6 +609,95 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             }
           });
           req.on("close", off);
+          return;
+        }
+
+        if (rota === "/tasks" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          enviar(res, 200, await tasks.listar(ws.path, {
+            coluna: url.searchParams.get("coluna") ?? undefined,
+            responsavel: url.searchParams.get("responsavel") ?? undefined,
+          }));
+          return;
+        }
+        if (rota === "/tasks" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+          const t = await tasks.criar(ws.path, {
+            titulo: String(corpo.titulo ?? ""),
+            descricao: corpo.descricao !== undefined ? String(corpo.descricao) : undefined,
+            coluna: corpo.coluna !== undefined ? String(corpo.coluna) : undefined,
+            prioridade: corpo.prioridade as "baixa" | "media" | "alta" | undefined,
+            labels: Array.isArray(corpo.labels) ? (corpo.labels as unknown[]).map(String) : undefined,
+            responsavel: corpo.responsavel !== undefined ? String(corpo.responsavel) : undefined,
+            due: corpo.due !== undefined ? String(corpo.due) : undefined,
+            task_pai: corpo.task_pai !== undefined ? String(corpo.task_pai) : undefined,
+            bloqueado_por: Array.isArray(corpo.bloqueado_por) ? (corpo.bloqueado_por as unknown[]).map(String) : undefined,
+          }, "api");
+          enviar(res, 201, t);
+          return;
+        }
+        if (rota === "/tasks/colunas" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          enviar(res, 200, await tasks.colunas(ws.path));
+          return;
+        }
+        const mTask = /^\/tasks\/([^/]+)(?:\/(chat))?$/.exec(rota);
+        if (mTask) {
+          const ws = await resolverWs(url);
+          const id = decodeURIComponent(mTask[1]!);
+          if (mTask[2] === "chat") {
+            if (req.method === "GET") {
+              enviar(res, 200, await tasks.chat(ws.path, id));
+              return;
+            }
+            if (req.method === "POST") {
+              const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+              const m = await tasks.mensagem(ws.path, id, {
+                autor: String(corpo.autor ?? "humano"),
+                corpo: String(corpo.corpo ?? ""),
+                tipo: corpo.tipo as "comentario" | "handoff" | "sistema" | "artefato" | "decisao" | undefined,
+                refs: Array.isArray(corpo.refs) ? (corpo.refs as unknown[]).map(String) : undefined,
+              });
+              enviar(res, 201, m);
+              return;
+            }
+          } else if (req.method === "GET") {
+            const t = await tasks.obter(ws.path, id);
+            enviar(res, 200, { ...t, bloqueada: tasks.bloqueado(ws.path, t) });
+            return;
+          } else if (req.method === "PATCH") {
+            const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+            let t: Task = await tasks.obter(ws.path, id);
+            if (typeof corpo.titulo === "string" || typeof corpo.descricao === "string" ||
+                typeof corpo.prioridade === "string" || corpo.due !== undefined) {
+              t = await tasks.editar(ws.path, id, {
+                titulo: typeof corpo.titulo === "string" ? corpo.titulo : undefined,
+                descricao: typeof corpo.descricao === "string" ? corpo.descricao : undefined,
+                prioridade: typeof corpo.prioridade === "string" ? corpo.prioridade : undefined,
+                due: corpo.due === null ? null : typeof corpo.due === "string" ? corpo.due : undefined,
+              });
+            }
+            if (typeof corpo.coluna === "string") {
+              t = await tasks.mover(ws.path, id, corpo.coluna, typeof corpo.pos === "number" ? corpo.pos : undefined);
+            }
+            if (typeof corpo.responsavel === "string") {
+              t = await tasks.atribuir(ws.path, id, corpo.responsavel);
+            }
+            if (Array.isArray(corpo.labels)) {
+              t = await tasks.label(ws.path, id, "add", (corpo.labels as unknown[]).map(String));
+            }
+            enviar(res, 200, t);
+            return;
+          } else if (req.method === "DELETE") {
+            await tasks.excluir(ws.path, id);
+            enviar(res, 200, { ok: true, id });
+            return;
+          }
+        }
+        if (rota === "/tasks/colunas" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          enviar(res, 200, await tasks.colunas(ws.path));
           return;
         }
 

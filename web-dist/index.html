@@ -10,12 +10,16 @@
 <body class="p-4">
 <header class="flex items-center gap-3 mb-4">
   <h1 class="text-xl font-bold">🏢 opencorp</h1>
+  <nav class="flex gap-2 text-sm">
+    <button class="btn" id="tab-dash" onclick="mostrarTab('dash')">Dashboard</button>
+    <button class="btn" id="tab-tasks" style="background:#334155" onclick="mostrarTab('tasks')">Tasks</button>
+  </nav>
   <span id="ws-atual" class="text-sm text-neutral-400"></span>
   <select id="ws-select" class="ml-auto"></select>
   <button class="btn" onclick="novoWs()">+ workspace</button>
   <span id="conn" class="text-xs warn">●</span>
 </header>
-<main class="grid grid-cols-3 gap-4">
+<main id="view-dash" class="grid grid-cols-3 gap-4">
   <section class="card p-3 col-span-2">
     <h2 class="font-semibold mb-2">Execuções <button class="btn ml-2" onclick="runOrdem()">▶ run</button></h2>
     <table id="execs"><thead><tr><th>id</th><th>agente</th><th>status</th><th>exit</th><th>início</th></tr></thead><tbody></tbody></table>
@@ -35,6 +39,21 @@
   <section class="card p-3">
     <h2 class="font-semibold mb-2">Logs do terminal</h2>
     <pre id="log" class="text-xs whitespace-pre-wrap h-40 overflow-auto">aguardando eventos SSE…</pre>
+  </section>
+</main>
+<main id="view-tasks" class="hidden">
+  <div class="flex gap-2 mb-3">
+    <input id="task-titulo" placeholder="nova task…" class="w-64"/>
+    <button class="btn" onclick="criarTask()">+ criar</button>
+  </div>
+  <div id="kanban" class="grid grid-cols-4 gap-3"></div>
+  <section id="chat-task" class="card p-3 mt-4 hidden">
+    <h2 class="font-semibold mb-2">Chat: <span id="chat-titulo" class="text-blue-400"></span></h2>
+    <div id="chat-msgs" class="text-sm space-y-1 h-64 overflow-auto mb-2"></div>
+    <div class="flex gap-2">
+      <input id="chat-input" placeholder="mensagem (@nome menciona um agente)…" class="flex-1"/>
+      <button class="btn" onclick="enviarMsg()">enviar</button>
+    </div>
   </section>
 </main>
 <script>
@@ -63,7 +82,36 @@ async function novoWs(){const id=prompt('id do workspace (kebab-case):');if(!id)
 document.getElementById('ws-select').onchange=e=>{localStorage.setItem('oc-ws',e.target.value);location.search='?ws='+e.target.value};
 const es=new EventSource('/events?token='+(token||''));
 es.onopen=()=>document.getElementById('conn').className='text-xs ok';
-es.onmessage=m=>{const ev=JSON.parse(m.data);const l=document.getElementById('log');l.textContent=JSON.stringify(ev)+'\n'+l.textContent;load()};
+es.onmessage=m=>{const ev=JSON.parse(m.data);const l=document.getElementById('log');l.textContent=JSON.stringify(ev)+'\n'+l.textContent;load();if(tabAtiva==='tasks'&&String(ev.tipo||'').startsWith('task.'))loadTasks();};
 load();setInterval(load,8000);
+
+let tabAtiva='dash',taskAberta=null;
+function mostrarTab(t){tabAtiva=t;document.getElementById('view-dash').classList.toggle('hidden',t!=='dash');document.getElementById('view-tasks').classList.toggle('hidden',t!=='tasks');
+document.getElementById('tab-'+t).style.background='#2563eb';document.getElementById('tab-'+(t==='dash'?'tasks':'dash')).style.background='#334155';if(t==='tasks')loadTasks();}
+async function loadTasks(){
+  const tasks=await q('/tasks');if(!Array.isArray(tasks))return;
+  const colunas=['backlog','fazendo','bloqueado','feito'];const extras=[...new Set(tasks.map(t=>t.coluna))].filter(c=>!colunas.includes(c));
+  const kb=document.getElementById('kanban');kb.innerHTML='';
+  for(const c of [...colunas,...extras]){
+    const card=document.createElement('div');card.className='card p-2';
+    card.innerHTML=`<h3 class="font-semibold text-sm mb-2 capitalize">${c} <span class="text-neutral-500">(${tasks.filter(t=>t.coluna===c).length})</span></h3>`;
+    for(const t of tasks.filter(x=>x.coluna===c).sort((a,b)=>a.pos-b.pos)){
+      const el=document.createElement('div');
+      el.className='text-xs bg-neutral-800 rounded p-2 mb-1 cursor-pointer hover:bg-neutral-700'+(taskAberta===t.id?' ring-1 ring-blue-500':'');
+      el.innerHTML=`<div class="font-medium">${t.titulo}</div><div class="text-neutral-400">${t.responsavel||'—'}${t.prioridade!=='media'?' · '+t.prioridade:''}${t.labels.length?' · '+t.labels.join(','):''}</div>`;
+      el.onclick=()=>abrirTask(t.id,t.titulo);card.appendChild(el);
+      const sel=document.createElement('select');sel.className='mt-1 w-full text-xs';sel.innerHTML=['backlog','fazendo','bloqueado','feito',...extras].map(x=>`<option ${x===t.coluna?'selected':''}>${x}</option>`).join('');
+      sel.onchange=async()=>{await api(`/tasks/${t.id}?`+(wsAtivo?'workspace='+wsAtivo:''),{method:'PATCH',headers:H,body:JSON.stringify({coluna:sel.value})});loadTasks();};
+      card.appendChild(el);card.appendChild(sel);
+    }
+    kb.appendChild(card);
+  }
+}
+async function criarTask(){const i=document.getElementById('task-titulo');if(!i.value)return;await api('/tasks'+(wsAtivo?'?workspace='+wsAtivo:''),{method:'POST',headers:H,body:JSON.stringify({titulo:i.value})});i.value='';loadTasks();}
+async function abrirTask(id,titulo){taskAberta=id;document.getElementById('chat-task').classList.remove('hidden');document.getElementById('chat-titulo').textContent=titulo;loadTasks();carregarChat();}
+async function carregarChat(){if(!taskAberta)return;const msgs=await q(`/tasks/${taskAberta}/chat`);
+  document.getElementById('chat-msgs').innerHTML=(Array.isArray(msgs)?msgs:[]).map(m=>`<div><span class="text-neutral-500">${(m.criado_em||'').slice(11,16)}</span> <b class="${m.autor==='humano'?'text-green-400':'text-blue-400'}">${m.autor}</b> ${m.corpo}${m.menciona?.length?' <span class="text-yellow-400">'+m.menciona.map(x=>'@'+x.replace('agente:','')).join(' ')+'</span>':''}</div>`).join('')||'<div class="text-neutral-500">sem mensagens</div>';}
+async function enviarMsg(){const i=document.getElementById('chat-input');if(!i.value||!taskAberta)return;
+  await api(`/tasks/${taskAberta}/chat?`+(wsAtivo?'workspace='+wsAtivo:''),{method:'POST',headers:H,body:JSON.stringify({autor:'humano',corpo:i.value})});i.value='';carregarChat();}
 </script>
 </body></html>
