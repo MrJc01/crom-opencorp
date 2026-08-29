@@ -1,7 +1,7 @@
 ---
 description: Implementador de etapas opencorp — escreve código + testes unitários de UM chunk por sessão, sem execuções reais de LLM.
 mode: all
-model: opencode/mimo-v2.5-free
+model: opencode/nemotron-3-ultra-free
 permission:
   bash: allow
   edit: allow

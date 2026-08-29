@@ -142,13 +142,11 @@ function extrairVereditoDeConteudo(conteudo: string): "PASS" | "FAIL" {
   const linhas = conteudo.split("\n");
   for (let i = linhas.length - 1; i >= 0; i--) {
     const linha = linhas[i]!.trim();
-    if (linha.startsWith("VEREDITO:")) {
-      // Formato: "VEREDITO: PASS — ..." ou "VEREDITO: FAIL — ..."
-      if (linha.startsWith("VEREDITO: PASS")) return "PASS";
-      if (linha.startsWith("VEREDITO: FAIL")) return "FAIL";
-      // Fallback: se não começa com PASS/FAIL direto, procurar palavra isolada
-      if (/\bFAIL\b/.test(linha)) return "FAIL";
-      if (/\bPASS\b/.test(linha)) return "PASS";
+    if (/^VEREDITO:/i.test(linha)) {
+      // Formatos: "VEREDITO: PASS", "VEREDITO: **PASS** (5 PASS · 0 FAIL)", "VEREDITO: FAIL ..."
+      // A decisão é a PRIMEIRA palavra após "VEREDITO:" (ignora detalhes como "0 FAIL")
+      const m = /VEREDITO:\s*\**\s*(PASS|FAIL)/i.exec(linha);
+      if (m) return m[1]!.toUpperCase() as "PASS" | "FAIL";
       return "FAIL";
     }
   }
@@ -176,8 +174,7 @@ async function rodarSpecUnica(
     await writeFileAtomic(logPath, ""); // criar arquivo de log
 
     const comando = [
-      "node",
-      "bin/opencorp.mjs",
+      "opencode",
       "run",
       "--auto",
       "--agent",
@@ -186,6 +183,7 @@ async function rodarSpecUnica(
       model,
       "--title",
       `cego-${spec.etapa}-${timestamp}`,
+      prompt,
     ];
 
     const env = {
