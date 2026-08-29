@@ -103,7 +103,7 @@
 
 | Etapa | Tema | Status |
 |---|---|---|
-| 19 | Task Board + Chat interno (docs/14) | `pendente` |
+| 19 | Task Board + Chat interno (docs/14) | `implementada — bateria cega pendente` |
 | 20 | Scheduler | `pendente` |
 | 21 | Webhooks & Triggers | `pendente` |
 | 22 | Tools / MCP | `pendente` |
