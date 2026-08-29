@@ -329,3 +329,46 @@ describe("MeetingManager — encerramentos", () => {
     expect(err.message).toContain("agent create");
   });
 });
+
+describe("MeetingManager — listar", () => {
+  it("expõe criado_em em ISO que formata como data curta (coluna do meeting list)", async () => {
+    const { wsPath } = await ambiente();
+    const registros = new RegistryStore();
+    const { writeFileAtomic } = await import("../src/utils/fs-safe.js");
+    const dir = join(wsPath, ".opencorp", "registries", "chats", "reuniao-teste-001");
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(dir, { recursive: true });
+    await writeFileAtomic(
+      join(dir, "meta.json"),
+      JSON.stringify({
+        id: "reuniao-teste-001",
+        categoria: "chats",
+        descricao: "pauta de teste",
+        criado_por: "ceo-documentos",
+        criado_em: "2026-08-28T14:30:11.000Z",
+        atualizado_em: "2026-08-28T14:35:00.000Z",
+        permissoes: { leitura: ["*"], escrita: ["ceo-documentos"], modificacao_meta: [] },
+        tags: [],
+        referencias: [],
+        extras: {
+          tipo: "reuniao",
+          pauta: "pauta de teste",
+          status: "encerrada",
+          turno: 2,
+          max_turnos: 6,
+          participantes: ["ceo-documentos"],
+          moderator: "ceo-documentos",
+          moderacao: "fixa",
+          modelo: "opencode/hy3-free",
+          motivo_fim: "max_turnos",
+          encerrada_em: "2026-08-28T14:35:00.000Z",
+        },
+      }, null, 2) + "\n",
+    );
+    const salas = await new MeetingManager().listar(wsPath);
+    expect(salas).toHaveLength(1);
+    const dataCurta = salas[0]!.criado_em.slice(0, 16).replace("T", " ");
+    expect(dataCurta).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    expect(salas[0]!.pauta).toBe("pauta de teste");
+  });
+});

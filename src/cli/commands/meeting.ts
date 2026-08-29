@@ -61,10 +61,11 @@ export function registerMeetingCommand(program: Command): void {
           console.log('nenhuma reunião — abra uma com: opencorp meeting start "<pauta>"');
           return;
         }
-        console.log("id                                   status              turnos  pauta");
+        const formatarData = (iso: string): string => iso.slice(0, 16).replace("T", " ");
+        console.log("id                                   status              turnos  abertura            pauta");
         for (const s of salas) {
           console.log(
-            `${s.id}  ${s.status.padEnd(19)} ${`${s.turno}/${s.max_turnos}`.padEnd(7)} ${s.pauta.slice(0, 60)}`,
+            `${s.id}  ${s.status.padEnd(19)} ${`${s.turno}/${s.max_turnos}`.padEnd(7)} ${formatarData(s.criado_em).padEnd(19)} ${s.pauta.slice(0, 60)}`,
           );
         }
       }),

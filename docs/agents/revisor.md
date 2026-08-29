@@ -2,6 +2,7 @@
 id: revisor
 role: Revisor de etapa
 category: processo
+mode: all
 model: openrouter/google/gemini-2.5-flash
 tools: [read, bash, grep, glob]
 permissions: level-1
