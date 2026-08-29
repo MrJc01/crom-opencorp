@@ -12,6 +12,7 @@ import { registerApprovalsCommand } from "./commands/approvals.js";
 import { registerBudgetCommand } from "./commands/budget.js";
 import { registerMeetingCommand } from "./commands/meeting.js";
 import { registerSubcorpCommand } from "./commands/subcorp.js";
+import { registerSupervisorCommand } from "./commands/supervisor.js";
 import { registerTemplateCommand } from "./commands/template.js";
 import { registerWorkspaceCommands } from "./commands/workspace.js";
 import { notImplementedAction } from "./placeholder.js";
@@ -65,6 +66,8 @@ export function buildProgram(): Command {
   registerTemplateCommand(program);
 
   registerSubcorpCommand(program);
+
+  registerSupervisorCommand(program);
 
   const test = program.command("test").description("teste cego (QA black-box via OpenCode)");
   test

@@ -57,6 +57,12 @@ const SECOES: Secao[] = [
     chaves: ["meeting.max_turns", "meeting.per_agent_usd", "meeting.moderator"],
   },
   {
+    id: "supervisor",
+    label: "Supervisor",
+    hint: "intervalo, habilitado, ordens por tick",
+    chaves: ["supervisor.interval_minutes", "supervisor.enabled", "supervisor.max_orders_per_tick"],
+  },
+  {
     id: "avancado",
     label: "Avançado",
     hint: "tema, verbose, versão",

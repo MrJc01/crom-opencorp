@@ -63,6 +63,13 @@ export const settingsSchema = z.object({
       moderator: z.string().min(1).default("secretario"),
     })
     .prefault({}),
+  supervisor: z
+    .object({
+      interval_minutes: z.number().int().min(1).default(15),
+      enabled: z.boolean().default(false),
+      max_orders_per_tick: z.number().int().min(1).default(3),
+    })
+    .prefault({}),
 });
 
 export type Settings = z.infer<typeof settingsSchema>;
