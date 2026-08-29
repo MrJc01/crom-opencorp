@@ -37,9 +37,10 @@ export const settingsSchema = z.object({
   tests: z
     .object({
       blind: z.boolean().default(true),
-      model: z.string().min(1).default("opencode/hy3-free"),
+      test_model: z.string().min(1).default("opencode/hy3-free"),
       reports_dir: z.string().min(1).default(".opencorp/reports/testes"),
-      max_fix_cycles: z.number().int().min(1).default(3),
+      rotation: z.array(z.string().min(1)).default(["opencode/hy3-free", "opencode/nemotron-3-ultra-free", "opencode/mimo-v2.5-free"]),
+      timeout_minutes: z.number().int().min(1).default(25),
     })
     .prefault({}),
   cloud: z

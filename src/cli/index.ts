@@ -17,6 +17,7 @@ import { registerSupervisorCommand } from "./commands/supervisor.js";
 import { registerServeCommand } from "./commands/serve.js";
 import { registerTemplateCommand } from "./commands/template.js";
 import { registerWorkspaceCommands } from "./commands/workspace.js";
+import { registerTestCommand } from "./commands/test.js";
 import { notImplementedAction } from "./placeholder.js";
 
 const require = createRequire(import.meta.url);
@@ -75,14 +76,7 @@ export function buildProgram(): Command {
 
   registerServeCommand(program);
 
-  const test = program.command("test").description("teste cego (QA black-box via OpenCode)");
-  test
-    .command("blind")
-    .argument("<etapa>", "etapa a testar (ex.: 01)")
-    .option("--model <provider/model>", "modelo do testador cego")
-    .option("--spec <arquivo>", "spec a executar (docs/tests/ETAPA-0X.md)")
-    .description("dispara o testador cego para uma etapa")
-    .action(notImplementedAction("opencorp test blind"));
+  registerTestCommand(program);
 
   const cloud = program.command("cloud").description("backup/sync (opcional)");
   cloud
