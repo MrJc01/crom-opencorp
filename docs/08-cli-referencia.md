@@ -104,9 +104,11 @@ opencorp subcorp remove <id>
 ## test (teste cego)
 
 ```bash
-opencorp test blind <etapa> [--model provider/model] [--spec docs/tests/ETAPA-0X.md]
-# spawn: opencode run --agent testador-cego --model $test_model --dir <raiz>
-# relatório → .opencorp/reports/testes/ETAPA-0X-<timestamp>.md
+opencorp test blind <etapa> [--model provider/model] [--timeout min] [--list]
+# <etapa>: número ("01") ou fragmento ("workspaces") de docs/tests/ETAPA-XX-*.md; "all" roda todas em sequência
+# rotação automática de modelos free em rate limit/timeout (settings tests.rotation)
+# relatório e logs em .opencorp/reports/testes/ · exit 0 = PASS, 1 = FAIL
+opencorp test blind all          # regressão completa + relatório consolidado
 ```
 
 ## cloud (opcional — ETAPA 8)
