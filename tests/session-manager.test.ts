@@ -64,7 +64,7 @@ describe("SessionManager.rodar (execa mockado — nunca roda opencode real)", ()
     expect(args).toContain("--agent");
     expect(args[args.indexOf("--agent") + 1]).toBe("executor-padrao");
     expect(args).toContain("--model");
-    expect(args[args.indexOf("--model") + 1]).toBe("opencode/grok-code");
+    expect(args[args.indexOf("--model") + 1]).toBe("opencode/nemotron-3-ultra-free");
     expect(args).toContain("--dir");
     expect(args[args.indexOf("--dir") + 1]).toBe(ws.path);
     expect(args[args.length - 1]).toBe("crie o probe.txt");

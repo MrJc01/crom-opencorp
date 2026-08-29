@@ -8,7 +8,7 @@ export const agentSchema = z.object({
   category: z.enum(["ceo", "secretario", "operario", "custom"]),
   model: z
     .string()
-    .regex(/^[a-z0-9_-]+\/\S+$/i, "use o formato provider/model (ex.: opencode/grok-code)"),
+    .regex(/^[a-z0-9_-]+\/\S+$/i, "use o formato provider/model (ex.: opencode/nemotron-3-ultra-free)"),
   inherits: z.string().min(1).nullable().optional(),
   tools: z.array(z.string().min(1)).min(1),
   permissions: z.enum(["level-1", "level-2", "level-3"]),

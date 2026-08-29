@@ -15,6 +15,7 @@ import { registerSubcorpCommand } from "./commands/subcorp.js";
 import { registerFlowCommand } from "./commands/flow.js";
 import { registerSupervisorCommand } from "./commands/supervisor.js";
 import { registerServeCommand } from "./commands/serve.js";
+import { registerWebCommand } from "./commands/web.js";
 import { registerTemplateCommand } from "./commands/template.js";
 import { registerWorkspaceCommands } from "./commands/workspace.js";
 import { registerTestCommand } from "./commands/test.js";
@@ -75,6 +76,8 @@ export function buildProgram(): Command {
   registerFlowCommand(program);
 
   registerServeCommand(program);
+
+  registerWebCommand(program);
 
   registerTestCommand(program);
 

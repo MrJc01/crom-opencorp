@@ -2,7 +2,7 @@
 id: ceo-documentos
 role: Chief Knowledge Officer (CEO Documentador)
 category: ceo
-model: openrouter/google/gemini-2.5-pro
+model: opencode/nemotron-3-ultra-free
 tools: [read, write, registry]
 permissions: level-1
 budget:

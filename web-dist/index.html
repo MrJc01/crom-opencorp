@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>opencorp</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>body{background:#0a0a0a;color:#e5e5e5}.card{background:#171717;border:1px solid #262626;border-radius:.5rem}.btn{background:#2563eb;border-radius:.375rem;padding:.375rem .75rem;font-size:.875rem}.ok{color:#4ade80}.err{color:#f87171}.warn{color:#fbbf24}input,select{background:#262626;border:1px solid #404040;border-radius:.375rem;padding:.375rem .5rem;color:#e5e5e5;font-size:.875rem}table{width:100%;font-size:.875rem}td,th{border-bottom:1px solid #262626;padding:.375rem .5rem;text-align:left}a{color:#60a5fa}</style>
+</head>
+<body class="p-4">
+<header class="flex items-center gap-3 mb-4">
+  <h1 class="text-xl font-bold">🏢 opencorp</h1>
+  <span id="ws-atual" class="text-sm text-neutral-400"></span>
+  <select id="ws-select" class="ml-auto"></select>
+  <button class="btn" onclick="novoWs()">+ workspace</button>
+  <span id="conn" class="text-xs warn">●</span>
+</header>
+<main class="grid grid-cols-3 gap-4">
+  <section class="card p-3 col-span-2">
+    <h2 class="font-semibold mb-2">Execuções <button class="btn ml-2" onclick="runOrdem()">▶ run</button></h2>
+    <table id="execs"><thead><tr><th>id</th><th>agente</th><th>status</th><th>exit</th><th>início</th></tr></thead><tbody></tbody></table>
+  </section>
+  <section class="card p-3">
+    <h2 class="font-semibold mb-2">Approvals</h2>
+    <table id="aprov"><thead><tr><th>id</th><th>padrão</th><th>ação</th></tr></thead><tbody></tbody></table>
+  </section>
+  <section class="card p-3">
+    <h2 class="font-semibold mb-2">Agentes</h2>
+    <table id="agentes"><thead><tr><th>id</th><th>cat.</th><th>modelo</th></tr></thead><tbody></tbody></table>
+  </section>
+  <section class="card p-3">
+    <h2 class="font-semibold mb-2">Custos</h2>
+    <pre id="custos" class="text-xs whitespace-pre-wrap"></pre>
+  </section>
+  <section class="card p-3">
+    <h2 class="font-semibold mb-2">Logs do terminal</h2>
+    <pre id="log" class="text-xs whitespace-pre-wrap h-40 overflow-auto">aguardando eventos SSE…</pre>
+  </section>
+</main>
+<script>
+const qs=new URLSearchParams(location.search);let token=localStorage.getItem('oc-token');
+if(!token){token=prompt('Token da API (veja ~/.opencorp/secrets.json):');if(token)localStorage.setItem('oc-token',token);}
+const H={'Authorization':'Bearer '+(token||''),'content-type':'application/json'};
+const api=p=>fetch(p,{headers:H}).then(r=>{if(r.status===401){localStorage.removeItem('oc-token');location.reload();throw 0}return r.json()});
+let wsAtivo=qs.get('ws')||localStorage.getItem('oc-ws')||'';
+function q(u){return api(u+(wsAtivo?(u.includes('?')?'&':'?')+'workspace='+encodeURIComponent(wsAtivo):''))}
+async function load(){
+  try{
+    const wss=await api('/workspaces');const s=document.getElementById('ws-select');
+    s.innerHTML='<option value="">—</option>'+wss.map(w=>`<option ${w.id===wsAtivo?'selected':''}>${w.id}</option>`).join('');
+    document.getElementById('ws-atual').textContent=wsAtivo?('ativo: '+wsAtivo):'sem workspace';
+    const [execs,apro,ags]=await Promise.all([q('/sessions'),q('/approvals'),q('/agents').catch(()=>[])]);
+    document.querySelector('#execs tbody').innerHTML=(execs||[]).slice(0,12).map(e=>`<tr><td>${e.id||e.exec_id||''}</td><td>${e.agente||''}</td><td class="${String(e.status).includes('falhou')?'err':'ok'}">${e.status||''}</td><td>${e.exit_code??''}</td><td>${(e.inicio||e.criado_em||'').slice(0,19)}</td></tr>`).join('');
+    document.querySelector('#aprov tbody').innerHTML=(apro||[]).filter(a=>a.status==='pendente').map(a=>`<tr><td>${a.id.slice(-8)}</td><td>${a.padrao||''}</td><td><button class="btn" onclick="dec('${a.id}',1)">✓</button> <button class="btn" style="background:#dc2626" onclick="dec('${a.id}',0)">✗</button></td></tr>`).join('')||'<tr><td colspan=3>nenhuma pendente</td></tr>';
+    document.querySelector('#agentes tbody').innerHTML=(ags||[]).map(a=>`<tr><td>${a.id}</td><td>${a.category||a.categoria||''}</td><td class="text-xs">${a.model||a.modelo||''}</td></tr>`).join('');
+    const b=await q('/budget/status').catch(()=>null);
+    if(b)document.getElementById('custos').textContent=JSON.stringify(b.estado?.por_agente||{},null,1)+('\nworkspace: US$ '+(b.estado?.workspace_usd_hoje??0));
+  }catch(e){}
+}
+async function dec(id,ok){await api('/approvals/'+id+(ok?'/approve':'/reject'),{method:'POST',headers:H,body:JSON.stringify({motivo:'web'})});load()}
+async function runOrdem(){const o=prompt('Ordem para executor-padrao:');if(!o)return;const r=await fetch('/agents/executor-padrao/run'+(wsAtivo?'?workspace='+wsAtivo:''),{method:'POST',headers:H,body:JSON.stringify({ordem:o})});alert(r.status===202?'iniciado (202)':('HTTP '+r.status+' — '+await r.text()));}
+async function novoWs(){const id=prompt('id do workspace (kebab-case):');if(!id)return;await api('/workspaces',{method:'POST',headers:H,body:JSON.stringify({id})});localStorage.setItem('oc-ws',id);location.search='?ws='+id;}
+document.getElementById('ws-select').onchange=e=>{localStorage.setItem('oc-ws',e.target.value);location.search='?ws='+e.target.value};
+const es=new EventSource('/events?token='+(token||''));
+es.onopen=()=>document.getElementById('conn').className='text-xs ok';
+es.onmessage=m=>{const ev=JSON.parse(m.data);const l=document.getElementById('log');l.textContent=JSON.stringify(ev)+'\n'+l.textContent;load()};
+load();setInterval(load,8000);
+</script>
+</body></html>

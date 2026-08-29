@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes } from "node:crypto";
 import { join, resolve, relative, isAbsolute } from "node:path";
 import { stat, readdir, readFile } from "node:fs/promises";
+import { existsSync, statSync, readFileSync } from "node:fs";
 import { WorkspaceManager } from "../core/workspace-manager.js";
 import { AgentStore } from "../core/agent-store.js";
 import { SessionManager, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
@@ -163,6 +164,33 @@ async function lerArquivoWorkspace(alvo: string): Promise<{ tipo: "arquivo"; con
   return { tipo: "arquivo", conteudo };
 }
 
+/** Serve a UI estática de web-dist/ (HTML, JS, CSS) — 404 via null */
+function servirEstatico(rota: string): { tipo: string; corpo: string } | null {
+  try {
+    const raiz = resolve(import.meta.dirname ?? ".", "..", "..", "web-dist");
+    const caminhoRel = rota === "/" ? "index.html" : rota.replace(/^\/+/, "");
+    const alvo = resolve(raiz, caminhoRel);
+    if (!alvo.startsWith(raiz)) return null;
+    if (!existsSync(alvo) || !statSync(alvo).isFile()) {
+      if (caminhoRel.includes(".")) return null;
+      return { tipo: "text/html; charset=utf-8", corpo: readFileSync(join(raiz, "index.html"), "utf8") };
+    }
+    const ext = caminhoRel.split(".").pop() ?? "";
+    const tipos: Record<string, string> = {
+      html: "text/html; charset=utf-8",
+      js: "text/javascript",
+      css: "text/css",
+      json: "application/json",
+      svg: "image/svg+xml",
+      png: "image/png",
+      ico: "image/x-icon",
+    };
+    return { tipo: tipos[ext] ?? "application/octet-stream", corpo: readFileSync(alvo, "utf8") };
+  } catch {
+    return null;
+  }
+}
+
 function statusHttpDe(erro: unknown): number {
   const code = (erro as { exitCode?: number }).exitCode;
   if (code === 3) return 403;
@@ -277,6 +305,15 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         enviar(res, 204, {});
         return;
       }
+      // ── UI estática PÚBLICA (a UI pede o token; os dados continuam protegidos) ──
+      if (req.method === "GET" && (rota === "/" || /\.[a-z0-9]+$/i.test(rota)) && rota !== "/events" && !rota.startsWith("/settings/") && rota !== "/doc") {
+        const estatico = servirEstatico(rota);
+        if (estatico !== null) {
+          res.writeHead(200, { "content-type": estatico.tipo, "access-control-allow-origin": "*" });
+          res.end(estatico.corpo);
+          return;
+        }
+      }
       if (rota === "/health") {
         enviar(res, 200, { ok: true, versao: version });
         return;
@@ -286,7 +323,9 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         enviar(res, 200, gerarOpenApiSpec());
         return;
       }
-      if ((req.headers.authorization ?? "") !== `Bearer ${token}`) {
+      const tokenQuery = url.searchParams.get("token") ?? "";
+      const autenticado = (req.headers.authorization ?? "") === `Bearer ${token}` || tokenQuery === token;
+      if (!autenticado) {
         enviar(res, 401, { erro: "token ausente ou inválido — Authorization: Bearer <token>" });
         return;
       }
@@ -567,6 +606,16 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           });
           req.on("close", off);
           return;
+        }
+
+        if (req.method === "GET" && rota !== "/events") {
+          // ── fallback estático: UI web (estilo opencode — servidor embute a web) ──
+          const estatico = servirEstatico(rota);
+          if (estatico !== null) {
+            res.writeHead(200, { "content-type": estatico.tipo, "access-control-allow-origin": "*" });
+            res.end(estatico.corpo);
+            return;
+          }
         }
 
         const sugestoes = sugerirRotas(rota);

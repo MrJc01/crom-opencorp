@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const settingsSchema = z.object({
   version: z.number().int().default(1),
-  default_model: z.string().min(1).default("opencode/grok-code"),
+  default_model: z.string().min(1).default("opencode/nemotron-3-ultra-free"),
   test_model: z.string().min(1).default("opencode/hy3-free"),
   secretary: z
     .object({

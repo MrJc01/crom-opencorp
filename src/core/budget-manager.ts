@@ -23,6 +23,7 @@ const PRECOS_POR_TURNO: Record<string, number> = {
   "opencode/grok-code": 0.0025,
   "opencode/mimo-v2.5-free": 0.0005,
   "opencode/hy3-free": 0.0005,
+  "opencode/nemotron-3-ultra-free": 0.0005,
 };
 const PRECO_TURNO_PADRAO = 0.004;
 

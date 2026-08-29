@@ -2,7 +2,7 @@
 id: secretario
 role: Secretário / Chief of Staff
 category: secretario
-model: openrouter/google/gemini-2.5-flash
+model: opencode/nemotron-3-ultra-free
 tools: [read, registry]
 permissions: level-1
 budget:

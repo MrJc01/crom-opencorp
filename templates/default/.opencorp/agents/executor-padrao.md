@@ -2,7 +2,7 @@
 id: executor-padrao
 role: Operário
 category: operario
-model: opencode/grok-code
+model: opencode/nemotron-3-ultra-free
 tools: [read, write, edit, bash, registry]
 permissions: level-2
 budget:

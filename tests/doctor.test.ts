@@ -82,7 +82,7 @@ describe("loadSettings", () => {
     const check = await loadSettings(caminho);
     expect(check.check.status).toBe("ok");
     expect(check.settings?.budget.daily_usd).toBe(2.5);
-    expect(check.settings?.default_model).toBe("opencode/grok-code");
+    expect(check.settings?.default_model).toBe("opencode/nemotron-3-ultra-free");
   });
 
   it("JSON quebrado → fail", async () => {
