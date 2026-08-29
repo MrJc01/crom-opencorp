@@ -22,9 +22,10 @@
 - Setup: `budget set --per-agent-usd 0.000001` e provoque uma falha
 - Esperado: healing tenta e é RECUSADO por orçamento (registrado), não executa; restore `budget set --per-agent-usd 1`.
 
-### 5. Sucesso encerra o ciclo
-- Setup: falha simples que o agente CONSEGUE corrigir (ex.: ordem "escreva o número 42 no arquivo sandbox/num.txt" com um pedido impossível na primeira tentativa — se difícil de forçar, use a falha do cenário 1 e permita que a correção pelo menos rode até o fim com status claro)
-- Esperado: quando a correção termina OK, a cadeia encerra (sem novas ordens de correção sobre a correção).
+### 5. Sucesso encerra o ciclo (v1 — formato provável)
+- Setup: falha via guard (`execute: rm -rf /tmp/x` → `falhou`), deixe o supervisor disparar a correção
+- Esperado: quando a correção conclui com sucesso, o supervisor NÃO emite nova ordem para a mesma execução original (chave `healing_ok` no estado / ausência de nova ordem de correção no tick seguinte). **Limitação v1 documentada:** o agente LLM quase sempre conclui a sessão (`concluido`) mesmo falhando na tarefa — falhas observáveis para o healing são guard (exit 3), orçamento (exit 4), HITL rejeitado (exit 5) e spawn/timeout; falha semântica dentro de sessão concluída não é detectável em v1.
+- Edge conhecido (não bloqueia): apagar a pasta do workspace com supervisor rodando deixa o daemon órfão (pidfile some junto) — matar manualmente; `supervisor stop --pid` fica para Fase B+.
 
 ### 6. Configuração
 - Comando: `settings get healing` (ou equivalente)

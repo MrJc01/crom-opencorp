@@ -44,3 +44,8 @@ CLI (commander, `bin/opencorp.mjs` → `src/cli`) chama o core puro (`src/core`:
 - **ETAPA 12 — self-healing**: recuperação automática de falhas de sessão.
 - **ETAPA 13 — flows**: fluxos declarativos multi-passos.
 - Fase C (API/web/canvas) e `cloud backup/sync` (ETAPA 08, opcional) ficam para depois da Fase B.
+
+## Limitações Fase B v1 (self-healing e supervisor)
+
+- Healing dispara apenas em execuções com status `falhou` observável: guard (exit 3), orçamento (exit 4), HITL rejeitado (exit 5), spawn/timeout. Falha semântica dentro de sessão `concluido` (o agente "termina" mesmo errando a tarefa) não é detectável em v1.
+- Se a pasta do workspace for apagada com o supervisor rodando, o daemon fica órfão (pidfile morre junto) — matar manualmente. `supervisor stop --pid` planejado para Fase B+.

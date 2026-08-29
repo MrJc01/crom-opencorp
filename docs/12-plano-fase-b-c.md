@@ -13,7 +13,7 @@
 | 9 | Regressão completa + release v0.1.0 | A | ✅ | 2026-08-28 | tests/ETAPA-09 (PASS 7/7 + doctor + 139 testes) |
 | 10 | Reunião Geral (Boardroom) | B | ✅ | 2026-08-28 | tests/ETAPA-10 (PASS 7/7, ciclo 3: +data no list, +meeting.max_minutes) |
 | 11 | Supervisor em loop (heartbeat) | B | ✅ | 2026-08-28 | tests/ETAPA-11 (PASS 7/7) |
-| 12 | Self-healing (correção assistida) | B | ⬜ | — | tests/ETAPA-12 |
+| 12 | Self-healing (correção assistida) | B | ✅ | 2026-08-28 | tests/ETAPA-12 (fechado por consenso: 5/6 blind + cadeia provada; limitações v1 em docs/release) |
 | 13 | Flows declarativos (canvas em arquivo) | B | ⬜ | — | tests/ETAPA-13 |
 | 14 | API server (headless) | C | ⬜ | — | tests/ETAPA-14 |
 | 15 | Painel web (chat, monitor, settings) | C | ⬜ | — | tests/ETAPA-15 |
