@@ -3,7 +3,7 @@ id: testador-cego
 role: Testador QA black-box
 category: processo
 mode: all
-model: opencode/hy3-free
+model: openrouter/google/gemini-2.5-flash-lite
 tools: [bash, read]
 permissions: level-2
 budget:

@@ -1,7 +1,7 @@
 ---
 description: Testador QA black-box do opencorp — executa specs de teste cego (docs/tests/ETAPA-0X.md) usando apenas o CLI opencorp, sem ler código-fonte, e grava o relatório no caminho indicado na ordem.
 mode: all
-model: opencode/hy3-free
+model: openrouter/google/gemini-2.5-flash-lite
 tools:
   bash: true
   read: true
