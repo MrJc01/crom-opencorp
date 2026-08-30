@@ -25,7 +25,7 @@ import { loadPersistedAuth, getToken, getWsAtivo, setToken, setWsAtivo, setWorks
 describe("format.ts — formatters puros", () => {
   describe("escapeHtml", () => {
     it("escapa & < > \" '", () => {
-      expect(escapeHtml('A & B < C > D "E" \'F\'')).toBe('A & B < C > D "E" &#039;F&#039;');
+      expect(escapeHtml('A & B < C > D "E" \'F\'')).toBe('A &amp; B &lt; C &gt; D &quot;E&quot; &#039;F&#039;');
     });
     it("string vazia retorna vazio", () => {
       expect(escapeHtml('')).toBe('');

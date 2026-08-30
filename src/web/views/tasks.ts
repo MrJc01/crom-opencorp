@@ -19,8 +19,8 @@ export async function renderTasks(): Promise<void> {
   if (!viewEl) return;
 
   viewEl.innerHTML = `
-    <div class="flex gap-2 mb-6">
-      <input id="task-titulo" placeholder="Título da task — Enter cria" class="w-80" onkeydown="if(event.key==='Enter')criarTask()"/>
+    <div class="flex flex-wrap gap-2 mb-6">
+      <input id="task-titulo" placeholder="Título da task — Enter cria" class="flex-1 min-w-0 max-w-80" onkeydown="if(event.key==='Enter')criarTask()"/>
       <button class="btn" onclick="criarTask()">+ Criar task</button>
     </div>
     <div id="kanban" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"></div>
@@ -69,7 +69,7 @@ export async function criarTask(): Promise<void> {
   const titulo = input.value.trim();
   if (!titulo) return;
 
-  await api('/tasks', { method: 'POST', body: JSON.stringify({ titulo }) });
+  await api('/tasks', { method: 'POST', body: JSON.stringify({ titulo }) }).catch(() => undefined);
   input.value = '';
   renderTasks();
 }
@@ -174,7 +174,7 @@ export async function enviarMsgDrawer(): Promise<void> {
   const corpo = input.value.trim();
   if (!corpo || !taskAbertaId) return;
 
-  await api('/tasks/' + taskAbertaId + '/chat', { method: 'POST', body: JSON.stringify({ autor: 'humano', corpo }) });
+  await api('/tasks/' + taskAbertaId + '/chat', { method: 'POST', body: JSON.stringify({ autor: 'humano', corpo }) }).catch(() => undefined);
   input.value = '';
 
   const chat = await api<Record<string, unknown>[]>('/tasks/' + taskAbertaId + '/chat');
@@ -191,7 +191,7 @@ export async function moverTaskColuna(): Promise<void> {
   const coluna = (document.getElementById('drawer-coluna') as HTMLSelectElement)?.value;
   if (!coluna) return;
 
-  await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ coluna }) });
+  await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ coluna }) }).catch(() => undefined);
   renderTasks();
   await carregarDrawerConteudo(taskAbertaId);
 }
@@ -202,7 +202,7 @@ export async function atualizarTaskPrioridade(): Promise<void> {
   const prioridade = (document.getElementById('drawer-prioridade') as HTMLSelectElement)?.value;
   if (!prioridade) return;
 
-  await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ prioridade }) });
+  await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ prioridade }) }).catch(() => undefined);
   renderTasks();
 }
 
@@ -210,7 +210,7 @@ export async function atualizarTaskPrioridade(): Promise<void> {
 export async function atualizarTaskResponsavel(): Promise<void> {
   if (!taskAbertaId) return;
   const responsavel = (document.getElementById('drawer-responsavel') as HTMLInputElement)?.value;
-  await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ responsavel }) });
+  await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ responsavel }) }).catch(() => undefined);
   renderTasks();
 }
 
@@ -218,7 +218,7 @@ export async function atualizarTaskResponsavel(): Promise<void> {
 export async function atualizarTaskDue(): Promise<void> {
   if (!taskAbertaId) return;
   const due = (document.getElementById('drawer-due') as HTMLInputElement)?.value;
-  await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ due: due || null }) });
+  await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ due: due || null }) }).catch(() => undefined);
 }
 
 /** Atualiza labels da task */
@@ -226,7 +226,7 @@ export async function atualizarTaskLabels(): Promise<void> {
   if (!taskAbertaId) return;
   const labels = (document.getElementById('drawer-labels') as HTMLInputElement)?.value
     .split(',').map(s => s.trim()).filter(Boolean) || [];
-  await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ labels }) });
+  await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ labels }) }).catch(() => undefined);
   renderTasks();
 }
 
@@ -234,5 +234,5 @@ export async function atualizarTaskLabels(): Promise<void> {
 export async function atualizarTaskDescricao(): Promise<void> {
   if (!taskAbertaId) return;
   const descricao = (document.getElementById('drawer-descricao') as HTMLTextAreaElement)?.value || '';
-  await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ descricao }) });
+  await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ descricao }) }).catch(() => undefined);
 }

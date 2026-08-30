@@ -78,7 +78,7 @@ interface ScheduleJob {
 async function carregarAgendaLista(): Promise<void> {
   const escopo = getAgendaEscopoAtual();
   const jobs = escopo === 'todas'
-    ? await api<ScheduleJob[]>('/schedules').catch(() => [])
+    ? await api<ScheduleJob[]>('/schedules?all=1').catch(() => [])
     : await q<ScheduleJob[]>('/schedules').catch(() => []);
 
   const el = document.getElementById('agenda-lista');

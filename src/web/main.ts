@@ -17,7 +17,7 @@ import { icone } from "./icons.js";
 import { initRouter, fecharDrawer, abrirDrawer, navegar, parseHash } from "./router.js";
 import { loadPersistedAuth, setToken, setWsAtivo, getToken, setSseConnected, setEventSource, setRefreshInterval, getRefreshInterval, getViewAtual, getEventSource, clearAuth, getWsAtivo } from "./state.js";
 import { carregarWorkspaces } from "./api.js";
-import { renderHome } from "./views/home.js";
+import { renderHome, adicionarFeedItem } from "./views/home.js";
 import { renderTasks } from "./views/tasks.js";
 import { renderAgenda } from "./views/agenda.js";
 import { renderTeams } from "./views/teams.js";
@@ -213,7 +213,11 @@ function processarEventoSSE(ev: Record<string, unknown>): void {
   const tipo = String(ev.tipo || '');
   const view = getViewAtual();
 
-  if (view === 'home') renderHome();
+  if (view === 'home') {
+    // Feed de atividade é incremental — re-render de home apagaria o feed
+    adicionarFeedItem(ev);
+    return;
+  }
   if (view === 'tasks' && tipo.startsWith('task.')) renderTasks();
   if (view === 'teams' && (tipo.startsWith('team.') || tipo.startsWith('task.'))) renderTeams();
   if (view === 'agenda') renderAgenda();
@@ -233,8 +237,19 @@ export async function iniciarApp(): Promise<void> {
   conectarSSE();
   renderView();
 
-  // Refresh automático a cada 8s
-  const interval = setInterval(() => renderView(), 8000);
+  // Refresh automático a cada 8s — NÃO destrutivo:
+  // - pula o Secretário (estado local da conversa não pode ser resetado)
+  // - pula se o usuário está digitando em algum campo (inputs recriados perderiam o rascunho)
+  // - pula se o drawer está aberto (o conteúdo do drawer não é parte da view)
+  const interval = setInterval(() => {
+    const view = getViewAtual();
+    if (view === 'secretario') return;
+    const drawer = document.getElementById('drawer');
+    if (drawer?.classList.contains('open')) return;
+    const ativo = document.activeElement as HTMLElement | null;
+    if (ativo && (ativo.tagName === 'INPUT' || ativo.tagName === 'TEXTAREA' || ativo.tagName === 'SELECT' || ativo.closest('.main, .drawer'))) return;
+    void renderView();
+  }, 8000);
   setRefreshInterval(interval);
 }
 
@@ -305,11 +320,22 @@ export function boot(): void {
   iniciarApp();
 }
 
+/** Abre/fecha a sidebar em telas pequenas (hamburger). Sem arg = toggle. */
+export function toggleSidebar(acao?: boolean): void {
+  const sidebar = document.getElementById('sidebar');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  if (!sidebar) return;
+  const abrir = acao ?? !sidebar.classList.contains('open');
+  sidebar.classList.toggle('open', abrir);
+  backdrop?.classList.toggle('open', abrir);
+}
+
 /** Torna funções globais para onclick/HTML inline */
 export function exporGlobais(): void {
   const g = window as unknown as Record<string, unknown>;
   g.navegar = navegar;
   g.parseHash = parseHash;
+  g.toggleSidebar = toggleSidebar;
   g.abrirDrawer = abrirDrawer;
   g.fecharDrawer = fecharDrawer;
   g.criarTask = criarTask;

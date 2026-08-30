@@ -213,6 +213,7 @@ function renderAgentesLista(agents: AgentInfo[]): void {
 
 export async function decidirAprovacao(id: string, ok: boolean): Promise<void> {
   await api('/approvals/' + id + (ok ? '/approve' : '/reject'), { method: 'POST', body: JSON.stringify({ motivo: 'web' }) });
+  toast(ok ? 'Aprovação registrada' : 'Aprovação rejeitada', ok ? 'ok' : 'aviso');
   if (getViewAtual() === 'home') renderHome();
 }
 

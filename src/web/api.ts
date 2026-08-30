@@ -32,18 +32,34 @@ export function headers(): Record<string, string> {
  */
 export async function api<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
   const ws = getWsAtivo();
-  const url = path + (ws && !path.includes('workspace=')
-    ? (path.includes('?') ? '&' : '?') + 'workspace=' + encodeURIComponent(ws)
-    : '');
+  // ?all=1 = consulta sem escopo de empresa ("todas as empresas") — não injeta workspace
+  const semWs = path.includes('workspace=') || path.includes('all=1');
+  const url = ws && !semWs
+    ? path + (path.includes('?') ? '&' : '?') + 'workspace=' + encodeURIComponent(ws)
+    : path;
 
-  const res = await fetch(url, { ...opts, headers: headers() });
+  let res: Response;
+  try {
+    // Timeout de 15s em GETs (POSTs de proxy podem demorar — ex. secretário)
+    const signal = (!opts.method || opts.method === 'GET') ? AbortSignal.timeout(15000) : undefined;
+    res = await fetch(url, { ...opts, headers: headers(), ...(signal ? { signal } : {}) });
+  } catch {
+    toast('Sem conexão com o servidor', 'erro');
+    throw new Error('rede indisponível');
+  }
 
   if (res.status === 401) {
     sairParaLogin('Sessão inválida — faça login novamente');
     throw new Error('401');
   }
-  if (res.status >= 500) {
-    toast(`Erro do servidor (HTTP ${res.status}) em ${path.split('?')[0]}`, 'erro');
+  if (!res.ok) {
+    let msg = `HTTP ${res.status} em ${path.split('?')[0]}`;
+    try {
+      const corpo = (await res.json()) as { erro?: string };
+      if (corpo && typeof corpo.erro === 'string' && corpo.erro.length > 0) msg = corpo.erro;
+    } catch { /* corpo sem JSON — usa mensagem padrão */ }
+    toast(msg, 'erro');
+    throw new Error(msg);
   }
   return res.json() as Promise<T>;
 }

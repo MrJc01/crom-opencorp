@@ -7,13 +7,13 @@ import { getWsAtivo } from "../state.js";
 import { formatarDataLocal, mesclarHistorico, type EventoHistorico, type SessionInfo, type TaskInfo, type ScheduleJob } from "../format.js";
 
 function corDoTipo(tipo: EventoHistorico['tipo'], status?: string): string {
-  if (tipo === 'execucao') return 'bg-blue-500';
+  if (tipo === 'execucao') return 'var(--accent)';
   if (tipo === 'task') {
-    if (status === 'feito') return 'bg-emerald-500';
-    if (status === 'fazendo') return 'bg-amber-500';
-    return 'bg-green-500';
+    if (status === 'feito') return 'var(--ok)';
+    if (status === 'fazendo') return 'var(--warn)';
+    return 'var(--ok)';
   }
-  return 'bg-violet-500'; // rotina
+  return 'var(--warn)'; // rotina
 }
 
 function labelDoTipo(tipo: EventoHistorico['tipo']): string {
@@ -113,7 +113,7 @@ export async function renderHistorico(): Promise<void> {
 
     container.innerHTML = eventos.map((e) => `
       <div class="timeline-item">
-        <div class="timeline-dot" style="background: var(--${corDoTipo(e.tipo, e.status).replace('bg-', '').replace('-500', '')})"></div>
+        <div class="timeline-dot" style="background: ${corDoTipo(e.tipo, e.status)}"></div>
         <div class="timeline-content">
           <div class="flex items-start justify-between gap-4">
             <div class="flex-1 min-w-0">

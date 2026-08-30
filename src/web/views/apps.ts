@@ -71,8 +71,14 @@ export async function abrirApp(id: string): Promise<void> {
   const viewEl = document.getElementById('app-view');
   if (!listaEl || !viewEl) return;
 
+  let spec: AppSpec;
+  try {
+    spec = await api<AppSpec>('/apps/' + id + '/spec');
+  } catch {
+    listaEl.classList.remove('hidden');
+    return;
+  }
   listaEl.classList.add('hidden');
-  const spec = await api<AppSpec>('/apps/' + id + '/spec');
   viewEl.classList.remove('hidden');
   viewEl.innerHTML = `
     <div class="flex items-center gap-3 mb-6">

@@ -7,15 +7,17 @@ import { renderView } from "./main.js";
 
 /**
  * Navega para uma view/hash.
- * @param hash Hash sem # (ex: 'home', 'tasks', 'app/meu-app')
+ * @param hash Hash sem # nem #/ (ex: 'home', 'tasks', 'app/meu-app')
  */
 export function navegar(hash: string): void {
-  if (hash.startsWith('app/')) {
+  const limpo = hash.replace(/^#\/?/, '');
+  if (limpo.startsWith('app/')) {
     setViewAtual('app-detail');
   } else {
-    setViewAtual(hash.replace('#/', '') || 'home');
+    setViewAtual(limpo || 'home');
   }
-  window.location.hash = hash;
+  // Formato canônico: #/view (ex.: #/home, #/tasks, #/app/meu-app)
+  window.location.hash = '/' + limpo;
   renderView();
 }
 
@@ -23,11 +25,9 @@ export function navegar(hash: string): void {
  * Parseia o hash atual e retorna a view correspondente.
  */
 export function parseHash(): string {
-  const h = window.location.hash.slice(1);
+  const h = window.location.hash.replace(/^#\/?/, '');
   if (!h) return 'home';
   if (h.startsWith('app/')) return 'app-detail';
-  if (h === 'historico') return 'historico';
-  if (h === 'secretario') return 'secretario';
   return h;
 }
 
@@ -36,7 +36,6 @@ export function initRouter(): void {
   window.addEventListener('hashchange', () => {
     const h = parseHash();
     if (h.startsWith('app/')) setViewAtual('app-detail');
-    else if (h === 'historico' || h === 'secretario') setViewAtual(h);
     else setViewAtual(h);
     renderView();
   });
