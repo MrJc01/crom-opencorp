@@ -347,7 +347,8 @@ export class TaskStore {
 
   private extrairMencoes(corpo: string): string[] {
     const saida = new Set<string>();
-    for (const m of corpo.matchAll(/@([\w-]+)/g)) {
+    // Suporta "@fake-a" e "@agente:fake-a" (o : é parte do id na forma completa)
+    for (const m of corpo.matchAll(/@([\w-]+(?::[\w-]+)?)/g)) {
       const bruto = m[1];
       if (["humano", "sistema", "todos"].includes(bruto)) continue;
       saida.add(bruto.startsWith("agente:") ? bruto : `agente:${bruto}`);

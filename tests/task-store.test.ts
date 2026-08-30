@@ -119,6 +119,15 @@ describe("TaskStore — chat", () => {
     expect(chat.map((m) => m.autor)).toEqual(["humano", "agente:executor-padrao"]);
   });
 
+  it("extrai menção completa @agente:<id> (não trunca no :)", async () => {
+    const t = await store.criar(wsPath, { titulo: "Menções completas" });
+    const m = await store.mensagem(wsPath, t.id, {
+      autor: "humano",
+      corpo: "@agente:fake-a comece e depois @agente:fake-b assume",
+    });
+    expect(m.menciona).toEqual(["agente:fake-a", "agente:fake-b"]);
+  });
+
   it("aplica rate limit por hora por task", async () => {
     const t = await store.criar(wsPath, { titulo: "Rate" });
     const pequeno = new TaskStore({ agora: () => new Date((relogio += 1000)), max_mensagens_hora: 3 });
