@@ -33,7 +33,9 @@
 | 09 | [Testes cegos](09-testes-cegos.md) | Protocolo de QA com modelos leves/free |
 | **10** | [**Plano Fase A (concluída)**](10-plano-e-checklist.md) | Etapas 0–7 ✅ — histórico e protocolo |
 | 11 | [Nuvem: backup e sync](11-nuvem-backup-sync.md) | Estratégia de backup/sincronização (opcional) |
-| **12** | [**Plano Fase B/C (ATUAL)**](12-plano-fase-b-c.md) | **Plano ativo: fechamento A + Boardroom + Supervisor + Flows + Web** |
+| 12 | [Plano Fase B/C](12-plano-fase-b-c.md) | Fechamento A + Boardroom + Supervisor + Flows + Web (v0.2) |
+| **13** | [**Plano Extensões da Plataforma (ATUAL)**](13-plano-extensoes-plataforma.md) | **Etapas 19–25: Tasks, Scheduler, Webhooks, Tools/MCP, Mini-apps, Teams, v0.3.0** |
+| 14 | [Análise multi-agente + chat de tasks](14-analise-multiagente-tasks.md) | Padrões de orquestração e chat interno |
 
 ### Pastas auxiliares
 

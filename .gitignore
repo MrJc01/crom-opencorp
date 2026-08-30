@@ -5,3 +5,4 @@ workspaces/
 .opencorp/
 *.log
 !templates/default/.opencorp/
+test-results/
