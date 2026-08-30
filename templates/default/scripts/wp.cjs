@@ -68,6 +68,10 @@ const auth = "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
     }
     if (input.pagina_posts !== undefined && input.pagina_posts) corpo.page_for_posts = Number(input.pagina_posts);
     opts.body = JSON.stringify(corpo);
+  } else if (modo === "ver") {
+    if (!input.id) { console.error("id é obrigatório"); process.exit(2); }
+    url = `${base}/${tipo}/${Number(input.id)}`;
+    verbatim = true;
   } else if (modo === "settings") {
     url = `${base}/settings`;
     verbatim = true;
@@ -84,7 +88,12 @@ const auth = "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
   const t = await r.text();
   if (r.status >= 400) { console.error(`HTTP ${r.status}: ${t.slice(0, 300)}`); process.exit(1); }
   const d = JSON.parse(t);
-  if (verbatim) { console.log(JSON.stringify({ titulo: d.title, descricao: d.description, home_estatica: d.page_on_front, mostra_posts: d.show_on_front, pagina_posts: d.page_for_posts }, null, 1)); return; }
+  if (verbatim && d.content !== undefined) {
+    // item único (modo ver) — inclui um trecho do conteúdo para auditoria
+    console.log(JSON.stringify({ id: d.id, titulo: d.title && (d.title.rendered || d.title), status: d.status, tipo: d.type, conteudo: ((d.content && d.content.rendered) || "").slice(0, 600), link: d.link || "" }, null, 1));
+    return;
+  }
+  if (verbatim && d.description !== undefined) { console.log(JSON.stringify({ titulo: d.title, descricao: d.description, home_estatica: d.page_on_front, mostra_posts: d.show_on_front, pagina_posts: d.page_for_posts }, null, 1)); return; }
   const tipoResposta = (modo === "pages" || tipo === "pages") ? "page" : "post";
   const limpa = (p) => ({ id: p.id, titulo: (p.title && (p.title.rendered || p.title)) || "", status: p.status, tipo: p.type || tipoResposta, link: p.link || "" });
   console.log(JSON.stringify(Array.isArray(d) ? d.map(limpa) : limpa(d), null, 1));
