@@ -108,5 +108,5 @@
 | 21 | Webhooks & Triggers | `concluída — PASS 5/5 (ciclo 2; fix: triggers no processo CLI)` |
 | 22 | Tools / MCP | `concluída — PASS 5/5 (1º ciclo; MCP stdio JSON-RPC)` |
 | 23 | Mini-apps | `concluída — PASS 5/5 (ciclo 4; fix 500→404 no ciclo 2; ciclos 3/3 interrompidos por erro de provedor; spec do cenário 4 reescrita p/ daemon + sem pkill; relatório com "VEREDITO" fora do formato — conteúdo 5/5 PASS)` |
-| 24 | Orquestração multi-agente (docs/14) | `pendente` |
-| 25 | Bateria final v0.3.0 | `pendente` |
+| 24 | Orquestração multi-agente (docs/14) | `concluída — PASS 5/5 (ciclo 3; fixes: parser de menções @agente:<id>, POST /teams aceita sem criado_em, rate guard documentado vs rate limit 30/h do chat; runner marcou TIMEOUT pós-gravação — veredito extraído do relatório, mesmo padrão da 23)` |
+| 25 | Bateria final v0.3.0 | `em andamento — doctor ✅ (34 testes, scheduler/hooks/apps/teams/secretário); e2e Playwright permanente 38/38 ✅; pendente: regressão blind all, README/tag` |
