@@ -744,7 +744,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         if (rota === "/schedules" && req.method === "GET") {
           const wsFiltro = url.searchParams.get("workspace");
           const jobs = await scheduler.listar();
-          enviar(res, 200, wsFiltro ? jobs.filter((j) => j.workspace === wsFiltro) : jobs);
+          // ?all=1 (ou sem workspace) = escopo "todas as empresas"
+          enviar(res, 200, !wsFiltro || url.searchParams.has("all") ? jobs : jobs.filter((j) => j.workspace === wsFiltro));
           return;
         }
         if (rota === "/schedules" && req.method === "POST") {
@@ -838,6 +839,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         if (rota === "/teams" && req.method === "POST") {
           const ws = await resolverWs(url);
           const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+          // criado_em é opcional na API (o CLI sempre preenche)
+          if (typeof corpo.criado_em !== "string" || corpo.criado_em.length === 0) {
+            corpo.criado_em = new Date().toISOString();
+          }
           const spec = teams.validarTexto(JSON.stringify(corpo), "POST /teams");
           await teams.salvar(ws.path, spec);
           enviar(res, 201, spec);

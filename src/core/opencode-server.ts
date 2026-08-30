@@ -213,8 +213,14 @@ export class OpencodeServerManager {
     };
 
     const child = spawn(this.binario, argv, options);
-    child.unref();
     const pid = child.pid ?? 0;
+    child.unref();
+
+    // Se o binário não existir/não for executável, o 'error' event sem
+    // listener viraria uncaughtException e DERRUBARIA o servidor inteiro.
+    child.on("error", (err) => {
+      eventBus.emit("secretario.erro", { pid, porta, erro: err.message });
+    });
 
     const info: OpencodeServerInfo = { pid, porta, iniciado_em: new Date().toISOString() };
     await gravarPidfile(this.homeDir, info);
