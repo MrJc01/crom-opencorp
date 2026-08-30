@@ -13,6 +13,7 @@
   <nav class="flex gap-2 text-sm">
     <button class="btn" id="tab-dash" onclick="mostrarTab('dash')">Dashboard</button>
     <button class="btn" id="tab-tasks" style="background:#334155" onclick="mostrarTab('tasks')">Tasks</button>
+    <button class="btn" id="tab-apps" style="background:#334155" onclick="mostrarTab('apps')">Apps</button>
   </nav>
   <span id="ws-atual" class="text-sm text-neutral-400"></span>
   <select id="ws-select" class="ml-auto"></select>
@@ -56,6 +57,10 @@
     </div>
   </section>
 </main>
+<main id="view-apps" class="hidden">
+  <div id="apps-lista"></div>
+  <div id="app-view"></div>
+</main>
 <script>
 const qs=new URLSearchParams(location.search);let token=localStorage.getItem('oc-token');
 if(!token){token=prompt('Token da API (veja ~/.opencorp/secrets.json):');if(token)localStorage.setItem('oc-token',token);}
@@ -87,7 +92,9 @@ load();setInterval(load,8000);
 
 let tabAtiva='dash',taskAberta=null;
 function mostrarTab(t){tabAtiva=t;document.getElementById('view-dash').classList.toggle('hidden',t!=='dash');document.getElementById('view-tasks').classList.toggle('hidden',t!=='tasks');
-document.getElementById('tab-'+t).style.background='#2563eb';document.getElementById('tab-'+(t==='dash'?'tasks':'dash')).style.background='#334155';if(t==='tasks')loadTasks();}
+document.getElementById('tab-'+t).style.background='#2563eb';document.getElementById('tab-'+({dash:'dash',tasks:'tasks',apps:'apps'}[t]==='dash'?'tasks':'dash')).style.background='#334155';
+for(const x of ['dash','tasks','apps'])if(x!==t)document.getElementById('tab-'+x).style.background='#334155';
+if(t==='tasks')loadTasks();if(t==='apps')loadAppsList();}
 async function loadTasks(){
   const tasks=await q('/tasks');if(!Array.isArray(tasks))return;
   const colunas=['backlog','fazendo','bloqueado','feito'];const extras=[...new Set(tasks.map(t=>t.coluna))].filter(c=>!colunas.includes(c));
@@ -113,5 +120,44 @@ async function carregarChat(){if(!taskAberta)return;const msgs=await q(`/tasks/$
   document.getElementById('chat-msgs').innerHTML=(Array.isArray(msgs)?msgs:[]).map(m=>`<div><span class="text-neutral-500">${(m.criado_em||'').slice(11,16)}</span> <b class="${m.autor==='humano'?'text-green-400':'text-blue-400'}">${m.autor}</b> ${m.corpo}${m.menciona?.length?' <span class="text-yellow-400">'+m.menciona.map(x=>'@'+x.replace('agente:','')).join(' ')+'</span>':''}</div>`).join('')||'<div class="text-neutral-500">sem mensagens</div>';}
 async function enviarMsg(){const i=document.getElementById('chat-input');if(!i.value||!taskAberta)return;
   await api(`/tasks/${taskAberta}/chat?`+(wsAtivo?'workspace='+wsAtivo:''),{method:'POST',headers:H,body:JSON.stringify({autor:'humano',corpo:i.value})});i.value='';carregarChat();}
+
+async function loadAppsList(){
+  const lista=await q('/apps');const el=document.getElementById('apps-lista');
+  el.innerHTML='<h2 class="font-semibold mb-2">Mini-apps do workspace</h2>'+(Array.isArray(lista)&&lista.length?lista.map(a=>`<div class="card p-2 mb-2 cursor-pointer hover:bg-neutral-800" onclick="abrirApp('${a.id}')"><b>${a.titulo}</b> <span class="text-neutral-500">${a.id} · ${a.widgets} widget(s)</span></div>`).join(''):'<div class="text-neutral-500 text-sm">nenhum app — instale com: opencorp app seed painel-tarefas</div>');
+}
+async function abrirApp(id){document.getElementById('apps-lista').classList.add('hidden');const spec=await q(`/apps/${id}/spec`);
+  const raiz=document.getElementById('app-view');raiz.innerHTML=`<div class="flex items-center gap-3 mb-3"><h2 class="font-semibold">${spec.titulo}</h2><a class="text-xs" href="#" onclick="fecharApp()">← voltar</a></div>`;
+  for(const pagina of spec.paginas||[]){raiz.innerHTML+=`<h3 class="text-sm text-neutral-400 mb-2">${pagina.titulo}</h3><div class="grid grid-cols-3 gap-3" id="pg-${pagina.titulo.replace(/\W/g,'')}"></div>`;
+    const grid=raiz.querySelector(`#pg-${pagina.titulo.replace(/\W/g,'')}`);
+    for(const w of pagina.widgets||[])grid.appendChild(await renderWidget(w));}}
+function fecharApp(){document.getElementById('app-view').classList.add('hidden');document.getElementById('apps-lista').classList.remove('hidden');document.getElementById('app-view').innerHTML='';}
+async function dadosWidget(w){if(!w.fonte||!w.fonte.rota)return null;try{const d=await q(w.fonte.rota);return Array.isArray(d)?d:d;}catch(e){return null;}}
+async function renderWidget(w){
+  const el=document.createElement('div');el.className='card p-3';
+  el.innerHTML=`<h4 class="text-sm font-semibold mb-2">${w.titulo}</h4>`;
+  const dados=await dadosWidget(w);
+  if(w.tipo==='metrica'){const n=Array.isArray(dados)?dados.length:(dados?Object.keys(dados).length:0);el.innerHTML+=`<div class="text-3xl font-bold text-blue-400">${n}</div>`;}
+  else if(w.tipo==='tabela'||w.tipo==='grafico'){
+    const rot=w.fonte.rotulo_campo||'id',val=w.fonte.campo_valor||'status';
+    const linhas=(Array.isArray(dados)?dados:[]).slice(0,10);
+    if(w.tipo==='grafico'){const contagem={};linhas.forEach(d=>{const k=String(d[val]??'?');contagem[k]=(contagem[k]||0)+1;});
+      const max=Math.max(1,...Object.values(contagem));
+      el.innerHTML+=Object.entries(contagem).map(([k,v])=>`<div class="flex items-center gap-2 mb-1"><span class="text-xs w-20 truncate">${k}</span><div style="width:${(v/max)*70}%" class="h-3 bg-blue-600 rounded"></div><span class="text-xs">${v}</span></div>`).join('')||'<div class="text-neutral-500 text-xs">sem dados</div>';}
+    else el.innerHTML+=`<table>${linhas.map(d=>`<tr><td class="text-xs">${String(d[rot]??'').slice(0,30)}</td><td class="text-xs text-neutral-400">${String(d[val]??'')}</td></tr>`).join('')||'<tr><td class="text-xs text-neutral-500">sem dados</td></tr>'}</table>`;}
+  else if(w.tipo==='kanban'){
+    const colunas={};(Array.isArray(dados)?dados:[]).forEach(t=>{(colunas[t.coluna]=colunas[t.coluna]||[]).push(t);});
+    el.innerHTML+=Object.entries(colunas).map(([c,ts])=>`<div class="mb-2"><div class="text-xs text-neutral-400 capitalize">${c} (${ts.length})</div>${ts.map(t=>`<div class="text-xs bg-neutral-800 rounded p-1 mb-1 truncate">${t.titulo}</div>`).join('')}</div>`).join('')||'<div class="text-neutral-500 text-xs">sem dados</div>';}
+  else if(w.tipo==='markdown'){el.innerHTML+=`<div class="text-xs whitespace-pre-wrap">${w.texto||''}</div>`;}
+  else if(w.tipo==='lista_tarefas'){
+    el.innerHTML+=(Array.isArray(dados)?dados:[]).map(t=>`<label class="flex items-center gap-2 text-xs mb-1"><input type="checkbox" ${t.coluna==='feito'?'checked':''}/> ${t.titulo}</label>`).join('')||'<div class="text-neutral-500 text-xs">sem dados</div>';}
+  else if(w.tipo==='formulario'){
+    el.innerHTML+=(w.acao?.campos||[{nome:'titulo'}]).map(c=>`<input class="w-full mb-2" placeholder="${c.rotulo||c.nome}" data-campo="${c.nome}"/>`).join('')+`<button class="btn" onclick="enviarForm(this,'${w.id}')">${w.acao?.tipo==='post_rota'?'enviar':'executar'}</button>`;
+    el.dataset.rota=w.fonte?.rota||'';el.dataset.acao=w.acao?.tipo||'post_rota';}
+  return el;}
+async function enviarForm(btn,widgetId){const card=btn.closest('.card');const corpo={};
+  card.querySelectorAll('[data-campo]').forEach(i=>corpo[i.dataset.campo]=i.value);
+  const rota=card.dataset.rota||'/tasks';
+  await api(rota+(wsAtivo?(rota.includes('?')?'&':'?')+'workspace='+wsAtivo:''),{method:'POST',headers:H,body:JSON.stringify(corpo)});
+  btn.textContent='enviado ✓';}
 </script>
 </body></html>

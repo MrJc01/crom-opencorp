@@ -17,6 +17,7 @@ import { registerTaskCommand } from "./commands/task.js";
 import { registerScheduleCommands } from "./commands/schedule.js";
 import { registerHookCommands } from "./commands/hook.js";
 import { registerToolCommands } from "./commands/tool.js";
+import { registerAppCommand } from "./commands/app.js";
 import { registerSupervisorCommand } from "./commands/supervisor.js";
 import { registerServeCommand } from "./commands/serve.js";
 import { registerWebCommand } from "./commands/web.js";
@@ -87,6 +88,8 @@ export function buildProgram(): Command {
   registerHookCommands(program);
 
   registerToolCommands(program);
+
+  registerAppCommand(program);
 
   registerServeCommand(program);
 

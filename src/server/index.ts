@@ -16,7 +16,8 @@ import { TaskStore, type Task } from "../core/task-store.js";
 import { Scheduler } from "../core/scheduler.js";
 import type { Agenda } from "../core/scheduler.js";
 import { HookStore, type Hook, type AlvoHook, type PayloadHook } from "../core/hook-store.js";
-import { TaskError, SchedulerError, HookError } from "../core/errors.js";
+import { AppStore } from "../core/app-store.js";
+import { TaskError, SchedulerError, HookError, AppError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
 
@@ -69,6 +70,10 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/hooks/:id", descricao: "Detalhes do hook (inclui token)" },
   { method: "DELETE", path: "/hooks/:id", descricao: "Exclui hook" },
   { method: "POST", path: "/hooks/:workspace/:id", descricao: "Disparo público do hook (header x-opencorp-token)" },
+  { method: "GET", path: "/apps", descricao: "Lista mini-apps do workspace" },
+  { method: "GET", path: "/apps/:id/spec", descricao: "Spec declarativo de um app" },
+  { method: "POST", path: "/apps", descricao: "Cria/salva spec de app (validado)", corpo: true },
+  { method: "DELETE", path: "/apps/:id", descricao: "Exclui app" },
 ];
 
 export interface SessaoApi {
@@ -209,6 +214,7 @@ function statusHttpDe(erro: unknown): number {
   if (erro instanceof TaskError) return (erro as TaskError).status ?? 400;
   if (erro instanceof SchedulerError) return 400;
   if (erro instanceof HookError) return ((erro as unknown as { status?: number }).status ?? 400);
+  if (erro instanceof AppError) return ((erro as unknown as { status?: number }).status ?? 404);
   if (erro instanceof RegistryError || erro instanceof WorkspaceError || erro instanceof AgentError) return 422;
   return 500;
 }
@@ -305,6 +311,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   const meetings = new MeetingManager({ ...base, sessoes: opcoes.sessoes as never });
   const tasks = new TaskStore();
   const scheduler = new Scheduler({ homeDir: opcoes.homeDir });
+  const apps = new AppStore();
   const hooks = new HookStore({
     executores: {
       agentRun: async (agente: string, ordem: string, wsPath: string) => {
@@ -722,6 +729,33 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             enviar(res, 200, { ok: true, resultado });
             return;
           }
+        }
+
+        if (rota === "/apps" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          enviar(res, 200, apps.listar(ws.path));
+          return;
+        }
+        const mApp = /^\/apps\/([^/]+)\/spec$/.exec(rota);
+        if (mApp && req.method === "GET") {
+          const ws = await resolverWs(url);
+          enviar(res, 200, apps.obter(ws.path, decodeURIComponent(mApp[1]!)));
+          return;
+        }
+        if (rota === "/apps" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+          const spec = apps.validarTexto(JSON.stringify(corpo), "POST /apps");
+          await apps.salvar(ws.path, spec);
+          enviar(res, 201, spec);
+          return;
+        }
+        const mAppDel = /^\/apps\/([^/]+)$/.exec(rota);
+        if (mAppDel && req.method === "DELETE") {
+          const ws = await resolverWs(url);
+          await apps.excluir(ws.path, decodeURIComponent(mAppDel[1]!));
+          enviar(res, 200, { ok: true, id: mAppDel[1] });
+          return;
         }
 
         if (rota === "/hooks" && req.method === "GET") {
