@@ -32,10 +32,10 @@
 
 ### 5. Renderer (verificação sem browser)
 - Com o servidor daemon do cenário 4 ainda ativo e 1-2 tasks criadas (`task create --titulo "Item A"`):
-  1. `curl -s http://127.0.0.1:4100/ | grep -o "renderWidget" | head -1` — espera: "renderWidget" (a UI embutida tem o renderer de mini-apps)
-  2. `curl -s http://127.0.0.1:4100/ | grep -o "loadAppsList" | head -1` — espera: "loadAppsList" (a aba Apps existe)
+  1. `curl -s "http://127.0.0.1:4100/app/views/apps.js" | grep -o "renderWidget" | head -1` — espera: "renderWidget" (o BUNDLE do renderer de mini-apps é servido em /app/views/apps.js — o HTML da home NÃO tem mais JS inline)
+  2. `curl -s "http://127.0.0.1:4100/app/views/apps.js" | grep -oE "loadAppsList|abrirApp|enviarForm" | sort -u | head -3` — espera: pelo menos `loadAppsList` (a aba Apps existe no bundle)
   3. Finalize com `OPENCORP_HOME=/tmp/opencorp-cego-e23 node bin/opencorp.mjs serve stop` — espera: confirmação de parada
-- Esperado: ambos os grep encontram as funções do renderer — prova de que o servidor embute a UI com mini-apps (mesmo padrão do opencode).
+- Esperado: os greps encontram as funções do renderer no bundle — prova de que o servidor serve a UI v3 com mini-apps (o index.html carrega `<script type="module" src="/app/main.js">`).
 
 ## Veredito
 
