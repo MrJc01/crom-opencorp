@@ -268,6 +268,65 @@ describe("MeetingManager — encerramentos", () => {
     expect(audit).toContain('"dono":"executor-padrao"');
   });
 
+  it("ata com provedor falho → rotação tenta próximo modelo e grava", async () => {
+    const { home, wsPath } = await ambiente();
+    const chamadas: Chamada[] = [];
+    const sessao: SessaoLike = {
+      rodar: vi.fn(async (opcoes: OpcoesRun) => {
+        if (opcoes.ordem?.includes("TAREFA INTERNA DO SISTEMA")) {
+          chamadas.push({ opcoes });
+          if (opcoes.model === "opencode/hy3-free") {
+            throw new Error('UnknownError — Unexpected server error. Check server logs for details. ref: err_x');
+          }
+          const m = /registries\/documentos\/atas\/ATA-[\w-]+\.md/.exec(opcoes.ordem)!;
+          mkdirSync(join(wsPath, "registries", "documentos", "atas"), { recursive: true });
+          writeFileSync(join(wsPath, m[0]!), "# ATA\n\n## Decisões\nok via fallback\n\n## Tarefas delegadas\n(nenhuma)\n");
+          return resultadoFake(opcoes, "ata escrita");
+        }
+        chamadas.push({ opcoes });
+        return resultadoFake(opcoes, `fala de ${opcoes.agente}`);
+      }),
+    };
+    const mm = new MeetingManager({ homeDir: home, cwd: home, sessoes: sessao });
+    const sala = await mm.iniciar({
+      pauta: "rotação de ata",
+      agentes: "ceo-documentos,executor-padrao",
+      model: "opencode/hy3-free",
+      workspaceDir: wsPath,
+    });
+    expect(sala.ata).toContain("ATA-");
+
+    const ataChamadas = chamadas.filter((c) => c.opcoes.ordem?.includes("TAREFA INTERNA DO SISTEMA"));
+    expect(ataChamadas).toHaveLength(2);
+    expect(ataChamadas[0]!.opcoes.model).toBe("opencode/hy3-free");
+    expect(ataChamadas[1]!.opcoes.model).toBe("opencode/nemotron-3-ultra-free");
+  });
+
+  it("ata com recusa determinística (budget) → não roda rotação", async () => {
+    const { home, wsPath } = await ambiente();
+    const chamadas: Chamada[] = [];
+    const sessao: SessaoLike = {
+      rodar: vi.fn(async (opcoes: OpcoesRun) => {
+        if (opcoes.ordem?.includes("TAREFA INTERNA DO SISTEMA")) {
+          chamadas.push({ opcoes });
+          throw new Error('recusada pelo BudgetManager: orçamento diário do agente "ceo-documentos" esgotado');
+        }
+        chamadas.push({ opcoes });
+        return resultadoFake(opcoes, `fala de ${opcoes.agente}`);
+      }),
+    };
+    const mm = new MeetingManager({ homeDir: home, cwd: home, sessoes: sessao });
+    const sala = await mm.iniciar({
+      pauta: "recusa budget ata",
+      agentes: "ceo-documentos,executor-padrao",
+      model: "opencode/hy3-free",
+      workspaceDir: wsPath,
+    });
+    expect(sala.ata).toBe("falhou");
+    const ataChamadas = chamadas.filter((c) => c.opcoes.ordem?.includes("TAREFA INTERNA DO SISTEMA"));
+    expect(ataChamadas).toHaveLength(1);
+  });
+
   it("meeting end em sala marcada em-andamento finaliza de forma controlada", async () => {
     const { home, wsPath, registros } = await ambiente();
     const { sessao, chamadas } = stubSessao((chamada) => {

@@ -53,8 +53,14 @@ export async function renderTeams(): Promise<void> {
 
 /** Executa um team */
 export async function executarTeam(id: string): Promise<void> {
+  const { modalPrompt, modalConfirm } = await import("../modal.js");
   const btn = document.getElementById('btn-run-' + id) as HTMLButtonElement | null;
-  const entrada = prompt('Entrada para o team:');
+  const entrada = await modalPrompt({
+    titulo: 'Executar team ' + id,
+    label: 'Entrada para o team:',
+    multiline: true,
+    obrigatorio: true,
+  });
   if (!entrada) return;
 
   if (btn) {
@@ -76,7 +82,7 @@ export async function executarTeam(id: string): Promise<void> {
     const taskId = res.task_id || res.taskId;
     const status = res.status || 'desconhecido';
 
-    if (confirm(`Orquestração concluída — task ${taskId} em ${status}\n\nVer no Kanban?`)) {
+    if (await modalConfirm(`Orquestração concluída — task ${taskId} em ${status}. Ver no Kanban?`, { confirmar: 'Ver no Kanban' })) {
       const { navegar } = await import("../router.js");
       const { abrirDrawer } = await import("./tasks.js");
       navegar('tasks');

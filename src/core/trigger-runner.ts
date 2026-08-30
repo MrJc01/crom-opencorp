@@ -37,7 +37,10 @@ export function instalarTriggers(opcoes: { homeDir?: string } = {}): void {
     }
     for (const t of casados) {
       const p = (async () => {
-        const ws = (await new WorkspaceManager({ homeDir }).resolver(t.workspace)) as unknown as {
+        // Preferência pelo workspace do EVENTO (ex.: task criada em X) — o
+        // trigger declara o workspace padrão quando o evento não traz um.
+        const wsAlvo = (ev.dados.workspace as string) || t.workspace || "";
+        const ws = (await new WorkspaceManager({ homeDir }).resolver(wsAlvo)) as unknown as {
           id: string;
           path: string;
         };
@@ -50,7 +53,7 @@ export function instalarTriggers(opcoes: { homeDir?: string } = {}): void {
           dedup_seg: 0,
           ativo: true,
           alvo: t.alvo,
-          workspace: t.workspace ?? "",
+          workspace: ws.id || t.workspace || "",
           criado_em: "",
         };
         await hooks.executar(ws.path, hook, { corpo: { ...ev.dados, evento: ev.tipo }, query: {} });

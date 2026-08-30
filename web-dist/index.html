@@ -199,6 +199,24 @@ input[readonly],select[readonly],textarea[readonly]{background:#1a1a1a}
 .chat-msg.flex-row-reverse{flex-direction:row-reverse}
 .chat-msg > div{max-width:85%}
 #chat-input{flex:1;min-height:60px;max-height:150px;resize:none;font-family:inherit;font-size:.875rem;line-height:1.5}
+
+/* ========= MODAIS (substituem prompt()/confirm() nativos) ========= */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:60;display:flex;align-items:center;justify-content:center;padding:1rem}
+.modal-box{background:var(--card);border:1px solid var(--border);border-radius:.5rem;box-shadow:0 10px 30px rgba(0,0,0,.5);width:100%;max-width:420px;padding:1.25rem;animation:modalIn .15s ease}
+@keyframes modalIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+.modal-titulo{font-weight:600;font-size:1rem;margin:0 0 .75rem}
+.modal-corpo{display:flex;flex-direction:column;gap:.5rem}
+.modal-label{font-size:.6875rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.modal-campo{width:100%}
+.modal-msg{font-size:.875rem;line-height:1.5;margin:0;white-space:pre-wrap}
+.modal-acoes{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem}
+@media(max-width:640px){.modal-acoes{flex-direction:column-reverse}.modal-acoes button{width:100%}}
+
+/* ========= KANBAN DRAG-AND-DROP ========= */
+.task-card[draggable="true"]{cursor:grab}
+.task-card.arrastando{opacity:.4}
+.kanban-cards.drag-over{outline:2px dashed var(--accent);outline-offset:-4px;border-radius:.375rem}
+
 </style>
 </head>
 <body>

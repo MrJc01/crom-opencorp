@@ -84,20 +84,20 @@ test.describe("Agenda / Rotinas", () => {
     await expect(page.locator('#agenda-lista .card .badge', { hasText: 'pausado' }).first()).toBeVisible();
   });
 
-  test("Excluir remove (confirm → page.on('dialog') accept)", async ({ page }) => {
+  test("Excluir remove (modal de confirmação)", async ({ page }) => {
     await page.click('.nav-item[data-view="agenda"]');
     await page.waitForURL("**/#/agenda");
     await esperarElementoTexto(page, "Agenda");
 
-    // Configura handler para dialog de confirmação
-    page.on("dialog", async (dialog) => {
-      expect(dialog.type()).toBe("confirm");
-      await dialog.accept();
-    });
-
     // Encontra o PRIMEIRO job semeado e clica excluir
     const excluirBtn = page.locator('#agenda-lista .card:has-text("job-e2e-corp") button[aria-label="Excluir"]').first();
     await excluirBtn.click();
+
+    // Modal de confirmação aparece → confirma
+    const modal = page.locator('.modal-box');
+    await expect(modal).toBeVisible();
+    await modal.locator('button.modal-ok').click();
+    await expect(modal).toBeHidden();
 
     // Aguarda remoção
     await page.waitForTimeout(500);

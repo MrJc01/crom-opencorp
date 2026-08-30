@@ -7,6 +7,7 @@ import { getWsAtivo, setTaskAberta } from "../state.js";
 import { fecharDrawer } from "../router.js";
 
 let taskAbertaId: string | null = null;
+let arrastouAgora = false;
 
 /** Renderiza a view Tasks (Kanban) */
 export async function renderTasks(): Promise<void> {
@@ -43,6 +44,7 @@ export async function renderTasks(): Promise<void> {
     kb.appendChild(div);
     const container = div.querySelector('#kanban-' + escapeHtml(col));
     if (!container) continue;
+    configurarDropColuna(container as HTMLElement, kb, col);
 
     for (const t of colTasks) {
       const card = document.createElement('div');
@@ -56,10 +58,65 @@ export async function renderTasks(): Promise<void> {
           ${(t.labels as string[] | undefined)?.length ? (t.labels as string[]).map(l => `<span class="badge badge-neutral">${escapeHtml(l)}</span>`).join('') : ''}
         </div>
       `;
-      card.onclick = () => abrirDrawer(String(t.id), String(t.titulo));
+      card.onclick = () => {
+        if (!arrastouAgora) abrirDrawer(String(t.id), String(t.titulo));
+      };
+      configurarDragCard(card, String(t.id), col);
       container.appendChild(card);
     }
   }
+}
+
+/** Torna um card arrastável entre colunas do kanban */
+function configurarDragCard(card: HTMLElement, taskId: string, coluna: string): void {
+  card.draggable = true;
+  card.dataset.taskId = taskId;
+  card.dataset.colunaAtual = coluna;
+
+  card.addEventListener('dragstart', ev => {
+    arrastouAgora = false;
+    if (ev.dataTransfer) {
+      ev.dataTransfer.setData('text/plain', taskId);
+      ev.dataTransfer.effectAllowed = 'move';
+    }
+    card.classList.add('arrastando');
+  });
+
+  card.addEventListener('dragend', () => {
+    card.classList.remove('arrastando');
+    arrastouAgora = true;
+    setTimeout(() => { arrastouAgora = false; }, 150);
+  });
+}
+
+/** Liga os handlers de drop numa coluna do kanban */
+function configurarDropColuna(container: HTMLElement, kb: HTMLElement, coluna: string): void {
+  container.addEventListener('dragover', ev => {
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+    container.classList.add('drag-over');
+  });
+
+  container.addEventListener('dragleave', ev => {
+    if (!container.contains(ev.relatedTarget as Node)) container.classList.remove('drag-over');
+  });
+
+  container.addEventListener('drop', ev => {
+    ev.preventDefault();
+    container.classList.remove('drag-over');
+    const taskId = ev.dataTransfer?.getData('text/plain');
+    if (!taskId) return;
+    const cardEl = kb.querySelector('.task-card[data-task-id="' + taskId.replace(/"/g, '\\"') + '"]') as HTMLElement | null;
+    if (!cardEl || cardEl.dataset.colunaAtual === coluna) return;
+    cardEl.dataset.colunaAtual = coluna;
+    void moverTaskColunaDireto(taskId, coluna);
+  });
+}
+
+/** Move task solta pelo drag-and-drop (PATCH coluna — mesmo contrato do drawer) */
+export async function moverTaskColunaDireto(id: string, coluna: string): Promise<void> {
+  await api('/tasks/' + id, { method: 'PATCH', body: JSON.stringify({ coluna }) }).catch(() => undefined);
+  renderTasks();
 }
 
 /** Cria nova task a partir do input */

@@ -24,6 +24,7 @@ export interface ConfigMeeting {
   max_minutes: number;
   per_agent_usd: number;
   moderator: string;
+  ata_model_rotation: string[];
 }
 
 export interface SalaInfo {
@@ -122,11 +123,13 @@ export class MeetingManager {
     const maxMinutes = await this.store.get("meeting.max_minutes", { workspaceDir });
     const perAgent = await this.store.get("meeting.per_agent_usd", { workspaceDir });
     const moderator = await this.store.get("meeting.moderator", { workspaceDir });
+    const ataRotation = await this.store.get("meeting.ata_model_rotation", { workspaceDir });
     return {
       max_turnos: Number(maxTurns.valor),
       max_minutes: Number(maxMinutes.valor),
       per_agent_usd: Number(perAgent.valor),
       moderator: String(moderator.valor),
+      ata_model_rotation: (ataRotation.valor as unknown as string[]) ?? [],
     };
   }
 
@@ -616,36 +619,69 @@ export class MeetingManager {
       transcript,
     ].join("\n");
 
-    try {
-      await this.sessoes.rodar({
-        agente: "ceo-documentos",
-        ordem,
-        model: sala.modelo === MODELO_POR_AGENTE ? undefined : sala.modelo,
-        workspaceDir: ws.path,
-        pularGuard: true,
-        tags: [`reuniao:${sala.id}`, "ata"],
-        timeoutMs: 5 * 60_000,
-      });
-    } catch (erro) {
+    // Rotação de modelos para a ata: se o modelo da reunião (ou o do agente)
+    // estiver indisponível, tenta os fallbacks free antes de declarar falha.
+    const cfg = await this.cfgMeeting(ws.path);
+    const candidatos: (string | undefined)[] = [
+      sala.modelo === MODELO_POR_AGENTE ? undefined : sala.modelo,
+      ...cfg.ata_model_rotation,
+    ];
+    const vistos = new Set<string>();
+    const modelosTentados = candidatos.filter(m => {
+      const k = m ?? "(por-agente)";
+      if (vistos.has(k)) return false;
+      vistos.add(k);
+      return true;
+    });
+
+    const pathAta = join(ws.path, arquivoAta);
+    let recusa: Error | null = null;
+    for (const modelo of modelosTentados) {
+      try {
+        await this.sessoes.rodar({
+          agente: "ceo-documentos",
+          ordem,
+          model: modelo,
+          workspaceDir: ws.path,
+          pularGuard: true,
+          tags: [`reuniao:${sala.id}`, "ata"],
+          timeoutMs: 5 * 60_000,
+        });
+      } catch (erro) {
+        const m = msg(erro);
+        if (/BudgetManager|SecurityGuard|HITL|bloqueado|recusada/i.test(m)) {
+          recusa = erro instanceof Error ? erro : new Error(m);
+          break;
+        }
+        await this.registros.eventoAuditoria(ws.path, {
+          por: "opencorp",
+          evento: "ata_falhou",
+          resumo: `ata da reunião ${sala.id} falhou com modelo ${modelo ?? "(por-agente)"}: ${m}`,
+        });
+        continue;
+      }
+      if (existsSync(pathAta)) break;
+    }
+
+    if (recusa) {
       sala.ata = "falhou";
       await this.salvarSala(ws.path, sala);
       await this.registros.eventoAuditoria(ws.path, {
         por: "opencorp",
         evento: "ata_falhou",
-        resumo: `ata da reunião ${sala.id} falhou: ${msg(erro)}`,
+        resumo: `ata da reunião ${sala.id} falhou: ${msg(recusa)}`,
       });
-      console.log(`[reunião ${sala.id}] ata não gerada (${msg(erro)})`);
+      console.log(`[reunião ${sala.id}] ata não gerada (${msg(recusa)})`);
       return;
     }
 
-    const pathAta = join(ws.path, arquivoAta);
     if (!existsSync(pathAta)) {
       sala.ata = "falhou";
       await this.salvarSala(ws.path, sala);
       await this.registros.eventoAuditoria(ws.path, {
         por: "opencorp",
         evento: "ata_falhou",
-        resumo: `o agente não criou o arquivo ${arquivoAta}`,
+        resumo: `o agente não criou o arquivo ${arquivoAta} (modelos tentados: ${modelosTentados.map(m => m ?? "(por-agente)").join(", ")})`,
       });
       console.log(`[reunião ${sala.id}] ata não encontrada em ${arquivoAta}`);
       return;

@@ -281,10 +281,14 @@ export class TriggersStore {
     return triggers;
   }
 
-  /** Avalia um evento contra os triggers; devolve os casados. */
+  /** Avalia um evento contra os triggers; devolve os casados.
+   *  Se o evento carrega `workspace` e o trigger declara `workspace`, exigimos
+   *  igualdade — sem isso, um trigger por empresa dispararia em TODAS as
+   *  empresas sempre que qualquer task com o mesmo título fosse criada. */
   casar(homeDir: string, evento: string, dados: Record<string, unknown>): TriggerDef[] {
     return this.listar(homeDir, false).filter((t) => {
       if (t.quando.evento !== evento) return false;
+      if (t.workspace && dados.workspace !== undefined && dados.workspace !== t.workspace) return false;
       if (t.filtro) {
         const valor = String(dados[t.filtro.campo] ?? "");
         return valor === t.filtro.valor;

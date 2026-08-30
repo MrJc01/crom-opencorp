@@ -194,4 +194,57 @@ describe("TriggersStore", () => {
     expect(ts.casar(home, "task.concluida", { coluna: "feito" })).toHaveLength(1);
     void t1;
   });
+
+  it("trigger com workspace não casa quando o evento vem de outro workspace", async () => {
+    const home = wsPath;
+    const ts = new TriggersStore();
+    await ts.criar(home, {
+      quando: { evento: "task.criada" },
+      filtro: { campo: "titulo", valor: "Auditoria-do-site" },
+      alvo: { tipo: "agent_run", agente: "auditor" },
+      workspace: "engenhar",
+    });
+    await ts.criar(home, {
+      quando: { evento: "task.criada" },
+      filtro: { campo: "titulo", valor: "Auditoria-do-site" },
+      alvo: { tipo: "agent_run", agente: "auditor" },
+      workspace: "emporio-aurora",
+    });
+    // evento SEM workspace (retrocompatibilidade) → casa
+    expect(ts.casar(home, "task.criada", { titulo: "Auditoria-do-site" })).toHaveLength(2);
+    // evento com workspace → só o trigger da MESMA empresa casa
+    expect(ts.casar(home, "task.criada", { titulo: "Auditoria-do-site", workspace: "engenhar" })).toHaveLength(1);
+    // outro evento → não casa
+    expect(ts.casar(home, "task.concluida", { titulo: "Auditoria-do-site", workspace: "engenhar" })).toHaveLength(0);
+  });
+
+  it("evento com workspace de outro trigger não casa (isola empresas)", async () => {
+    const home = wsPath;
+    const ts = new TriggersStore();
+    await ts.criar(home, {
+      id: "trg-test-ws-a",
+      quando: { evento: "task.criada" },
+      filtro: { campo: "titulo", valor: "Auditoria-do-site" },
+      workspace: "empresas-a",
+      alvo: { tipo: "agent_run", agente: "auditor", ordem: "audite" },
+    });
+    await ts.criar(home, {
+      id: "trg-test-ws-b",
+      quando: { evento: "task.criada" },
+      filtro: { campo: "titulo", valor: "Auditoria-do-site" },
+      workspace: "empresas-b",
+      alvo: { tipo: "agent_run", agente: "auditor", ordem: "audite" },
+    });
+    // task criada na empresa A → só o trigger A casa
+    const casadosA = ts.casar(home, "task.criada", { titulo: "Auditoria-do-site", workspace: "empresas-a" });
+    expect(casadosA).toHaveLength(1);
+    expect(casadosA[0]!.workspace).toBe("empresas-a");
+    // task criada na empresa B → só o trigger B casa
+    const casadosB = ts.casar(home, "task.criada", { titulo: "Auditoria-do-site", workspace: "empresas-b" });
+    expect(casadosB).toHaveLength(1);
+    // evento SEM workspace (payload antigo) → ambos casam (retrocompatível)
+    expect(ts.casar(home, "task.criada", { titulo: "Auditoria-do-site" })).toHaveLength(2);
+    await ts.excluir(home, "trg-test-ws-a");
+    await ts.excluir(home, "trg-test-ws-b");
+  });
 });

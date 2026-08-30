@@ -68,6 +68,9 @@ export const settingsSchema = z.object({
       max_minutes: z.number().int().min(1).default(6),
       per_agent_usd: z.number().nonnegative().default(0.5),
       moderator: z.string().min(1).default("secretario"),
+      ata_model_rotation: z
+        .array(z.string().min(1))
+        .default(["opencode/nemotron-3-ultra-free", "openrouter/minimax/minimax-m3:free"]),
     })
     .prefault({}),
   supervisor: z

@@ -51,7 +51,12 @@ async function carregarFluxosLista(): Promise<void> {
 }
 
 export async function executarFlow(id: string): Promise<void> {
-  const entrada = prompt('Entrada para o flow (JSON ou texto):');
+  const { modalPrompt } = await import("../modal.js");
+  const entrada = await modalPrompt({
+    titulo: 'Executar flow ' + id,
+    label: 'Entrada (JSON ou texto):',
+    multiline: true,
+  });
   if (entrada === null) return;
 
   try {

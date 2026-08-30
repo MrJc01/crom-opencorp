@@ -220,7 +220,8 @@ export async function toggleAgendaAtivo(id: string, ativo: boolean): Promise<voi
 }
 
 export async function excluirAgenda(id: string): Promise<void> {
-  if (!confirm('Excluir esta rotina?')) return;
+  const { modalConfirm } = await import("../modal.js");
+  if (!(await modalConfirm('Excluir esta rotina?', { confirmar: 'Excluir' }))) return;
   try {
     await api('/schedules/' + id, { method: 'DELETE' });
     toast('Excluído', 'ok');

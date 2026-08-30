@@ -218,7 +218,13 @@ export async function decidirAprovacao(id: string, ok: boolean): Promise<void> {
 }
 
 export async function promptOrdem(): Promise<void> {
-  const ordem = prompt('Ordem para executor-padrao:');
+  const { modalPrompt } = await import("../modal.js");
+  const ordem = await modalPrompt({
+    titulo: 'Executar agente',
+    label: 'Ordem para executor-padrao:',
+    multiline: true,
+    obrigatorio: true,
+  });
   if (!ordem) return;
   try {
     const wsAtivo = getWsAtivo();

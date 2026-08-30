@@ -279,13 +279,19 @@ export async function renderView(): Promise<void> {
   }
 }
 
-/** Cria novo workspace via prompt */
+/** Cria novo workspace via modal */
 export async function novoWorkspace(): Promise<void> {
   const { api } = await import("./api.js");
   const { setWsAtivo } = await import("./state.js");
   const { renderView: rv } = await import("./main.js");
+  const { modalPrompt } = await import("./modal.js");
 
-  const id = prompt('ID do workspace (kebab-case):');
+  const id = await modalPrompt({
+    titulo: 'Novo workspace',
+    label: 'ID do workspace (kebab-case):',
+    placeholder: 'ex: minha-empresa',
+    obrigatorio: true,
+  });
   if (!id) return;
 
   await api('/workspaces', { method: 'POST', body: JSON.stringify({ id }) });

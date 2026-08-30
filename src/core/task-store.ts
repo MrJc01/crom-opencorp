@@ -95,6 +95,12 @@ function gerarId(prefixo: string): string {
   return `${prefixo}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
+/** Deriva o id do workspace do caminho (<home>/workspaces/<id> → id). */
+export function workspaceIdDoPath(wsPath: string): string {
+  const segs = wsPath.replace(/[\\/]+$/, "").split("/");
+  return segs[segs.length - 1] ?? "";
+}
+
 export class TaskStore {
   private readonly agora: () => Date;
   private readonly maxMensagensHora: number;
@@ -229,7 +235,13 @@ export class TaskStore {
       )
       .run(t);
     const task = this.linhaParaTask(t);
-    eventBus.emit("task.criada", { task_id: task.id, titulo: task.titulo, coluna: task.coluna, por });
+    eventBus.emit("task.criada", {
+      task_id: task.id,
+      titulo: task.titulo,
+      coluna: task.coluna,
+      por,
+      workspace: workspaceIdDoPath(wsPath),
+    });
     return task;
   }
 
