@@ -83,6 +83,7 @@ test.describe("Agenda / Rotinas", () => {
 
     // Verifica badge pausado
     await expect(jobCard.locator("text=pausado")).toBeVisible();
+  });
 
   test("Excluir remove (confirm → page.on('dialog') accept)", async ({ page }) => {
     await page.click('.nav-item[data-view="agenda"]');
