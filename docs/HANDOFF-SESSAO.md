@@ -1,0 +1,50 @@
+# Handoff de sessão — opencorp (cole este contexto ao trocar de chat)
+
+## Objective
+- Continuar o desenvolvimento do **opencorp** — Sistema Operacional de Empresas Autônomas CLI-first sobre o OpenCode (`/home/j/Documentos/GitHub/crom-worker-opencode`, usuário fala PT-BR).
+- Fase atual: **plano `docs/13-plano-extensoes-plataforma.md` (etapas 19–25)**, implementadas com o protocolo: implementação → testes unitários → verificação real → bateria cega `opencorp test blind <n>` → fix (máx 3 ciclos) → status em docs/13 → commit. Modo **Custo Zero** (modelos free, teto budget.daily_usd=0.10).
+- Momento do handoff: **etapas 19–22 concluídas com PASS; etapa 23 (Mini-apps) implementada e commitada, bateria cega ciclo 3 em andamento**; faltam 24–25.
+
+## Important Details
+- node v22.22.3 · opencode 1.18.22 · melhor-sqlite3 WAL · zod · vitest (285 testes verdes).
+- **Modelos free (atualização do usuário nesta sessão):** `openrouter/nvidia/nemotron-3-ultra-550b-a55b:free` = default do testador-cego e `tests.test_model` (rápido: ~4s e competente, passou baterias de 1ª) · `openrouter/minimax/minimax-m3:free` = implementador-free. Rotação (schema default + `~/.opencorp/settings.json`): `["openrouter/nvidia/nemotron-3-ultra-550b-a55b:free","openrouter/minimax/minimax-m3:free","opencode/nemotron-3-ultra-free"]`. Antigos hy3-free/mimo travam — matar sessão e rotacionar.
+- **Paralelismo de LLMs liberado pelo usuário** ("pode rodar em paralelo"): validado — 3 runs diretos em 33s; 2 sessões concorrentes pela API concluíram.
+- Protocolo bateria cega: `opencorp test blind <n> --model openrouter/nvidia/nemotron-3-ultra-550b-a55b:free` com `OPENCORP_HOME=/tmp/opencorp-cego` (workspace `test-hook` já existe; `rm -rf /tmp/opencorp-cego-e<n>` antes). Relatórios em `.opencorp/reports/testes/`. Cada tentativa pode levar 2–10 min; poll com sleeps de ~110s.
+- Armadilhas de sessão: NUNCA `pkill -f` com padrão que casa com o próprio comando (matou a shell 1x) — matar processos por pidfile ou portas exatas via `ss -ltnp`; `mkdirRecursive` é async (await!); validação de specs cegas: cenário que exige browser não funciona para agente headless (verificar via curl do HTML estático).
+- `statusHttpDe` em src/server/index.ts: mapear toda classe de erro nova (TaskError/HookError/AppError com campo `status` opcional; SchedulerError→400; sem mapeamento = 500).
+- Gasto total antes do custo-zero: $16.81/5d. Orçamento: chunks pequenos, 1 commit por etapa.
+
+## Work State
+### Completed
+- **Fases A e B (etapas 0–13)** + v0.1.0/v0.2.0: settings+TUI, workspaces, agentes+sessões OpenCode reais, registries (journal+SQLite `corp-db`), SecurityGuard+HITL+Budget, Boardroom, Supervisor daemon, Self-healing, Flows, **API REST+SSE (`src/server/index.ts`)**, `serve` daemonizado, `opencorp web` (UI estática em `web-dist/index.html`), `test blind` com rotação, docs 10/12/13/14.
+- **ETAPA 19 · Task Board + Chat** ✅ PASS 5/5 (1º ciclo, `4f7b4e0`): `src/core/task-store.ts` (SQLite próprio `<ws>/.opencorp/tasks.db`; tasks + `task_mensagens`; menções `@agente` extraídas por regex; rate limit 30 msgs/h por task (429); lock/lease com expiração (409); dependências `bloqueado_por` com `bloqueado()`; colunas padrão backlog/fazendo/bloqueado/feito + custom kebab-case; `pos` float por ordinal; eventos task.criada/movida/atribuida/concluida/editada/excluida/mensagem no eventBus) · CLI `task create|list|show|move|assign|label|chat|columns|delete` (`src/cli/commands/task.ts`) · API `/tasks` CRUD+PATCH unificado+`/tasks/:id/chat`+`/tasks/colunas` (colunas ANTES do regex `:id`) · UI: aba Tasks com kanban + chat por task ao vivo · TaskError tem `status` opcional no constructor (`errors.ts`).
+- **ETAPA 20 · Scheduler** ✅ PASS 5/5 (1º ciclo, `7e7ea3d`): `src/core/scheduler.ts` — parser cron 5 campos próprio (`validarCron`, `proximoCron`; regex `^(?:(\d+)(?:-(\d+))?|\*)(?:\/(\d+))?$`; cuidado: valor único NÃO é faixa), agenda cron|intervalo_min|data_unica, jobs em `<home>/.opencorp/scheduler.db`, `tick()` com graça (`graca_min` atraso → pula e reagenda), `data_unica` desativa após executar, `runNow`, spawn do binário com `--workspace` e `OPENCORP_HOME`; daemon `scheduler start/stop/status` (`src/cli/commands/schedule.ts`) — **keep-alive obrigatório no foreground**: `iniciar(intervaloSeg, manterVivo=true)` com interval não-unref'd (sem isso o processo morre na hora); API `/schedules` CRUD + POST `/:id` = run-now; SchedulerError→400, 404 via status no erro.
+- **ETAPA 21 · Webhooks & Triggers** ✅ PASS 5/5 (ciclo 2, `84404aa`; ciclo 1 FAIL no cenário triggers): `src/core/hook-store.ts` — Hook `{id, token hk_*, metodos, respond imediato|final, dedup_seg, alvo: task_create|agent_run|flow_run|webhook_out}`, `substituirTemplate` (`{{a.b}}`, `{{payload}}`, query), dedup SHA-256 por janela (409), arquivos em `<ws>/.opencorp/hooks/`; TriggersStore (`~/.opencorp/triggers/*.json`): `casar(home, evento, dados)` com filtro campo==valor; **fix chave do ciclo 1: `src/core/trigger-runner.ts` — `instalarTriggers()` chamado em `main()` (cli/index.ts) avalia eventos no PROCESSO CLI também** (antes só o servidor via eventBus — CLI morria antes de executar a ação); `main()` faz `await Promise.allSettled(pendentesTriggers())` após parseAsync; watcher inline do servidor foi REMOVIDO (evita duplicidade); rota pública `POST/GET /hooks/:workspace/:id` isenta da auth Bearer global (auth própria `x-opencorp-token` ou `?token=`), respond final=200/imediato=202; nó de flow `webhook` (enum em `nosFlowSchema`, valida `config.url`, executa com retry 3 + backoff, `{{entrada}}` no corpo); CLI `hook create|list|show|test|delete` + `trigger create|list|delete`.
+- **ETAPA 22 · Tools/MCP** ✅ PASS 5/5 (1º ciclo, `c1334f0`): `src/core/tool-registry.ts` — built-ins `task.list/create/move/chat`, `query.sql` (SELECT único sem `;`, via `db["db"]` privado do CorpDb), `http.get` (approval "sempre"); manifests JSON plugáveis em `~/.opencorp/tools/` e `<ws>/.opencorp/tools/` (hot-reload por mtime, ws sobrescreve home); validador JSON Schema mínimo (`validarContraSchema`); rate limit por min em memória; `approval: "sempre"` exige `--aprovado`; handler tipos comando (spawn com input JSON como último arg, cwd=ws)|http|interno; `opencorp mcp serve` (`src/cli/commands/tool.ts`) — **MCP stdio JSON-RPC por linhas** (initialize→protocolVersion 2025-06-18 + serverInfo opencorp, tools/list, tools/call com `isError`, notifications ignoradas, stdin end→exit); testes do MCP falam com o binário real via execFile.
+- **ETAPA 23 · Mini-apps** implementada (`66d717f`): `src/core/app-store.ts` — spec zod `{id kebab, titulo, paginas:[{titulo, widgets:[{id, tipo: metrica|tabela|kanban|grafico|formulario|markdown|lista_tarefas, titulo, fonte:{rota?, campo_valor?, rotulo_campo?}, acao?, texto?}]}]}` (widgets só leem ROTAS da API autenticadas — nada de SQL do cliente), seeds `painel-tarefas` e `custos`, `salvar` valida; CLI `app create|list|show|validate|delete|seed`; API `/apps` GET/POST(spec validado)/`/apps/:id/spec` GET/DELETE; UI: aba Apps + `loadAppsList`/`abrirApp`/`renderWidget`/`enviarForm` (hash `/#/app/<id>`); **fix do ciclo 2 da bateria: AppError→404 no statusHttpDe (era 500), verificado ao vivo**.
+- **Baterias cegas** PASS: 19 (5/5), 20 (5/5), 21 (5/5 ciclo 2), 22 (5/5). Ciclo 2 da 23 = FAIL parcial 4/5 (só o 500→404) → fix aplicado e commitado → **ciclo 3 disparado antes do handoff e AINDA RODANDO** (relatório novo em `.opencorp/reports/testes/ETAPA-23-*.md` com timestamp > 00-29-49; verificar VEREDITO; relatório antigo/ciclo 2 é o `...00-29-49.md`).
+
+### Active
+- Conferir resultado do ciclo 3 da bateria 23 (se PASS: marcar status na docs/13 e commitar relatório; se FAIL: ler o relatório e corrigir — máx 3 ciclos).
+- Working tree limpa no momento do handoff (`66d717f`).
+
+### Blocked
+- (nada)
+
+## Next Move
+1. `R=$(ls -t .opencorp/reports/testes/ETAPA-23* | head -1); grep -oE "VEREDITO.*" "$R"` — se o relatório novo der PASS 5/5 → atualizar docs/13 (`| 23 | Mini-apps | concluída — PASS 5/5 |`), `git add -A && git commit -m "test(blind): ETAPA 23 PASS"`. Se der FAIL → corrigir e rodar de novo (ciclo 3/3).
+2. **ETAPA 24 · Orquestração multi-agente** (`docs/13` + `docs/14-analise-multiagente-tasks.md`): padrões declarativos pipeline/fan-out-fan-in com barreira (`bloqueado_por`)/revisão cruzada/debate via `opencorp team create|list|run`; spawn por menção no chat de task usando as 3 guardas (loop guard, rate limit, lease do TaskStore); supervisor como orquestrador padrão; escala humano nas violações.
+3. **ETAPA 25 · Bateria final**: specs cegas 24 + regressão `test blind all`, `doctor` cobrindo scheduler/hooks/apps, README/docs atualizados, **tag v0.3.0**.
+
+## Relevant Files
+- `docs/13-plano-extensoes-plataforma.md` — plano ativo com tabela de status (19–22 ✅, 23 pendente de bateria, 24–25 pendentes).
+- `docs/14-analise-multiagente-tasks.md` — análise de chat de tasks + orquestração multi-agente (modelos A-D, fluxogramas F1–F4, guardas) — base da etapa 24.
+- `docs/tests/ETAPA-19..23-*.md` — specs cegas usadas (23 = `ETAPA-23-mini-apps.md`).
+- `.opencorp/reports/testes/ETAPA-2x-*.md` — relatórios das baterias (blind XX log em /tmp/opencode/blindXX*.log).
+- `src/core/task-store.ts`, `scheduler.ts`, `hook-store.ts`, `trigger-runner.ts`, `tool-registry.ts`, `app-store.ts` — cores das etapas 19–23.
+- `src/cli/commands/task.ts`, `schedule.ts`, `hook.ts`, `tool.ts`, `app.ts` + `src/cli/index.ts` (registro de comandos; `main()` instala triggers e aguarda pendentes).
+- `src/server/index.ts` — API completa: ROUTES array (alimenta `/doc`), `/tasks`, `/schedules`, `/hooks` + rota pública, `/apps`, fallback estático UI, `statusHttpDe` com mapeamentos de erro.
+- `src/cli/commands/test.ts` — `test blind` (rotação, extração VEREDITO, relatório em `.opencorp/reports/testes/`).
+- `src/schemas/settings.ts` — `test_model` e `tests.rotation` defaults novos (nemotron-550b primeiro).
+- `web-dist/index.html` — UI completa (Dashboard, Tasks kanban+chat, Apps com renderWidget).
+- `.opencode/agent/testador-cego.md` (nemotron-550b) e `.opencode/agent/implementador-free.md` (minimax-m3).
