@@ -54,8 +54,9 @@ export function registerWebCommand(program: Command): void {
     .option("--port <porta>", "porta (padrão 4100)", "4100")
     .option("--token <token>", "token de acesso (reutiliza ~/.opencorp/secrets.json se omitido)")
     .option("--workspace <id>", "workspace padrão da UI")
+    .option("--host <host>", "interface de escuta (padrão 127.0.0.1)", "127.0.0.1")
     .option("--no-open", "não abrir o navegador")
-    .action(async (opts: { port?: string; token?: string; workspace?: string; open?: boolean }) => {
+    .action(async (opts: { port?: string; token?: string; workspace?: string; host?: string; open?: boolean }) => {
       const ui = join(process.cwd(), "web-dist", "index.html");
       if (!existsSync(ui)) {
         console.error("erro: web-dist/index.html não encontrada — rode no diretório do projeto opencorp");
@@ -73,7 +74,7 @@ export function registerWebCommand(program: Command): void {
       }
       const token = opts.token ?? tokenPersistido();
       const { server, porta: portaPromessa } = createApiServer({ token, workspace: wsPadrao });
-      server.listen(Number(opts.port ?? 4100), "127.0.0.1");
+      server.listen(Number(opts.port ?? 4100), opts.host ?? "127.0.0.1");
       const porta = await portaPromessa;
       const url = `http://127.0.0.1:${porta}`;
       console.log(`opencorp web em ${url}`);

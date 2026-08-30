@@ -91,11 +91,12 @@ export function registerServeCommand(program: Command): void {
     .option("--port <porta>", "porta (padrão 4100)", "4100")
     .option("--token <token>", "token de acesso (gerado e salvo em ~/.opencorp/secrets.json se omitido)")
     .option("--workspace <id>", "workspace padrão da API")
+    .option("--host <host>", "interface de escuta (padrão 127.0.0.1; use 0.0.0.0 para rede local)", "127.0.0.1")
     .option("--foreground", "roda em primeiro plano (debug) — padrão: daemonizado em background");
 
   serve
     .action(
-      async (opts: { port?: string; token?: string; workspace?: string; foreground?: boolean }) => {
+      async (opts: { port?: string; token?: string; workspace?: string; host?: string; foreground?: boolean }) => {
         const home = opencorpHome();
         let token = opts.token;
         if (!token) {
@@ -141,7 +142,7 @@ export function registerServeCommand(program: Command): void {
         if (!opts.foreground) {
           // Modo daemon: spawn detached child com --foreground
           const logPath = join(home, "logs", "api-daemon.log");
-          const args = [process.argv[1]!, "serve", "--foreground", "--port", String(portaNum), "--token", token];
+          const args = [process.argv[1]!, "serve", "--foreground", "--port", String(portaNum), "--token", token, "--host", opts.host ?? "127.0.0.1"];
           if (opts.workspace) args.push("--workspace", opts.workspace);
           const pid = await spawnDaemon(args, logPath);
 
@@ -172,7 +173,7 @@ export function registerServeCommand(program: Command): void {
           token,
           workspace: opts.workspace,
         });
-        server.listen(portaNum, "127.0.0.1");
+        server.listen(portaNum, opts.host ?? "127.0.0.1");
         const porta = await portaPromessa.catch(() => portaNum);
         console.log(`API em http://127.0.0.1:${porta}`);
         console.log(`token: ${tokenFinal.slice(0, 6)}… (completo em ${join(home, ".opencorp", "secrets.json")})`);
