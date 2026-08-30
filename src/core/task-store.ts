@@ -397,8 +397,16 @@ export class TaskStore {
       .run(m);
     await this.tocar(wsPath, taskId);
     const msg = this.linhaParaMsg(m);
-    eventBus.emit("task.mensagem", { task_id: taskId, msg_id: msg.id, autor: msg.autor, menciona: msg.menciona, tipo: msg.tipo });
+    eventBus.emit("task.mensagem", { task_id: taskId, msg_id: msg.id, autor: msg.autor, menciona: msg.menciona, tipo: msg.tipo, ws_path: wsPath });
     return msg;
+  }
+
+  /** Define as dependências (barreira da orquestração fan-out/fan-in). */
+  async definirDependencias(wsPath: string, id: string, deps: string[]): Promise<Task> {
+    await this.obterLinha(wsPath, id);
+    this.db(wsPath).prepare("UPDATE tasks SET bloqueado_por = ? WHERE id = ?").run(paraLista(deps), id);
+    await this.tocar(wsPath, id);
+    return this.obter(wsPath, id);
   }
 
   async chat(wsPath: string, taskId: string, limite = 100): Promise<MensagemTask[]> {

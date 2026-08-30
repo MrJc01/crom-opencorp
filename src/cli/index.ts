@@ -18,6 +18,7 @@ import { registerScheduleCommands } from "./commands/schedule.js";
 import { registerHookCommands } from "./commands/hook.js";
 import { registerToolCommands } from "./commands/tool.js";
 import { registerAppCommand } from "./commands/app.js";
+import { registerTeamCommand } from "./commands/team.js";
 import { registerSupervisorCommand } from "./commands/supervisor.js";
 import { registerServeCommand } from "./commands/serve.js";
 import { registerWebCommand } from "./commands/web.js";
@@ -26,6 +27,7 @@ import { registerWorkspaceCommands } from "./commands/workspace.js";
 import { registerTestCommand } from "./commands/test.js";
 import { notImplementedAction } from "./placeholder.js";
 import { instalarTriggers, pendentesTriggers } from "../core/trigger-runner.js";
+import { instalarMencoes, pendentesMencoes } from "../core/mention-runner.js";
 
 const require = createRequire(import.meta.url);
 
@@ -90,6 +92,8 @@ export function buildProgram(): Command {
   registerToolCommands(program);
 
   registerAppCommand(program);
+
+  registerTeamCommand(program);
 
   registerServeCommand(program);
 
@@ -160,11 +164,12 @@ function handleCommanderError(err: CommanderError): void {
 
 export async function main(argv: string[] = process.argv): Promise<void> {
   instalarTriggers();
+  instalarMencoes();
   const program = buildProgram();
   program.exitOverride();
   try {
     await program.parseAsync(argv);
-    await Promise.allSettled(pendentesTriggers());
+    await Promise.allSettled([...pendentesTriggers(), ...pendentesMencoes()]);
   } catch (err) {
     if (err instanceof CommanderError) {
       handleCommanderError(err);

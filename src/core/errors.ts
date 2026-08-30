@@ -30,3 +30,11 @@ export class HookError extends OpencorpError {}
 export class ToolError extends OpencorpError {}
 export class AppError extends OpencorpError {}
 export class ApprovalError extends OpencorpError {}
+export class TeamError extends OpencorpError {
+  readonly status?: number;
+
+  constructor(mensagem: string, opts: { exitCode?: number; status?: number } = {}) {
+    super(mensagem, opts);
+    this.status = opts.status;
+  }
+}
