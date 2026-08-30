@@ -112,8 +112,16 @@ export function esconderLogin(): void {
  * de login quando havia uma sessão ativa (api() em 401 usa isto).
  */
 export function sairParaLogin(mensagemErro = 'Sessão encerrada — faça login novamente'): void {
-  clearAuth();
+  // ORDEM IMPORTA: fecha o EventSource ANTES de clearAuth zerar o state
+  // (se clearAuth rodar primeiro, a referência do ES vivo é perdida e o
+  // socket fica aberto — bug "login visível com SSE conectado")
   fecharSSE();
+  const prevInterval = getRefreshInterval();
+  if (prevInterval) {
+    clearInterval(prevInterval);
+    setRefreshInterval(null);
+  }
+  clearAuth();
   mostrarLogin(mensagemErro);
 }
 
@@ -168,6 +176,13 @@ export function conectarSSE(): void {
   setEventSource(es);
 
   es.onopen = () => {
+    // Guard: se o token sumiu (logout/401 durante o CONNECTING), este ES é um
+    // órfão — fecha e NÃO pinta "conectado" com a tela de login visível.
+    if (!getToken()) {
+      try { es.close(); } catch { /* ignore */ }
+      setSseConnected(false);
+      return;
+    }
     setSseConnected(true);
     const dot = document.getElementById('conn-dot');
     const text = document.getElementById('conn-text');

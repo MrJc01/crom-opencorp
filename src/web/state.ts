@@ -243,6 +243,11 @@ export function loadPersistedAuth(): { token: string | null; ws: string } {
 export function clearAuth(): void {
   localStorage.removeItem('oc-token');
   localStorage.removeItem('oc-ws');
+  // Fecha o EventSource vivo antes de descartar a referência (evita socket
+  // órfão que segue aberto e reconecta com o login na tela)
+  if (state.eventSource) {
+    try { state.eventSource.close(); } catch { /* ignore */ }
+  }
   state = { ...initialState };
   notify();
 }
