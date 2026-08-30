@@ -15,21 +15,29 @@ export function registerDoctorCommand(program: Command): void {
   program
     .command("doctor")
     .description(
-      "diagnóstico do ambiente: node, opencode no PATH, settings global, escrita e segredos",
+      "diagnóstico do ambiente: node, opencode no PATH, settings, scheduler, hooks, apps, teams, secretário e segredos",
     )
     .option("--json", "imprime o resultado em JSON (machine-readable)")
     .action(async (opts: { json?: boolean }) => {
       let securityPolicyPath: string | undefined;
       let budgetPath: string | undefined;
+      let workspacePath: string | undefined;
       try {
         const ws = await new WorkspaceManager().resolver();
         securityPolicyPath = join(ws.path, ".opencorp", "security_policy.json");
         budgetPath = join(ws.path, ".opencorp", "budget.json");
+        workspacePath = ws.path;
       } catch {
         securityPolicyPath = undefined;
         budgetPath = undefined;
+        workspacePath = undefined;
       }
-      const resultado = await runDoctor({ homeDir: opencorpHome(), securityPolicyPath, budgetPath });
+      const resultado = await runDoctor({
+        homeDir: opencorpHome(),
+        securityPolicyPath,
+        budgetPath,
+        workspacePath,
+      });
       if (opts.json) {
         console.log(JSON.stringify(resultado, null, 2));
       } else {

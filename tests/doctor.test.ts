@@ -8,7 +8,18 @@ import {
   loadSettings,
   lookupExecutable,
   runDoctor,
+  checkScheduler,
+  checkHooks,
+  checkApps,
+  checkTeams,
+  checkSecretario,
+  schedulerPidfilePath,
+  secretarioPidfilePath,
+  hooksDir,
+  appsDir,
+  teamsDir,
 } from "../src/core/doctor.js";
+import { mkdirSync } from "node:fs";
 
 const raizes: string[] = [];
 
@@ -222,5 +233,242 @@ describe("runDoctor (integração, tudo injetado)", () => {
     const escrita = resultado.checks.find((c) => c.id === "escrita");
     expect(escrita?.status).toBe("fail");
     expect(escrita?.detail).toContain(join(home, ".opencorp"));
+  });
+});
+
+describe("checkScheduler", () => {
+  it("sem pidfile e sem scheduler.db → info (primeira execução)", async () => {
+    const home = await tmpDir();
+    const check = await checkScheduler(home);
+    expect(check.status).toBe("info");
+    expect(check.detail).toContain("scheduler não configurado");
+  });
+
+  it("pidfile órfão (PID inexistente) → warn sem jobs", async () => {
+    const home = await tmpDir();
+    mkdirSync(join(home, ".opencorp"), { recursive: true });
+    const pidfile = schedulerPidfilePath(home);
+    await writeFile(pidfile, JSON.stringify({ pid: 999_999, iniciado: new Date().toISOString() }));
+    const check = await checkScheduler(home);
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("pidfile órfão");
+  });
+
+  it("scheduler vivo (process.pid no pidfile) → ok com jobs=0", async () => {
+    const home = await tmpDir();
+    mkdirSync(join(home, ".opencorp"), { recursive: true });
+    const pidfile = schedulerPidfilePath(home);
+    await writeFile(pidfile, JSON.stringify({ pid: process.pid, iniciado: new Date().toISOString() }));
+    const check = await checkScheduler(home, { pidVivo: () => true });
+    expect(check.status).toBe("ok");
+    expect(check.detail).toContain(`pid ${process.pid}`);
+    expect(check.detail).toContain("vivo");
+  });
+
+  it("scheduler morto com jobs ativos em scheduler.db → warn (aviso principal)", async () => {
+    const home = await tmpDir();
+    mkdirSync(join(home, ".opencorp"), { recursive: true });
+    const pidfile = schedulerPidfilePath(home);
+    await writeFile(pidfile, JSON.stringify({ pid: 999_999, iniciado: new Date().toISOString() }));
+    // cria scheduler.db com 1 job ativo usando o módulo real (mais simples)
+    const { Scheduler } = await import("../src/core/scheduler.js");
+    const s = new Scheduler({ homeDir: home });
+    await s.criar({ nome: "r", agenda: { tipo: "intervalo_min", valor: 30 }, args: ["task", "list"] });
+    const check = await checkScheduler(home);
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("scheduler morto");
+    expect(check.detail).toContain("1 job");
+  });
+});
+
+describe("checkHooks", () => {
+  it("diretório ausente → info", async () => {
+    const ws = await tmpDir();
+    const check = await checkHooks(ws);
+    expect(check.status).toBe("info");
+    expect(check.detail).toContain("não existe");
+  });
+
+  it("hook com JSON inválido → warn listando o nome", async () => {
+    const ws = await tmpDir();
+    const dir = hooksDir(ws);
+    mkdirSync(dir, { recursive: true });
+    await writeFile(join(dir, "hook-abc.json"), "{ não é json");
+    const check = await checkHooks(ws);
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("JSON inválido");
+    expect(check.items).toBeDefined();
+    expect(check.items?.[0]).toContain("hook-abc.json");
+  });
+
+  it("hook válido → ok", async () => {
+    const ws = await tmpDir();
+    const dir = hooksDir(ws);
+    mkdirSync(dir, { recursive: true });
+    await writeFile(
+      join(dir, "hook-ok.json"),
+      JSON.stringify({
+        id: "hook-ok",
+        nome: "ok",
+        token: "x",
+        metodos: ["POST"],
+        respond: "imediato",
+        dedup_seg: 60,
+        ativo: true,
+        alvo: { tipo: "task_create", titulo: "t" },
+        workspace: "w",
+        criado_em: new Date().toISOString(),
+      }),
+    );
+    const check = await checkHooks(ws);
+    expect(check.status).toBe("ok");
+    expect(check.detail).toContain("1 hook");
+  });
+});
+
+describe("checkApps", () => {
+  it("app com spec inválida → warn", async () => {
+    const ws = await tmpDir();
+    const dir = appsDir(ws);
+    mkdirSync(dir, { recursive: true });
+    await writeFile(join(dir, "app-bad.json"), JSON.stringify({ id: "App_Bad", titulo: "x", paginas: [] }));
+    const check = await checkApps(ws);
+    expect(check.status).toBe("warn");
+    expect(check.items?.[0]).toContain("app-bad.json");
+  });
+
+  it("app válido → ok", async () => {
+    const ws = await tmpDir();
+    const dir = appsDir(ws);
+    mkdirSync(dir, { recursive: true });
+    const spec = {
+      id: "painel-ok",
+      titulo: "Painel OK",
+      paginas: [{ titulo: "Página", widgets: [] }],
+    };
+    await writeFile(join(dir, "painel-ok.json"), JSON.stringify(spec));
+    const check = await checkApps(ws);
+    expect(check.status).toBe("ok");
+    expect(check.detail).toContain("1 app");
+  });
+});
+
+describe("checkTeams", () => {
+  it("team pipeline sem passos → warn", async () => {
+    const ws = await tmpDir();
+    const dir = teamsDir(ws);
+    mkdirSync(dir, { recursive: true });
+    await writeFile(
+      join(dir, "team-bad.json"),
+      JSON.stringify({
+        id: "team-bad",
+        titulo: "Bad",
+        padrao: "pipeline",
+        criado_em: new Date().toISOString(),
+      }),
+    );
+    const check = await checkTeams(ws);
+    expect(check.status).toBe("warn");
+    expect(check.items?.[0]).toContain("team-bad.json");
+  });
+
+  it("team pipeline válido → ok", async () => {
+    const ws = await tmpDir();
+    const dir = teamsDir(ws);
+    mkdirSync(dir, { recursive: true });
+    await writeFile(
+      join(dir, "team-ok.json"),
+      JSON.stringify({
+        id: "team-ok",
+        titulo: "OK",
+        padrao: "pipeline",
+        passos: [{ agente: "executor-padrao", ordem: "faça" }],
+        criado_em: new Date().toISOString(),
+      }),
+    );
+    const check = await checkTeams(ws);
+    expect(check.status).toBe("ok");
+    expect(check.detail).toContain("1 team");
+  });
+});
+
+describe("checkSecretario", () => {
+  it("sem pidfile → ok (parado)", async () => {
+    const home = await tmpDir();
+    const check = await checkSecretario(home);
+    expect(check.status).toBe("ok");
+    expect(check.detail).toContain("secretário parado");
+  });
+
+  it("com pidfile (PID vivo) e fetch mock ok → ok", async () => {
+    const home = await tmpDir();
+    mkdirSync(join(home, ".opencorp"), { recursive: true });
+    await writeFile(
+      secretarioPidfilePath(home),
+      JSON.stringify({ pid: process.pid, porta: 12345, iniciado_em: new Date().toISOString() }),
+    );
+    const fetchMock = (async () => new Response("ok", { status: 200 })) as unknown as typeof fetch;
+    const check = await checkSecretario(home, { pidVivo: () => true, fetch: fetchMock });
+    expect(check.status).toBe("ok");
+    expect(check.detail).toContain("/health");
+  });
+
+  it("pidfile órfão (PID morto) → warn", async () => {
+    const home = await tmpDir();
+    mkdirSync(join(home, ".opencorp"), { recursive: true });
+    await writeFile(
+      secretarioPidfilePath(home),
+      JSON.stringify({ pid: 999_999, porta: 12345, iniciado_em: new Date().toISOString() }),
+    );
+    const check = await checkSecretario(home, { pidVivo: () => false });
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("órfão");
+  });
+});
+
+describe("runDoctor — checks novos integrados", () => {
+  it("inclui scheduler, secretário, hooks, apps, teams; pidfile órfão do scheduler → warn", async () => {
+    const home = await tmpDir();
+    mkdirSync(join(home, ".opencorp"), { recursive: true });
+    await writeFile(
+      schedulerPidfilePath(home),
+      JSON.stringify({ pid: 999_999, iniciado: new Date().toISOString() }),
+    );
+    const resultado = await runDoctor({
+      nodeVersion: "v22.0.0",
+      pathEnv: "",
+      homeDir: home,
+      cwd: home,
+      settingsPath: join(home, "inexistente.json"),
+      workspaceRoots: [],
+      pidVivo: () => false,
+    });
+    const porId = new Map(resultado.checks.map((c) => [c.id, c]));
+    expect(porId.get("scheduler")?.status).toBe("warn");
+    expect(porId.get("secretario")?.status).toBe("ok"); // sem pidfile
+    expect(porId.get("hooks")?.status).toBe("info"); // sem workspace
+    expect(porId.get("apps")?.status).toBe("info");
+    expect(porId.get("teams")?.status).toBe("info");
+  });
+
+  it("com workspacePath, hook inválido → warn", async () => {
+    const home = await tmpDir();
+    mkdirSync(join(home, ".opencorp"), { recursive: true });
+    const wsPath = await tmpDir();
+    const dir = hooksDir(wsPath);
+    mkdirSync(dir, { recursive: true });
+    await writeFile(join(dir, "hook-x.json"), "{ inválido");
+    const resultado = await runDoctor({
+      nodeVersion: "v22.0.0",
+      pathEnv: "",
+      homeDir: home,
+      cwd: home,
+      settingsPath: join(home, "inexistente.json"),
+      workspaceRoots: [],
+      workspacePath: wsPath,
+    });
+    const hooks = resultado.checks.find((c) => c.id === "hooks");
+    expect(hooks?.status).toBe("warn");
+    expect(hooks?.items?.[0]).toContain("hook-x.json");
   });
 });

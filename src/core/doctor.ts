@@ -2,10 +2,13 @@ import { accessSync, constants as fsConstants, existsSync, statSync } from "node
 import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { settingsSchema, type Settings } from "../schemas/settings.js";
 import { parseSecurityPolicyTexto } from "../schemas/security-policy.js";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { expandTilde } from "../utils/paths.js";
+import { AppStore } from "./app-store.js";
+import { TeamStore } from "./team-store.js";
 
 export const MIN_NODE_MAJOR = 22;
 export const DEFAULT_WORKSPACES_ROOT = "~/.opencorp/workspaces";
@@ -33,8 +36,16 @@ export interface DoctorOptions {
   cwd?: string;
   settingsPath?: string;
   workspaceRoots?: string[];
+  workspacePath?: string;
   securityPolicyPath?: string;
   budgetPath?: string;
+  /**
+   * Injetado para evitar dependência circular e facilitar testes.
+   * Recebe um PID e devolve true se o processo estiver vivo.
+   */
+  pidVivo?: (pid: number) => boolean | Promise<boolean>;
+  /** Função de fetch injetada para o check do secretário (testes podem mockar). */
+  fetch?: typeof fetch;
 }
 
 export function errorMessage(erro: unknown): string {
@@ -234,6 +245,389 @@ export function checkSecrets(arquivos: string[], raizes: string[]): DoctorCheck 
   };
 }
 
+export function schedulerPidfilePath(homeDir: string): string {
+  return join(homeDir, ".opencorp", "scheduler.pid");
+}
+
+export function schedulerDbPath(homeDir: string): string {
+  return join(homeDir, ".opencorp", "scheduler.db");
+}
+
+export function hooksDir(wsPath: string): string {
+  return join(wsPath, ".opencorp", "hooks");
+}
+
+export function appsDir(wsPath: string): string {
+  return join(wsPath, ".opencorp", "apps");
+}
+
+export function teamsDir(wsPath: string): string {
+  return join(wsPath, ".opencorp", "teams");
+}
+
+export function secretarioPidfilePath(homeDir: string): string {
+  return join(homeDir, ".opencorp", "opencode-server.json");
+}
+
+export async function pidfileAlive(
+  pidfile: string,
+  pidVivoFn: (pid: number) => boolean | Promise<boolean>,
+): Promise<{ vivo: boolean; pid: number | null }> {
+  if (!existsSync(pidfile)) return { vivo: false, pid: null };
+  try {
+    const dados = JSON.parse(await readFile(pidfile, "utf8")) as { pid?: unknown };
+    const pid = typeof dados.pid === "number" ? dados.pid : NaN;
+    if (!Number.isFinite(pid)) return { vivo: false, pid: null };
+    const vivo = await pidVivoFn(pid);
+    return { vivo, pid };
+  } catch {
+    return { vivo: false, pid: null };
+  }
+}
+
+async function contarJobsAtivos(dbPath: string): Promise<number> {
+  if (!existsSync(dbPath)) return 0;
+  let db: Database.Database | null = null;
+  try {
+    db = new Database(dbPath, { readonly: true });
+    const linha = db.prepare("SELECT COUNT(*) as n FROM jobs WHERE ativo = 1").get() as { n: number };
+    return Number(linha.n) || 0;
+  } catch {
+    return 0;
+  } finally {
+    if (db) {
+      try {
+        db.close();
+      } catch {
+        /* noop */
+      }
+    }
+  }
+}
+
+export async function checkScheduler(
+  homeDir: string,
+  opcoes: { pidVivo?: (pid: number) => boolean | Promise<boolean> } = {},
+): Promise<DoctorCheck> {
+  const base = { id: "scheduler", label: "scheduler (daemon + jobs)" } as const;
+  const pidfile = schedulerPidfilePath(homeDir);
+  const dbPath = schedulerDbPath(homeDir);
+  const pidVivoFn =
+    opcoes.pidVivo ??
+    ((pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+  const existePidfile = existsSync(pidfile);
+  const existeDb = existsSync(dbPath);
+  if (!existePidfile && !existeDb) {
+    return {
+      ...base,
+      status: "info",
+      detail: "scheduler não configurado (sem pidfile nem scheduler.db) — ok na primeira execução",
+    };
+  }
+
+  const estado = await pidfileAlive(pidfile, pidVivoFn);
+  const jobs = await contarJobsAtivos(dbPath);
+  const itens: string[] = [];
+
+  if (existePidfile && estado.pid === null) {
+    itens.push(`pidfile ${pidfile} ilegível (sem campo pid válido) — remova manualmente`);
+    return {
+      ...base,
+      status: "warn",
+      detail: `pidfile ilegível em ${pidfile} — scheduler pode estar rodando sem pidfile ou há resíduo`,
+      items: itens,
+    };
+  }
+  if (existePidfile && !estado.vivo && estado.pid !== null) {
+    itens.push(
+      `pidfile ${pidfile} aponta pid ${estado.pid} que NÃO está vivo — scheduler está morto`,
+    );
+  }
+
+  if (jobs > 0 && (!estado.vivo || !existePidfile)) {
+    itens.push(
+      `${jobs} job(s) ativo(s) em ${dbPath} com scheduler ${existePidfile ? "morto" : "sem pidfile"} — não serão executados`,
+    );
+    return {
+      ...base,
+      status: "warn",
+      detail: `scheduler morto (pidfile órfão) mas há ${jobs} job(s) ativo(s) — start com "opencorp scheduler start"`,
+      items: itens,
+    };
+  }
+
+  if (!estado.vivo && estado.pid !== null) {
+    return {
+      ...base,
+      status: "warn",
+      detail: `pidfile órfão em ${pidfile} (pid ${estado.pid} não está vivo) — remova com "opencorp scheduler stop"`,
+      items: itens,
+    };
+  }
+
+  if (estado.vivo && estado.pid !== null) {
+    return {
+      ...base,
+      status: "ok",
+      detail: `scheduler vivo (pid ${estado.pid}) — ${jobs} job(s) ativo(s)`,
+    };
+  }
+
+  return {
+    ...base,
+    status: "info",
+    detail: `scheduler parado — ${jobs} job(s) cadastrado(s) (sem execução até "opencorp scheduler start")`,
+    items: itens,
+  };
+}
+
+export async function checkHooks(wsPath: string): Promise<DoctorCheck> {
+  const base = { id: "hooks", label: "hooks do workspace" } as const;
+  const dir = hooksDir(wsPath);
+  if (!existsSync(dir)) {
+    return {
+      ...base,
+      status: "info",
+      detail: `diretório ${dir} não existe — sem hooks configurados`,
+    };
+  }
+  let entradas;
+  try {
+    entradas = await readdir(dir);
+  } catch (erro) {
+    return {
+      ...base,
+      status: "warn",
+      detail: `não foi possível ler ${dir}: ${errorMessage(erro)}`,
+    };
+  }
+  const arquivos = entradas.filter((f) => f.endsWith(".json"));
+  if (arquivos.length === 0) {
+    return {
+      ...base,
+      status: "info",
+      detail: `${dir} vazio — sem hooks configurados`,
+    };
+  }
+  const invalidos: string[] = [];
+  for (const f of arquivos) {
+    try {
+      JSON.parse(await readFile(join(dir, f), "utf8"));
+    } catch (erro) {
+      invalidos.push(`${f}: ${errorMessage(erro)}`);
+    }
+  }
+  if (invalidos.length > 0) {
+    return {
+      ...base,
+      status: "warn",
+      detail: `${invalidos.length} hook(s) com JSON inválido em ${dir}`,
+      items: invalidos,
+    };
+  }
+  return {
+    ...base,
+    status: "ok",
+    detail: `${arquivos.length} hook(s) válido(s) em ${dir}`,
+  };
+}
+
+export async function checkApps(wsPath: string): Promise<DoctorCheck> {
+  const base = { id: "apps", label: "apps do workspace" } as const;
+  const store = new AppStore();
+  const dir = appsDir(wsPath);
+  if (!existsSync(dir)) {
+    return {
+      ...base,
+      status: "info",
+      detail: `diretório ${dir} não existe — sem apps configurados`,
+    };
+  }
+  let entradas;
+  try {
+    entradas = await readdir(dir);
+  } catch (erro) {
+    return {
+      ...base,
+      status: "warn",
+      detail: `não foi possível ler ${dir}: ${errorMessage(erro)}`,
+    };
+  }
+  const arquivos = entradas.filter((f) => f.endsWith(".json"));
+  if (arquivos.length === 0) {
+    return {
+      ...base,
+      status: "info",
+      detail: `${dir} vazio — sem apps configurados`,
+    };
+  }
+  const invalidos: string[] = [];
+  for (const f of arquivos) {
+    try {
+      store.validarTexto(await readFile(join(dir, f), "utf8"), f);
+    } catch (erro) {
+      invalidos.push(`${f}: ${errorMessage(erro)}`);
+    }
+  }
+  if (invalidos.length > 0) {
+    return {
+      ...base,
+      status: "warn",
+      detail: `${invalidos.length} app(s) com spec inválida em ${dir}`,
+      items: invalidos,
+    };
+  }
+  return {
+    ...base,
+    status: "ok",
+    detail: `${arquivos.length} app(s) válido(s) em ${dir}`,
+  };
+}
+
+export async function checkTeams(wsPath: string): Promise<DoctorCheck> {
+  const base = { id: "teams", label: "teams do workspace" } as const;
+  const store = new TeamStore();
+  const dir = teamsDir(wsPath);
+  if (!existsSync(dir)) {
+    return {
+      ...base,
+      status: "info",
+      detail: `diretório ${dir} não existe — sem teams configurados`,
+    };
+  }
+  let entradas;
+  try {
+    entradas = await readdir(dir);
+  } catch (erro) {
+    return {
+      ...base,
+      status: "warn",
+      detail: `não foi possível ler ${dir}: ${errorMessage(erro)}`,
+    };
+  }
+  const arquivos = entradas.filter((f) => f.endsWith(".json"));
+  if (arquivos.length === 0) {
+    return {
+      ...base,
+      status: "info",
+      detail: `${dir} vazio — sem teams configurados`,
+    };
+  }
+  const invalidos: string[] = [];
+  for (const f of arquivos) {
+    try {
+      store.validarTexto(await readFile(join(dir, f), "utf8"), f);
+    } catch (erro) {
+      invalidos.push(`${f}: ${errorMessage(erro)}`);
+    }
+  }
+  if (invalidos.length > 0) {
+    return {
+      ...base,
+      status: "warn",
+      detail: `${invalidos.length} team(s) com spec inválida em ${dir}`,
+      items: invalidos,
+    };
+  }
+  return {
+    ...base,
+    status: "ok",
+    detail: `${arquivos.length} team(s) válido(s) em ${dir}`,
+  };
+}
+
+export async function checkSecretario(
+  homeDir: string,
+  opcoes: { fetch?: typeof fetch; pidVivo?: (pid: number) => boolean | Promise<boolean> } = {},
+): Promise<DoctorCheck> {
+  const base = { id: "secretario", label: "secretário (opencode-server)" } as const;
+  const pidfile = secretarioPidfilePath(homeDir);
+  const pidVivoFn =
+    opcoes.pidVivo ??
+    ((pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  const fetchFn: typeof fetch | undefined = opcoes.fetch ?? (typeof fetch === "function" ? fetch : undefined);
+
+  if (!existsSync(pidfile)) {
+    return {
+      ...base,
+      status: "ok",
+      detail: `secretário parado (sem pidfile ${pidfile}) — ok, será iniciado por "opencorp serve"`,
+    };
+  }
+
+  let info: { pid?: unknown; porta?: unknown };
+  try {
+    info = JSON.parse(await readFile(pidfile, "utf8")) as { pid?: unknown; porta?: unknown };
+  } catch {
+    return {
+      ...base,
+      status: "warn",
+      detail: `pidfile ${pidfile} ilegível — remova manualmente`,
+    };
+  }
+  const pid = typeof info.pid === "number" ? info.pid : NaN;
+  const porta = typeof info.porta === "number" ? info.porta : NaN;
+  if (!Number.isFinite(pid) || !Number.isFinite(porta)) {
+    return {
+      ...base,
+      status: "warn",
+      detail: `pidfile ${pidfile} sem pid/porta válidos — remova manualmente`,
+    };
+  }
+  const vivo = await pidVivoFn(pid);
+  if (!vivo) {
+    return {
+      ...base,
+      status: "warn",
+      detail: `pidfile ${pidfile} órfão (pid ${pid} não está vivo) — remova manualmente`,
+    };
+  }
+
+  if (!fetchFn) {
+    return {
+      ...base,
+      status: "info",
+      detail: `secretário vivo (pid ${pid}, porta ${porta}) — sem fetch disponível, porta não testada`,
+    };
+  }
+  try {
+    const resp = await fetchFn(`http://127.0.0.1:${porta}/health`, { signal: AbortSignal.timeout(2000) });
+    if (resp.ok || resp.status === 401 || resp.status === 404) {
+      return {
+        ...base,
+        status: "ok",
+        detail: `secretário vivo (pid ${pid}, porta ${porta}) — /health respondeu HTTP ${resp.status}`,
+      };
+    }
+    return {
+      ...base,
+      status: "warn",
+      detail: `secretário vivo (pid ${pid}) mas porta ${porta} respondeu ${resp.status}`,
+    };
+  } catch {
+    return {
+      ...base,
+      status: "warn",
+      detail: `secretário vivo (pid ${pid}) mas porta ${porta} não respondeu em 2s`,
+    };
+  }
+}
+
 export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResult> {
   const home = options.homeDir ?? homedir();
   const cwd = options.cwd ?? process.cwd();
@@ -280,6 +674,35 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
       label: "budget.json",
       status: "info",
       detail: "nenhum workspace ativo — budget não verificado",
+    });
+  }
+
+  checks.push(await checkScheduler(home, { pidVivo: options.pidVivo }));
+  checks.push(await checkSecretario(home, { pidVivo: options.pidVivo, fetch: options.fetch }));
+
+  if (options.workspacePath !== undefined) {
+    const wsPath = options.workspacePath;
+    checks.push(await checkHooks(wsPath));
+    checks.push(await checkApps(wsPath));
+    checks.push(await checkTeams(wsPath));
+  } else {
+    checks.push({
+      id: "hooks",
+      label: "hooks do workspace",
+      status: "info",
+      detail: "nenhum workspace ativo — hooks não verificados",
+    });
+    checks.push({
+      id: "apps",
+      label: "apps do workspace",
+      status: "info",
+      detail: "nenhum workspace ativo — apps não verificados",
+    });
+    checks.push({
+      id: "teams",
+      label: "teams do workspace",
+      status: "info",
+      detail: "nenhum workspace ativo — teams não verificados",
     });
   }
 
