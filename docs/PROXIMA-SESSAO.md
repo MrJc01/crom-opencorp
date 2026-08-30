@@ -20,7 +20,7 @@
 
 ## ESTADO ATUAL (pausa)
 
-**JOBS TODOS PAUSADOS** (pedido do usuário): auditoria-site ×4 e fila-conteudo ×4 pausados no scheduler ( + fila ×4 para reativar; heartbeat/checar-site antigos seguem pausados). Último ciclo automático 19:55: job→task→trigger→agente funcionou ×4 (3 concluídos até a parada). Daemons (serve 4300, scheduler, secretário, supervisor) continuam no ar.
+**JOBS TODOS PAUSADOS** (pedido do usuário): auditoria-site ×4 e fila-conteudo ×4 pausados no scheduler — para reativar: `schedule resume sch-mtg65km0c348 sch-mtg65kssey8j sch-mtg65kzbcyiv sch-mtg65l5ba05c` (auditorias) e `schedule resume sch-mtg65lbgh5xu sch-mtg65lhnl4vh sch-mtg65lnres6s sch-mtfauggihzz8` (fila-conteudo); heartbeat/checar-site antigos seguem pausados. Último ciclo automático 19:55: job→task→trigger→agente funcionou ×4 (3 concluídos até a parada). Daemons (serve 4300, scheduler, secretário, supervisor) continuam no ar.
 
 1. **Monitorar ciclo recorrente do auditor** (job 60min ×4, rodou às 19:54 — ver se as 4 execuções de manutenção passam: cenário B → "site ok" ou correção pontual). Cuidado: execução do trigger roda DENTRO do CLI `task create` — CLI morre = agente morre (não usar `| head` no kick; scheduler run-now é seguro).
 2. **Refinar briefings**: `projeto.json` das 4 empresas foi INFERIDO pelo nome (aprovado pelo usuário, "valido depois") — pedir ao usuário os briefs reais e ajustar (ou criar `opencorp workspace perfil set`).
