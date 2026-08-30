@@ -46,7 +46,7 @@ export async function renderTeams(): Promise<void> {
           <button class="btn" onclick="executarTeam('${escapeHtml(String(t.id))}')" id="btn-run-${escapeHtml(String(t.id))}">${icone('run')} Executar</button>
         </div>
       </div>
-      <div class="team-steps">${((t.passos as unknown[]) || []).length} passo(s)</div>
+      <div class="team-steps">${typeof t.passos === "number" ? `${t.passos} passo(s)` : `${((t.passos as unknown[]) || []).length} passo(s)`}</div>
     </div>
   `).join('');
 }
