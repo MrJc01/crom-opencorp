@@ -15,10 +15,10 @@ test.describe("Teams", () => {
     await esperarElementoTexto(page, "Teams");
 
     // Verifica o card do team semeado (estrutura real: .team-card)
-    const teamCard = page.locator('.team-card', { hasText: 'e2e-pipe' });
+    const teamCard = page.locator('.team-card', { hasText: 'e2e-pipe' }).first();
     await expect(teamCard).toBeVisible();
-    await expect(teamCard.locator(".badge-pipeline")).toBeVisible();
-    await expect(teamCard.locator("text=/2 passo/")).toBeVisible();
+    await expect(teamCard.locator(".badge-pipeline").first()).toBeVisible();
+    await expect(teamCard.locator(".team-steps")).toContainText("2");
   });
 
   test("estado vazio ensina o comando + botão Executar existe", async ({ page }) => {

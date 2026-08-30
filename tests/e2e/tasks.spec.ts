@@ -96,10 +96,8 @@ test.describe("Tasks / Kanban", () => {
     const feitoCol = page.locator('#kanban-feito');
     await expect(feitoCol.locator(`.task-title`, { hasText: "Task mover e2e" }).first()).toBeVisible();
 
-    // Verifica badge de count
-    const backlogCount = backlogCol.locator(".kanban-count");
-    const feitoCount = feitoCol.locator(".kanban-count");
-    await expect(backlogCount).toBeVisible();
-    await expect(feitoCount).toBeVisible();
+    // Verifica badge de count (o header da coluna tem .kanban-count)
+    await expect(page.locator('.kanban-col:has(#kanban-backlog) .kanban-count')).toBeVisible();
+    await expect(page.locator('.kanban-col:has(#kanban-feito) .kanban-count')).toBeVisible();
   });
 });
