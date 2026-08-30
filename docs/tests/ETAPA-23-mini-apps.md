@@ -24,15 +24,17 @@
 - Depois remova o arquivo.
 
 ### 4. API
-- Com servidor ativo (`opencorp web --port 4100 --no-open` ou `opencorp serve`):
-  1. `curl -s -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:4100/apps?workspace=<WS>` — espera lista com painel-tarefas
-  2. `curl -s -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:4100/apps/painel-tarefas/spec?workspace=<WS>` — espera spec JSON
-  3. `curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:4100/apps/fantasma/spec?workspace=<WS>` — espera 404
+- Suba o servidor EM MODO DAEMON (nunca use `--foreground`; nunca use `pkill -f` — para parar use `serve stop` no final). Uma chamada bash por passo:
+  1. `OPENCORP_HOME=/tmp/opencorp-cego-e23 node bin/opencorp.mjs serve --port 4100 --token teste-e23 --workspace test-app` — espera: "ok: API em background em http://127.0.0.1:4100" e o comando RETORNA sozinho
+  2. `curl -s -H "Authorization: Bearer teste-e23" "http://127.0.0.1:4100/apps?workspace=test-app"` — espera lista com painel-tarefas
+  3. `curl -s -H "Authorization: Bearer teste-e23" "http://127.0.0.1:4100/apps/painel-tarefas/spec?workspace=test-app"` — espera spec JSON
+  4. `curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer teste-e23" "http://127.0.0.1:4100/apps/fantasma/spec?workspace=test-app"` — espera 404
 
 ### 5. Renderer (verificação sem browser)
-- Com o servidor do cenário 4 ativo e 1-2 tasks criadas:
+- Com o servidor daemon do cenário 4 ainda ativo e 1-2 tasks criadas (`task create --titulo "Item A"`):
   1. `curl -s http://127.0.0.1:4100/ | grep -o "renderWidget" | head -1` — espera: "renderWidget" (a UI embutida tem o renderer de mini-apps)
   2. `curl -s http://127.0.0.1:4100/ | grep -o "loadAppsList" | head -1` — espera: "loadAppsList" (a aba Apps existe)
+  3. Finalize com `OPENCORP_HOME=/tmp/opencorp-cego-e23 node bin/opencorp.mjs serve stop` — espera: confirmação de parada
 - Esperado: ambos os grep encontram as funções do renderer — prova de que o servidor embute a UI com mini-apps (mesmo padrão do opencode).
 
 ## Veredito
