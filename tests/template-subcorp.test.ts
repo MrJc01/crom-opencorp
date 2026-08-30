@@ -194,7 +194,7 @@ describe("SubcorpStore — add/list/remove", () => {
       id: "financeiro",
       perm: "ask",
     });
-    expect(entrada.exposed_agents.length).toBe(3);
+    expect(entrada.exposed_agents.length).toBe(4);
     expect(entrada.permissions).toBe("ask");
     const config = JSON.parse(readFileSync(join(env.wsBase.path, ".opencorp", "config.json"), "utf8"));
     expect(config.subcorps[0].id).toBe("financeiro");
@@ -228,7 +228,7 @@ describe("SubcorpStore — add/list/remove", () => {
     const err = await env.subcorps.obter(env.wsBase.path, "fin").catch((e) => e);
     expect(err).toBeInstanceOf(SubcorpError);
     expect(existsSync(join(wsFilho.path, ".opencorp", "agents"))).toBe(true);
-    expect(readdirSync(join(wsFilho.path, ".opencorp", "agents")).length).toBe(3);
+    expect(readdirSync(join(wsFilho.path, ".opencorp", "agents")).length).toBe(4);
   });
 
   it("perm read bloqueia run; agente não exposto bloqueia run (exit 3)", async () => {

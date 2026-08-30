@@ -17,9 +17,13 @@ import { Scheduler } from "../core/scheduler.js";
 import type { Agenda } from "../core/scheduler.js";
 import { HookStore, type Hook, type AlvoHook, type PayloadHook } from "../core/hook-store.js";
 import { AppStore } from "../core/app-store.js";
-import { TaskError, SchedulerError, HookError, AppError } from "../core/errors.js";
+import { TeamStore } from "../core/team-store.js";
+import { OrquestradorDeTeams } from "../core/team-orchestrator.js";
+import { instalarMencoes } from "../core/mention-runner.js";
+import { TaskError, SchedulerError, HookError, AppError, TeamError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
+import { OpencodeServerManager, SecretarioError } from "../core/opencode-server.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
@@ -62,6 +66,7 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/flows/:id", descricao: "Obtém detalhes de um flow" },
   { method: "POST", path: "/flows/:id/run", descricao: "Executa um flow", corpo: true },
   { method: "POST", path: "/meetings", descricao: "Inicia nova reunião", corpo: true },
+  { method: "GET", path: "/meetings", descricao: "Lista reuniões do workspace" },
   { method: "POST", path: "/meetings/:id/stop", descricao: "Solicita interrupção de reunião ativa" },
   { method: "GET", path: "/events", descricao: "Stream SSE de eventos do servidor" },
   { method: "GET", path: "/files", descricao: "Lista diretório ou lê arquivo do workspace", publico: false },
@@ -74,6 +79,17 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/apps/:id/spec", descricao: "Spec declarativo de um app" },
   { method: "POST", path: "/apps", descricao: "Cria/salva spec de app (validado)", corpo: true },
   { method: "DELETE", path: "/apps/:id", descricao: "Exclui app" },
+  { method: "GET", path: "/teams", descricao: "Lista teams do workspace" },
+  { method: "POST", path: "/teams", descricao: "Cria/salva spec de team (validado)", corpo: true },
+  { method: "GET", path: "/teams/:id", descricao: "Obtém spec de um team" },
+  { method: "DELETE", path: "/teams/:id", descricao: "Exclui team" },
+  { method: "POST", path: "/teams/:id/run", descricao: "Executa team via orquestrador", corpo: true },
+  { method: "GET", path: "/secretario/status", descricao: "Status do secretário (opencode server)", publico: false },
+  { method: "POST", path: "/secretario/start", descricao: "Inicia o secretário (opencode serve)", corpo: false },
+  { method: "POST", path: "/secretario/stop", descricao: "Para o secretário", corpo: false },
+  { method: "GET", path: "/secretario/sessoes", descricao: "Lista sessões do opencode (proxy)", publico: false },
+  { method: "POST", path: "/secretario/conversa", descricao: "Envia mensagem ao secretário (proxy create session + message)", corpo: true },
+  { method: "GET", path: "/secretario/sessoes/:id", descricao: "Detalhe/mensagens de uma sessão do opencode (proxy)", publico: false },
 ];
 
 export interface SessaoApi {
@@ -88,6 +104,8 @@ export interface ApiServerOptions {
   sessoes?: SessaoApi;
   token?: string;
   workspace?: string;
+  instalarMencoes?: boolean;
+  opencodeServer?: OpencodeServerManager;
 }
 
 
@@ -149,6 +167,10 @@ function sugerirRotas(rota: string, max = 3): string[] {
     .map((r) => r.path);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 /** Valida e resolve caminho dentro do workspace (anti path-traversal) */
 async function resolverCaminhoWorkspace(wsPath: string, pathParam: string): Promise<string> {
   const base = resolve(wsPath);
@@ -179,7 +201,16 @@ async function lerArquivoWorkspace(alvo: string): Promise<{ tipo: "arquivo"; con
   return { tipo: "arquivo", conteudo };
 }
 
-/** Serve a UI estática de web-dist/ (HTML, JS, CSS) — 404 via null */
+/**
+ * Serve a UI estática de web-dist/ (HTML, JS, CSS) — 404 via null.
+ *
+ * Obs: NÃO injetamos cache-buster (?v=...) no <script> porque o ES Module
+ * cacheia por URL completa — o import dinâmico relativo "./main.js" usado
+ * internamente resolve sem o query string e vira uma SEGUNDA instância de
+ * módulo (boot Roda duas vezes, ícones duplicam, estado fica inconsistente).
+ * O cache-control: no-cache já garante reload do HTML/JS no boot.
+ */
+
 function servirEstatico(rota: string): { tipo: string; corpo: string } | null {
   try {
     const raiz = resolve(import.meta.dirname ?? ".", "..", "..", "web-dist");
@@ -200,6 +231,9 @@ function servirEstatico(rota: string): { tipo: string; corpo: string } | null {
       png: "image/png",
       ico: "image/x-icon",
     };
+    if (ext === "html") {
+      return { tipo: tipos[ext]!, corpo: readFileSync(alvo, "utf8") };
+    }
     return { tipo: tipos[ext] ?? "application/octet-stream", corpo: readFileSync(alvo, "utf8") };
   } catch {
     return null;
@@ -212,10 +246,12 @@ function statusHttpDe(erro: unknown): number {
   if (code === 4) return 402;
   if (code === 5) return 409;
   if (erro instanceof TaskError) return (erro as TaskError).status ?? 400;
+  if (erro instanceof TeamError) return (erro as TeamError).status ?? 400;
   if (erro instanceof SchedulerError) return 400;
   if (erro instanceof HookError) return ((erro as unknown as { status?: number }).status ?? 400);
   if (erro instanceof AppError) return ((erro as unknown as { status?: number }).status ?? 404);
   if (erro instanceof RegistryError || erro instanceof WorkspaceError || erro instanceof AgentError) return 422;
+  if (erro instanceof SecretarioError) return (erro as SecretarioError).status ?? 500;
   return 500;
 }
 
@@ -312,6 +348,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   const tasks = new TaskStore();
   const scheduler = new Scheduler({ homeDir: opcoes.homeDir });
   const apps = new AppStore();
+  const teams = new TeamStore();
+  const orquestrador = new OrquestradorDeTeams();
   const hooks = new HookStore({
     executores: {
       agentRun: async (agente: string, ordem: string, wsPath: string) => {
@@ -331,7 +369,26 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   });
   const sessoes: SessaoApi = opcoes.sessoes ?? (new SessionManager(base) as unknown as SessaoApi);
 
+  if (opcoes.instalarMencoes !== false) {
+    instalarMencoes({
+      executores: {
+        rodar: async (agente: string, ordem: string, wsPath: string) => {
+          const r = await sessoes.rodar({
+            agente,
+            ordem,
+            workspaceDir: wsPath,
+            execId: gerarIdExec(),
+          } as OpcoesRun);
+          return { id: r.id, captura: r.captura };
+        },
+      },
+    });
+  }
+
   const token = opcoes.token ?? randomBytes(24).toString("hex");
+
+  // OpencodeServerManager para o secretário (injetaável para testes)
+  const opencodeServer = opcoes.opencodeServer ?? new OpencodeServerManager({ homeDir: opcoes.homeDir });
 
   async function resolverWs(url: URL): Promise<{ id: string; path: string }> {
     const id = url.searchParams.get("workspace") ?? opcoes.workspace ?? undefined;
@@ -351,7 +408,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
       if (req.method === "GET" && (rota === "/" || /\.[a-z0-9]+$/i.test(rota)) && rota !== "/events" && !rota.startsWith("/settings/") && rota !== "/doc") {
         const estatico = servirEstatico(rota);
         if (estatico !== null) {
-          res.writeHead(200, { "content-type": estatico.tipo, "access-control-allow-origin": "*" });
+          res.writeHead(200, { "content-type": estatico.tipo, "access-control-allow-origin": "*", "cache-control": "no-cache" });
           res.end(estatico.corpo);
           return;
         }
@@ -569,6 +626,11 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         }
 
         // ── reuniões ────────────────────────────────────────────────
+        if (rota === "/meetings" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          enviar(res, 200, await meetings.listar(ws.path));
+          return;
+        }
         if (rota === "/meetings" && req.method === "POST") {
           const ws = await resolverWs(url);
           const corpo = (await lerCorpo(req)) as { pauta?: string; agentes?: string; model?: string };
@@ -680,7 +742,9 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
         if (rota === "/schedules" && req.method === "GET") {
-          enviar(res, 200, await scheduler.listar());
+          const wsFiltro = url.searchParams.get("workspace");
+          const jobs = await scheduler.listar();
+          enviar(res, 200, wsFiltro ? jobs.filter((j) => j.workspace === wsFiltro) : jobs);
           return;
         }
         if (rota === "/schedules" && req.method === "POST") {
@@ -699,6 +763,13 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             graca_min: typeof corpo.graca_min === "number" ? corpo.graca_min : undefined,
           });
           enviar(res, 201, j);
+          return;
+        }
+        const mSchedRun = /^\/schedules\/([^/]+)\/run$/.exec(rota);
+        if (mSchedRun && req.method === "POST") {
+          const id = decodeURIComponent(mSchedRun[1]!);
+          const { resultado } = await scheduler.runNow(id);
+          enviar(res, 200, { ok: true, resultado });
           return;
         }
         const mSched = /^\/schedules\/([^/]+)$/.exec(rota);
@@ -756,6 +827,42 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           await apps.excluir(ws.path, decodeURIComponent(mAppDel[1]!));
           enviar(res, 200, { ok: true, id: mAppDel[1] });
           return;
+        }
+
+        // ── /teams ─────────────────────────────────────────────────────
+        if (rota === "/teams" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          enviar(res, 200, teams.listar(ws.path));
+          return;
+        }
+        if (rota === "/teams" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+          const spec = teams.validarTexto(JSON.stringify(corpo), "POST /teams");
+          await teams.salvar(ws.path, spec);
+          enviar(res, 201, spec);
+          return;
+        }
+        const mTeam = /^\/teams\/([^/]+)(?:\/(run))?$/.exec(rota);
+        if (mTeam) {
+          const ws = await resolverWs(url);
+          const teamId = decodeURIComponent(mTeam[1]!);
+          const acao = mTeam[2];
+          if (!acao && req.method === "GET") {
+            enviar(res, 200, teams.obter(ws.path, teamId));
+            return;
+          }
+          if (!acao && req.method === "DELETE") {
+            await teams.excluir(ws.path, teamId);
+            enviar(res, 200, { ok: true, id: teamId });
+            return;
+          }
+          if (acao === "run" && req.method === "POST") {
+            const corpo = (await lerCorpo(req)) as { entrada?: string };
+            const resOrq = await orquestrador.executar(ws.path, teamId, String(corpo.entrada ?? ""));
+            enviar(res, 200, resOrq);
+            return;
+          }
         }
 
         if (rota === "/hooks" && req.method === "GET") {
@@ -891,11 +998,199 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
+        // ── /secretario/status ──
+        if (rota === "/secretario/status" && req.method === "GET") {
+          const status = await opencodeServer.status();
+          const configurado = await opencodeServer.configurado();
+          enviar(res, 200, { ...status, configurado });
+          return;
+        }
+
+        // ── /secretario/start ──
+        if (rota === "/secretario/start" && req.method === "POST") {
+          try {
+            const { pid, porta } = await opencodeServer.iniciar();
+            const status = await opencodeServer.status();
+            enviar(res, 200, { pid, porta, agentes: status.rodando ? "configurados" : 0 });
+          } catch (erro) {
+            const mensagem = erro instanceof Error ? erro.message : String(erro);
+            enviar(res, 500, { erro: `falha ao iniciar secretário: ${mensagem}` });
+          }
+          return;
+        }
+
+        // ── /secretario/stop ──
+        if (rota === "/secretario/stop" && req.method === "POST") {
+          await opencodeServer.parar();
+          enviar(res, 200, { ok: true });
+          return;
+        }
+
+        // Helper: obtém porta do opencode server ou lança 409
+        async function portaOpencodeOuErro(): Promise<number> {
+          const status = await opencodeServer.status();
+          if (!status.rodando || !status.porta) {
+            throw new SecretarioError("secretário não iniciado — POST /secretario/start", { status: 409 });
+          }
+          return status.porta;
+        }
+
+        // ── /secretario/sessoes (proxy GET /session) ──
+        if (rota === "/secretario/sessoes" && req.method === "GET") {
+          try {
+            const porta = await portaOpencodeOuErro();
+            const opencodeUrl = `http://127.0.0.1:${porta}/session`;
+            const resOpencode = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
+            if (!resOpencode.ok) {
+              enviar(res, 502, { erro: `opencode respondeu ${resOpencode.status}` });
+              return;
+            }
+            const data = await resOpencode.json();
+            enviar(res, 200, data);
+          } catch (erro) {
+            if (erro instanceof SecretarioError) {
+              enviar(res, erro.status ?? 409, { erro: erro.message });
+            } else {
+              enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
+            }
+          }
+          return;
+        }
+
+        // ── /secretario/sessoes/:id (proxy GET /session/:id) ──
+        const mSessaoDetalhe = /^\/secretario\/sessoes\/([^/]+)$/.exec(rota);
+        if (mSessaoDetalhe && req.method === "GET") {
+          try {
+            const porta = await portaOpencodeOuErro();
+            const sessionId = decodeURIComponent(mSessaoDetalhe[1]!);
+            const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}`;
+            const resOpencode = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
+            if (!resOpencode.ok) {
+              if (resOpencode.status === 404) {
+                enviar(res, 404, { erro: "sessão não encontrada" });
+              } else {
+                enviar(res, 502, { erro: `opencode respondeu ${resOpencode.status}` });
+              }
+              return;
+            }
+            const data = await resOpencode.json();
+            enviar(res, 200, data);
+          } catch (erro) {
+            if (erro instanceof SecretarioError) {
+              enviar(res, erro.status ?? 409, { erro: erro.message });
+            } else {
+              enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
+            }
+          }
+          return;
+        }
+
+        // ── /secretario/conversa (proxy POST /session + POST /session/:id/message + poll) ──
+        if (rota === "/secretario/conversa" && req.method === "POST") {
+          try {
+            const porta = await portaOpencodeOuErro();
+            const corpo = (await lerCorpo(req)) as { mensagem: string; sessao_id?: string; agente?: string };
+            const mensagem = corpo.mensagem?.trim();
+            if (!mensagem) {
+              enviar(res, 400, { erro: "mensagem obrigatória" });
+              return;
+            }
+            let sessaoId = corpo.sessao_id;
+            const baseUrl = `http://127.0.0.1:${porta}`;
+
+            // 1. Se não há sessao_id, cria nova sessão
+            if (!sessaoId) {
+              const createRes = await fetch(`${baseUrl}/session`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  title: mensagem.slice(0, 60),
+                  agent: corpo.agente,
+                }),
+                signal: AbortSignal.timeout(10000),
+              });
+              if (!createRes.ok) {
+                enviar(res, 502, { erro: `falha ao criar sessão: ${createRes.status}` });
+                return;
+              }
+              const sessionData = (await createRes.json()) as { id: string };
+              sessaoId = sessionData.id;
+            }
+
+            // 2. Envia mensagem — o POST /message do opencode serve é SÍNCRONO: aguarda o processamento
+            //    e retorna a mensagem do assistant. O modelo vem do agente (frontmatter) ou do config (free).
+            const msgRes = await fetch(`${baseUrl}/session/${sessaoId}/message`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                sessionID: sessaoId,
+                agent: corpo.agente ?? "secretario",
+                parts: [{ type: "text", text: mensagem }],
+              }),
+              signal: AbortSignal.timeout(240_000),
+            });
+            if (!msgRes.ok) {
+              enviar(res, 502, { erro: `falha ao enviar mensagem: ${msgRes.status}` });
+              return;
+            }
+            const msgData = (await msgRes.json()) as {
+              info?: { role?: string };
+              parts?: Array<{ type: string; text?: string }>;
+            };
+
+            // 3. Extrai a resposta: o POST retorna a mensagem do assistant; se vier a do user (fallback), faz poll
+            let respostaTexto = "";
+            const extrair = (m: { parts?: Array<{ type: string; text?: string }> }): string =>
+              (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim();
+            if (msgData.info?.role === "assistant") {
+              respostaTexto = extrair(msgData);
+            }
+            if (!respostaTexto) {
+              const timeoutMs = 180_000;
+              const inicio = Date.now();
+              while (Date.now() - inicio < timeoutMs) {
+                await sleep(2000);
+                const getRes = await fetch(`${baseUrl}/session/${sessaoId}`, { signal: AbortSignal.timeout(5000) });
+                if (!getRes.ok) continue;
+                const sessionData = (await getRes.json()) as {
+                  messages?: Array<{ role: string; parts: Array<{ type: string; text?: string }>; time?: { completed?: number } }>;
+                };
+                const messages = sessionData.messages ?? [];
+                for (let i = messages.length - 1; i >= 0; i--) {
+                  const msg = messages[i];
+                  if (msg.role === "assistant" && msg.time?.completed) {
+                    const textos = msg.parts.filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n");
+                    if (textos.trim()) {
+                      respostaTexto = textos;
+                      break;
+                    }
+                  }
+                }
+                if (respostaTexto) break;
+              }
+            }
+
+            if (!respostaTexto) {
+              enviar(res, 504, { erro: "timeout aguardando resposta do assistant (180s)", sessao_id: sessaoId });
+              return;
+            }
+
+            enviar(res, 200, { sessao_id: sessaoId, resposta: respostaTexto });
+          } catch (erro) {
+            if (erro instanceof SecretarioError) {
+              enviar(res, erro.status ?? 409, { erro: erro.message });
+            } else {
+              enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
+            }
+          }
+          return;
+        }
+
         if (req.method === "GET" && rota !== "/events") {
           // ── fallback estático: UI web (estilo opencode — servidor embute a web) ──
           const estatico = servirEstatico(rota);
           if (estatico !== null) {
-            res.writeHead(200, { "content-type": estatico.tipo, "access-control-allow-origin": "*" });
+            res.writeHead(200, { "content-type": estatico.tipo, "access-control-allow-origin": "*", "cache-control": "no-cache" });
             res.end(estatico.corpo);
             return;
           }

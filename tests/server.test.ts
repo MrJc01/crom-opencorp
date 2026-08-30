@@ -78,6 +78,7 @@ describe("API Server — REST + SSE", () => {
       homeDir: home,
       token,
       sessoes: fakeSessoes,
+      instalarMencoes: false,
     } as ApiServerOptions);
     server = srv;
     token = tk;
@@ -149,13 +150,13 @@ describe("API Server — REST + SSE", () => {
     // Note: /workspaces returns workspace list, we need /agents endpoint
   });
 
-  it("GET /agents?workspace=... lista 3 agentes do template", async () => {
+  it("GET /agents?workspace=... lista 4 agentes do template", async () => {
     const { status, json } = await fetchApi("/agents?workspace=corp-agentes");
     expect(status).toBe(200);
     const agentes = json as Array<{ id: string }>;
-    expect(agentes.length).toBe(3);
+    expect(agentes.length).toBe(4);
     const ids = agentes.map((a) => a.id).sort();
-    expect(ids).toEqual(["ceo-documentos", "executor-padrao", "secretario"]);
+    expect(ids).toEqual(["ceo-documentos", "executor-padrao", "secretario", "secretario-exec"]);
   });
 
   // (6) POST /agents/:id/run com sessoes MOCKADA
@@ -365,7 +366,7 @@ describe("API Server — Tasks", () => {
         ordem: op.ordem,
       }),
     } as unknown as SessaoApi;
-    const criado = createApiServer({ homeDir: home, cwd: home, token, sessoes: fakeSessoes });
+    const criado = createApiServer({ homeDir: home, cwd: home, token, sessoes: fakeSessoes, instalarMencoes: false });
     server = criado.server;
     token = criado.token;
     server.listen(0, "127.0.0.1");
@@ -471,7 +472,7 @@ describe("API Server — Hooks", () => {
         ordem: op.ordem,
       }),
     } as unknown as SessaoApi;
-    const criado = createApiServer({ homeDir: home, cwd: home, token, sessoes: fakeSessoes });
+    const criado = createApiServer({ homeDir: home, cwd: home, token, sessoes: fakeSessoes, instalarMencoes: false });
     server = criado.server;
     token = criado.token;
     server.listen(0, "127.0.0.1");
