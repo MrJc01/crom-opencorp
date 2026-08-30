@@ -1,8 +1,9 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { encontrarSpecs, extrairVereditoDeConteudo, montarPrompt, extrairEtapaDoNome, extrairSlugDoNome } from "../src/cli/commands/test.ts";
+import { encontrarSpecs, extrairVereditoDeConteudo, montarPrompt, extrairEtapaDoNome, extrairSlugDoNome, classificarFalha, filtrarModelosSaudaveis } from "../src/cli/commands/test.ts";
+import { appendEvent, type EventoTeste } from "../src/utils/event-log.ts";
 
 const raizes: string[] = [];
 
@@ -183,5 +184,167 @@ describe("test blind - rotação de modelos (mock spawn)", () => {
 
   it("tenta próximo modelo da rotation quando timeout", async () => {
     expect(unrefMock).toBeDefined();
+  });
+});
+
+describe("telemetria - classificarFalha", () => {
+  it("retorna timeout_harness quando timedOut (tem prioridade sobre tudo)", () => {
+    expect(classificarFalha(true, "HTTP 429 rate limit", null)).toBe("timeout_harness");
+  });
+
+  it("retorna rate_limit quando saída contém 429", () => {
+    expect(classificarFalha(false, "Error: HTTP 429 Too Many Requests", null)).toBe("rate_limit");
+  });
+
+  it("retorna rate_limit quando saída contém 'rate limit'", () => {
+    expect(classificarFalha(false, "Request failed: Rate limit exceeded", null)).toBe("rate_limit");
+  });
+
+  it("retorna provider_error quando saída contém 502", () => {
+    expect(classificarFalha(false, "Bad Gateway: HTTP 502", "relatorio qualquer")).toBe("provider_error");
+  });
+
+  it("retorna provider_error quando saída contém 503", () => {
+    expect(classificarFalha(false, "HTTP 503 Service Unavailable", "relatorio qualquer")).toBe("provider_error");
+  });
+
+  it("retorna provider_error quando saída contém 'Overloaded'", () => {
+    expect(classificarFalha(false, "Provider is Overloaded, try again", "relatorio qualquer")).toBe("provider_error");
+  });
+
+  it("retorna provider_error quando saída contém 'Provider returned error'", () => {
+    expect(classificarFalha(false, "APIError: Provider returned error", "relatorio qualquer")).toBe("provider_error");
+  });
+
+  it("retorna provider_error quando saída contém 'provider_unavailable'", () => {
+    expect(classificarFalha(false, "status: provider_unavailable", "relatorio qualquer")).toBe("provider_error");
+  });
+
+  it("retorna missing_report quando relatório é null", () => {
+    expect(classificarFalha(false, "saída normal sem erros", null)).toBe("missing_report");
+  });
+
+  it("retorna product_bug quando relatório tem linha CATEGORIA: product_bug", () => {
+    const relatorio = "# Relatório\n- cenário 1: FAIL\nCATEGORIA: product_bug";
+    expect(classificarFalha(false, "saída normal", relatorio)).toBe("product_bug");
+  });
+
+  it("retorna spec_divergence quando relatório tem CATEGORIA: spec_divergence", () => {
+    const relatorio = "# Relatório\nCATEGORIA: spec_divergence";
+    expect(classificarFalha(false, "saída normal", relatorio)).toBe("spec_divergence");
+  });
+
+  it("retorna spec_divergence quando relatório tem CATEGORIA: ambiguidade", () => {
+    const relatorio = "# Relatório\nCATEGORIA: ambiguidade";
+    expect(classificarFalha(false, "saída normal", relatorio)).toBe("spec_divergence");
+  });
+
+  it("retorna unknown quando nada se aplica", () => {
+    const relatorio = "# Relatório\n- cenário 1: PASS\nVEREDITO: FAIL";
+    expect(classificarFalha(false, "saída normal sem erros", relatorio)).toBe("unknown");
+  });
+});
+
+describe("telemetria - filtrarModelosSaudaveis", () => {
+  it("preserva ordem e remove insaudáveis", () => {
+    const modelos = ["m/a", "m/b", "m/c"];
+    const pings = new Map([
+      ["m/a", { ok: true }],
+      ["m/b", { ok: false }],
+      ["m/c", { ok: true }],
+    ]);
+    expect(filtrarModelosSaudaveis(modelos, pings)).toEqual(["m/a", "m/c"]);
+  });
+
+  it("mantém todos quando todos são saudáveis", () => {
+    const modelos = ["m/2", "m/1"];
+    const pings = new Map([
+      ["m/1", { ok: true }],
+      ["m/2", { ok: true }],
+    ]);
+    expect(filtrarModelosSaudaveis(modelos, pings)).toEqual(["m/2", "m/1"]);
+  });
+
+  it("retorna vazio quando todos são insaudáveis", () => {
+    const modelos = ["m/a", "m/b"];
+    const pings = new Map([
+      ["m/a", { ok: false }],
+      ["m/b", { ok: false }],
+    ]);
+    expect(filtrarModelosSaudaveis(modelos, pings)).toEqual([]);
+  });
+
+  it("trata modelo sem ping como insaudável", () => {
+    const modelos = ["m/a", "m/b"];
+    const pings = new Map([
+      ["m/b", { ok: true }],
+    ]);
+    expect(filtrarModelosSaudaveis(modelos, pings)).toEqual(["m/b"]);
+  });
+});
+
+describe("telemetria - appendEvent", () => {
+  it("grava linha JSON parseável e cria diretório se não existe", async () => {
+    const base = await mkdtemp(join(tmpdir(), "opencorp-test-events-"));
+    raizes.push(base);
+    const eventsPath = join(base, "logs", "aninhado", "events-test.jsonl");
+
+    const evento: EventoTeste = {
+      ts: "2026-08-30T12:00:00.000Z",
+      execid: "exec-123",
+      etapa: "03",
+      slug: "workspaces",
+      fase: "attempt_end",
+      modelo: "openrouter/test-model:free",
+      tentativa: 1,
+      dur_ms: 1234,
+      exit: 0,
+      timed_out: false,
+      fail_cat: "unknown",
+    };
+    await appendEvent(eventsPath, evento);
+
+    const conteudo = await readFile(eventsPath, "utf8");
+    const linhas = conteudo.trim().split("\n");
+    expect(linhas).toHaveLength(1);
+    const parsed = JSON.parse(linhas[0]!) as EventoTeste;
+    expect(parsed).toMatchObject({
+      ts: "2026-08-30T12:00:00.000Z",
+      execid: "exec-123",
+      etapa: "03",
+      slug: "workspaces",
+      fase: "attempt_end",
+      modelo: "openrouter/test-model:free",
+      tentativa: 1,
+      dur_ms: 1234,
+      exit: 0,
+      timed_out: false,
+      fail_cat: "unknown",
+    });
+  });
+
+  it("acumula múltiplos eventos como linhas JSONL", async () => {
+    const base = await mkdtemp(join(tmpdir(), "opencorp-test-events-"));
+    raizes.push(base);
+    const eventsPath = join(base, "events.jsonl");
+
+    await appendEvent(eventsPath, { ts: "t1", execid: "e1", etapa: "01", slug: "s1", fase: "attempt_start", modelo: "m1", tentativa: 0 });
+    await appendEvent(eventsPath, { ts: "t2", execid: "e1", etapa: "01", slug: "s1", fase: "verdict", modelo: "m2", tentativa: 0, veredito: "FAIL", modelo_anterior: "m0" });
+
+    const conteudo = await readFile(eventsPath, "utf8");
+    const linhas = conteudo.trim().split("\n");
+    expect(linhas).toHaveLength(2);
+    const segundo = JSON.parse(linhas[1]!) as EventoTeste;
+    expect(segundo.fase).toBe("verdict");
+    expect(segundo.modelo_anterior).toBe("m0");
+    expect(segundo.veredito).toBe("FAIL");
+  });
+});
+
+describe("telemetria - prompt menciona CATEGORIA", () => {
+  it("instrui o relatório a conter linha CATEGORIA em caso de FAIL", () => {
+    const prompt = montarPrompt("/abs/spec.md", "/abs/reports", "01", "bootstrap", "20260828-120000");
+    expect(prompt).toContain("CATEGORIA");
+    expect(prompt).toContain("CATEGORIA: product_bug|spec_divergence|provider_issue|ambiguidade");
   });
 });

@@ -47,6 +47,7 @@ export const settingsSchema = z.object({
           "opencode/nemotron-3-ultra-free",
         ]),
       timeout_minutes: z.number().int().min(1).default(25),
+      health_check: z.boolean().default(true),
     })
     .prefault({}),
   cloud: z
