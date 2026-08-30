@@ -150,7 +150,7 @@ function renderChatLayout(): void {
         <div class="flex-1 overflow-y-auto p-4 space-y-4" id="chat-mensagens"></div>
         <div class="p-3 border-t border-zinc-800 chat-input-area" id="chat-input-area" style="display:none;">
           <textarea id="chat-input" placeholder="Digite sua mensagem…" rows="2" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); window.__secretarioEnviar()}"></textarea>
-          <button class="btn" onclick="window.__secretarioEnviar()" id="btn-enviar">${icone('run')}</button>
+          <button class="btn" onclick="window.__secretarioEnviar()" id="btn-enviar" aria-label="Enviar mensagem">${icone('run')}</button>
         </div>
         <div class="p-3 border-t border-zinc-800 text-center text-zinc-500 text-sm" id="chat-vazio">
           Selecione uma conversa ao lado ou clique em <button class="btn-ghost text-xs" onclick="window.__secretarioNovaConversa()">Nova conversa</button> para começar.
