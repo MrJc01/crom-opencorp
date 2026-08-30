@@ -223,8 +223,12 @@ async function rodarSpecUnica(
         }
       }
 
-      // Verificar se deve rotacionar modelo
-      const deveRotacionar = resultado.timedOut || resultado.stdout.includes("rate limit");
+      // Verificar se deve rotacionar modelo (timeout, rate limit ou erro de provedor)
+      const saida = resultado.stdout + "\n" + resultado.stderr;
+      const deveRotacionar =
+        resultado.timedOut ||
+        saida.includes("rate limit") ||
+        saida.includes("Provider returned error");
       
       if (deveRotacionar && tentativa < maxTentativas - 1) {
         tentativa++;
