@@ -150,13 +150,13 @@ describe("API Server — REST + SSE", () => {
     // Note: /workspaces returns workspace list, we need /agents endpoint
   });
 
-  it("GET /agents?workspace=... lista 4 agentes do template", async () => {
+  it("GET /agents?workspace=... lista 5 agentes do template", async () => {
     const { status, json } = await fetchApi("/agents?workspace=corp-agentes");
     expect(status).toBe(200);
     const agentes = json as Array<{ id: string }>;
-    expect(agentes.length).toBe(4);
+    expect(agentes.length).toBe(5);
     const ids = agentes.map((a) => a.id).sort();
-    expect(ids).toEqual(["ceo-documentos", "executor-padrao", "secretario", "secretario-exec"]);
+    expect(ids).toEqual(["ceo-documentos", "executor-padrao", "frontend-especialista", "secretario", "secretario-exec"]);
   });
 
   // (6) POST /agents/:id/run com sessoes MOCKADA
