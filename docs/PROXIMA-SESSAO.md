@@ -18,7 +18,9 @@
 6. **Web**: modais (`src/web/modal.ts`) no lugar de prompt()/confirm() (6 call-sites), drag-and-drop no kanban, e2e agenda atualizada. **Login duplicado RESOLVIDO**: build antiga do daemon injetava `?v=` no script tag → módulo avaliado 2× → boot duplo (regra: NUNCA cache-bust módulo ES entry; o código já documentava isso — faltava rebuild).
 7. **Boardroom**: ata com rotação de modelos (`meeting.ata_model_rotation`), recusas determinísticas não rotacionam.
 
-## O QUE FALTA (ordem sugerida)
+## ESTADO ATUAL (pausa)
+
+**JOBS TODOS PAUSADOS** (pedido do usuário): auditoria-site ×4 e fila-conteudo ×4 pausados no scheduler ( + fila ×4 para reativar; heartbeat/checar-site antigos seguem pausados). Último ciclo automático 19:55: job→task→trigger→agente funcionou ×4 (3 concluídos até a parada). Daemons (serve 4300, scheduler, secretário, supervisor) continuam no ar.
 
 1. **Monitorar ciclo recorrente do auditor** (job 60min ×4, rodou às 19:54 — ver se as 4 execuções de manutenção passam: cenário B → "site ok" ou correção pontual). Cuidado: execução do trigger roda DENTRO do CLI `task create` — CLI morre = agente morre (não usar `| head` no kick; scheduler run-now é seguro).
 2. **Refinar briefings**: `projeto.json` das 4 empresas foi INFERIDO pelo nome (aprovado pelo usuário, "valido depois") — pedir ao usuário os briefs reais e ajustar (ou criar `opencorp workspace perfil set`).
