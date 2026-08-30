@@ -107,7 +107,7 @@
 | 20 | Scheduler | `concluída — PASS 5/5 (nemotron-550b, 1º ciclo)` |
 | 20 | Scheduler | `pendente` |
 | 21 | Webhooks & Triggers | `concluída — PASS 5/5 (ciclo 2; fix: triggers no processo CLI)` |
-| 22 | Tools / MCP | `pendente` |
+| 22 | Tools / MCP | `concluída — PASS 5/5 (1º ciclo; MCP stdio JSON-RPC)` |
 | 23 | Mini-apps | `pendente` |
 | 24 | Orquestração multi-agente (docs/14) | `pendente` |
 | 25 | Bateria final v0.3.0 | `pendente` |

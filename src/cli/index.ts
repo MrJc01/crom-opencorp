@@ -16,6 +16,7 @@ import { registerFlowCommand } from "./commands/flow.js";
 import { registerTaskCommand } from "./commands/task.js";
 import { registerScheduleCommands } from "./commands/schedule.js";
 import { registerHookCommands } from "./commands/hook.js";
+import { registerToolCommands } from "./commands/tool.js";
 import { registerSupervisorCommand } from "./commands/supervisor.js";
 import { registerServeCommand } from "./commands/serve.js";
 import { registerWebCommand } from "./commands/web.js";
@@ -84,6 +85,8 @@ export function buildProgram(): Command {
   registerScheduleCommands(program);
 
   registerHookCommands(program);
+
+  registerToolCommands(program);
 
   registerServeCommand(program);
 
