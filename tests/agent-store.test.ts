@@ -25,8 +25,8 @@ afterAll(async () => {
 describe("AgentStore — criar", () => {
   it("cria a partir de executor-padrao mantendo o modelo da origem", async () => {
     const { ws, store } = await ambiente();
-    const r = await store.criar(ws.path, "auditor", {});
-    expect(r.frontmatter.id).toBe("auditor");
+    const r = await store.criar(ws.path, "operador-teste", {});
+    expect(r.frontmatter.id).toBe("operador-teste");
     expect(r.frontmatter.model).toBe("opencode/nemotron-3-ultra-free");
     expect(r.frontmatter.category).toBe("operario");
     expect(existsSync(r.path)).toBe(true);
@@ -35,7 +35,7 @@ describe("AgentStore — criar", () => {
 
   it("--model sobrepõe o modelo da origem", async () => {
     const { ws, store } = await ambiente();
-    const r = await store.criar(ws.path, "auditor", { model: "opencode/mimo-v2.5-free" });
+    const r = await store.criar(ws.path, "operador-teste", { model: "opencode/mimo-v2.5-free" });
     expect(r.frontmatter.model).toBe("opencode/mimo-v2.5-free");
     const bruto = readFileSync(r.path!, "utf8");
     expect(bruto).toContain("model: opencode/mimo-v2.5-free");
@@ -51,8 +51,8 @@ describe("AgentStore — criar", () => {
 
   it("rejeita id duplicado", async () => {
     const { ws, store } = await ambiente();
-    await store.criar(ws.path, "auditor", {});
-    const err = await store.criar(ws.path, "auditor", {}).catch((e) => e);
+    await store.criar(ws.path, "operador-teste", {});
+    const err = await store.criar(ws.path, "operador-teste", {}).catch((e) => e);
     expect(err).toBeInstanceOf(AgentError);
     expect(err.message).toContain("já existe");
   });
@@ -66,31 +66,31 @@ describe("AgentStore — criar", () => {
 
   it("gera o arquivo do bridge opencode na criação", async () => {
     const { ws, store } = await ambiente();
-    await store.criar(ws.path, "auditor", {});
-    const bridgeFile = join(ws.path, ".opencorp", "opencode", "agent", "auditor.md");
+    await store.criar(ws.path, "operador-teste", {});
+    const bridgeFile = join(ws.path, ".opencorp", "opencode", "agent", "operador-teste.md");
     expect(existsSync(bridgeFile)).toBe(true);
-    expect(existsSync(join(ws.path, ".opencode", "agent", "auditor.md"))).toBe(true);
+    expect(existsSync(join(ws.path, ".opencode", "agent", "operador-teste.md"))).toBe(true);
   });
 });
 
 describe("AgentStore — clone/listar/carregar", () => {
   it("clona agente do workspace e registra evento clonado", async () => {
     const { ws, store } = await ambiente();
-    await store.criar(ws.path, "auditor", {});
+    await store.criar(ws.path, "operador-teste", {});
     const journalPath = join(ws.path, ".opencorp", "registries", "agentes", "agentes-log", "journal.jsonl");
     const antes = readFileSync(journalPath, "utf8");
     const linhasAntes = antes.trim().split("\n");
     expect(linhasAntes).toHaveLength(2);
     expect(linhasAntes[0]).toContain('"evento":"criado"');
     expect(linhasAntes[1]).toContain('"evento":"criado"');
-    await store.clonar(ws.path, "auditor", "auditor-rapido");
+    await store.clonar(ws.path, "operador-teste", "operador-rapido");
     const depois = readFileSync(journalPath, "utf8");
     const linhas = depois.trim().split("\n");
     expect(linhas).toHaveLength(3);
     expect(linhas[0]).toBe(linhasAntes[0]);
     expect(linhas[1]).toBe(linhasAntes[1]);
     expect(linhas[2]).toContain('"evento":"clonado"');
-    expect(existsSync(join(ws.path, ".opencorp", "agents", "auditor-rapido.md"))).toBe(true);
+    expect(existsSync(join(ws.path, ".opencorp", "agents", "operador-rapido.md"))).toBe(true);
   });
 
   it("clonar para o mesmo id falha", async () => {
@@ -102,12 +102,12 @@ describe("AgentStore — clone/listar/carregar", () => {
 
   it("listar retorna os agentes ordenados com resumo completo", async () => {
     const { ws, store } = await ambiente();
-    await store.criar(ws.path, "auditor", {});
+    await store.criar(ws.path, "operador-teste", {});
     const agentes = await store.listar(ws.path);
-    expect(agentes.map((a) => a.id)).toEqual(["auditor", "ceo-documentos", "executor-padrao", "frontend-especialista", "secretario", "secretario-exec"]);
-    const auditor = agentes.find((a) => a.id === "auditor")!;
-    expect(auditor.permissions).toBe("level-2");
-    expect(auditor.budget_daily_usd).toBe(1);
+    expect(agentes.map((a) => a.id)).toEqual(["auditor", "ceo-documentos", "executor-padrao", "frontend-especialista", "operador-teste", "secretario", "secretario-exec"]);
+    const criado = agentes.find((a) => a.id === "operador-teste")!;
+    expect(criado.permissions).toBe("level-2");
+    expect(criado.budget_daily_usd).toBe(1);
   });
 
   it("carregar agente inexistente falha com AgentError", async () => {
@@ -132,12 +132,12 @@ describe("AgentStore — clone/listar/carregar", () => {
 
   it("posEditar re-sincroniza o bridge quando o arquivo muda", async () => {
     const { ws, store } = await ambiente();
-    await store.criar(ws.path, "auditor", {});
+    await store.criar(ws.path, "operador-teste", {});
     const { writeFileAtomic } = await import("../src/utils/fs-safe.js");
-    const path = join(ws.path, ".opencorp", "agents", "auditor.md");
+    const path = join(ws.path, ".opencorp", "agents", "operador-teste.md");
     await writeFileAtomic(path, readFileSync(path, "utf8").replace("permissions: level-2", "permissions: level-3"));
-    await store.posEditar(ws.path, "auditor", true);
-    const bridgeFile = readFileSync(join(ws.path, ".opencorp", "opencode", "agent", "auditor.md"), "utf8");
+    await store.posEditar(ws.path, "operador-teste", true);
+    const bridgeFile = readFileSync(join(ws.path, ".opencorp", "opencode", "agent", "operador-teste.md"), "utf8");
     expect(bridgeFile).toContain("webfetch: allow");
   });
 });

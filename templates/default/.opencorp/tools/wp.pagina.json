@@ -1,0 +1,9 @@
+{
+  "id": "wp.pagina",
+  "titulo": "Criar página no WordPress",
+  "descricao": "Cria uma página (Sobre, Serviços, Início) com status draft ou publish conforme o setup de identidade",
+  "inputSchema": { "type": "object", "properties": { "titulo": { "type": "string" }, "conteudo": { "type": "string", "description": "HTML do conteúdo" }, "status": { "type": "string" } }, "required": ["titulo", "conteudo"] },
+  "handler": { "tipo": "comando", "comando": ["node", "scripts/wp.cjs", "page"] },
+  "approval": "nunca",
+  "rate_limit_min": 20
+}

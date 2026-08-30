@@ -76,8 +76,9 @@
 - Usa chat da 19 + triggers da 21 + tools da 22 (ver docs/14): padrões declarativos **pipeline, fan-out/fan-in com barreira (`bloqueado_por`), revisão cruzada, debate**; supervisor como orquestrador padrão; spawn por menção com as 3 guardas (loop, rate, lease).
 - **CLI**: `opencorp team create|list|show|run` (config do padrão + agentes + artefatos); escala humano automática nas violações.
 
-### ETAPA 25 · Bateria final e v0.3.0 — status: `pendente`
+### ETAPA 25 · Bateria final e v0.3.0 — status: `concluída`
 - Specs cegas novas (19–23) + regressão `opencorp test blind all`; `doctor` cobre scheduler/hooks/apps; `README` e `docs/README.md` atualizados; tag **v0.3.0**.
+- **Aditivo (decisão do usuário)**: regressão cega completa trocada por **teste monitorado** nas 4 empresas reais — auditor proativo detecta e corrige o site SEM prompt humano (setup de identidade: tagline, título, páginas Início/Sobre/Serviços/Produtos, home estática, post de lançamento), com conteúdo adaptado ao `projeto.json` de cada empresa.
 
 ## 4 · Ordem e dependências
 
@@ -109,4 +110,4 @@
 | 22 | Tools / MCP | `concluída — PASS 5/5 (1º ciclo; MCP stdio JSON-RPC)` |
 | 23 | Mini-apps | `concluída — PASS 5/5 (ciclo 4; fix 500→404 no ciclo 2; ciclos 3/3 interrompidos por erro de provedor; spec do cenário 4 reescrita p/ daemon + sem pkill; relatório com "VEREDITO" fora do formato — conteúdo 5/5 PASS)` |
 | 24 | Orquestração multi-agente (docs/14) | `concluída — PASS 5/5 (ciclo 3; fixes: parser de menções @agente:<id>, POST /teams aceita sem criado_em, rate guard documentado vs rate limit 30/h do chat; runner marcou TIMEOUT pós-gravação — veredito extraído do relatório, mesmo padrão da 23)` |
-| 25 | Bateria final v0.3.0 | `em andamento — doctor ✅ (34 testes, scheduler/hooks/apps/teams/secretário); e2e Playwright permanente 38/38 ✅; pendente: regressão blind all, README/tag` |
+| 25 | Bateria final v0.3.0 | `concluída — doctor ✅ (34 testes); e2e Playwright 38/38 ✅; unitários 397 ✅; regressão blind all parcial (01–08, 11, 12 PASS; 08 nuvem FAIL esperado; 10 FAIL 6/1 cenário 5-ata corrigido com rotação de modelos; 09 TIMEOUT por design; interrompida por decisão do usuário); teste monitorado nas 4 empresas: setup de identidade SETUP-OK ×4 (auditor + perfil por projeto + wp.cjs v2 + triggers multi-empresa + fix task.criada com workspace); login duplicado no web corrigido (build antiga com ?v= → boot duplo); README/tag v0.3.0 ✅` |

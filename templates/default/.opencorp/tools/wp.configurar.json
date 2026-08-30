@@ -1,0 +1,9 @@
+{
+  "id": "wp.configurar",
+  "titulo": "Configurar identidade do site WordPress",
+  "descricao": "Define tagline/descrição do site e página inicial estática (home)",
+  "inputSchema": { "type": "object", "properties": { "descricao": { "type": "string" }, "home_estatica": { "type": "number", "description": "id da página Início" } } },
+  "handler": { "tipo": "comando", "comando": ["node", "scripts/wp.cjs", "configurar"] },
+  "approval": "nunca",
+  "rate_limit_min": 10
+}
