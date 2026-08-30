@@ -1,40 +1,45 @@
 # Handoff de sessão — opencorp (cole este contexto ao trocar de chat)
 
-## Objective
+## Objetivo
 - Continuar o **opencorp** — Sistema Operacional de Empresas Autônomas CLI-first sobre OpenCode (`/home/j/Documentos/GitHub/crom-worker-opencode`, usuário fala PT-BR).
-- Plano ativo: `docs/13-plano-extensoes-plataforma.md`. Etapas 19–24 ✅ PASS e commitadas. **ETAPA 25 em andamento**: doctor ✅, e2e permanente 38/38 ✅, regressão `test blind all` — VERIFICAR se terminou (ver "Estado do ambiente"). Falta: veredicto da regressão → docs/13 → **tag v0.3.0** + docs/release-v0.3.0.md.
-- Modo **Custo Zero**: baterias e agentes default 100% free (`openrouter/nvidia/nemotron-3-ultra-550b-a55b:free`, `minimax/minimax-m3:free`, `opencode/nemotron-3-ultra-free`; rotation automática em erro de provedor). **Modificações de código o orquestrador (GLM) faz direto** — subagentes free só para análise/leitura (pedido do usuário).
+- **v0.3.0 TAGADA** (25 etapas, ~400 testes unit + 38/38 e2e). Foco atual: **estabilização de testes + auto-gestão dos 4 sites** — ver `docs/PLANO-ESTABILIZACAO.md` (Fases 0-5) e `docs/HANDOFF-SESSAO.md` + mapa completo no **README.md (seção "Onde encontrar tudo")**.
+- Modo **Custo Zero**: modelos free em pools com cotas independentes — pool 1 AI Studio BYOK (`google/gemini-3.5-flash-lite` default), pool 2 OpenRouter free (glm-5.2, minimax-m3, nemotron-3.5-lightning, gemma-4-31b). Rotação em `~/.opencorp/settings.json`.
+- Construção: subagentes (implementação) usam `z-ai/glm-5.3-flash` (quase grátis); usuário quer fazer **aos poucos, simples, validando o que funciona** — não empilhar grandes chunks.
 
-## Estado do ambiente VIVO (não é o ~/.opencorp default!)
-- Home ativa: **`/tmp/opencorp-smoke24`** — 4 workspaces/empresas: `pulso-diario` (ativo), `engenhar`, `emporio-aurora`, `norteia` = sites WordPress reais do usuário.
-- Servidor web: `node bin/opencorp.mjs serve --port 4300 --token watch24 --host 0.0.0.0` (daemon, pidfile `api.pid`) — LAN: `http://192.168.18.15:4300` (token `watch24`).
-- Daemons vivos (pidfiles em `<home>/.opencorp/`): scheduler (tick 30s; checar-site 30min ×4; fila-conteudo 120min → task `Fila-de-conteudo` → trigger `trg-editor-conteudo` → agente editor) e supervisor. Secretário NATIVO no ar (opencode-server.json, porta dinâmica).
-- **REGRA DE OURO (incidente 30/08)**: NUNCA matar processo `opencode*`/`node` sem pidfile nosso (`api.pid`, `scheduler.pid`, `supervisor.pid`, `opencode-server.json`) — derrubamos a interface do usuário 1×. Os demais: perguntar antes.
-- Relatório da regressão blind all aparece em `.opencorp/reports/testes/` (gitignored) — extrair veredito da ÚLTIMA linha `VEREDITO:` (ler na mão se o formato desviar).
+## Estado do ambiente (30/08 noite)
+- **4 empresas reais MIGRADAS para `~/.opencorp/workspaces/`** (pulso-diario, engenhar, emporio-aurora, norteia) — NÃO estão mais em /tmp/opencorp-smoke24. Credenciais WP em `~/.opencorp/secrets.json`.
+- Jobs/scheduler: **PAUSADOS** (pedido do usuário). Servidor web/daemons podem não estar no ar — checar pidfiles antes de assumir.
+- **REGRA DE OURO**: NUNCA matar `opencode*`/`node` sem pidfile nosso (`api.pid`, `scheduler.pid`, `supervisor.pid`) — o opencode do usuário roda na mesma máquina (cuidado com pkill/grep largo).
+- Bench OpenRouter pendente: agenda `/tmp/opencode/bench-f1/agenda.sh` roda às 00:05 UTC (10 modelos × etapa-02) — resultado em `/tmp/opencode/bench-f1/bench.log`.
 
-## Trabalho desta sessão (TUDO commitado — working tree limpo)
-1. **Commits em blocos**: feat(teams etapa 24) · feat(web UI v3 TS) · feat(secretario opencode nativo) · feat(api rotas /teams + /secretario) · fix(test-blind rotação) · spec 24 · auditoria web · doctor 25 · e2e 38/38 · README v0.3.0 · agente frontend-especialista (template + 4 empresas vivas sincronizadas).
-2. **ETAPA 24 PASS 5/5 (ciclo 3)** — fixes no caminho: parser de menções `@agente:<id>` completo (task-store), POST /teams preenche `criado_em`, rotação do test blind em erros genéricos de provedor (`provider_unavailable`, `overloaded`, `502/503`, relatório ausente). Runner marcou TIMEOUT pós-gravação do relatório — veredito extraído do conteúdo (mesmo padrão da 23).
-3. **Spec ETAPA-23 cenário 5** corrigida: greps no bundle `curl :PORTA/app/views/apps.js` (HTML não tem mais JS inline).
-4. **Bug de login FECHADO**: causa raiz = `clearAuth()` descartava o EventSource sem fechar (socket órfão seguia "conectado" com login na tela) + interval de 8s gerava 401-loop eterno. Fix: `sairParaLogin` fecha SSE ANTES do clearAuth + clearInterval; `clearAuth` fecha ES; guard no `onopen` (sem token → fecha e não pinta conectado). Validado com repro Playwright (401 forçado → 0 sockets abertos).
-5. **Suíte e2e permanente 38/38 PASS**: playwright.config (webServer 4399 isolado, `OPENCORP_HOME=/tmp/opencorp-e2e`, `OPENCODE_SERVER_BIN=fake-opencode.mjs`) + tests/e2e/* (13 specs) + `npm run test:e2e`. Bugs achados: hash router v3 gravava `#view` mas specs esperam `#/view` (router normalizado); caminho do fake no config tinha `..` a mais → ENOENT → uncaughtException matava o webServer; seletores `.card`/`.team-card` com hasText; GET /teams retorna `passos` como CONTAGEM (view tratava como array → "undefined passo(s)"); seeder duplica jobs/tasks entre testes (usar `.first()`/task exclusiva).
-6. **Auditoria frontend (painel 3 especialistas via subagente) + fixes**: escapeHtml estava CORROMPIDO (XSS real), hamburger/backdrop/logout, refresh 8s não-destrutivo (secretário/inputs/drawer), api() com contrato de erro (4xx→toast com {erro}, timeout 15s GETs, rede caída), feed incremental, cores da timeline, contraste WCAG (accent #2563eb, baixa/version), mobile CSS (16px inputs, 44px touch, wrap, dvh, viewport-fit), apps sem tela preta, aria-label no enviar do secretário.
-7. **Trigger editor + WordPress validados**: ordem simplificada (1 objetivo: rascunho via wp.rascunho + postar id no chat; NÃO mover/publicar). Ciclo completo OK: task → editor (19.5s) → rascunho 12 draft no WP → "rascunho 12 criado" no chat. Modelos free flakam (1ª sessão travou 170s sem resposta — rerodar).
-8. **Doctor etapa 25**: scheduler (pid órfão + jobs ativos), hooks/apps/teams (specs inválidos), secretário (parado=ok, porta). 34 testes.
-9. **Agente `frontend-especialista`** no template default: painel de 3 especialistas (arquiteto UX, designer mobile-first, eng. a11y) com checklist de responsividade. Testes 4→5 agentes atualizados (393 unitários verdes). Sincronizado nas 4 empresas.
-10. **README.md (raiz, novo) v0.3.0** + docs/README índice apontando plano 13.
+## Trabalho da sessão 30/08 (tarde/noite)
+1. **Fase 0 ✅ (commit c5a3390)**: telemetria do `test blind` — eventos JSONL `events-<execid>.jsonl` com fail_cat (`provider_error|rate_limit|timeout_harness|missing_report|product_bug|spec_divergence|unknown`), `CATEGORIA:` no relatório do testador, health-check de modelos (`pingModelo`, setting `tests.health_check`). 417 testes verdes.
+2. **Bench de modelos (AI Studio BYOK)**: `gemini-3.5-flash-lite` PASS 7/7 em **61s** (vencedor, default); `gemini-3.1-flash-lite` PASS 101s; `gemma-4-31b-it` 2× FAIL ("high demand" — re-bench); `gemini-3.5-flash` timeout (turnos de 2-4min); `3.7-flash` erro API; `2.5-flash-lite` descontinuado. Tabela completa no README/PLANO.
+3. **Descoberta chave de cota**: OpenRouter tem **cota diária por conta** para free models (`free-models-per-day-high-balance`) — esgotou e gerou FAILs falsos; rotação NÃO resolve. AI Studio BYOK = cota própria (segunda pool). Antes de bateria longa: health-check.
+4. **Kit de auto-gestão dos sites** (templates/default + implantado nos 4 workspaces):
+   - Catálogo de **function calling** `docs/testes-site/FERRAMENTAS.md` (wp_listar/wp_ler/wp_criar/wp_editar/wp_configurar/wp_apagar/registro_*/agente_run com contratos exatos, quirks de status no 3º argumento, tabela de erros HTTP) — a "MCP do usuário" simplificada: modelos chamam via bash seguindo o catálogo.
+   - Agentes `critico-site` (só leitura → PARECER com prioridades) e `corretor-site` (executa correções do parecer) — model flash-lite, no template e nos 4 workspaces.
+   - Specs `AUDITORIA-01-identidade/02-conteudo/03-tecnico.md` + playbook `CICLO-AUTO-GESTAO.md`.
+5. **Ciclo validado ao vivo no pulso-diario** (~11 min): aud01 PASS 7/7 · aud02 FAIL (C1 volume) · aud03 FAIL (C7 rascunhos lixo) → editor publicou 2 posts reais da fila (IDs 23, 16) · corretor apagou lixo (IDs 1,5,7). Estado final verificado: 3 posts de conteúdo publicados, identidade correta.
 
-## Pendências (ordem sugerida)
-1. **Regressão `test blind all`** — se ainda rodando, esperar (pidfile do processo em voo; relatório por spec em `.opencorp/reports/testes/`). Ao terminar: veredicto consolidado → docs/13 status 25 → commit. Fix se FAIL (máx 3 ciclos).
-2. **TAG v0.3.0** + `docs/release-v0.3.0.md` (seguir padrão do release-v0.1.0.md).
-3. Opcional: seed de apps nas 4 empresas; fechar editor no fluxo de publicação com revisão (team `publicacao-review` já criado no pulso-diario — recriá-lo com o CLI novo se necessário).
-4. Ideia futura: drag-and-drop no kanban; Tailwind pré-compilado (hoje usa CDN — em rede sem internet a UI perde classes utilitárias); limpar prompts()/confirm() nativos por modais.
+## Lições validadas (não repetir erros)
+- **1 spec por execução de agente** — sessão longa empilha contexto e morre ("Requests ending with a model turn are not supported", API Google); sessões curtas = 100%.
+- bin roda `dist/`, não `src/` — rebuild antes de validar via CLI.
+- Settings isoladas de teste: caminho é `$OPENCORP_HOME/.opencorp/settings.json` (a subpasta .opencorp dentro do home).
+- Scripts de monitoramento: `rc=$?` em linha separada (command substitution reseta $?); `pgrep -f` casa com o próprio shell — filtrar com ps.
+- wp.cjs v2: CREATE aceita status só como 3º argumento; credenciais `wp_<site>_user/_pass`; SITE derivado do nome do workspace.
 
-## Detalhes que salvam tempo
-- **Test blind**: relatórios em `.opencorp/reports/testes/` (gitignored); veredito na ÚLTIMA linha `VEREDITO:` (ler na mão se desviar); home isolada é mkdtemp mas a SPEC manda usar `/tmp/opencorp-cego-e<n>` (rm -rf antes); spec com servidor DEVE mandar `serve` daemon + `serve stop` e proibir `--foreground`/`pkill`. Rotação de modelos cobre rate limit, "Provider returned error", `provider_unavailable`, `overloaded`, 502/503 e relatório ausente.
-- **Bateria com agentes reais**: cada passo do team run demora 1-3min (free flaky). Rate limit do chat = 30 msgs/h/task (bloqueia ANTES do rate guard de 20/h quando spawn falha rápido — spec 24 documenta isso).
-- **Secretário**: POST /session/:id/message do opencode serve É síncrono (retorna assistant direto; usar timeout 240s); `agent` no BODY; sessões antigas grudam no modelo da criação; agentes copiados crus quebram opencode — SEMPRE via bridge (`gerarAgenteOpencode`).
-- **Web**: `configurarIconesIniciais` idempotente; router usa `#/view` (navegar() seta `'/' + hash`); specs cegas fazem grep em `/app/views/apps.js`; server injeta `?v=<boot>` + `no-cache`.
-- **Playwright e2e**: webServer 4399 isolado; global-setup recria /tmp/opencorp-e2e (safe); fake-opencode responde sync com `info.role="assistant"` e parts textuais; NUNCA rodar `npm run build` com bateria em voo (dist trocado em voo) — `npx tsc -p tsconfig.web.json` (só web-dist) é seguro se a bateria não faz curl no bundle.
-- **Scheduler spawn não tem timeout**; trigger CLI não expõe filtro — escrever JSON direto em `<home>/.opencorp/triggers/`.
-- Gasto total antes do custo-zero: $16.81/5d. Hoje: tudo free.
+## Backlog de ideias do usuário (fazer AOS POUCOS, validando)
+- [ ] Re-bench `gemma-4-31b-it` (Google "high demand" era transitório) + consolidar bench OpenRouter pós-reset
+- [ ] Fase 2 do plano: 4 bugs sistêmicos (path fantasma `registries/`, gridlock permissões CKO, parser menções, `{{workspace}}` bridge)
+- [ ] Fase 3: daemon de teste + timeout por cenário + retry com checkpoint
+- [ ] Fase 4: verificador de write-falso + lock de healer
+- [ ] MCP server real (ToolRegistry/agente_run como MCP) — catálogo FERRAMENTAS.md resolve hoje
+- [ ] Replicar ciclo de auto-gestão nas outras 3 empresas + specs específicas por template
+- [ ] Agendador do ciclo diário de auto-gestão (cuidando cotas) — jobs hoje pausados
+- [ ] Limpar ~1.045 diretórios-lixo opencorp-* em /tmp
+
+## Próximos passos sugeridos
+1. Checar resultado do bench OpenRouter (`/tmp/opencode/bench-f1/`) e consolidar rotação final.
+2. Re-bench gemma-4-31b + 2º ciclo de auto-gestão no pulso-diario (deve dar 3/3 PASS agora).
+3. Escolher próximo item do backlog com o usuário — sempre: simplificar, rodar, medir, anotar.
