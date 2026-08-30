@@ -223,12 +223,23 @@ async function rodarSpecUnica(
         }
       }
 
-      // Verificar se deve rotacionar modelo (timeout, rate limit ou erro de provedor)
+      // Verificar se deve rotacionar modelo (timeout, rate limit, erro de provedor genérico, ou spec nem começou)
       const saida = resultado.stdout + "\n" + resultado.stderr;
-      const deveRotacionar =
-        resultado.timedOut ||
+      const provedorCaiu =
         saida.includes("rate limit") ||
-        saida.includes("Provider returned error");
+        saida.includes("Provider returned error") ||
+        saida.includes("provider_unavailable") ||
+        saida.includes("temporarily overloaded") ||
+        saida.includes("Overloaded") ||
+        /\b(429|502|503)\b.*(?:error|overload|unavailable)|provider.*(?:error|overload|unavailable)/i.test(saida);
+      let relatorioExiste = false;
+      try {
+        await import("node:fs/promises").then((fs) => fs.access(reportPath));
+        relatorioExiste = true;
+      } catch {
+        relatorioExiste = false;
+      }
+      const deveRotacionar = resultado.timedOut || provedorCaiu || (!relatorioExiste && !resultado.timedOut);
       
       if (deveRotacionar && tentativa < maxTentativas - 1) {
         tentativa++;
