@@ -4,6 +4,8 @@ import { join, resolve, relative, isAbsolute } from "node:path";
 import { stat, readdir, readFile } from "node:fs/promises";
 import { existsSync, statSync, readFileSync } from "node:fs";
 import { WorkspaceManager } from "../core/workspace-manager.js";
+import { writeFileAtomic } from "../utils/fs-safe.js";
+import { opencorpHome } from "../utils/paths.js";
 import { AgentStore } from "../core/agent-store.js";
 import { SessionManager, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
 import { RegistryStore } from "../core/registry-store.js";
@@ -40,6 +42,7 @@ interface DefinicaoRota {
 
 const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/health", descricao: "Verifica saúde do servidor e versão", publico: true },
+  { method: "GET", path: "/status", descricao: "Saúde agregada: scheduler daemon + secretário" },
   { method: "GET", path: "/doc", descricao: "Especificação OpenAPI 3.0 de todas as rotas", publico: true },
   { method: "GET", path: "/workspaces", descricao: "Lista workspaces disponíveis" },
   { method: "POST", path: "/workspaces", descricao: "Cria novo workspace", corpo: true },
@@ -61,6 +64,10 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/settings", descricao: "Lista configurações" },
   { method: "GET", path: "/settings/:chave", descricao: "Obtém uma configuração específica" },
   { method: "PUT", path: "/settings", descricao: "Define uma configuração", corpo: true },
+  { method: "GET", path: "/secrets", descricao: "Lista NOMES de segredos (valores nunca expostos)" },
+  { method: "PUT", path: "/secrets/:chave", descricao: "Define/altera um segredo", corpo: true },
+  { method: "DELETE", path: "/secrets/:chave", descricao: "Remove um segredo" },
+  { method: "GET", path: "/tools", descricao: "Lista ferramentas declarativas do workspace (.opencorp/tools/*.json — só a spec, sem executar)" },
   { method: "GET", path: "/flows", descricao: "Lista flows disponíveis" },
   { method: "POST", path: "/flows", descricao: "Cria novo flow", corpo: true },
   { method: "GET", path: "/flows/:id", descricao: "Obtém detalhes de um flow" },
@@ -88,6 +95,7 @@ const ROUTES: DefinicaoRota[] = [
   { method: "POST", path: "/secretario/start", descricao: "Inicia o secretário (opencode serve)", corpo: false },
   { method: "POST", path: "/secretario/stop", descricao: "Para o secretário", corpo: false },
   { method: "GET", path: "/secretario/sessoes", descricao: "Lista sessões do opencode (proxy)", publico: false },
+  { method: "GET", path: "/secretario/sessoes/:id/mensagens", descricao: "Mensagens de uma sessão (proxy, normalizado [{role,content}])", publico: false },
   { method: "POST", path: "/secretario/conversa", descricao: "Envia mensagem ao secretário (proxy create session + message)", corpo: true },
   { method: "GET", path: "/secretario/sessoes/:id", descricao: "Detalhe/mensagens de uma sessão do opencode (proxy)", publico: false },
 ];
@@ -417,6 +425,23 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         enviar(res, 200, { ok: true, versao: version });
         return;
       }
+      // GET /status — saúde agregada (scheduler daemon + secretário)
+      if (rota === "/status" && req.method === "GET") {
+        const home = opcoes.homeDir ?? opencorpHome();
+        let scheduler = false;
+        try {
+          const pidInfo = JSON.parse(readFileSync(join(home, ".opencorp", "scheduler.pid"), "utf8")) as { pid?: number };
+          if (typeof pidInfo.pid === "number") {
+            try { process.kill(pidInfo.pid, 0); scheduler = true; } catch (e) {
+              scheduler = (e as NodeJS.ErrnoException).code === "EPERM";
+            }
+          }
+        } catch {}
+        let secretario = false;
+        try { secretario = (await opencodeServer.status()).rodando === true; } catch {}
+        enviar(res, 200, { scheduler, secretario });
+        return;
+      }
       // GET /doc — público (sem auth), retorna OpenAPI 3.0
       if (rota === "/doc" && req.method === "GET") {
         enviar(res, 200, gerarOpenApiSpec());
@@ -440,8 +465,26 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
         if (rota === "/workspaces" && req.method === "POST") {
-          const corpo = (await lerCorpo(req)) as { id?: string };
+          const corpo = (await lerCorpo(req)) as {
+            id?: string;
+            perfil?: { empresa?: string; nicho?: string; publico?: string; tom?: string; tom_evitar?: unknown[]; topicos?: unknown[]; diferenciais?: unknown[] };
+          };
           const criado = await workspaces.criar(corpo.id ?? "");
+          // Perfil editorial opcional → grava .opencorp/projeto.json no workspace
+          // (mesmo schema consumido pelos flows de conteúdo). Compat: sem perfil = comportamento atual.
+          if (corpo.perfil && typeof corpo.perfil === "object") {
+            const p = corpo.perfil;
+            const projeto: Record<string, unknown> = {
+              empresa: String(p.empresa ?? criado.id),
+              nicho: String(p.nicho ?? ""),
+              publico: String(p.publico ?? ""),
+              tom: String(p.tom ?? ""),
+              tom_evitar: Array.isArray(p.tom_evitar) ? p.tom_evitar.map(String) : [],
+              topicos_editoriais: Array.isArray(p.topicos) ? p.topicos.map(String) : [],
+            };
+            if (Array.isArray(p.diferenciais)) projeto.diferenciais = p.diferenciais.map(String);
+            writeFileAtomic(join(criado.path, ".opencorp", "projeto.json"), `${JSON.stringify(projeto, null, 2)}\n`);
+          }
           enviar(res, 201, { id: criado.id, caminho: criado.path });
           return;
         }
@@ -593,6 +636,60 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             workspaceDir: (await resolverWs(url)).path,
           });
           enviar(res, 200, r);
+          return;
+        }
+
+        // ── secrets (NUNCA retornam valores — só nomes/máscara) ────
+        const secretsPath = join(opcoes.homeDir ?? opencorpHome(), ".opencorp", "secrets.json");
+        if (rota === "/secrets" && req.method === "GET") {
+          let nomes: string[] = [];
+          try {
+            const bruto = JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, unknown>;
+            nomes = Object.keys(bruto).sort();
+          } catch {}
+          enviar(res, 200, nomes.map((nome) => ({ nome, definido: true })));
+          return;
+        }
+        const mSecret = /^\/secrets\/([^/]+)$/.exec(rota);
+        if (mSecret && req.method === "PUT") {
+          const corpo = (await lerCorpo(req)) as { valor?: string };
+          if (typeof corpo.valor !== "string" || corpo.valor.length === 0) {
+            enviar(res, 400, { erro: "valor obrigatório" });
+            return;
+          }
+          let atual: Record<string, unknown> = {};
+          try { atual = JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, unknown>; } catch {}
+          atual[decodeURIComponent(mSecret[1]!)] = corpo.valor;
+          writeFileAtomic(secretsPath, `${JSON.stringify(atual, null, 2)}\n`, { mode: 0o600 });
+          enviar(res, 200, { ok: true });
+          return;
+        }
+        if (mSecret && req.method === "DELETE") {
+          let atual: Record<string, unknown> = {};
+          try { atual = JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, unknown>; } catch {}
+          delete atual[decodeURIComponent(mSecret[1]!)];
+          writeFileAtomic(secretsPath, `${JSON.stringify(atual, null, 2)}\n`, { mode: 0o600 });
+          enviar(res, 200, { ok: true });
+          return;
+        }
+
+        // ── tools (só LISTA a spec — executar fica no CLI/MCP) ─────
+        if (rota === "/tools" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const dir = join(ws.path, ".opencorp", "tools");
+          const itens: Array<{ id: string; spec?: unknown; erro?: string }> = [];
+          if (existsSync(dir)) {
+            const arquivos = (await readdir(dir)).filter((f) => f.endsWith(".json")).sort();
+            for (const f of arquivos) {
+              const id = f.replace(/\.json$/, "");
+              try {
+                itens.push({ id, spec: JSON.parse(readFileSync(join(dir, f), "utf8")) });
+              } catch (erro) {
+                itens.push({ id, erro: `JSON inválido: ${erro instanceof Error ? erro.message : String(erro)}` });
+              }
+            }
+          }
+          enviar(res, 200, itens);
           return;
         }
 
@@ -1052,6 +1149,40 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             }
             const data = await resOpencode.json();
             enviar(res, 200, data);
+          } catch (erro) {
+            if (erro instanceof SecretarioError) {
+              enviar(res, erro.status ?? 409, { erro: erro.message });
+            } else {
+              enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
+            }
+          }
+          return;
+        }
+
+        // ── /secretario/sessoes/:id/mensagens (proxy GET /session/:id → [{role,content}]) ──
+        const mMensagens = /^\/secretario\/sessoes\/([^/]+)\/mensagens$/.exec(rota);
+        if (mMensagens && req.method === "GET") {
+          try {
+            const porta = await portaOpencodeOuErro();
+            const sessionId = decodeURIComponent(mMensagens[1]!);
+            const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}`;
+            const resOpencode = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
+            if (!resOpencode.ok) {
+              enviar(res, resOpencode.status === 404 ? 404 : 502, { erro: resOpencode.status === 404 ? "sessão não encontrada" : `opencode respondeu ${resOpencode.status}` });
+              return;
+            }
+            const data = (await resOpencode.json()) as {
+              messages?: Array<{ role: string; parts?: Array<{ type: string; text?: string }>; time?: { created?: number; completed?: number } }>;
+            };
+            const mensagens = (data.messages ?? [])
+              .filter((m) => m.role === "user" || m.role === "assistant")
+              .map((m) => ({
+                role: m.role,
+                content: (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim(),
+                criado_em: m.time?.created ? new Date(m.time.created).toISOString() : undefined,
+              }))
+              .filter((m) => m.content.length > 0);
+            enviar(res, 200, mensagens);
           } catch (erro) {
             if (erro instanceof SecretarioError) {
               enviar(res, erro.status ?? 409, { erro: erro.message });
