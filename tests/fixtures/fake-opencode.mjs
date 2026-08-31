@@ -84,6 +84,22 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // GET /session/:id/message - mensagens no formato opencode ≥1.18 ([{info:{role,time},parts}])
+  // (o proxy do stream usa esta rota — sem ela o stream fica preso esperando a resposta)
+  const matchMsgs = path.match(/^\/session\/([^/]+)\/message$/);
+  if (matchMsgs && method === "GET") {
+    const session = sessions.get(matchMsgs[1]);
+    if (!session) {
+      send(res, 404, { error: "not found" });
+      return;
+    }
+    send(res, 200, session.messages.map((m, i) => ({
+      info: { id: `${session.id}_msg_${i}`, role: m.role, time: m.time },
+      parts: m.parts,
+    })));
+    return;
+  }
+
   // POST /session/:id/message - send message (SYNCHRONOUS response with assistant message)
   const matchMsg = path.match(/^\/session\/([^/]+)\/message$/);
   if (matchMsg && method === "POST") {

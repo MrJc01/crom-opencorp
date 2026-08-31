@@ -5,7 +5,6 @@ const views = [
   { hash: "home", titulo: "Operação hoje" },
   { hash: "tasks", titulo: "Tasks" },
   { hash: "agenda", titulo: "Agenda" },
-  { hash: "teams", titulo: "Teams" },
   { hash: "reunioes", titulo: "Reuniões" },
   { hash: "fluxos", titulo: "Fluxos" },
   { hash: "historico", titulo: "Histórico" },
@@ -31,7 +30,10 @@ test.describe("Navegação Sidebar", () => {
       // Verifica se o título da view aparece
       await esperarElementoTexto(page, view.titulo);
       // Verifica se a view está ativa
-      const viewEl = page.locator(`#view-${view.hash}`);
+      // Reuniões agora é uma ABA dentro da página do Secretário (PLANO-WEB-CRUD D):
+      // o hash #/reunioes ativa #view-secretario e mostra o painel de reuniões.
+      const sectionHash = view.hash === 'reunioes' ? 'secretario' : view.hash;
+      const viewEl = page.locator(`#view-${sectionHash}`);
       await expect(viewEl).toHaveClass(/active/);
     });
   }
