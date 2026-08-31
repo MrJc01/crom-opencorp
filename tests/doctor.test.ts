@@ -12,6 +12,7 @@ import {
   checkHooks,
   checkApps,
   checkTeams,
+  checkLedger,
   checkSecretario,
   schedulerPidfilePath,
   secretarioPidfilePath,
@@ -470,5 +471,45 @@ describe("runDoctor — checks novos integrados", () => {
     const hooks = resultado.checks.find((c) => c.id === "hooks");
     expect(hooks?.status).toBe("warn");
     expect(hooks?.items?.[0]).toContain("hook-x.json");
+  });
+});
+
+describe("checkLedger (PLANO-UNIFICACAO)", () => {
+  it("corp.db inexistente → info", async () => {
+    const ws = await tmpDir();
+    const check = await checkLedger(ws);
+    expect(check.status).toBe("info");
+  });
+
+  it("ledger vazio → ok; execução órfã >24h → warn com item; execução recente executando → ok", async () => {
+    const { CorpDb } = await import("../src/core/corp-db.js");
+    const ws = await tmpDir();
+    mkdirSync(join(ws, ".opencorp"), { recursive: true });
+    const db = new CorpDb(join(ws, ".opencorp", "corp.db"));
+
+    // ledger vazio
+    const vazio = await checkLedger(ws);
+    expect(vazio.status).toBe("ok");
+
+    const ontem = new Date(Date.now() - 30 * 3600_000).toISOString();
+    const agora = new Date().toISOString();
+    db.upsertExecucao({
+      id: "exec-orfa", agente: "a", modelo: "m", gatilho_tipo: "cron", gatilho_origem: "sch-x",
+      status: "executando", inicio: ontem, fim: null, duracao_ms: null, custo_usd: null, exit_code: null,
+    });
+    db.upsertExecucao({
+      id: "exec-viva", agente: "b", modelo: "m", gatilho_tipo: "mencao", gatilho_origem: "tsk_1/x",
+      status: "executando", inicio: agora, fim: null, duracao_ms: null, custo_usd: null, exit_code: null,
+    });
+    db.upsertExecucao({
+      id: "exec-ok", agente: "c", modelo: "m", gatilho_tipo: "manual", gatilho_origem: "",
+      status: "concluido", inicio: agora, fim: agora, duracao_ms: 10, custo_usd: 0, exit_code: 0,
+    });
+
+    const check = await checkLedger(ws);
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("1 execução(ões) presas");
+    expect(check.items?.[0]).toContain("exec-orfa");
+    db.fechar();
   });
 });

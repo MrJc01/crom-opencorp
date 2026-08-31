@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { FlowError } from "./errors.js";
-import { RegistryStore } from "./registry-store.js";
+import { RegistryStore, type MetaRegistro } from "./registry-store.js";
 import { eventBus } from "./event-bus.js";
 import { SessionManager, type OpcoesRun, type ResultadoRun } from "./session-manager.js";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
@@ -315,13 +315,16 @@ export class FlowStore {
   async executar(
     wsPath: string,
     flowId: string,
-    opts: { entrada?: string; model?: string; execId?: string } = {},
+    opts: { entrada?: string; model?: string; execId?: string; retomar?: boolean } = {},
   ): Promise<{ execId: string; status: "concluido" | "falhou"; nos: NoExecInfo[]; contextoFinal: string }> {
     const flow = await this.obter(wsPath, flowId);
     await this.registros.garantirCategorias(wsPath);
-    const entrada = opts.entrada ?? "";
-    const execId = opts.execId ?? gerarId("exec");
-    const nosInfo: NoExecInfo[] = flow.nos.map((n) => ({
+    const retomando = opts.retomar && opts.execId
+      ? await this.estadoParaRetomar(wsPath, flowId, opts.execId)
+      : null;
+    const entrada = retomando ? retomando.entrada : (opts.entrada ?? "");
+    const execId = retomando ? (opts.execId as string) : (opts.execId ?? gerarId("exec"));
+    const nosInfo: NoExecInfo[] = retomando ? retomando.nosInfo : flow.nos.map((n) => ({
       id: n.id,
       tipo: n.tipo,
       status: "nao-executado",
@@ -338,31 +341,45 @@ export class FlowStore {
       await this.registros.salvarMeta(wsPath, "execucoes", execId, meta);
     };
 
-    await this.registros.criar(wsPath, {
-      categoria: "execucoes",
-      id: execId,
-      descricao: `Flow "${flowId}" (${flow.nome}) — entrada: ${entrada.slice(0, 120)}`,
-      criadoPor: `flow:${flowId}`,
-      tags: ["flow", `flow:${flowId}`],
-      tipo: "flow",
-      eventoInicial: {
-        evento: "iniciado",
-        resumo: `flow ${flowId} · ${flow.nos.length} nó(s) · entrada: ${entrada.slice(0, 120)}`,
-      },
-      extras: {
-        status: "executando",
+    if (retomando) {
+      // Flow durável: retoma no MESMO exec — nós "ok" do run anterior não re-executam
+      await this.registros.anexarEvento(wsPath, "execucoes", execId, {
+        ts: this.agora().toISOString(),
+        por: `flow:${flowId}`,
+        evento: "retomado",
+        no: retomando.noId,
+        resumo: `retomada do nó "${retomando.noId}" (nós anteriores preservados)`,
+      });
+      eventBus.emit("flow-retomada", { flow: flowId, exec_id: execId, no: retomando.noId });
+    } else {
+      await this.registros.criar(wsPath, {
+        categoria: "execucoes",
+        id: execId,
+        descricao: `Flow "${flowId}" (${flow.nome}) — entrada: ${entrada.slice(0, 120)}`,
+        criadoPor: `flow:${flowId}`,
+        tags: ["flow", `flow:${flowId}`],
         tipo: "flow",
-        flow: flowId,
-        nome: flow.nome,
-        entrada,
-        nos: nosInfo,
-        contexto_final: "",
-      },
-    });
-    eventBus.emit("flow-inicio", { flow: flowId, exec_id: execId, entrada });
+        eventoInicial: {
+          evento: "iniciado",
+          resumo: `flow ${flowId} · ${flow.nos.length} nó(s) · entrada: ${entrada.slice(0, 120)}`,
+        },
+        extras: {
+          status: "executando",
+          tipo: "flow",
+          flow: flowId,
+          nome: flow.nome,
+          entrada,
+          nos: nosInfo,
+          contexto_final: "",
+        },
+      });
+      eventBus.emit("flow-inicio", { flow: flowId, exec_id: execId, entrada });
+    }
 
-    let contexto = stripAnsi(entrada);
-    let atual: NoFlow | undefined = flow.nos.find((n) => n.tipo === "manual");
+    let contexto = retomando ? retomando.contexto : stripAnsi(entrada);
+    let atual: NoFlow | undefined = retomando
+      ? porId(flow, retomando.noId)
+      : flow.nos.find((n) => n.tipo === "manual");
     let status: "concluido" | "falhou" = "concluido";
     let motivo: string | null = null;
     let noFalha: string | null = null;
@@ -392,6 +409,7 @@ export class FlowStore {
               referencias: [execId],
               tipo: "flow-no",
               tags: [`flow:${flowId}`, `no:${no.id}`],
+              gatilho: { tipo: "dependencia", origem: `flow:${flowId}/${no.id}` },
             });
           } catch (erro) {
             await marcarNo(no.id, "falhou", null);
@@ -533,6 +551,7 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
               referencias: [execId],
               tipo: "flow-decisao",
               tags: [`flow:${flowId}`, `no:${no.id}`, "decisao"],
+              gatilho: { tipo: "dependencia", origem: `flow:${flowId}/${no.id}` },
             });
             if (resultado.exit_code !== 0) {
               throw new FlowError(`exit ${resultado.exit_code}`);
@@ -614,6 +633,41 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
       );
     }
     return { execId, status, nos: nosInfo, contextoFinal: contexto };
+  }
+
+  /**
+   * Estado de retomada de uma execução falha (flow durável): o 1º nó não-ok
+   * e o contexto final do run anterior — nós "ok" NÃO re-executam.
+   */
+  private async estadoParaRetomar(
+    wsPath: string,
+    flowId: string,
+    execId: string,
+  ): Promise<{ nosInfo: NoExecInfo[]; contexto: string; noId: string; entrada: string }> {
+    let meta: MetaRegistro;
+    try {
+      meta = await this.registros.lerMeta(wsPath, "execucoes", execId);
+    } catch {
+      throw new FlowError(`execução "${execId}" não encontrada — veja "opencorp flow status ${flowId}"`);
+    }
+    const extras = (meta.extras ?? {}) as Record<string, unknown>;
+    if (extras.tipo !== "flow" || extras.flow !== flowId) {
+      throw new FlowError(`execução "${execId}" não pertence ao flow "${flowId}"`);
+    }
+    if (extras.status !== "falhou") {
+      throw new FlowError(`execução "${execId}" está "${String(extras.status)}" — só execuções falhas podem ser retomadas`);
+    }
+    const nosInfo = (extras.nos as NoExecInfo[] | undefined) ?? [];
+    const pendente = nosInfo.find((n) => n.status !== "ok");
+    if (!pendente) {
+      throw new FlowError(`execução "${execId}" não tem nós pendentes para retomar`);
+    }
+    return {
+      nosInfo,
+      contexto: String(extras.contexto_final ?? ""),
+      noId: pendente.id,
+      entrada: String(extras.entrada ?? ""),
+    };
   }
 
   async ultimaExecucao(wsPath: string, flowId: string): Promise<{ execId: string; status: string; nos: NoExecInfo[]; contextoFinal: string; em: string } | null> {

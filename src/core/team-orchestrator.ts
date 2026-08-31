@@ -1,9 +1,10 @@
 import { TeamStore, type TeamSpec, type Passo } from "./team-store.js";
 import { TaskStore } from "./task-store.js";
+import type { Gatilho } from "../schemas/gatilho.js";
 import { TeamError } from "./errors.js";
 
 export interface ExecutoresOrquestrador {
-  rodar(agente: string, ordem: string, wsPath: string): Promise<{ id: string; captura: string }>;
+  rodar(agente: string, ordem: string, wsPath: string, gatilho?: Gatilho): Promise<{ id: string; captura: string }>;
 }
 
 export interface ResultadoOrquestracao {
@@ -54,8 +55,8 @@ export class OrquestradorDeTeams {
     if (this.executores) return this.executores;
     const { SessionManager } = await import("./session-manager.js");
     return {
-      rodar: async (agente: string, ordem: string, wsPath: string) => {
-        const r = await new SessionManager({ cwd: wsPath }).rodar({ agente, ordem, workspaceDir: wsPath });
+      rodar: async (agente: string, ordem: string, wsPath: string, gatilho?: Gatilho) => {
+        const r = await new SessionManager({ cwd: wsPath }).rodar({ agente, ordem, workspaceDir: wsPath, gatilho });
         return { id: r.id, captura: r.captura };
       },
     };
@@ -118,11 +119,12 @@ export class OrquestradorDeTeams {
     task: { id: string },
     passo: Passo,
     ordem: string,
-    rotulo: string
+    rotulo: string,
+    gatilho?: Gatilho
   ): Promise<{ ok: boolean; sessao: string | null; resumo: string }> {
     const exec = await this.getExecutor();
     try {
-      const r = await exec.rodar(passo.agente, ordem, wsPath);
+      const r = await exec.rodar(passo.agente, ordem, wsPath, gatilho);
       const resumo = primeiraLinha(r.captura);
       await this.tasks.mensagem(wsPath, task.id, {
         autor: `agente:${passo.agente}`,
@@ -155,7 +157,10 @@ export class OrquestradorDeTeams {
       const passo = passos[i];
       const ordem = template(passo.ordem, { entrada, anterior });
       const rotulo = `${i + 1}/${passos.length}:${passo.agente}`;
-      const r = await this.executarPasso(wsPath, raiz, passo, ordem, rotulo);
+      const r = await this.executarPasso(wsPath, raiz, passo, ordem, rotulo, {
+        tipo: "padrao",
+        origem: `team:${spec.id}/${rotulo}`,
+      });
       passosResultado.push({ agente: passo.agente, ...r });
       if (!r.ok) {
         await this.tasks.mover(wsPath, raiz.id, "bloqueado");
@@ -206,7 +211,10 @@ export class OrquestradorDeTeams {
         try {
           const ordem = template(p.ordem, { entrada });
           const rotulo = `fanout/${p.agente}`;
-          const r = await this.executarPasso(wsPath, { id: subtaskIds[idx] }, p, ordem, rotulo);
+          const r = await this.executarPasso(wsPath, { id: subtaskIds[idx] }, p, ordem, rotulo, {
+            tipo: "padrao",
+            origem: `team:${spec.id}/${rotulo}`,
+          });
           passosResultado.push({ agente: p.agente, ...r });
           return { idx, ok: r.ok };
         } finally {
@@ -251,7 +259,10 @@ export class OrquestradorDeTeams {
     if (spec.sintese) {
       const capturas = passosResultado.map((pr) => `## ${pr.agente}\n${pr.resumo.slice(0, 600)}\n\n`).join("");
       const ordem = template(spec.sintese.ordem, { entrada, anterior: capturas });
-      const r = await this.executarPasso(wsPath, raiz, spec.sintese, ordem, "síntese");
+      const r = await this.executarPasso(wsPath, raiz, spec.sintese, ordem, "síntese", {
+        tipo: "padrao",
+        origem: `team:${spec.id}/síntese`,
+      });
       passosResultado.push({ agente: spec.sintese.agente, ...r });
     }
 
@@ -274,7 +285,10 @@ export class OrquestradorDeTeams {
 
     for (let t = 1; t <= turnos; t++) {
       const ordemExecutor = template(executor.ordem, { entrada, ajustes });
-      const rExec = await this.executarPasso(wsPath, raiz, executor, ordemExecutor, `review/turno${t}/executor`);
+      const rExec = await this.executarPasso(wsPath, raiz, executor, ordemExecutor, `review/turno${t}/executor`, {
+        tipo: "padrao",
+        origem: `team:${spec.id}/review/turno${t}/executor`,
+      });
       passosResultado.push({ agente: executor.agente, ...rExec });
       if (!rExec.ok) {
         await this.tasks.mover(wsPath, raiz.id, "bloqueado");
@@ -289,7 +303,10 @@ export class OrquestradorDeTeams {
 
       const ordemRevisor = template(revisor.ordem, { entrada, anterior: capturaExecutor }) +
         "\n\nPROTOCOL: responda na PRIMEIRA linha exatamente 'APROVADO' ou 'AJUSTES: <motivo>'.";
-      const rRev = await this.executarPasso(wsPath, raiz, revisor, ordemRevisor, `review/turno${t}/revisor`);
+      const rRev = await this.executarPasso(wsPath, raiz, revisor, ordemRevisor, `review/turno${t}/revisor`, {
+        tipo: "padrao",
+        origem: `team:${spec.id}/review/turno${t}/revisor`,
+      });
       passosResultado.push({ agente: revisor.agente, ...rRev });
       if (!rRev.ok) {
         await this.tasks.mover(wsPath, raiz.id, "bloqueado");
@@ -346,7 +363,10 @@ export class OrquestradorDeTeams {
       proponentes.map(async (p) => {
         const ordem = template(p.ordem, { entrada });
         const exec = await this.getExecutor();
-        const r = await exec.rodar(p.agente, ordem, wsPath);
+        const r = await exec.rodar(p.agente, ordem, wsPath, {
+          tipo: "padrao",
+          origem: `team:${spec.id}/proponente/${p.agente}`,
+        });
         const resumo = primeiraLinha(r.captura);
         await this.tasks.mensagem(wsPath, raiz.id, {
           autor: `agente:${p.agente}`,
@@ -384,7 +404,10 @@ export class OrquestradorDeTeams {
     const ordemModerador = `Pergunta: ${entrada}\n\nPropostas:\n${propostasTexto}\n\nResponda na PRIMEIRA linha 'DECISÃO: <escolha>' e justifique.`;
 
     const exec = await this.getExecutor();
-    const rMod = await exec.rodar(moderador.agente, ordemModerador, wsPath);
+    const rMod = await exec.rodar(moderador.agente, ordemModerador, wsPath, {
+      tipo: "padrao",
+      origem: `team:${spec.id}/moderador`,
+    });
     const resumoMod = primeiraLinha(rMod.captura);
     await this.tasks.mensagem(wsPath, raiz.id, {
       autor: `agente:${moderador.agente}`,

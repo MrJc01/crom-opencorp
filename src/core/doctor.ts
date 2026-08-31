@@ -598,8 +598,52 @@ export async function checkApps(wsPath: string): Promise<DoctorCheck> {
   };
 }
 
-export async function checkTeams(wsPath: string): Promise<DoctorCheck> {
-  const base = { id: "teams", label: "teams do workspace" } as const;
+/**
+ * Ledger unificado (corp.db `execucoes`, PLANO-UNIFICACAO): detecta execuções
+ * órfãs — presas em "executando" com fim em aberto há mais de 24h — que
+ * indicam processo morto sem finalizar (anti-stale observável).
+ */
+export async function checkLedger(wsPath: string, agoraMs = Date.now()): Promise<DoctorCheck> {
+  const base = { id: "ledger", label: "ledger de execuções (corp.db)" } as const;
+  const dbPath = join(wsPath, ".opencorp", "corp.db");
+  if (!existsSync(dbPath)) {
+    return { ...base, status: "info", detail: "corp.db inexistente — ledger ainda sem execuções" };
+  }
+  let db: Database.Database;
+  try {
+    db = new Database(dbPath, { readonly: true });
+  } catch (erro) {
+    return { ...base, status: "fail", detail: `corp.db não abre: ${errorMessage(erro)}` };
+  }
+  try {
+    const total = db.prepare("SELECT COUNT(*) AS n FROM execucoes").get() as { n: number };
+    const limite = agoraMs - 24 * 3600_000;
+    const orfas = db
+      .prepare(
+        "SELECT id, agente, inicio FROM execucoes WHERE status = 'executando' AND fim IS NULL AND inicio < ? ORDER BY inicio",
+      )
+      .all(new Date(limite).toISOString()) as Array<{ id: string; agente: string; inicio: string }>;
+    if (orfas.length === 0) {
+      return {
+        ...base,
+        status: "ok",
+        detail: `${total.n} execução(ões) no ledger — nenhuma órfã (>24h em "executando")`,
+      };
+    }
+    return {
+      ...base,
+      status: "warn",
+      detail: `${orfas.length} execução(ões) presas em "executando" há >24h (processo morto sem finalizar?)`,
+      items: orfas.slice(0, 5).map((o) => `${o.id} · ${o.agente} · início ${o.inicio.slice(0, 19).replace("T", " ")}`),
+    };
+  } catch (erro) {
+    return { ...base, status: "fail", detail: `consulta ao ledger falhou: ${errorMessage(erro)}` };
+  } finally {
+    try { db.close(); } catch { /* ignore */ }
+  }
+}
+
+export async function checkTeams(wsPath: string): Promise<DoctorCheck> {  const base = { id: "teams", label: "teams do workspace" } as const;
   const store = new TeamStore();
   const dir = teamsDir(wsPath);
   if (!existsSync(dir)) {
@@ -792,6 +836,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
     checks.push(await checkHooks(wsPath));
     checks.push(await checkApps(wsPath));
     checks.push(await checkTeams(wsPath));
+    checks.push(await checkLedger(wsPath));
   } else {
     checks.push({
       id: "hooks",
@@ -810,6 +855,12 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
       label: "teams do workspace",
       status: "info",
       detail: "nenhum workspace ativo — teams não verificados",
+    });
+    checks.push({
+      id: "ledger",
+      label: "ledger de execuções (corp.db)",
+      status: "info",
+      detail: "nenhum workspace ativo — ledger não verificado",
     });
   }
 

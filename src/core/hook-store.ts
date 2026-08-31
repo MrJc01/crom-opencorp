@@ -5,6 +5,7 @@ import { writeFileAtomic, mkdirRecursive } from "../utils/fs-safe.js";
 import { HookError } from "./errors.js";
 import { TaskStore } from "./task-store.js";
 import { eventBus } from "./event-bus.js";
+import type { Gatilho } from "../schemas/gatilho.js";
 
 export type AlvoHook =
   | { tipo: "task_create"; titulo: string; responsavel?: string }
@@ -31,7 +32,7 @@ export interface PayloadHook {
 }
 
 export interface ExecutoresHook {
-  agentRun?: (agente: string, ordem: string, wsPath: string) => Promise<{ id: string; captura?: string }>;
+  agentRun?: (agente: string, ordem: string, wsPath: string, gatilho?: Gatilho) => Promise<{ id: string; captura?: string }>;
   flowRun?: (flow: string, entrada: string, wsPath: string) => Promise<{ id: string; captura?: string }>;
 }
 
@@ -198,7 +199,11 @@ export class HookStore {
     if (alvo.tipo === "agent_run") {
       if (!this.executores.agentRun) throw new HookError("execução de agente não disponível neste contexto (use o servidor)");
       const ordem = substituirTemplate(alvo.ordem, payload);
-      const r = await this.executores.agentRun(alvo.agente, ordem, wsPath);
+      // hook/trigger = ativação por EVENTO (ledger unificado, PLANO-UNIFICACAO)
+      const r = await this.executores.agentRun(alvo.agente, ordem, wsPath, {
+        tipo: "evento",
+        origem: hook.id,
+      });
       eventBus.emit("hook.executado", { hook: hook.id, alvo: alvo.tipo, exec: r.id });
       return { exec_id: r.id, resultado: r.captura?.trim() ?? "" };
     }

@@ -97,6 +97,15 @@ function gerarId(): string {
   return `sch-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
+/**
+ * Gatilho do ledger unificado: se o job roda um `agent run`, ele deve se
+ * auto-declarar como ativação "cron" de origem <jobId> (retorna o valor do
+ * flag --gatilho; vazio quando o job não é agent run).
+ */
+export function argsComGatilhoCron(job: { id: string; args: string[] }): string {
+  return job.args[0] === "agent" && job.args[1] === "run" ? `cron:${job.id}` : "";
+}
+
 export class Scheduler {
   private readonly homeDir: string;
   private readonly agora: () => Date;
@@ -314,11 +323,15 @@ export class Scheduler {
   private async executarSpawn(job: Job): Promise<string> {
     const bin = resolve(import.meta.dirname ?? ".", "..", "..", "bin", "opencorp.mjs");
     const args = ["--workspace", job.workspace, ...job.args].filter((a) => a.length > 0);
+    // Gatilho no ledger unificado (PLANO-UNIFICACAO): todo agent run disparado
+    // pelo scheduler se auto-declara como ativação "cron" de origem <jobId>.
+    const extras = argsComGatilhoCron(job);
+    const final = extras ? [...args, "--gatilho", extras] : args;
     // stderr/stdout do filho vão para log por job — spawn quebrado deixa rastro (não some em silêncio)
     const logDir = join(this.homeDir, "logs");
     await mkdirRecursive(logDir);
     const logFd = openSync(join(logDir, `job-${job.id}.log`), "a");
-    const filho = spawn(process.execPath, [bin, ...args], {
+    const filho = spawn(process.execPath, [bin, ...final], {
       env: { ...process.env, OPENCORP_HOME: this.homeDir },
       detached: true,
       stdio: ["ignore", logFd, logFd],

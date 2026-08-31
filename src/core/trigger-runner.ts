@@ -15,13 +15,14 @@ export function instalarTriggers(opcoes: { homeDir?: string } = {}): void {
   const triggers = new TriggersStore();
   const hooks = new HookStore({
     executores: {
-      agentRun: async (agente: string, ordem: string, wsPath: string) => {
+      agentRun: async (agente: string, ordem: string, wsPath: string, gatilho?: { tipo: string; origem: string }) => {
         // Spawn DETACHED (anti-stale): a ordem disparada por trigger roda em
         // processo próprio e sobrevive ao processo que emitiu o evento.
         const { spawnOpencorpDetached } = await import("./spawn-detached.js");
         const wsId = basename(wsPath);
+        const extras = gatilho ? ["--gatilho", `${gatilho.tipo}:${gatilho.origem}`] : [];
         const r = spawnOpencorpDetached(
-          ["agent", "run", agente, ordem, "--workspace", wsId],
+          ["agent", "run", agente, ordem, "--workspace", wsId, ...extras],
           { homeDir, nomeLog: `trigger-${agente}` },
         );
         return { id: `detached-pid-${r.pid}`, captura: `spawn detached (pid ${r.pid})` };

@@ -1,10 +1,11 @@
 import { TaskStore } from "./task-store.js";
 import { eventBus } from "./event-bus.js";
+import type { Gatilho } from "../schemas/gatilho.js";
 import { opencorpHome } from "../utils/paths.js";
 import { basename } from "node:path";
 
 export interface ExecutoresMencoes {
-  rodar(agente: string, ordem: string, wsPath: string): Promise<{ id: string; captura: string }>;
+  rodar(agente: string, ordem: string, wsPath: string, gatilho?: Gatilho): Promise<{ id: string; captura: string }>;
 }
 
 export interface OpcoesMencoes {
@@ -32,15 +33,16 @@ export function instalarMencoes(opcoes: OpcoesMencoes = {}): () => void {
   const tasks = new TaskStore({ agora });
 
   const executores: ExecutoresMencoes = executoresExternos ?? {
-    rodar: async (agente: string, ordem: string, wsPath: string) => {
+    rodar: async (agente: string, ordem: string, wsPath: string, gatilho?: Gatilho) => {
       // Spawn DETACHED: a execução delegada roda em processo próprio e
       // sobrevive à morte do processo que recebeu a menção (anti-stale).
       // O filho registra a exec, posta no chat da task e processa as suas
       // próprias menções — cada elo da cadeia é autônomo.
       const { spawnOpencorpDetached } = await import("./spawn-detached.js");
       const wsId = basename(wsPath);
+      const extras = gatilho ? ["--gatilho", `${gatilho.tipo}:${gatilho.origem}`] : [];
       const r = spawnOpencorpDetached(
-        ["agent", "run", agente, ordem, "--workspace", wsId],
+        ["agent", "run", agente, ordem, "--workspace", wsId, ...extras],
         { homeDir, nomeLog: `mencao-${agente}` },
       );
       return { id: `detached-pid-${r.pid ?? "0"}`, captura: `spawn detached (pid ${r.pid ?? "?"}, log ${r.log})` };
@@ -157,7 +159,11 @@ Se precisar de handoff, mencione @<outro-agente> dentro da mensagem. Ao concluir
 opencorp task move ${task_id} --coluna feito`;
 
           try {
-            const resultado = await executores.rodar(alvoCurto, ordem, ws_path);
+            // gatilho "mencao" no ledger unificado: quem citou → quem foi citado
+            const resultado = await executores.rodar(alvoCurto, ordem, ws_path, {
+              tipo: "mencao",
+              origem: `${task_id}/${alvoCurto}`,
+            });
             await tasks.mensagem(ws_path, task_id, {
               autor: "orquestrador",
               corpo: `spawn ${alvoCurto} concluído (exec ${resultado.id})`,

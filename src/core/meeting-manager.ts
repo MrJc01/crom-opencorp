@@ -349,6 +349,7 @@ export class MeetingManager {
             workspaceDir: ws.path,
             tags: [`reuniao:${id}`],
             timeoutMs: restanteMs,
+            gatilho: { tipo: "turno", origem: id },
           });
         } catch (erro) {
           falhasConsecutivas += 1;
@@ -466,6 +467,7 @@ export class MeetingManager {
         model: sala.modelo === MODELO_POR_AGENTE ? undefined : sala.modelo,
         workspaceDir: ws.path,
         tags: [`reuniao:${sala.id}`, "moderacao"],
+        gatilho: { tipo: "turno", origem: sala.id },
       });
       const decisao = parseDecisaoModerador(r.captura);
       await this.registros.appendConteudo(
@@ -646,6 +648,7 @@ export class MeetingManager {
           pularGuard: true,
           tags: [`reuniao:${sala.id}`, "ata"],
           timeoutMs: 5 * 60_000,
+          gatilho: { tipo: "turno", origem: `${sala.id}/ata` },
         });
       } catch (erro) {
         const m = msg(erro);
