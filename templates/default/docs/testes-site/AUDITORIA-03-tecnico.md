@@ -20,4 +20,4 @@
 
 ## Relatório
 
-Gravar em `registries/documentos/PARECER-AUDITORIA-03-<data>.md`. Última linha: `VEREDITO: PASS|FAIL — <n> PASS, <n> FAIL — parecer: <caminho>`.
+Gravar em `.opencorp/registries/documentos/PARECER-AUDITORIA-03-<data>.md`. Última linha: `VEREDITO: PASS|FAIL — <n> PASS, <n> FAIL — parecer: <caminho>`.

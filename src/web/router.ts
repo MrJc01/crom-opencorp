@@ -11,6 +11,7 @@ import { renderView } from "./main.js";
  */
 export function navegar(hash: string): void {
   const limpo = hash.replace(/^#\/?/, '');
+  fecharDrawerSeAberto();
   if (limpo.startsWith('app/')) {
     setViewAtual('app-detail');
   } else {
@@ -19,6 +20,12 @@ export function navegar(hash: string): void {
   // Formato canônico: #/view (ex.: #/home, #/tasks, #/app/meu-app)
   window.location.hash = '/' + limpo;
   renderView();
+}
+
+/** Fecha o drawer de task se estiver aberto (evita overlay órfão ao trocar de view). */
+function fecharDrawerSeAberto(): void {
+  const drawer = document.getElementById('drawer');
+  if (drawer?.classList.contains('open')) fecharDrawer();
 }
 
 /**
@@ -34,6 +41,7 @@ export function parseHash(): string {
 /** Inicializa listener de hashchange */
 export function initRouter(): void {
   window.addEventListener('hashchange', () => {
+    fecharDrawerSeAberto();
     const h = parseHash();
     if (h.startsWith('app/')) setViewAtual('app-detail');
     else setViewAtual(h);

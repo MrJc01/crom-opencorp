@@ -228,8 +228,8 @@ describe("MeetingManager — encerramentos", () => {
     const { home, wsPath } = await ambiente();
     const { sessao, chamadas } = stubSessao((chamada) => {
       if (chamada.opcoes.ordem?.includes("TAREFA INTERNA DO SISTEMA")) {
-        const m = /registries\/documentos\/atas\/ATA-[\w-]+\.md/.exec(chamada.opcoes.ordem)!;
-        mkdirSync(join(wsPath, "registries", "documentos", "atas"), { recursive: true });
+        const m = /\.opencorp\/registries\/documentos\/atas\/ATA-[\w-]+\.md/.exec(chamada.opcoes.ordem)!;
+        mkdirSync(join(wsPath, ".opencorp", "registries", "documentos", "atas"), { recursive: true });
         writeFileSync(
           join(wsPath, m[0]!),
           "# ATA — Reunião\n\n## Pauta\nmelhorar custos\n\n## Participantes\nceo-documentos, executor-padrao\n\n## Decisões\nusar budget.json\n\n## Tarefas delegadas\n- @executor-padrao: revisar budget.json diariamente\n\n## Status da reunião\nencerrada\n",
@@ -258,7 +258,7 @@ describe("MeetingManager — encerramentos", () => {
     expect(chamadasAta[0]!.opcoes.ordem).toContain("TRANSCRIÇÃO DA REUNIÃO");
 
     const data = new Date().toISOString().slice(0, 10);
-    const ata = readFileSync(join(wsPath, "registries", "documentos", "atas", `ATA-${data}-${sala.id}.md`), "utf8");
+    const ata = readFileSync(join(wsPath, ".opencorp", "registries", "documentos", "atas", `ATA-${data}-${sala.id}.md`), "utf8");
     expect(ata).toContain("## Decisões");
     expect(existsSync(join(wsPath, ".opencorp", "registries", "documentos", `ata-${data}-${sala.id}`, "conteudo.md"))).toBe(true);
     const indice = readFileSync(join(wsPath, ".opencorp", "registries", "documentos", "atas-indice", "conteudo.md"), "utf8");
@@ -278,8 +278,8 @@ describe("MeetingManager — encerramentos", () => {
           if (opcoes.model === "opencode/hy3-free") {
             throw new Error('UnknownError — Unexpected server error. Check server logs for details. ref: err_x');
           }
-          const m = /registries\/documentos\/atas\/ATA-[\w-]+\.md/.exec(opcoes.ordem)!;
-          mkdirSync(join(wsPath, "registries", "documentos", "atas"), { recursive: true });
+          const m = /\.opencorp\/registries\/documentos\/atas\/ATA-[\w-]+\.md/.exec(opcoes.ordem)!;
+          mkdirSync(join(wsPath, ".opencorp", "registries", "documentos", "atas"), { recursive: true });
           writeFileSync(join(wsPath, m[0]!), "# ATA\n\n## Decisões\nok via fallback\n\n## Tarefas delegadas\n(nenhuma)\n");
           return resultadoFake(opcoes, "ata escrita");
         }
@@ -331,8 +331,8 @@ describe("MeetingManager — encerramentos", () => {
     const { home, wsPath, registros } = await ambiente();
     const { sessao, chamadas } = stubSessao((chamada) => {
       if (chamada.opcoes.ordem?.includes("TAREFA INTERNA DO SISTEMA")) {
-        const m = /registries\/documentos\/atas\/ATA-[\w-]+\.md/.exec(chamada.opcoes.ordem)!;
-        mkdirSync(join(wsPath, "registries", "documentos", "atas"), { recursive: true });
+        const m = /\.opencorp\/registries\/documentos\/atas\/ATA-[\w-]+\.md/.exec(chamada.opcoes.ordem)!;
+        mkdirSync(join(wsPath, ".opencorp", "registries", "documentos", "atas"), { recursive: true });
         writeFileSync(join(wsPath, m[0]!), "# ATA\n\n## Decisões\nnenhuma\n\n## Tarefas delegadas\n(nenhuma)\n");
         return "ata escrita";
       }
@@ -436,8 +436,8 @@ describe("MeetingManager — teto de tempo (meeting.max_minutes)", () => {
   function stubAta(wsPath: string): ReturnType<typeof stubSessao> {
     return stubSessao((chamada) => {
       if (chamada.opcoes.ordem?.includes("TAREFA INTERNA DO SISTEMA")) {
-        const m = /registries\/documentos\/atas\/ATA-[\w-]+\.md/.exec(chamada.opcoes.ordem)!;
-        mkdirSync(join(wsPath, "registries", "documentos", "atas"), { recursive: true });
+        const m = /\.opencorp\/registries\/documentos\/atas\/ATA-[\w-]+\.md/.exec(chamada.opcoes.ordem)!;
+        mkdirSync(join(wsPath, ".opencorp", "registries", "documentos", "atas"), { recursive: true });
         writeFileSync(join(wsPath, m[0]!), "# ATA — Reunião\n\n## Decisões\npor tempo\n");
         return "ata escrita";
       }

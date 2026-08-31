@@ -205,12 +205,12 @@ describe("WorkspaceManager — estado e agentes", () => {
     expect(err.exitCode).toBe(2);
   });
 
-  it("listarAgentes encontra os agentes do template (6, incluindo auditor)", async () => {
+  it("listarAgentes encontra os agentes do template (8, incluindo auditor)", async () => {
     const home = await tmpDir();
     const m = managerEm(home);
     await m.criar("corp-agentes");
     const agentes = await m.listarAgentes("corp-agentes");
-    expect(agentes.map((a) => a.id)).toEqual(["auditor", "ceo-documentos", "executor-padrao", "frontend-especialista", "secretario", "secretario-exec"]);
+    expect(agentes.map((a) => a.id)).toEqual(["auditor", "ceo-documentos", "corretor-site", "critico-site", "executor-padrao", "frontend-especialista", "secretario", "secretario-exec"]);
     const porId = new Map(agentes.map((a) => [a.id, a]));
     expect(porId.get("secretario")?.category).toBe("secretario");
     expect(porId.get("ceo-documentos")?.category).toBe("ceo");
@@ -224,7 +224,7 @@ describe("WorkspaceManager — estado e agentes", () => {
     const m = managerEm(home);
     await m.criar("corp-detalhe");
     const d = await m.detalhar("corp-detalhe");
-    expect(d.agentes).toHaveLength(6);
+    expect(d.agentes).toHaveLength(8);
     expect(d.orcamento.daily_usd).toMatchObject({ valor: 5, origem: "default" });
     expect(d.seguranca).toBe("standard");
   });

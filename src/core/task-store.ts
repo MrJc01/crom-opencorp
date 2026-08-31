@@ -459,6 +459,30 @@ export class TaskStore {
     await this.tocar(wsPath, id);
   }
 
+  /**
+   * Libera locks de tasks cuja validade (lease) já expirou — anti-stale:
+   * sessão morreu com lock preso; a próxima execução herda estado limpo.
+   * @returns ids das tasks destravadas
+   */
+  async limparLocksExpirados(wsPath: string): Promise<string[]> {
+    const agora = this.agora().toISOString();
+    const linhas = this.db(wsPath)
+      .prepare("SELECT id FROM tasks WHERE lock_por IS NOT NULL AND lock_expira IS NOT NULL AND lock_expira <= ?")
+      .all(agora) as { id: string }[];
+    for (const linha of linhas) {
+      this.db(wsPath)
+        .prepare("UPDATE tasks SET lock_por = NULL, lock_expira = NULL WHERE id = ?")
+        .run(linha.id);
+      await this.tocar(wsPath, linha.id);
+      await this.mensagem(wsPath, linha.id, {
+        autor: "orquestrador",
+        corpo: "anti-stale: lock expirado liberado automaticamente (execução anterior morreu sem liberar)",
+        tipo: "sistema",
+      });
+    }
+    return linhas.map((l) => l.id);
+  }
+
   bloqueado(wsPath: string, task: Task): boolean {
     if (task.bloqueado_por.length === 0) return false;
     for (const dep of task.bloqueado_por) {

@@ -34,7 +34,7 @@ Faça o setup de identidade, UMA etapa por vez, adaptando TUDO ao perfil:
 5. Defina a página inicial estática: `node scripts/wp.cjs configurar '{"home_estatica": <id da página Início>}'` (só depois de criada).
 6. Arquive o conteúdo default: `update` com status "draft" para o post id 1 ("Hello world!") e a página id 2 ou 3 ("Página de exemplo") — use `update` com `{"id":1,"status":"draft"}` e `{"id":2,"tipo":"page","status":"draft"}`. NÃO delete com force.
 7. Publique o **post de lançamento** (status publish) via `node scripts/wp.cjs post publish '{"titulo":"...","conteudo":"<p>...</p>"}'` — 3-4 parágrafos originais no tom da empresa, anunciando o site.
-8. Registre o relatório em `registries/documentos/` (arquivo `auditoria-<data>.md`): o que estava errado, o que fez, o que falta.
+8. Registre o relatório em `.opencorp/registries/documentos/` (arquivo `auditoria-<data>.md`): o que estava errado, o que fez, o que falta.
 
 ## Cenário B — site já configurado (manutenção)
 
@@ -45,8 +45,8 @@ Faça o setup de identidade, UMA etapa por vez, adaptando TUDO ao perfil:
 
 ## Regras operacionais
 
-1. **Registros**: antes de encerrar, registre o resultado da execução em `registries/execucoes/`.
-2. **Segurança**: ordem bloqueada pela política → recuse e registre em `registries/logs/`.
+1. **Registros**: antes de encerrar, registre o resultado da execução em `.opencorp/registries/execucoes/`.
+2. **Segurança**: ordem bloqueada pela política → recuse e registre em `.opencorp/registries/logs/`.
 3. **Orçamento**: ao atingir 80% do diário, conclua o mínimo e pare com aviso.
 4. **Sandbox**: nunca escreva fora do workspace; as tools wp.* cuidam do site — não use curl direto no site.
 5. **Estilo**: títulos de páginas/posts SEM aspas no começo; conteúdo HTML simples (p, h2, h3, ul/li, strong); sem estilos inline.

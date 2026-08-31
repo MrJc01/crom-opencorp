@@ -122,18 +122,20 @@ function renderChatLayout(): void {
   if (!viewEl) return;
 
   viewEl.innerHTML = `
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between mb-6 gap-2">
       <h1 class="text-2xl font-bold flex items-center gap-2">${icone('chat')} Secretário</h1>
       <div class="flex items-center gap-2">
-        <span class="text-xs text-zinc-500 font-mono">${sessoesCache.length} conversa(s)</span>
+        <span class="text-xs text-zinc-500 font-mono hidden sm:inline">${sessoesCache.length} conversa(s)</span>
+        <button class="btn-ghost text-xs md:hidden" onclick="window.__secretarioToggleConv()" aria-label="Alternar lista de conversas" title="Conversas">${icone('tasks')}</button>
         <button class="btn-ghost text-xs" onclick="window.__secretarioNovaConversa()">${icone('plus')} Nova</button>
       </div>
     </div>
-    <div class="grid md:grid-cols-[260px_1fr] gap-4 h-[85vh]">
+    <div class="grid md:grid-cols-[260px_1fr] gap-4 h-[85vh]" id="secretario-grid">
       <!-- Coluna esquerda: lista de conversas -->
       <div class="card flex flex-col" id="secretario-lateral">
-        <div class="p-3 border-b border-zinc-800">
+        <div class="p-3 border-b border-zinc-800 flex items-center justify-between">
           <h3 class="font-semibold text-sm">Conversas</h3>
+          <button class="btn-ghost text-xs md:hidden" onclick="window.__secretarioToggleConv()" aria-label="Fechar lista">✕</button>
         </div>
         <div class="flex-1 overflow-y-auto" id="lista-sessoes"></div>
       </div>
@@ -162,9 +164,14 @@ function renderChatLayout(): void {
   renderListaSessoes();
   renderMensagens();
 
+  (window as unknown as Record<string, unknown>).__secretarioToggleConv = () => {
+    document.getElementById('secretario-grid')?.classList.toggle('conv-aberta');
+  };
+
   (window as unknown as Record<string, unknown>).__secretarioNovaConversa = () => {
     sessaoAtivaId = null;
     mensagensCache = [];
+    document.getElementById('secretario-grid')?.classList.remove('conv-aberta');
     renderListaSessoes();
     renderMensagens();
     const inputArea = document.getElementById('chat-input-area');
@@ -260,6 +267,7 @@ function renderListaSessoes(): void {
 
   (window as unknown as Record<string, unknown>).__secretarioSelecionarSessao = async (id: string) => {
     sessaoAtivaId = id;
+    document.getElementById('secretario-grid')?.classList.remove('conv-aberta');
     await carregarMensagens(id);
     renderListaSessoes();
     renderMensagens();

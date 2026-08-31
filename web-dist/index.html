@@ -217,6 +217,29 @@ input[readonly],select[readonly],textarea[readonly]{background:#1a1a1a}
 .task-card.arrastando{opacity:.4}
 .kanban-cards.drag-over{outline:2px dashed var(--accent);outline-offset:-4px;border-radius:.375rem}
 
+/* ========= MOBILE (auditoria 30/08) ========= */
+button{white-space:nowrap}
+@media(max-width:768px){
+  /* conteúdo não fica sob o hamburger fixo */
+  .main{padding-top:3.25rem}
+}
+/* Histórico: header título+filtros quebra em 2 linhas; linha da timeline permite wrap */
+@media(max-width:640px){
+  #view-historico .flex.items-center.justify-between{flex-wrap:wrap;gap:.5rem}
+  #view-historico .timeline-content .flex.items-start.justify-between{flex-wrap:wrap;gap:.25rem}
+  #view-agenda .flex.items-center.justify-between{flex-wrap:wrap;gap:.5rem}
+  #view-agenda .card .flex.items-center.gap-2{flex-wrap:wrap}
+  #view-home .hero-title{font-size:1.5rem}
+}
+
+/* Secretário: lista de conversas vira overlay deslizante no mobile */
+@media(max-width:767px){
+  #secretario-grid{position:relative;height:calc(100dvh - 230px);min-height:420px}
+  #secretario-lateral{position:absolute;inset:0;z-index:20;transform:translateX(-105%);transition:transform .2s ease}
+  #secretario-grid.conv-aberta #secretario-lateral{transform:translateX(0)}
+  #secretario-grid.conv-aberta::before{content:"";position:absolute;inset:0;background:rgba(0,0,0,.5);z-index:15;border-radius:.5rem}
+}
+
 </style>
 </head>
 <body>

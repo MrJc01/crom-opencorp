@@ -21,4 +21,4 @@
 
 ## Relatório
 
-Gravar em `registries/documentos/PARECER-AUDITORIA-01-<data>.md` (formato do agente critico-site). Última linha: `VEREDITO: PASS|FAIL — <n> PASS, <n> FAIL — parecer: <caminho>`.
+Gravar em `.opencorp/registries/documentos/PARECER-AUDITORIA-01-<data>.md` (formato do agente critico-site). Última linha: `VEREDITO: PASS|FAIL — <n> PASS, <n> FAIL — parecer: <caminho>`.

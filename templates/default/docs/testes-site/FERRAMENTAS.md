@@ -49,16 +49,16 @@ OPENCORP_HOME=/home/j node scripts/wp.cjs delete '{"id":6,"tipo":"post","force":
 
 ## Registros (memória do workspace)
 
-**registro_gravar(namespace, nome, conteudo)** → `registries/documentos|execucoes|logs/<nome>`
+**registro_gravar(namespace, nome, conteudo)** → `.opencorp/registries/documentos|execucoes|logs/<nome>`
 ```bash
-cat > registries/documentos/PARECER-<spec>-<data>.md << 'EOF'
+cat > .opencorp/registries/documentos/PARECER-<spec>-<data>.md << 'EOF'
 <conteudo>
 EOF
 ```
 
 **registro_ler(namespace)**
 ```bash
-ls -t registries/documentos/ | head -5 && cat registries/documentos/<mais-recente>.md
+ls -t .opencorp/registries/documentos/ | head -5 && cat .opencorp/registries/documentos/<mais-recente>.md
 ```
 
 ## Chamar outro agente (delegação)
@@ -68,6 +68,45 @@ ls -t registries/documentos/ | head -5 && cat registries/documentos/<mais-recent
 cd /home/j/Documentos/GitHub/crom-worker-opencode && node bin/opencorp.mjs agent run <agente> --workspace <ws> "<ordem>"
 ```
 → bloqueia até concluir; saída inclui `exec_id`, status e duração.
+
+## Task board (fila de trabalho da empresa)
+
+> O board é a fila de trabalho compartilhada. Ao receber uma ordem ligada a uma task, WORK NELA:
+> assuma, registre progresso no chat e mova de coluna ao concluir.
+> Prefixo obrigatório: `cd /home/j/Documentos/GitHub/crom-worker-opencode &&` antes de node bin/opencorp.mjs
+> (o binário NÃO fica dentro do workspace — seu cwd é o workspace).
+
+**task_listar(coluna?)**
+```bash
+cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node bin/opencorp.mjs task list --workspace <ws>
+cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node bin/opencorp.mjs task list --workspace <ws> --coluna fazendo
+```
+→ `[{id, titulo, coluna, prioridade, responsavel, labels, criado_em}]`
+
+**task_criar(titulo, prioridade?, responsavel?, descricao?)**
+```bash
+cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node bin/opencorp.mjs task create --workspace <ws> --titulo "..." --prioridade alta --responsavel agente:<seu-id>
+```
+→ colunas: `backlog` → `fazendo` → `feito` (padrão: backlog).
+
+**task_assumir(task_id)** — mova para fazendo e anuncie no chat ANTES de trabalhar
+```bash
+cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node bin/opencorp.mjs task move <task_id> --coluna fazendo --workspace <ws>
+cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node bin/opencorp.mjs task chat <task_id> --msg "assumi esta task" --autor agente:<seu-id>
+```
+
+**task_chat(task_id, mensagem)** — registre progresso e decisões no chat da task
+```bash
+cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node bin/opencorp.mjs task chat <task_id> --msg "rascunho criado (id 23), verificado" --autor agente:<seu-id>
+```
+→ para pedir algo a outro agente, mencione `@<id-do-agente>` na mensagem (dispara o orquestrador).
+→ menções válidas: `@executor-padrao`, `@critico-site`… (sem espaços).
+
+**task_concluir(task_id)** — ao terminar, mova para feito com registro
+```bash
+cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node bin/opencorp.mjs task chat <task_id> --msg "concluído: <resumo + caminho do registro>" --autor agente:<seu-id>
+cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node bin/opencorp.mjs task move <task_id> --coluna feito --workspace <ws>
+```
 
 ## Erros do wp.cjs (contrato de erro)
 

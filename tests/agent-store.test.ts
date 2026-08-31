@@ -104,7 +104,7 @@ describe("AgentStore — clone/listar/carregar", () => {
     const { ws, store } = await ambiente();
     await store.criar(ws.path, "operador-teste", {});
     const agentes = await store.listar(ws.path);
-    expect(agentes.map((a) => a.id)).toEqual(["auditor", "ceo-documentos", "executor-padrao", "frontend-especialista", "operador-teste", "secretario", "secretario-exec"]);
+    expect(agentes.map((a) => a.id)).toEqual(["auditor", "ceo-documentos", "corretor-site", "critico-site", "executor-padrao", "frontend-especialista", "operador-teste", "secretario", "secretario-exec"]);
     const criado = agentes.find((a) => a.id === "operador-teste")!;
     expect(criado.permissions).toBe("level-2");
     expect(criado.budget_daily_usd).toBe(1);

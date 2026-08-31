@@ -1,5 +1,5 @@
 import { copyFileSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import type { Agente } from "../schemas/agent.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
 
@@ -57,7 +57,11 @@ export class OpenCodeBridge {
   async sincronizarAgente(wsPath: string, agente: Agente, corpo: string): Promise<string> {
     const dir = join(wsPath, ".opencorp", "opencode", "agent");
     const destino = join(dir, `${agente.id}.md`);
-    await writeFileAtomic(destino, gerarAgenteOpencode(agente, corpo));
+    // Substitui {{workspace}} pelo id real (basename do wsPath) — prompts de
+    // template citam o workspace; sem isto o agente recebe o literal.
+    const wsId = basename(wsPath);
+    const corpoFinal = corpo.replaceAll("{{workspace}}", wsId);
+    await writeFileAtomic(destino, gerarAgenteOpencode(agente, corpoFinal));
     this.vincular(wsPath, agente.id, destino);
     return destino;
   }

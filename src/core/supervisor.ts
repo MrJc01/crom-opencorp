@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { SessionManager } from "./session-manager.js";
 import { ApprovalsStore } from "./approvals-store.js";
 import { BudgetManager } from "./budget-manager.js";
+import { TaskStore } from "./task-store.js";
 import { RegistryStore, type MetaRegistro } from "./registry-store.js";
 import { SettingsStore } from "./settings-store.js";
 import { opencorpHome } from "../utils/paths.js";
@@ -24,6 +25,7 @@ export interface SessaoSupervisor {
     pularGuard?: boolean;
     tags?: string[];
   }): Promise<{ id: string; status: string; exit_code: number | null }>;
+  reconciliarZombies?(wsPath: string): Promise<string[]>;
 }
 
 export interface SupervisorOptions {
@@ -74,6 +76,8 @@ export interface ResultadoTick {
   recusas: Recusa[];
   escalacoes: { problema: string; detalhe: string }[];
   ignorados: string[];
+  locks_liberados: string[];
+  zombies_reconciliados: string[];
 }
 
 export interface EstadoSupervisor {
@@ -279,7 +283,7 @@ export class Supervisor {
         detalhe: `pendência ${pendencia.id} aguarda aprovação há ${Math.floor(idadeMin)} min (padrão "${pendencia.padrao}")`,
         acao: "ordem",
         agente: "executor-padrao",
-        ordem: `registre em registries/logs/ um lembrete formal da pendência de aprovação humana "${pendencia.id}" (padrão "${pendencia.padrao}", ordem: ${pendencia.ordem.slice(0, 80)}) — lembre o humano de usar "opencorp approvals"`,
+        ordem: `registre em .opencorp/registries/logs/ um lembrete formal da pendência de aprovação humana "${pendencia.id}" (padrão "${pendencia.padrao}", ordem: ${pendencia.ordem.slice(0, 80)}) — lembre o humano de usar "opencorp approvals"`,
       });
     }
 
@@ -338,6 +342,23 @@ export class Supervisor {
     const inicioTick = this.agora();
     const estado = await this.lerEstado(wsPath);
     const healing = await this.healingCfg(wsPath);
+
+    // ── anti-stale (Fase 3.3): limpar estado órfão antes de coletar ──
+    const tarefas = new TaskStore({ agora: this.agora });
+    let locks_liberados: string[] = [];
+    try {
+      locks_liberados = await tarefas.limparLocksExpirados(wsPath);
+    } catch {
+      // board indisponível — segue
+    }
+    let zombies_reconciliados: string[] = [];
+    try {
+      if (typeof this.sessoes.reconciliarZombies === "function") {
+        zombies_reconciliados = await this.sessoes.reconciliarZombies(wsPath);
+      }
+    } catch {
+      // registry indisponível — segue
+    }
     const { problemas, checks, fechadas } = await this.coletar(wsPath, estado, healing);
     const tratadas = new Set([...estado.chaves_tratadas, ...fechadas]);
     const maxOrdens = await this.maxOrdensPorTick(wsPath);
@@ -421,6 +442,8 @@ export class Supervisor {
       recusas,
       escalacoes,
       ignorados,
+      locks_liberados,
+      zombies_reconciliados,
     };
     await this.registros.garantirRegistro(wsPath, {
       categoria: "logs",
@@ -432,12 +455,14 @@ export class Supervisor {
       ts: em,
       por: "supervisor",
       evento: "tick",
-      resumo: `falhas ${checks.execucoes_falhas} · approvals ${checks.approvals_pendentes} (${checks.approvals_antigas} antigas) · budget80 ${checks.budget_80} · tarefas ${checks.tarefas_delegadas} — ordens ${ordens.length}, recusas ${recusas.length}, escalações ${escalacoes.length}, ignorados ${ignorados.length}`,
+      resumo: `falhas ${checks.execucoes_falhas} · approvals ${checks.approvals_pendentes} (${checks.approvals_antigas} antigas) · budget80 ${checks.budget_80} · tarefas ${checks.tarefas_delegadas} — ordens ${ordens.length}, recusas ${recusas.length}, escalações ${escalacoes.length}, ignorados ${ignorados.length}, locks liberados ${locks_liberados.length}, zombies ${zombies_reconciliados.length}`,
       checks,
       ordens,
       recusas,
       escalacoes,
       ignorados,
+      locks_liberados,
+      zombies_reconciliados,
     });
     await this.gravarEstado(wsPath, { ultimo_tick: em, chaves_tratadas: [...tratadas] });
     const pid = await lerPidfile(wsPath);
@@ -474,10 +499,10 @@ export class Supervisor {
     }
     const ordem = [
       "TAREFA DE CORREÇÃO (self-healing): a execução registrada abaixo falhou.",
-      "Corrija a CAUSA RAIZ do problema (não apenas o sintoma) e REGISTRE o resultado em registries/logs/.",
-      `Referência da execução original: registries/execucoes/${execId}/`,
+      "Corrija a CAUSA RAIZ do problema (não apenas o sintoma) e REGISTRE o resultado em .opencorp/registries/logs/.",
+      `Referência da execução original: .opencorp/registries/execucoes/${execId}/`,
       "",
-      "=== TRANSCRIPT DA EXECUÇÃO FALHA (registries/chats) ===",
+      "=== TRANSCRIPT DA EXECUÇÃO FALHA (.opencorp/registries/chats) ===",
       transcript ? transcript.slice(-2000) : "(sem transcript)",
       "",
       "=== TRECHO FINAL DO LOG (logs) ===",

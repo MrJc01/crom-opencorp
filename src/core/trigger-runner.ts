@@ -1,4 +1,5 @@
 import { opencorpHome } from "../utils/paths.js";
+import { basename } from "node:path";
 import { eventBus } from "./event-bus.js";
 import { HookStore, TriggersStore, type Hook } from "./hook-store.js";
 import { WorkspaceManager } from "./workspace-manager.js";
@@ -15,9 +16,15 @@ export function instalarTriggers(opcoes: { homeDir?: string } = {}): void {
   const hooks = new HookStore({
     executores: {
       agentRun: async (agente: string, ordem: string, wsPath: string) => {
-        const { SessionManager } = await import("./session-manager.js");
-        const r = await new SessionManager({ homeDir, cwd: wsPath }).rodar({ agente, ordem, workspaceDir: wsPath });
-        return { id: r.id, captura: r.captura };
+        // Spawn DETACHED (anti-stale): a ordem disparada por trigger roda em
+        // processo próprio e sobrevive ao processo que emitiu o evento.
+        const { spawnOpencorpDetached } = await import("./spawn-detached.js");
+        const wsId = basename(wsPath);
+        const r = spawnOpencorpDetached(
+          ["agent", "run", agente, ordem, "--workspace", wsId],
+          { homeDir, nomeLog: `trigger-${agente}` },
+        );
+        return { id: `detached-pid-${r.pid}`, captura: `spawn detached (pid ${r.pid})` };
       },
       flowRun: async (flow: string, entrada: string, wsPath: string) => {
         const { FlowStore } = await import("./flow-store.js");

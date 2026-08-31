@@ -19,7 +19,7 @@ Credenciais: `$OPENCORP_HOME/.opencorp/secrets.json` (chaves `wp_<site>_user/_pa
 
 ## O ciclo (1 iteração completa)
 
-1. **ANALISAR** — `critico-site` executa as 3 specs (`AUDITORIA-01`, `02`, `03`), gerando 3 pareceres em `registries/documentos/`.
+1. **ANALISAR** — `critico-site` executa as 3 specs (`AUDITORIA-01`, `02`, `03`), gerando 3 pareceres em `.opencorp/registries/documentos/`.
 2. **PRIORIZAR** — do conjunto de FAILs, ordenar por impacto: identidade/contaminação > site fora do ar > conteúdo fora do perfil > higiene técnica. Máx 5 itens por ciclo.
 3. **CORRIGIR** — `corretor-site` executa os itens do parecer (comando a comando, com verificação pós-correção).
 4. **VERIFICAR** — `critico-site` re-executa APENAS os cenários que falharam e confirma PASS.
@@ -30,5 +30,5 @@ Credenciais: `$OPENCORP_HOME/.opencorp/secrets.json` (chaves `wp_<site>_user/_pa
 - Um ciclo = no máx ~30 min de agentes. Se não couber, priorize e deixe o resto para o próximo.
 - Nunca corrigir sem parecer. Nunca analisar com modos de escrita.
 - Erros HTTP do wp.cjs: registrar saída completa; CATEGORIA no parecer (`identidade|conteudo|tecnico|provider_issue`).
-- Cada passo grava registro próprio em `registries/execucoes/` com VEREDITO final.
+- Cada passo grava registro próprio em `.opencorp/registries/execucoes/` com VEREDITO final.
 - Se o site estiver fora do ar (C1/C2 da 03), abortar melhorias e focar só no restauro.

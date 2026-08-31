@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { existsSync, lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { gerarAgenteOpencode, OpenCodeBridge } from "../src/core/opencode-bridge.js";
 import { parseAgenteMd } from "../src/schemas/agent.js";
 
@@ -139,5 +139,15 @@ describe("OpenCodeBridge.sincronizarAgente", () => {
     const b = await bridge.sincronizarAgente(ws, ag.frontmatter, ag.corpo);
     expect(a).toBe(b);
     expect(readlinkSync(join(ws, ".opencode"))).toBe(join(".opencorp", "opencode"));
+  });
+
+  it("substitui {{workspace}} pelo id real do workspace no corpo sincronizado", async () => {
+    const ws = await wsFalso();
+    const bridge = new OpenCodeBridge();
+    const ag = parseAgenteMd(EXEMPLO_EXECUTOR);
+    await bridge.sincronizarAgente(ws, ag.frontmatter, ag.corpo);
+    const gerado = readFileSync(join(ws, ".opencorp", "opencode", "agent", "executor-padrao.md"), "utf8");
+    expect(gerado).not.toContain("{{workspace}}");
+    expect(gerado).toContain(basename(ws));
   });
 });

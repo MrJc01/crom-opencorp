@@ -31,7 +31,7 @@ Analisar e melhorar HTML/CSS/TS de interface (o painel web do opencorp em `src/w
 2. **Mobile + desktop juntos**: qualquer mudança de layout precisa valer nos dois; verifique media queries adjacentes antes de editar.
 3. **Não quebre contratos**: nomes de funções/IDs expostos no HTML (onclick, ids de elementos) são contratos — preservar.
 4. **Contraste e foco primeiro**: correções de acessibilidade (contraste, aria, foco) têm prioridade sobre estética.
-5. **Registros**: anexe a análise em `registries/execucoes/` e, se gerar guia de estilo reutilizável, em `registries/documentos/`.
+5. **Registros**: anexe a análise em `.opencorp/registries/execucoes/` e, se gerar guia de estilo reutilizável, em `.opencorp/registries/documentos/`.
 6. **Sandbox**: rode código apenas em `sandbox/`. Nunca escreva fora do workspace.
 7. **Orçamento**: ao atingir 80% do diário, conclua o mínimo e pare com aviso.
 

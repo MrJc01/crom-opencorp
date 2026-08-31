@@ -25,6 +25,7 @@ import { registerWebCommand } from "./commands/web.js";
 import { registerTemplateCommand } from "./commands/template.js";
 import { registerWorkspaceCommands } from "./commands/workspace.js";
 import { registerTestCommand } from "./commands/test.js";
+import { registerMonitorCommand } from "./commands/monitor.js";
 import { notImplementedAction } from "./placeholder.js";
 import { instalarTriggers, pendentesTriggers } from "../core/trigger-runner.js";
 import { instalarMencoes, pendentesMencoes } from "../core/mention-runner.js";
@@ -80,6 +81,8 @@ export function buildProgram(): Command {
   registerSubcorpCommand(program);
 
   registerSupervisorCommand(program);
+
+  registerMonitorCommand(program);
 
   registerFlowCommand(program);
 

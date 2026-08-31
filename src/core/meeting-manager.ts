@@ -535,7 +535,7 @@ export class MeetingManager {
       "",
       "=== MEMÓRIA PRIVADA — registros que você pode consultar (memory.reads) ===",
       memoria || "- (nenhuma categoria em memory.reads)",
-      "Se precisar de detalhes, use as ferramentas do opencode para ler os arquivos em registries/ do workspace (acesso ao fs do workspace — consulte sob demanda, não despeje tudo).",
+      "Se precisar de detalhes, use as ferramentas do opencode para ler os arquivos em .opencorp/registries/ do workspace (acesso ao fs do workspace — consulte sob demanda, não despeje tudo).",
       "",
       "=== SUA FALA ===",
       "Contribua com a reunião: curto, objetivo, em português. Não repita o que já foi dito; avance a discussão.",
@@ -577,7 +577,7 @@ export class MeetingManager {
 
   private async gerarAta(ws: { path: string; id: string }, sala: SalaInfo): Promise<void> {
     const data = sala.criado_em.slice(0, 10);
-    const arquivoAta = `registries/documentos/atas/ATA-${data}-${sala.id}.md`;
+    const arquivoAta = `.opencorp/registries/documentos/atas/ATA-${data}-${sala.id}.md`;
     let transcript = "";
     try {
       transcript = (await this.registros.obter(ws.path, "chats", sala.id)).conteudo ?? "";

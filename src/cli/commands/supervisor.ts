@@ -40,6 +40,7 @@ export function registerSupervisorCommand(program: Command): void {
   supervisor
     .command("start")
     .option("--interval <minutos>", "intervalo entre ticks em minutos (padrão: settings supervisor.interval_minutes)")
+    .option("--workspace <id>", "workspace alvo (padrão: ativo)")
     .option("--foreground", "roda em primeiro plano (debug) — padrão: daemonizado em background")
     .description("inicia o loop do supervisor (daemonizado; pare com opencorp supervisor stop)")
     .action((opts: { interval?: string; foreground?: boolean; workspace?: string }) =>
@@ -57,9 +58,11 @@ export function registerSupervisorCommand(program: Command): void {
             }
           }
           const args = [process.argv[1]!, "supervisor", "start", "--foreground"];
+          // wsDe() cobre option global (program) e local (comando) — commander
+          // absorve --workspace no program quando declarado nos dois níveis.
+          const wsArg = wsDe(opts);
+          if (wsArg) args.push("--workspace", wsArg);
           if (intervaloResolvido !== undefined) args.push("--interval", String(intervaloResolvido));
-          if (opts.workspace) args.push("--workspace", opts.workspace);
-          if (opts.interval !== undefined) args.push("--interval", opts.interval);
           const pid = await spawnDaemon(args, logPath);
           let confirmado = false;
           for (let i = 0; i < 20; i++) {
@@ -134,6 +137,7 @@ export function registerSupervisorCommand(program: Command): void {
 
   supervisor
     .command("stop")
+    .option("--workspace <id>", "workspace alvo (padrão: ativo)")
     .description("envia SIGTERM ao supervisor e limpa o pidfile")
     .action((opts: { workspace?: string }) =>
       comErros(async () => {
@@ -160,6 +164,7 @@ export function registerSupervisorCommand(program: Command): void {
 
   supervisor
     .command("status")
+    .option("--workspace <id>", "workspace alvo (padrão: ativo)")
     .description("mostra rodando/parado, pid, intervalo e último tick")
     .action((opts: { workspace?: string }) =>
       comErros(async () => {

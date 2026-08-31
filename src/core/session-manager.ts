@@ -415,7 +415,7 @@ export class SessionManager {
           resumo: "transcript contém padrão da blocklist — auditoria (a sessão já tinha corrido)",
         });
         console.log(
-          `\n[opencorp] ⚠ auditoria: o transcript contém o padrão de blocklist "${posBloq}" — evento registrado em registries/logs/audit-log`,
+          `\n[opencorp] ⚠ auditoria: o transcript contém o padrão de blocklist "${posBloq}" — evento registrado em .opencorp/registries/logs/audit-log`,
         );
       }
     }
@@ -438,7 +438,30 @@ export class SessionManager {
     const extras = (meta.extras ?? {}) as Record<string, unknown>;
     if (extras.status !== "executando") return;
     const pid = extras.pid as number | null;
-    if (!pid) return;
+    if (!pid) {
+      // Sem pid (ex.: registro migrado): se já passou 1h do início, é zumbi —
+      // nenhuma execução real fica 1h sem pid capturado.
+      const inicio = Date.parse(meta.criado_em);
+      if (Number.isFinite(inicio) && Date.now() - inicio < 3600_000) return;
+      const registro = await this.paraRegistro(meta);
+      registro.status = "falhou";
+      registro.fim = new Date().toISOString();
+      registro.duracao_ms = Number.isFinite(inicio) ? Date.now() - inicio : 0;
+      registro.exit_code = null;
+      await this.finalizar(
+        { path: wsPath, id: "" },
+        registro,
+        null,
+        "falhou",
+        null,
+        registro.duracao_ms,
+        `zombie: registro "executando" sem pid há >1h — reconciliado em ${registro.fim}`,
+        "",
+        null,
+      );
+      meta.extras = { ...extras, status: "falhou", duracao_ms: registro.duracao_ms, fim: registro.fim };
+      return;
+    }
     let viva = true;
     try {
       process.kill(pid, 0);
@@ -475,6 +498,23 @@ export class SessionManager {
     return logPath;
   }
 
+  /**
+   * Anti-stale: reconcilia TODAS as execuções "executando" cujo processo já
+   * morreu sem finalizar (zombies). @returns ids que foram reconciliados.
+   */
+  async reconciliarZombies(wsPath: string): Promise<string[]> {
+    const metas = await this.registros.listar(wsPath, "execucoes");
+    const reconciliados: string[] = [];
+    for (const meta of metas) {
+      const extras = (meta.extras ?? {}) as Record<string, unknown>;
+      if (extras.status !== "executando") continue;
+      await this.reconciliarZombie(wsPath, meta);
+      const depois = (meta.extras ?? {}) as Record<string, unknown>;
+      if (depois.status === "falhou") reconciliados.push(meta.id);
+    }
+    return reconciliados;
+  }
+
   async logDe(wsPath: string, id: string): Promise<string> {
     return readFile(await this.caminhoLog(wsPath, id), "utf8");
   }
@@ -489,7 +529,7 @@ export class SessionManager {
     try {
       meta = await this.registros.lerMeta(wsPath, "execucoes", id);
     } catch {
-      throw new SessionError(`sessão "${id}" não encontrada (registries/execucoes)`);
+      throw new SessionError(`sessão "${id}" não encontrada (.opencorp/registries/execucoes)`);
     }
     const extras = (meta.extras ?? {}) as Record<string, unknown>;
     if (extras.status !== "executando") {

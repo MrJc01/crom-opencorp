@@ -1,5 +1,7 @@
 import { TaskStore } from "./task-store.js";
 import { eventBus } from "./event-bus.js";
+import { opencorpHome } from "../utils/paths.js";
+import { basename } from "node:path";
 
 export interface ExecutoresMencoes {
   rodar(agente: string, ordem: string, wsPath: string): Promise<{ id: string; captura: string }>;
@@ -20,19 +22,28 @@ export function pendentesMencoes(): Promise<unknown>[] {
 
 export function instalarMencoes(opcoes: OpcoesMencoes = {}): () => void {
   const {
-    homeDir,
+    homeDir: homeDirOpcao,
     executores: executoresExternos,
     max_mensagens_auto_h = 20,
     agora = () => new Date(),
   } = opcoes;
+  const homeDir = homeDirOpcao ?? opencorpHome();
 
   const tasks = new TaskStore({ agora });
 
   const executores: ExecutoresMencoes = executoresExternos ?? {
     rodar: async (agente: string, ordem: string, wsPath: string) => {
-      const { SessionManager } = await import("./session-manager.js");
-      const r = await new SessionManager({ homeDir, cwd: wsPath }).rodar({ agente, ordem, workspaceDir: wsPath });
-      return { id: r.id, captura: r.captura };
+      // Spawn DETACHED: a execução delegada roda em processo próprio e
+      // sobrevive à morte do processo que recebeu a menção (anti-stale).
+      // O filho registra a exec, posta no chat da task e processa as suas
+      // próprias menções — cada elo da cadeia é autônomo.
+      const { spawnOpencorpDetached } = await import("./spawn-detached.js");
+      const wsId = basename(wsPath);
+      const r = spawnOpencorpDetached(
+        ["agent", "run", agente, ordem, "--workspace", wsId],
+        { homeDir, nomeLog: `mencao-${agente}` },
+      );
+      return { id: `detached-pid-${r.pid ?? "0"}`, captura: `spawn detached (pid ${r.pid ?? "?"}, log ${r.log})` };
     },
   };
 
