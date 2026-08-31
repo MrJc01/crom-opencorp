@@ -7,6 +7,7 @@ import { AgentStore } from "../../core/agent-store.js";
 import { SubcorpStore } from "../../core/subcorp-store.js";
 import { BudgetManager } from "../../core/budget-manager.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { parseGatilho } from "../../schemas/gatilho.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -228,6 +229,7 @@ export function registerAgentCommand(program: Command): void {
     .option("--session <id>", "continua uma sessão opencode existente")
     .option("--file <arquivo>", "lê a ordem de um arquivo (sobrepõe o texto posicional)")
     .option("--title <titulo>", "título da sessão opencode")
+    .option("--gatilho <tipo:origem>", "declara quem ativa esta execução (cron, mencao, flow...) — ledger unificado")
     .description("executa uma ordem em uma sessão OpenCode dentro do workspace")
     .action(
       (
@@ -238,10 +240,12 @@ export function registerAgentCommand(program: Command): void {
           session?: string;
           file?: string;
           title?: string;
+          gatilho?: string;
           workspace?: string;
         },
       ) =>
         comErros(async () => {
+          const gatilho = opts.gatilho ? parseGatilho(opts.gatilho) : undefined;
           let agenteId = id;
           let workspaceDir: string | undefined;
           if (id.includes("/")) {
@@ -258,6 +262,7 @@ export function registerAgentCommand(program: Command): void {
             session: opts.session,
             file: opts.file,
             title: opts.title,
+            gatilho,
             workspaceId: workspaceDir ? undefined : wsDe(program, opts),
             workspaceDir,
           });

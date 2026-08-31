@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { SessionManager } from "../../core/session-manager.js";
+import { parseGatilho } from "../../schemas/gatilho.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -31,6 +32,7 @@ export function registerRunCommand(program: Command): void {
     .option("--session <id>", "continua uma sessão opencode existente")
     .option("--file <arquivo>", "lê a ordem de um arquivo (sobrepõe o texto posicional)")
     .option("--title <titulo>", "título da sessão opencode")
+    .option("--gatilho <tipo:origem>", "declara quem ativa esta execução (cron, mencao, flow...) — ledger unificado")
     .description("atalho de agent run no workspace ativo (padrão: executor-padrao)")
     .action(
       (
@@ -41,6 +43,7 @@ export function registerRunCommand(program: Command): void {
           session?: string;
           file?: string;
           title?: string;
+          gatilho?: string;
           workspace?: string;
         },
       ) =>
@@ -52,6 +55,7 @@ export function registerRunCommand(program: Command): void {
             session: opts.session,
             file: opts.file,
             title: opts.title,
+            gatilho: opts.gatilho ? parseGatilho(opts.gatilho) : undefined,
             workspaceId: (program.opts() as { workspace?: string }).workspace ?? opts.workspace,
           });
           console.log(

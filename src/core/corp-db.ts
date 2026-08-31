@@ -41,6 +41,29 @@ export interface LinhaMensagem {
   criado_em: string | null;
 }
 
+/** Linha do ledger unificado de execuções (PLANO-UNIFICACAO) — toda ativação de agente, de qualquer motor. */
+export interface LinhaExecucao {
+  id: string;
+  agente: string;
+  modelo: string;
+  gatilho_tipo: string;
+  gatilho_origem: string;
+  status: string;
+  inicio: string;
+  fim: string | null;
+  duracao_ms: number | null;
+  custo_usd: number | null;
+  exit_code: number | null;
+}
+
+export interface FiltroExecucoes {
+  agente?: string;
+  gatilho_tipo?: string;
+  gatilho_origem?: string;
+  status?: string;
+  limite?: number;
+}
+
 export class CorpDb {
   private readonly db: Database.Database;
 
@@ -93,13 +116,30 @@ export class CorpDb {
         conteudo TEXT NOT NULL DEFAULT '',
         criado_em TEXT
       );
+      CREATE TABLE IF NOT EXISTS execucoes (
+        id TEXT PRIMARY KEY,
+        agente TEXT NOT NULL DEFAULT '',
+        modelo TEXT NOT NULL DEFAULT '',
+        gatilho_tipo TEXT NOT NULL DEFAULT 'manual',
+        gatilho_origem TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'executando',
+        inicio TEXT NOT NULL DEFAULT '',
+        fim TEXT,
+        duracao_ms INTEGER,
+        custo_usd REAL,
+        exit_code INTEGER
+      );
       CREATE INDEX IF NOT EXISTS idx_journal_registro ON journal (categoria, registro_id);
       CREATE INDEX IF NOT EXISTS idx_mensagens_sessao ON mensagens (sessao_id, criado_em);
+      CREATE INDEX IF NOT EXISTS idx_execucoes_gatilho ON execucoes (gatilho_tipo, gatilho_origem);
+      CREATE INDEX IF NOT EXISTS idx_execucoes_agente ON execucoes (agente, inicio);
     `);
   }
 
   limpar(): void {
-    this.db.exec("DELETE FROM registros; DELETE FROM journal; DELETE FROM sessoes; DELETE FROM mensagens;");
+    this.db.exec(
+      "DELETE FROM registros; DELETE FROM journal; DELETE FROM sessoes; DELETE FROM mensagens; DELETE FROM execucoes;",
+    );
   }
 
   upsertRegistro(r: LinhaRegistro): void {
@@ -170,6 +210,53 @@ export class CorpDb {
       ? this.db.prepare(sql).all(filtro.agentePrefixo + "%")
       : this.db.prepare(sql).all();
     return rows as LinhaSessao[];
+  }
+
+  /** Grava/atualiza uma execução no ledger unificado (início: status "executando"; fim: status final). */
+  upsertExecucao(e: LinhaExecucao): void {
+    this.db
+      .prepare(
+        `INSERT INTO execucoes (id, agente, modelo, gatilho_tipo, gatilho_origem, status, inicio, fim, duracao_ms, custo_usd, exit_code)
+         VALUES (@id, @agente, @modelo, @gatilho_tipo, @gatilho_origem, @status, @inicio, @fim, @duracao_ms, @custo_usd, @exit_code)
+         ON CONFLICT (id) DO UPDATE SET
+           agente = excluded.agente,
+           modelo = excluded.modelo,
+           gatilho_tipo = excluded.gatilho_tipo,
+           gatilho_origem = excluded.gatilho_origem,
+           status = excluded.status,
+           fim = excluded.fim,
+           duracao_ms = excluded.duracao_ms,
+           custo_usd = excluded.custo_usd,
+           exit_code = excluded.exit_code`,
+      )
+      .run(e);
+  }
+
+  /** Consulta cross-motor do ledger: "o que rodou, por que rodou (gatilho), como terminou". */
+  listarExecucoes(filtro?: FiltroExecucoes): LinhaExecucao[] {
+    const condicoes: string[] = [];
+    const params: Record<string, string | number> = {};
+    if (filtro?.agente) {
+      condicoes.push("agente = @agente");
+      params.agente = filtro.agente;
+    }
+    if (filtro?.gatilho_tipo) {
+      condicoes.push("gatilho_tipo = @gatilho_tipo");
+      params.gatilho_tipo = filtro.gatilho_tipo;
+    }
+    if (filtro?.gatilho_origem) {
+      condicoes.push("gatilho_origem = @gatilho_origem");
+      params.gatilho_origem = filtro.gatilho_origem;
+    }
+    if (filtro?.status) {
+      condicoes.push("status = @status");
+      params.status = filtro.status;
+    }
+    const where = condicoes.length > 0 ? `WHERE ${condicoes.join(" AND ")}` : "";
+    const limite = filtro?.limite ? Math.max(1, Math.floor(filtro.limite)) : 100;
+    return this.db
+      .prepare(`SELECT * FROM execucoes ${where} ORDER BY COALESCE(NULLIF(inicio,''), '0000') DESC LIMIT ${limite}`)
+      .all(params) as LinhaExecucao[];
   }
 
   /** Primeira mensagem do usuário por sessão (fonte de título real na lista de conversas) */

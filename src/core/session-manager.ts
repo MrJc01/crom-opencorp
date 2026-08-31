@@ -15,6 +15,7 @@ import { ApprovalsStore } from "./approvals-store.js";
 import { BudgetManager } from "./budget-manager.js";
 import { avaliar, casaPadrao } from "./security-guard.js";
 import { parseSecurityPolicyTexto } from "../schemas/security-policy.js";
+import { gatilhoSchema, type Gatilho } from "../schemas/gatilho.js";
 import { mkdirRecursive } from "../utils/fs-safe.js";
 import { opencorpHome, resolvePath } from "../utils/paths.js";
 
@@ -36,6 +37,11 @@ export interface OpcoesRun {
   execId?: string;
   /** mata o opencode se exceder (ms) — status "falhou" com nota de timeout */
   timeoutMs?: number;
+  /**
+   * Gatilho da execução (PLANO-UNIFICACAO): quem chamou e por quê — cron, menção, nó de flow,
+   * passo de team, turno de reunião, evento ou manual. Vai para extras, ledger (corp.db) e eventos.
+   */
+  gatilho?: Gatilho;
 }
 
 export interface ResultadoRun extends RegistroExecucao {
@@ -55,6 +61,7 @@ export interface RegistroExecucao {
   duracao_ms: number | null;
   pid: number | null;
   log: string;
+  gatilho?: Gatilho;
 }
 
 export interface ResumoExecucao {
@@ -65,6 +72,7 @@ export interface ResumoExecucao {
   inicio: string;
   duracao_ms: number | null;
   exit_code: number | null;
+  gatilho?: Gatilho;
 }
 
 function msg(erro: unknown): string {
@@ -102,6 +110,31 @@ export class SessionManager {
       return parseSecurityPolicyTexto("{}", path);
     }
     return parseSecurityPolicyTexto(readFileSync(path, "utf8"), path);
+  }
+
+  /**
+   * Grava/atualiza a execução no ledger unificado (corp.db `execucoes`) — a leitura
+   * cross-motor do PLANO-UNIFICACAO. Falha de ledger NUNCA quebra a execução
+   * (mesma tolerância do job_runs do scheduler).
+   */
+  private registrarNoLedger(wsPath: string, registro: RegistroExecucao, custoUsd: number | null): void {
+    try {
+      this.registros.corpDb(wsPath).upsertExecucao({
+        id: registro.id,
+        agente: registro.agente,
+        modelo: registro.modelo,
+        gatilho_tipo: registro.gatilho?.tipo ?? "manual",
+        gatilho_origem: registro.gatilho?.origem ?? "",
+        status: registro.status,
+        inicio: registro.inicio,
+        fim: registro.fim,
+        duracao_ms: registro.duracao_ms,
+        custo_usd: custoUsd,
+        exit_code: registro.exit_code,
+      });
+    } catch {
+      /* ledger é índice; os registros (MD/JSON) são a fonte documental */
+    }
   }
 
   async workspaceDe(workspaceId?: string) {
@@ -143,6 +176,20 @@ export class SessionManager {
       if (pre.acao === "bloqueado") {
         const idBloqueio = gerarId("exec");
         await this.registros.garantirCategorias(ws.path);
+        await this.registrarNoLedger(ws.path, {
+          id: idBloqueio,
+          agente: ag.frontmatter.id,
+          modelo,
+          ordem,
+          inicio: new Date().toISOString(),
+          fim: new Date().toISOString(),
+          status: "falhou",
+          exit_code: 3,
+          duracao_ms: 0,
+          pid: null,
+          log: "",
+          gatilho: opcoes.gatilho,
+        }, null);
         await this.registros.criar(ws.path, {
           categoria: "execucoes",
           id: idBloqueio,
@@ -176,6 +223,20 @@ export class SessionManager {
       if (pre.acao === "hitl") {
         const idHitl = gerarId("exec");
         await this.registros.garantirCategorias(ws.path);
+        await this.registrarNoLedger(ws.path, {
+          id: idHitl,
+          agente: ag.frontmatter.id,
+          modelo,
+          ordem,
+          inicio: new Date().toISOString(),
+          fim: null,
+          status: "hitl_pendente",
+          exit_code: null,
+          duracao_ms: null,
+          pid: null,
+          log: "",
+          gatilho: opcoes.gatilho,
+        }, null);
         await this.registros.criar(ws.path, {
           categoria: "execucoes",
           id: idHitl,
@@ -240,6 +301,7 @@ export class SessionManager {
       duracao_ms: null,
       pid: null,
       log: logRelativo,
+      gatilho: opcoes.gatilho,
     };
 
     await this.registros.criar(ws.path, {
@@ -251,7 +313,7 @@ export class SessionManager {
       referencias: opcoes.referencias,
       eventoInicial: {
         evento: "iniciado",
-        resumo: `ordem: ${ordem.slice(0, 160)} · modelo: ${modelo}`,
+        resumo: `ordem: ${ordem.slice(0, 160)} · modelo: ${modelo}${opcoes.gatilho ? ` · gatilho: ${opcoes.gatilho.tipo}:${opcoes.gatilho.origem}` : ""}`,
       },
       extras: {
         status: "executando",
@@ -263,9 +325,25 @@ export class SessionManager {
         duracao_ms: null,
         log: logRelativo,
         ...(opcoes.tipo ? { tipo: opcoes.tipo } : {}),
+        ...(opcoes.gatilho ? { gatilho: opcoes.gatilho } : {}),
       },
     });
-    eventBus.emit("sessao-inicio", { exec_id: id, agente: registro.agente, modelo });
+    this.registrarNoLedger(ws.path, registro, null);
+    // evento unificado da primitiva Execução (PLANO-UNIFICACAO Etapa 5):
+    // qualquer consumidor casa "execução iniciada por gatilho X" sem conhecer o motor
+    eventBus.emit("exec.iniciada", {
+      exec_id: id,
+      agente: registro.agente,
+      modelo,
+      workspace: ws.id,
+      ...(opcoes.gatilho ? { gatilho: opcoes.gatilho } : { gatilho: { tipo: "manual", origem: "" } }),
+    });
+    eventBus.emit("sessao-inicio", {
+      exec_id: id,
+      agente: registro.agente,
+      modelo,
+      ...(opcoes.gatilho ? { gatilho: opcoes.gatilho } : {}),
+    });
 
     await this.bridge.sincronizarAgente(ws.path, ag.frontmatter, ag.corpo);
 
@@ -582,6 +660,7 @@ export class SessionManager {
       inicio: meta.criado_em,
       duracao_ms: (extras.duracao_ms as number | null) ?? null,
       exit_code: (extras.exit_code as number | null) ?? null,
+      ...(extras.gatilho ? { gatilho: gatilhoSchema.parse(extras.gatilho) } : {}),
     };
   }
 
@@ -599,6 +678,7 @@ export class SessionManager {
       duracao_ms: (extras.duracao_ms as number | null) ?? null,
       pid: (extras.pid as number | null) ?? null,
       log: String(extras.log ?? `logs/${meta.id}.log`),
+      ...(extras.gatilho ? { gatilho: gatilhoSchema.parse(extras.gatilho) } : {}),
     };
   }
 
@@ -613,6 +693,7 @@ export class SessionManager {
       exit_code: registro.exit_code,
       duracao_ms: registro.duracao_ms,
       log: registro.log,
+      ...(registro.gatilho ? { gatilho: registro.gatilho } : {}),
     };
     await this.registros.salvarMeta(wsPath, "execucoes", registro.id, meta);
   }
@@ -638,6 +719,7 @@ export class SessionManager {
       status,
       exit_code: exitCode,
       duracao_ms: duracaoMs,
+      ...(registro.gatilho ? { gatilho: registro.gatilho } : {}),
     });
     await this.registros.anexarEvento(ws.path, "execucoes", registro.id, {
       ts: new Date().toISOString(),
@@ -650,6 +732,7 @@ export class SessionManager {
     });
     const meta = await this.registros.lerMeta(ws.path, "execucoes", registro.id);
     await this.salvarExtras(ws.path, meta, registro);
+    this.registrarNoLedger(ws.path, registro, custoUsd);
     await this.registros.registrarSessao(ws.path, {
       id: registro.id,
       agente: registro.agente,
