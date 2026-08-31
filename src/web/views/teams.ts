@@ -4,17 +4,34 @@
 
 import { api, toast, icone, escapeHtml } from "../api.js";
 import { badgeTeamPadrao } from "../format.js";
+import { estadoVazio, estadoErro, estadoCarregando } from "../estado.js";
+import { ajuda } from "../help.js";
 
 /** Renderiza a view Teams */
 export async function renderTeams(): Promise<void> {
-  const teams = await api<Record<string, unknown>[]>('/teams').catch(() => []);
-
   const viewEl = document.getElementById('view-teams');
   if (!viewEl) return;
 
+  if (!viewEl.innerHTML.trim()) {
+    viewEl.innerHTML = `<h1 class="text-2xl font-bold flex items-center gap-2 mb-6">${icone('teams')} Teams</h1>` + estadoCarregando();
+  }
+
+  let teams: Record<string, unknown>[] | null;
+  try {
+    teams = await api<Record<string, unknown>[]>('/teams');
+  } catch {
+    teams = null;
+  }
+
+  if (!teams) {
+    viewEl.innerHTML = `<h1 class="text-2xl font-bold flex items-center gap-2 mb-6">${icone('teams')} Teams</h1>` +
+      estadoErro('Não foi possível carregar os teams.', () => { void renderTeams(); });
+    return;
+  }
+
   viewEl.innerHTML = `
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('teams')} Teams</h1>
+      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('teams')} Teams ${ajuda('teams')}</h1>
       <a href="/doc" target="_blank" class="btn btn-ghost text-sm">Ver spec no /doc</a>
     </div>
     <div id="teams-lista" class="space-y-4"></div>
@@ -24,13 +41,7 @@ export async function renderTeams(): Promise<void> {
   if (!el) return;
 
   if (!teams.length) {
-    el.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">${icone('teams')}</div>
-        <div class="empty-title">Nenhum team configurado</div>
-        <div class="empty-desc">Crie um team via <code>POST /teams</code> com spec (pipeline, fanout, review ou debate).<br>Ex: <code>{"id":"meu-team","padrao":"pipeline","passos":[{"agente":"executor-padrao"}]}</code></div>
-      </div>
-    `;
+    el.innerHTML = estadoVazio('teams', 'Nenhum team configurado', 'Crie um team via <code>POST /teams</code> com spec (pipeline, fanout, review ou debate).<br>Ex: <code>{"id":"meu-team","padrao":"pipeline","passos":[{"agente":"executor-padrao"}]}</code>');
     return;
   }
 

@@ -3,15 +3,21 @@
  */
 
 import { api, toast, icone, escapeHtml } from "../api.js";
+import { estadoVazio, estadoErro, estadoCarregando } from "../estado.js";
+import { ajuda } from "../help.js";
 
 /** Renderiza a view Reuniões */
 export async function renderReunioes(): Promise<void> {
   const viewEl = document.getElementById('view-reunioes');
   if (!viewEl) return;
 
+  if (!viewEl.innerHTML.trim()) {
+    viewEl.innerHTML = `<h1 class="text-2xl font-bold flex items-center gap-2 mb-6">${icone('reunioes')} Reuniões</h1>` + estadoCarregando();
+  }
+
   viewEl.innerHTML = `
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('reunioes')} Reuniões</h1>
+      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('reunioes')} Reuniões ${ajuda('reunioes')}</h1>
     </div>
     <div class="card p-4 mb-6" id="reunioes-form"></div>
     <div id="reunioes-lista" class="space-y-4"></div>
@@ -76,12 +82,22 @@ interface MeetingInfo {
 }
 
 async function carregarReunioesLista(): Promise<void> {
-  const reunioes = await api<MeetingInfo[]>('/meetings').catch(() => []);
+  let reunioes: MeetingInfo[] | null;
+  try {
+    reunioes = await api<MeetingInfo[]>('/meetings');
+  } catch {
+    reunioes = null;
+  }
   const el = document.getElementById('reunioes-lista');
   if (!el) return;
 
+  if (!reunioes) {
+    el.innerHTML = estadoErro('Não foi possível carregar as reuniões.', () => { void carregarReunioesLista(); });
+    return;
+  }
+
   if (!reunioes.length) {
-    el.innerHTML = '<div class="empty-state"><div class="empty-icon">' + icone('reunioes') + '</div><div class="empty-title">Nenhuma reunião</div><div class="empty-desc">Convoque acima ou use: <code>opencorp meeting start --pauta "..."</code></div></div>';
+    el.innerHTML = estadoVazio('reunioes', 'Nenhuma reunião', 'Convoque acima ou use: <code>opencorp meeting start --pauta "..."</code>');
     return;
   }
 

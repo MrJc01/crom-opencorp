@@ -5,6 +5,8 @@
 import { api, q, toast, icone, escapeHtml } from "../api.js";
 import { getWsAtivo } from "../state.js";
 import { formatarDataLocal, mesclarHistorico, type EventoHistorico, type SessionInfo, type TaskInfo, type ScheduleJob } from "../format.js";
+import { estadoVazio, estadoErro, estadoCarregando } from "../estado.js";
+import { ajuda } from "../help.js";
 
 function corDoTipo(tipo: EventoHistorico['tipo'], status?: string): string {
   if (tipo === 'execucao') return 'var(--accent)';
@@ -48,11 +50,10 @@ export async function renderHistorico(): Promise<void> {
     } catch (erro) {
       if (viewEl) {
         viewEl.innerHTML = `
-          <div class="empty-state">
-            <div class="empty-title">Não foi possível carregar o histórico</div>
-            <div class="empty-desc">${escapeHtml(erro instanceof Error ? erro.message : String(erro))}</div>
+          <div class="flex items-center justify-between mb-6">
+            <h1 class="text-2xl font-bold flex items-center gap-2">${icone('history')} Histórico ${ajuda('historico')}</h1>
           </div>
-        `;
+        ` + estadoErro('Não foi possível carregar o histórico: ' + (erro instanceof Error ? erro.message : String(erro)), () => { void renderHistorico(); });
       }
     }
   }
@@ -64,7 +65,7 @@ export async function renderHistorico(): Promise<void> {
     if (!eventos.length) {
       el.innerHTML = `
         <div class="flex items-center justify-between mb-6">
-          <h1 class="text-2xl font-bold flex items-center gap-2">${icone('history')} Histórico</h1>
+          <h1 class="text-2xl font-bold flex items-center gap-2">${icone('history')} Histórico ${ajuda('historico')}</h1>
           <div class="flex items-center gap-2">
             <div class="flex rounded-lg border border-zinc-700" role="group" aria-label="Filtro por tipo">
               <button class="btn-ghost text-xs px-3 py-1 ${filtroAtual === 'tudo' ? 'bg-blue-600 text-white' : ''}" onclick="window.__historicoSetFiltro('tudo')">Tudo</button>
@@ -79,18 +80,14 @@ export async function renderHistorico(): Promise<void> {
             </select>
           </div>
         </div>
-        <div class="empty-state">
-          <div class="empty-icon">${icone('history')}</div>
-          <div class="empty-title">Nada registrado ainda</div>
-          <div class="empty-desc">As execuções, tasks e rotinas aparecem aqui conforme a empresa opera.</div>
-        </div>
+        ${estadoVazio('history', 'Nada registrado ainda', 'As execuções, tasks e rotinas aparecem aqui conforme a empresa opera.')}
       `;
       return;
     }
 
     el.innerHTML = `
       <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold flex items-center gap-2">${icone('history')} Histórico</h1>
+        <h1 class="text-2xl font-bold flex items-center gap-2">${icone('history')} Histórico ${ajuda('historico')}</h1>
         <div class="flex items-center gap-2">
           <div class="flex rounded-lg border border-zinc-700" role="group" aria-label="Filtro por tipo">
             <button class="btn-ghost text-xs px-3 py-1 ${filtroAtual === 'tudo' ? 'bg-blue-600 text-white' : ''}" onclick="window.__historicoSetFiltro('tudo')">Tudo</button>
@@ -133,7 +130,7 @@ export async function renderHistorico(): Promise<void> {
 
   viewEl.innerHTML = `
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('history')} Histórico</h1>
+      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('history')} Histórico ${ajuda('historico')}</h1>
       <div class="flex items-center gap-2">
         <div class="flex rounded-lg border border-zinc-700" role="group" aria-label="Filtro por tipo">
           <button class="btn-ghost text-xs px-3 py-1 bg-blue-600 text-white" onclick="window.__historicoSetFiltro('tudo')">Tudo</button>
@@ -148,10 +145,7 @@ export async function renderHistorico(): Promise<void> {
         </select>
       </div>
     </div>
-    <div class="empty-state">
-      <div class="empty-icon">${icone('history')}</div>
-      <div class="empty-title">Carregando…</div>
-    </div>
+    ${estadoCarregando()}
   `;
 
   await carregarERender();

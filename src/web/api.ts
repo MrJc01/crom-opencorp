@@ -7,7 +7,7 @@
  * token persistido não bate com o do servidor.
  */
 
-import { getToken, getWsAtivo, setWorkspaces, getWorkspaces, type WorkspaceInfo } from "./state.js";
+import { getToken, getWsAtivo, setWorkspaces, getWorkspaces, setWsAtivo, type WorkspaceInfo } from "./state.js";
 import { icone } from "./icons.js";
 import { escapeHtml } from "./format.js";
 import { sairParaLogin } from "./main.js";
@@ -109,9 +109,15 @@ function atualizarSelectWorkspaces(wsArray: WorkspaceInfo[]): void {
   sel.onchange = (e: Event) => {
     const target = e.target as HTMLSelectElement;
     const novoWs = target.value;
-    if (novoWs) localStorage.setItem(WS_KEY, novoWs);
-    else localStorage.removeItem(WS_KEY);
-    location.hash = '#/home';
+    // Atualiza o estado em memória (e persiste) — sem isso a API continuaria
+    // usando o workspace antigo até um reload manual da página.
+    setWsAtivo(novoWs);
+    if (location.hash === '#/home' || location.hash === '' || location.hash === '#') {
+      // Já estava no Início: hashchange não dispara — re-renderiza manualmente.
+      void import("./main.js").then((m) => m.renderView());
+    } else {
+      location.hash = '#/home';
+    }
   };
 }
 
@@ -148,7 +154,7 @@ export function toast(mensagem: string, tipo: 'ok' | 'erro' | 'aviso' = 'ok'): v
   const el = document.createElement('div');
   const bg = tipo === 'ok' ? 'rgba(74,222,128,.15)' : tipo === 'erro' ? 'rgba(248,113,113,.15)' : 'rgba(251,191,36,.15)';
   const border = tipo === 'ok' ? 'var(--ok)' : tipo === 'erro' ? 'var(--err)' : 'var(--warn)';
-  const iconeToast = tipo === 'ok' ? 'spark' : tipo === 'erro' ? 'close' : 'spark';
+  const iconeToast = tipo === 'ok' ? 'check' : tipo === 'erro' ? 'close' : 'warn';
 
   el.style.cssText = `background:${bg};border:1px solid ${border};color:var(--text);padding:.75rem 1rem;border-radius:.5rem;box-shadow:0 10px 30px rgba(0,0,0,.4);min-width:240px;max-width:360px;display:flex;align-items:center;gap:.5rem;font-size:.8125rem;animation:slideIn .2s ease`;
   el.innerHTML = icone(iconeToast) + '<span>' + escapeHtml(mensagem) + '</span>';

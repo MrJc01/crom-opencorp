@@ -4,6 +4,8 @@
  */
 
 import { api, toast, icone, escapeHtml } from "../api.js";
+import { estadoVazio, estadoCarregando } from "../estado.js";
+import { ajuda } from "../help.js";
 
 interface WidgetSpec {
   id: string;
@@ -37,9 +39,9 @@ export async function renderApps(): Promise<void> {
 
   viewEl.innerHTML = `
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('apps')} Mini-apps</h1>
+      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('apps')} Mini-apps ${ajuda('apps')}</h1>
     </div>
-    <div id="apps-lista" class="apps-grid"></div>
+    <div id="apps-lista" class="apps-grid">${estadoCarregando()}</div>
     <div id="app-view" class="hidden"></div>
   `;
 
@@ -48,12 +50,17 @@ export async function renderApps(): Promise<void> {
 
 /** Carrega lista de apps — FUNÇÃO EXPOSTA GLOBALMENTE para testes cegos */
 export async function loadAppsList(): Promise<void> {
-  const lista = await api<AppInfo[]>('/apps').catch(() => []);
+  let lista: AppInfo[] | null;
+  try {
+    lista = await api<AppInfo[]>('/apps');
+  } catch {
+    lista = null;
+  }
   const el = document.getElementById('apps-lista');
   if (!el) return;
 
   if (!Array.isArray(lista) || !lista.length) {
-    el.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">' + icone('apps') + '</div><div class="empty-title">Nenhum mini-app</div><div class="empty-desc">Instale com: <code>opencorp app seed painel-tarefas</code> ou crie via <code>POST /apps</code>.</div></div>';
+    el.innerHTML = '<div style="grid-column:1/-1">' + estadoVazio('apps', 'Nenhum mini-app', 'Instale com: <code>opencorp app seed painel-tarefas</code> ou crie via <code>POST /apps</code>.') + '</div>';
     return;
   }
 

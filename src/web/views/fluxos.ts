@@ -3,15 +3,21 @@
  */
 
 import { api, toast, icone, escapeHtml } from "../api.js";
+import { estadoVazio, estadoErro, estadoCarregando } from "../estado.js";
+import { ajuda } from "../help.js";
 
 /** Renderiza a view Fluxos */
 export async function renderFluxos(): Promise<void> {
   const viewEl = document.getElementById('view-fluxos');
   if (!viewEl) return;
 
+  if (!viewEl.innerHTML.trim()) {
+    viewEl.innerHTML = `<h1 class="text-2xl font-bold flex items-center gap-2 mb-6">${icone('fluxos')} Fluxos</h1>` + estadoCarregando();
+  }
+
   viewEl.innerHTML = `
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('fluxos')} Fluxos</h1>
+      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('fluxos')} Fluxos ${ajuda('flows')}</h1>
     </div>
     <div id="fluxos-lista" class="space-y-4"></div>
   `;
@@ -25,12 +31,22 @@ interface FlowInfo {
 }
 
 async function carregarFluxosLista(): Promise<void> {
-  const flows = await api<FlowInfo[]>('/flows').catch(() => []);
+  let flows: FlowInfo[] | null;
+  try {
+    flows = await api<FlowInfo[]>('/flows');
+  } catch {
+    flows = null;
+  }
   const el = document.getElementById('fluxos-lista');
   if (!el) return;
 
+  if (!flows) {
+    el.innerHTML = estadoErro('Não foi possível carregar os fluxos.', () => { void carregarFluxosLista(); });
+    return;
+  }
+
   if (!flows.length) {
-    el.innerHTML = '<div class="empty-state"><div class="empty-icon">' + icone('fluxos') + '</div><div class="empty-title">Nenhum fluxo</div><div class="empty-desc">Crie com: <code>opencorp flow create <id> --nome "..."</code></div></div>';
+    el.innerHTML = estadoVazio('fluxos', 'Nenhum fluxo', 'Crie com: <code>opencorp flow create &lt;id&gt; --nome "..."</code>');
     return;
   }
 

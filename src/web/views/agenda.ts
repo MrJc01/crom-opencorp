@@ -5,6 +5,8 @@
 import { api, q, toast, icone, escapeHtml } from "../api.js";
 import { getWsAtivo, getAgendaEscopoAtual, setAgendaEscopoAtual } from "../state.js";
 import { formatarAgenda, badgeTipo, formatarDataLocal } from "../format.js";
+import { estadoVazio, estadoErro, estadoCarregando } from "../estado.js";
+import { ajuda } from "../help.js";
 
 /** Renderiza a view Agenda */
 export async function renderAgenda(): Promise<void> {
@@ -13,16 +15,20 @@ export async function renderAgenda(): Promise<void> {
   const viewEl = document.getElementById('view-agenda');
   if (!viewEl) return;
 
+  if (!viewEl.innerHTML.trim()) {
+    viewEl.innerHTML = `<h1 class="text-2xl font-bold flex items-center gap-2 mb-6">${icone('agenda')} Agenda</h1>` + estadoCarregando();
+  }
+
   viewEl.innerHTML = `
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('agenda')} Agenda</h1>
+      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('agenda')} Agenda ${ajuda('agenda')}</h1>
       <div class="flex items-center gap-1 rounded-lg border border-zinc-700 p-1" role="group" aria-label="Escopo da agenda">
         <button id="agenda-escopo-ws" class="btn text-xs" onclick="agendaEscopo('ws')">só ${escapeHtml(wsAtivo || 'esta empresa')}</button>
         <button id="agenda-escopo-todas" class="btn text-xs" onclick="agendaEscopo('todas')">todas as empresas</button>
       </div>
     </div>
     <div id="agenda-status" class="card p-4 mb-6"></div>
-    <div id="agenda-lista" class="space-y-4"></div>
+    <div id="agenda-lista" class="space-y-4">${estadoCarregando()}</div>
     <div class="card p-4 mt-6" id="agenda-form"></div>
   `;
 
@@ -57,7 +63,7 @@ async function carregarAgendaStatus(): Promise<void> {
   el.innerHTML = `
     <div class="flex items-start gap-3">
       <div class="flex-1">
-        <p class="text-sm text-zinc-400">O daemon do scheduler executa os jobs a cada 30s.</p>
+        <p class="text-sm text-zinc-400">O daemon do scheduler executa os jobs a cada 30s. ${ajuda('scheduler')}</p>
         <p class="text-sm text-zinc-400 mt-1">Inicie com: <code class="font-mono bg-zinc-800 px-1.5 py-0.5 rounded">opencorp scheduler start</code></p>
       </div>
     </div>
@@ -77,15 +83,25 @@ interface ScheduleJob {
 
 async function carregarAgendaLista(): Promise<void> {
   const escopo = getAgendaEscopoAtual();
-  const jobs = escopo === 'todas'
-    ? await api<ScheduleJob[]>('/schedules?all=1').catch(() => [])
-    : await q<ScheduleJob[]>('/schedules').catch(() => []);
+  let jobs: ScheduleJob[] | null;
+  try {
+    jobs = escopo === 'todas'
+      ? await api<ScheduleJob[]>('/schedules?all=1')
+      : await q<ScheduleJob[]>('/schedules');
+  } catch {
+    jobs = null;
+  }
 
   const el = document.getElementById('agenda-lista');
   if (!el) return;
 
+  if (!jobs) {
+    el.innerHTML = estadoErro('Não foi possível carregar as rotinas.', () => { void carregarAgendaLista(); });
+    return;
+  }
+
   if (!jobs.length) {
-    el.innerHTML = '<div class="empty-state"><div class="empty-icon">' + icone('agenda') + '</div><div class="empty-title">' + (escopo === 'todas' ? 'Nenhuma rotina agendada em nenhuma empresa' : 'Nenhuma rotina nesta empresa') + '</div><div class="empty-desc">A empresa opera sozinha quando você agenda a primeira rotina.</div></div>';
+    el.innerHTML = estadoVazio('agenda', escopo === 'todas' ? 'Nenhuma rotina agendada em nenhuma empresa' : 'Nenhuma rotina nesta empresa', 'A empresa opera sozinha quando você agenda a primeira rotina.');
     return;
   }
 
@@ -119,7 +135,7 @@ function renderAgendaForm(): void {
   if (!el) return;
 
   el.innerHTML = `
-    <h3 class="font-semibold mb-3 flex items-center gap-2">${icone('plus')} Nova rotina</h3>
+    <h3 class="font-semibold mb-3 flex items-center gap-2">${icone('plus')} Nova rotina ${ajuda('agenda')}</h3>
     <form id="form-nova-agenda" class="space-y-4" onsubmit="event.preventDefault(); criarAgenda()">
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>

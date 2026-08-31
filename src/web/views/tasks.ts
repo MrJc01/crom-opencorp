@@ -5,26 +5,54 @@
 import { api, toast, icone, escapeHtml } from "../api.js";
 import { getWsAtivo, setTaskAberta } from "../state.js";
 import { fecharDrawer } from "../router.js";
+import { estadoVazio, estadoErro, estadoCarregando } from "../estado.js";
+import { ajuda } from "../help.js";
 
 let taskAbertaId: string | null = null;
 let arrastouAgora = false;
 
+const AJUDA_COLUNA: Record<string, string> = {
+  backlog: 'Tasks na fila — ninguém pegou ainda.',
+  fazendo: 'Em execução por um agente neste momento.',
+  bloqueado: 'Paradas: falta algo (dependência, aprovação HITL, erro).',
+  feito: 'Concluídas. Histórico fica em Histórico.',
+};
+
 /** Renderiza a view Tasks (Kanban) */
 export async function renderTasks(): Promise<void> {
-  const tasks = await api<Record<string, unknown>[]>('/tasks').catch(() => []);
+  const viewEl = document.getElementById('view-tasks');
+  if (!viewEl) return;
+
+  // Loading apenas no primeiro render (evita piscar no refresh de 8s)
+  if (!viewEl.innerHTML.trim()) {
+    viewEl.innerHTML = estadoCarregando('Carregando tasks…');
+  }
+
+  let tasks: Record<string, unknown>[] | null;
+  try {
+    tasks = await api<Record<string, unknown>[]>('/tasks');
+  } catch {
+    tasks = null;
+  }
+
+  if (!tasks) {
+    viewEl.innerHTML = estadoErro('Não foi possível carregar o task board.', () => { void renderTasks(); });
+    return;
+  }
+
   const colunasPadrao = ['backlog', 'fazendo', 'bloqueado', 'feito'];
   const extras = [...new Set(tasks.map(t => String(t.coluna)))].filter(c => !colunasPadrao.includes(c));
   const todasColunas = [...colunasPadrao, ...extras];
 
-  const viewEl = document.getElementById('view-tasks');
-  if (!viewEl) return;
-
   viewEl.innerHTML = `
-    <div class="flex flex-wrap gap-2 mb-6">
+    <div class="flex flex-wrap items-center gap-2 mb-6">
       <input id="task-titulo" placeholder="Título da task — Enter cria" class="flex-1 min-w-0 max-w-80" onkeydown="if(event.key==='Enter')criarTask()"/>
       <button class="btn" onclick="criarTask()">+ Criar task</button>
+      <span class="help-wrap">${ajuda('tasks')}</span>
     </div>
-    <div id="kanban" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"></div>
+    ${tasks.length === 0
+      ? estadoVazio('tasks', 'Nenhuma task na empresa', 'Crie a primeira no campo acima — os agentes assumem tasks do board automaticamente conforme a rotina.')
+      : `<div id="kanban" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"></div>`}
   `;
 
   const kb = document.getElementById('kanban');
@@ -36,7 +64,7 @@ export async function renderTasks(): Promise<void> {
     div.className = 'kanban-col';
     div.innerHTML = `
       <div class="kanban-header">
-        <span class="kanban-title capitalize">${escapeHtml(col)}</span>
+        <span class="kanban-title capitalize">${escapeHtml(col)}${AJUDA_COLUNA[col] ? ajudaKanban(col) : ''}</span>
         <span class="kanban-count">${colTasks.length}</span>
       </div>
       <div class="kanban-cards" id="kanban-${escapeHtml(col)}"></div>
@@ -65,6 +93,11 @@ export async function renderTasks(): Promise<void> {
       container.appendChild(card);
     }
   }
+}
+
+/** "?" explicando uma coluna do kanban (texto fixo por coluna) */
+function ajudaKanban(col: string): string {
+  return ajuda('kanban-' + col, AJUDA_COLUNA[col] ?? '');
 }
 
 /** Torna um card arrastável entre colunas do kanban */
