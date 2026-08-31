@@ -220,4 +220,23 @@ function wsDe(opts: { workspace?: string }): string | undefined {
         }
       }),
     );
+
+  flow
+    .command("migrate-teams")
+    .description("fusão team×fluxo (PLANO-WEB-CRUD F3): converte teams legados em flows (pipeline→nós agente; fanout/review/debate→nó próprio); teams ficam no disco como legado read-only")
+    .action((opts: { workspace?: string }) =>
+      comErros(async () => {
+        const ws = await manager.resolver(wsDe(opts));
+        const { TeamStore } = await import("../../core/team-store.js");
+        const { migrarTeamsParaFlows } = await import("../../core/flow-migrate.js");
+        const res = await migrarTeamsParaFlows(ws.path, new TeamStore(), store);
+        if (!res.criados.length && !res.pulados.length) {
+          console.log("nenhum team legado para migrar neste workspace");
+          return;
+        }
+        for (const id of res.criados) console.log(`ok: team "${id}" → flow "${id}"`);
+        for (const p of res.pulados) console.log(`pulado: ${p.id} — ${p.motivo}`);
+        console.log(`${res.criados.length} flow(s) criado(s), ${res.pulados.length} pulado(s)`);
+      }),
+    );
 }
