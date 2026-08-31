@@ -30,7 +30,8 @@ test.describe("Reuniões e Fluxos", () => {
     await page.waitForURL("**/#/fluxos");
     await esperarElementoTexto(page, "Fluxos");
 
-    // Verifica estado vazio
-    await esperarElementoTexto(page, "Nenhum fluxo");
+    // Estado vazio OU lista com fluxos (home.spec semeia um flow na mesma home e2e):
+    // vazio mostra "Nenhum fluxo"; com fluxos, cada card tem botão Executar.
+    await expect(page.locator("#view-fluxos")).toContainText(/Nenhum fluxo|Executar/);
   });
 });

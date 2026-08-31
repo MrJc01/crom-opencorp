@@ -35,8 +35,8 @@ test.describe("Secretário", () => {
     await esperarElementoTexto(page, "Conversas");
     await esperarElementoTexto(page, "Nova conversa");
 
-    // Clica em "Nova conversa" para criar uma
-    await page.click('button:has-text("Nova conversa")');
+    // Clica em "Nova conversa" (botão de ícone no header da lista)
+    await page.click('button[title="Nova conversa"]');
 
     // Aguarda input aparecer
     const input = page.locator("#chat-input");
