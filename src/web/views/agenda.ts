@@ -115,6 +115,7 @@ async function carregarAgendaLista(): Promise<void> {
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
           <button class="btn btn-ghost text-sm" onclick="executarAgendaAgora('${escapeHtml(String(j.id))}')" aria-label="Executar agora">${icone('run')} Agora</button>
+          <button class="btn btn-ghost text-sm" onclick="editarAgenda('${escapeHtml(String(j.id))}')" aria-label="Editar">${icone('gear')} Editar</button>
           <button class="btn btn-ghost text-sm" onclick="toggleAgendaAtivo('${escapeHtml(String(j.id))}', ${j.ativo})" aria-label="${j.ativo ? 'Pausar' : 'Retomar'}">${j.ativo ? icone('pause') : icone('run')} ${j.ativo ? 'Pausar' : 'Retomar'}</button>
           <button class="btn btn-ghost text-sm" style="color:var(--err)" onclick="excluirAgenda('${escapeHtml(String(j.id))}')" aria-label="Excluir">${icone('trash')}</button>
         </div>
@@ -161,18 +162,19 @@ export function renderAgendaForm(): void {
   `;
 }
 
-/** Atualiza campo de valor conforme tipo selecionado */
-export function atualizarCampoAgenda(): void {
-  const tipo = (document.getElementById('agenda-tipo') as HTMLSelectElement)?.value;
-  const container = document.getElementById('agenda-valor-container');
+/** Atualiza campo de valor conforme tipo selecionado (reusável no form de edição) */
+export function atualizarCampoAgenda(containerId = 'agenda-valor-container', valorInicial = ''): void {
+  const tipo = (document.getElementById(containerId === 'agenda-valor-container' ? 'agenda-tipo' : 'agenda-edit-tipo') as HTMLSelectElement)?.value;
+  const container = document.getElementById(containerId);
   if (!container) return;
 
+  const idCampo = containerId === 'agenda-valor-container' ? 'agenda-valor' : 'agenda-edit-valor';
   if (tipo === 'intervalo_min') {
-    container.innerHTML = '<label class="block text-xs text-zinc-500 mb-1">Valor (minutos)</label><input id="agenda-valor" type="number" min="1" placeholder="Ex: 30" required />';
+    container.innerHTML = `<label class="block text-xs text-zinc-500 mb-1">Valor (minutos)</label><input id="${idCampo}" type="number" min="1" placeholder="Ex: 30" required value="${escapeHtml(valorInicial)}" />`;
   } else if (tipo === 'cron') {
-    container.innerHTML = '<label class="block text-xs text-zinc-500 mb-1">Expressão cron</label><input id="agenda-valor" type="text" placeholder="*/5 * * * *" required />';
+    container.innerHTML = `<label class="block text-xs text-zinc-500 mb-1">Expressão cron</label><input id="${idCampo}" type="text" placeholder="*/5 * * * *" required value="${escapeHtml(valorInicial)}" />`;
   } else if (tipo === 'data_unica') {
-    container.innerHTML = '<label class="block text-xs text-zinc-500 mb-1">Data/hora (ISO)</label><input id="agenda-valor" type="datetime-local" required />';
+    container.innerHTML = `<label class="block text-xs text-zinc-500 mb-1">Data/hora (ISO)</label><input id="${idCampo}" type="datetime-local" required value="${escapeHtml(valorInicial)}" />`;
   }
 }
 
@@ -235,6 +237,89 @@ export async function excluirAgenda(id: string): Promise<void> {
   try {
     await api('/schedules/' + id, { method: 'DELETE' });
     toast('Excluído', 'ok');
+    await carregarAgendaLista();
+  } catch (e) {
+    toast('Erro: ' + (e as Error).message, 'erro');
+  }
+}
+
+/** Abre o form de edição pré-preenchido com o job atual (PLANO-WEB-CRUD B1) */
+export async function editarAgenda(id: string): Promise<void> {
+  let j: ScheduleJob | null = null;
+  try {
+    j = await api<ScheduleJob>('/schedules/' + encodeURIComponent(id));
+  } catch {
+    j = null;
+  }
+  if (!j) { toast('Não foi possível carregar a rotina ' + id, 'erro'); return; }
+
+  const el = document.getElementById('agenda-form');
+  if (!el) return;
+
+  const tipo = String(j.agenda?.tipo ?? 'intervalo_min');
+  let valor = String(j.agenda?.valor ?? '');
+  if (tipo === 'data_unica' && valor) {
+    const d = new Date(valor);
+    if (!Number.isNaN(d.getTime())) {
+      // datetime-local interpreta hora LOCAL — formatar no fuso (evita drift cumulativo, auditoria #3)
+      const p2 = (n: number): string => String(n).padStart(2, '0');
+      valor = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`;
+    }
+  }
+
+  el.innerHTML = `
+    <h3 class="font-semibold mb-3 flex items-center gap-2">${icone('gear')} Editar rotina <span class="font-mono text-xs text-zinc-500">${escapeHtml(id)}</span></h3>
+    <form id="form-editar-agenda" class="space-y-4" onsubmit="event.preventDefault(); salvarEdicaoAgenda('${escapeHtml(id)}')">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs text-zinc-500 mb-1">Nome</label>
+          <input id="agenda-edit-nome" required value="${escapeHtml(String(j.nome))}" />
+        </div>
+        <div>
+          <label class="block text-xs text-zinc-500 mb-1">Tipo</label>
+          <select id="agenda-edit-tipo" onchange="atualizarCampoAgenda('agenda-edit-valor-container')">
+            <option value="intervalo_min" ${tipo === 'intervalo_min' ? 'selected' : ''}>Intervalo (minutos)</option>
+            <option value="cron" ${tipo === 'cron' ? 'selected' : ''}>Cron (5 campos)</option>
+            <option value="data_unica" ${tipo === 'data_unica' ? 'selected' : ''}>Data única</option>
+          </select>
+        </div>
+      </div>
+      <div id="agenda-edit-valor-container"></div>
+      <div>
+        <label class="block text-xs text-zinc-500 mb-1">Comando (args)</label>
+        <input id="agenda-edit-args" value="${escapeHtml((j.args as string[] || []).join(' '))}" required />
+      </div>
+      <div class="flex gap-2">
+        <button type="submit" class="btn">${icone('check')} Salvar</button>
+        <button type="button" class="btn btn-ghost" onclick="renderAgendaForm()">Cancelar</button>
+      </div>
+    </form>
+  `;
+  atualizarCampoAgenda('agenda-edit-valor-container', valor);
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/** Salva a edição da rotina (PATCH pleno) */
+export async function salvarEdicaoAgenda(id: string): Promise<void> {
+  const nome = (document.getElementById('agenda-edit-nome') as HTMLInputElement)?.value.trim();
+  const tipo = (document.getElementById('agenda-edit-tipo') as HTMLSelectElement)?.value;
+  let valor = (document.getElementById('agenda-edit-valor') as HTMLInputElement)?.value ?? '';
+  const argsStr = (document.getElementById('agenda-edit-args') as HTMLInputElement)?.value.trim() ?? '';
+
+  if (!nome || !valor || !argsStr) return;
+  if (tipo === 'data_unica') {
+    valor = new Date(valor).toISOString();
+  } else if (tipo === 'intervalo_min') {
+    valor = String(Number(valor));
+  }
+
+  try {
+    await api('/schedules/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      body: JSON.stringify({ nome, agenda_tipo: tipo, agenda_valor: valor, args: argsStr.split(/\s+/).filter(Boolean) }),
+    });
+    toast('Rotina atualizada', 'ok');
+    renderAgendaForm();
     await carregarAgendaLista();
   } catch (e) {
     toast('Erro: ' + (e as Error).message, 'erro');

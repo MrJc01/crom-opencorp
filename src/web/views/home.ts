@@ -264,20 +264,9 @@ export async function decidirAprovacao(id: string, ok: boolean): Promise<void> {
 }
 
 export async function promptOrdem(): Promise<void> {
-  const { modalPrompt } = await import("../modal.js");
-  const ordem = await modalPrompt({
-    titulo: 'Executar agente',
-    label: 'Ordem para executor-padrao:',
-    multiline: true,
-    obrigatorio: true,
-  });
-  if (!ordem) return;
-  try {
-    const wsAtivo = getWsAtivo();
-    const r = await fetch('/agents/executor-padrao/run' + (wsAtivo ? '?workspace=' + wsAtivo : ''), {
-      method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('oc-token')}`, 'content-type': 'application/json' }, body: JSON.stringify({ ordem })
-    });
-    if (r.status === 202) toast('Iniciado (202)');
-    else toast('HTTP ' + r.status + ' — ' + await r.text(), 'erro');
-  } catch (e) { toast('Erro: ' + (e as Error).message, 'erro'); }
+  // PLANO-WEB-CRUD C5/E2: a home não chama mais agente fixo — leva à view Agentes,
+  // onde cada card tem "Chamar" (POST /agents/:id/run) e o seletor visual.
+  const { navegar } = await import("../router.js");
+  navegar('agentes');
+  toast('Escolha o agente e clique em Chamar', 'ok');
 }

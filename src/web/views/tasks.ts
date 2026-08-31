@@ -236,6 +236,9 @@ export async function carregarDrawerConteudo(id: string): Promise<void> {
         <span class="task-detail-label">Descrição</span>
         <textarea id="drawer-descricao" class="task-detail-value" rows="3" onblur="atualizarTaskDescricao()">${escapeHtml(String(task.descricao || ''))}</textarea>
       </div>
+      <div class="flex justify-end pt-1 border-t border-zinc-800 mt-2">
+        <button class="btn btn-ghost text-error" onclick="excluirTask()">${icone('trash')} Excluir task</button>
+      </div>
     </div>
     <div class="border-t border-zinc-800 pt-4">
       <h3 class="font-semibold mb-2 flex items-center gap-2">${icone('chat')} Chat</h3>
@@ -379,4 +382,21 @@ export async function atualizarTaskDescricao(): Promise<void> {
   if (!taskAbertaId) return;
   const descricao = (document.getElementById('drawer-descricao') as HTMLTextAreaElement)?.value || '';
   await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ descricao }) }).catch(() => undefined);
+}
+
+/** Exclui a task aberta no drawer (com confirmação) */
+export async function excluirTask(): Promise<void> {
+  if (!taskAbertaId) return;
+  const id = taskAbertaId;
+  const { modalConfirm } = await import("../modal.js");
+  if (!(await modalConfirm(`Excluir a task ${escapeHtml(id)}? Esta ação não pode ser desfeita.`, { titulo: 'Excluir task', confirmar: 'Excluir' }))) return;
+
+  try {
+    await api('/tasks/' + id, { method: 'DELETE' });
+    toast('Task excluída', 'ok');
+    fecharDrawer();
+    renderTasks();
+  } catch (e) {
+    toast('Erro ao excluir: ' + (e as Error).message, 'erro');
+  }
 }

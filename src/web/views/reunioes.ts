@@ -1,35 +1,36 @@
 /**
- * View Reuniões — Boardroom / meetings.
+ * Reuniões — painel hospedado DENTRO da página do Secretário (aba "Reuniões")
+ * (PLANO-WEB-CRUD D: proposta do dono). `#/reunioes` renderiza o Secretário com
+ * esta aba ativa. Form de convocação com check-list de agentes (seletor-agentes).
  */
 
 import { api, toast, icone, escapeHtml } from "../api.js";
 import { estadoVazio, estadoErro, estadoCarregando } from "../estado.js";
 import { ajuda } from "../help.js";
+import { htmlSeletorAgentes, agentesMarcados } from "../seletor-agentes.js";
 
-/** Renderiza a view Reuniões */
+/** Renderiza o painel de reuniões dentro do contêiner da aba do Secretário */
 export async function renderReunioes(): Promise<void> {
-  const viewEl = document.getElementById('view-reunioes');
+  const viewEl = document.getElementById('sec-tab-reunioes');
   if (!viewEl) return;
-
-  if (!viewEl.innerHTML.trim()) {
-    viewEl.innerHTML = `<h1 class="text-2xl font-bold flex items-center gap-2 mb-6">${icone('reunioes')} Reuniões</h1>` + estadoCarregando();
-  }
 
   viewEl.innerHTML = `
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-2xl font-bold flex items-center gap-2">${icone('reunioes')} Reuniões ${ajuda('reunioes')}</h1>
     </div>
-    <div class="card p-4 mb-6" id="reunioes-form"></div>
-    <div id="reunioes-lista" class="space-y-4"></div>
+    <div class="card p-4 mb-6" id="reunioes-form">${estadoCarregando()}</div>
+    <div id="reunioes-lista" class="space-y-4">${estadoCarregando()}</div>
   `;
 
-  renderReunioesForm();
+  await renderReunioesForm();
   await carregarReunioesLista();
 }
 
-function renderReunioesForm(): void {
+async function renderReunioesForm(): Promise<void> {
   const el = document.getElementById('reunioes-form');
   if (!el) return;
+
+  const seletor = await htmlSeletorAgentes('reuniao-seletor-agentes', ['ceo-documentos', 'secretario']);
 
   el.innerHTML = `
     <h3 class="font-semibold mb-3 flex items-center gap-2">${icone('plus')} Convocar reunião</h3>
@@ -39,8 +40,8 @@ function renderReunioesForm(): void {
         <textarea id="reuniao-pauta" rows="3" placeholder="Descreva a pauta da reunião…" required></textarea>
       </div>
       <div>
-        <label class="block text-xs text-zinc-500 mb-1">Agentes (opcional, separados por vírgula)</label>
-        <input id="reuniao-agentes" placeholder="ceo-documentos,ceo-estrategia,secretario" />
+        <label class="block text-xs text-zinc-500 mb-1">Participantes (marque quem chama — vazio usa o padrão)</label>
+        ${seletor}
       </div>
       <div class="flex gap-2">
         <button type="submit" class="btn">${icone('plus')} Convocar</button>
@@ -51,18 +52,17 @@ function renderReunioesForm(): void {
 
 export async function criarReuniao(): Promise<void> {
   const pauta = (document.getElementById('reuniao-pauta') as HTMLTextAreaElement)?.value.trim();
-  const agentes = (document.getElementById('reuniao-agentes') as HTMLInputElement)?.value.trim();
-
   if (!pauta) return;
+  const participantes = agentesMarcados('reuniao-seletor-agentes');
 
   try {
     const res = await api<{ status?: string }>('/meetings', {
       method: 'POST',
-      body: JSON.stringify({ pauta, agentes: agentes || undefined }),
+      body: JSON.stringify({ pauta, agentes: participantes.length ? participantes.join(',') : undefined }),
     });
 
     if (res.status === 'iniciado') {
-      toast('Reunião iniciada em background — ata em registries/meetings/', 'ok');
+      toast('Reunião iniciada em background — a ata aparece no registro quando terminar', 'ok');
     }
 
     (document.getElementById('reuniao-pauta') as HTMLTextAreaElement)!.value = '';
@@ -79,6 +79,7 @@ interface MeetingInfo {
   participantes?: string[];
   criado_em?: string;
   encerrada_em?: string;
+  ata?: string | null;
 }
 
 async function carregarReunioesLista(): Promise<void> {
@@ -112,6 +113,7 @@ async function carregarReunioesLista(): Promise<void> {
           <div class="text-sm mb-1">${escapeHtml(String(r.pauta))}</div>
           <div class="text-xs text-zinc-500">Participantes: ${escapeHtml(((r.participantes as string[]) || []).join(', '))}</div>
           <div class="text-xs text-zinc-500 font-mono mt-1">início: ${escapeHtml(String(r.criado_em).slice(0, 19).replace('T', ' '))} ${r.encerrada_em ? '· fim: ' + escapeHtml(String(r.encerrada_em).slice(0, 19).replace('T', ' ')) : ''}</div>
+          ${r.ata ? `<a class="text-xs inline-flex items-center gap-1 mt-1" href="/files?path=${encodeURIComponent(String(r.ata))}" target="_blank" rel="noopener">${icone('reunioes')} ver ata</a>` : ''}
         </div>
         ${r.status === 'em-andamento' ? '<button class="btn btn-ghost text-sm flex-shrink-0" onclick="encerrarReuniao(\'' + escapeHtml(String(r.id)) + '\')" aria-label="Encerrar reunião">' + icone('stop') + ' Encerrar</button>' : ''}
       </div>

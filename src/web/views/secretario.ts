@@ -107,17 +107,27 @@ function tempoRelativo(d: Date): string {
 }
 
 /** Renderiza a view Secretário */
-export async function renderSecretario(): Promise<void> {
+export async function renderSecretario(aba: 'conversa' | 'reunioes' = 'conversa'): Promise<void> {
   const viewEl = document.getElementById('view-secretario');
   if (!viewEl) return;
 
+  if (aba === 'reunioes') {
+    // PLANO-WEB-CRUD D: reuniões moram na mesma página do Secretário (aba)
+    viewEl.innerHTML = `
+      ${abasSecretario('reunioes')}
+      <div id="sec-tab-conversa" class="hidden"></div>
+      <div id="sec-tab-reunioes"></div>
+    `;
+    const { renderReunioes } = await import("./reunioes.js");
+    await renderReunioes();
+    return;
+  }
+
   // Estado (conversas/rascunho) SOBREVIVE à navegação — reset só em __secretarioNovaConversa
   viewEl.innerHTML = `
-    <div class="flex items-center justify-between mb-4 gap-2">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('chat')} Secretário ${ajuda('secretario')}</h1>
-      <button class="btn-ghost text-xs md:hidden" onclick="window.__secretarioToggleConv()" aria-label="Alternar lista de conversas" title="Conversas">${icone('tasks')}</button>
-    </div>
-    <div id="secretario-content">${estadoCarregandoCustom()}</div>
+    ${abasSecretario('conversa')}
+    <div id="sec-tab-conversa">${estadoCarregandoCustom()}</div>
+    <div id="sec-tab-reunioes" class="hidden"></div>
   `;
 
   try {
@@ -134,6 +144,29 @@ export async function renderSecretario(): Promise<void> {
   }
 }
 
+/** Barra de abas Conversa | Reuniões (mesma página, PLANO-WEB-CRUD D) */
+function abasSecretario(ativa: 'conversa' | 'reunioes'): string {
+  const btn = (id: 'conversa' | 'reunioes', rotulo: string, icon: string): string => `
+    <button class="btn ${ativa === id ? '' : 'btn-ghost'} text-sm" onclick="secretarioAba('${id}')" aria-label="Aba ${rotulo}">${icone(icon)} ${rotulo}</button>
+  `;
+  return `
+    <div class="flex items-center justify-between mb-4 gap-2 flex-wrap">
+      <div class="flex items-center gap-2">
+        <h1 class="text-2xl font-bold flex items-center gap-2">${icone('chat')} Secretário ${ajuda('secretario')}</h1>
+      </div>
+      <div class="flex items-center gap-1 rounded-lg border border-zinc-700 p-1">
+        ${btn('conversa', 'Conversa', 'chat')}
+        ${btn('reunioes', 'Reuniões', 'reunioes')}
+      </div>
+    </div>
+  `;
+}
+
+/** Troca de aba dentro da página do Secretário */
+export function secretarioAba(aba: 'conversa' | 'reunioes'): void {
+  void renderSecretario(aba);
+}
+
 function estadoCarregandoCustom(): string {
   return `
     <div class="card p-6 text-center">
@@ -144,7 +177,7 @@ function estadoCarregandoCustom(): string {
 }
 
 function renderStandby(): void {
-  const viewEl = document.getElementById('view-secretario');
+  const viewEl = document.getElementById('sec-tab-conversa');
   if (!viewEl) return;
 
   viewEl.innerHTML = `
@@ -191,7 +224,7 @@ async function carregarSessoes(): Promise<void> {
 }
 
 function renderChatLayout(): void {
-  const viewEl = document.getElementById('view-secretario');
+  const viewEl = document.getElementById('sec-tab-conversa');
   if (!viewEl) return;
 
   viewEl.innerHTML = `
@@ -657,7 +690,7 @@ async function enviar(): Promise<void> {
 }
 
 function renderErro(): void {
-  const viewEl = document.getElementById('view-secretario');
+  const viewEl = document.getElementById('sec-tab-conversa');
   if (!viewEl) return;
 
   viewEl.innerHTML = `

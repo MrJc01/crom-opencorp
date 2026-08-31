@@ -21,20 +21,20 @@ import { carregarWorkspaces } from "./api.js";
 import { renderHome, adicionarFeedItem } from "./views/home.js";
 import { renderTasks } from "./views/tasks.js";
 import { renderAgenda } from "./views/agenda.js";
-import { renderTeams } from "./views/teams.js";
 import { renderReunioes } from "./views/reunioes.js";
 import { renderFluxos } from "./views/fluxos.js";
+import { renderHooks, abrirFormHook, fecharFormHook, hookCamposAlvo, criarHook, excluirHook, copiarCurlHook } from "./views/hooks.js";
+import { renderAgentes, chamarAgente, editarAgente, salvarAgente, abrirFormAgente, fecharFormAgente, criarAgente, excluirAgente } from "./views/agentes.js";
 import { renderApps } from "./views/apps.js";
 import { renderAppDetail } from "./views/app-detail.js";
 import { renderHistorico } from "./views/historico.js";
-import { renderSecretario } from "./views/secretario.js";
+import { renderSecretario, secretarioAba } from "./views/secretario.js";
 import { renderConfig } from "./views/config.js";
 import { abrirWizard, exporWizard } from "./views/wizard.js";
-import { criarTask, enviarMsgDrawer, moverTaskColuna, atualizarTaskPrioridade, atualizarTaskResponsavel, atualizarTaskDue, atualizarTaskLabels, atualizarTaskDescricao } from "./views/tasks.js";
-import { agendaEscopo, atualizarCampoAgenda, criarAgenda, executarAgendaAgora, toggleAgendaAtivo, excluirAgenda, renderAgendaForm } from "./views/agenda.js";
-import { executarTeam, abrirFormTeam, fecharFormTeam, teamCamposPadrao, addPassoTeam, criarTeam } from "./views/teams.js";
+import { criarTask, enviarMsgDrawer, moverTaskColuna, atualizarTaskPrioridade, atualizarTaskResponsavel, atualizarTaskDue, atualizarTaskLabels, atualizarTaskDescricao, excluirTask } from "./views/tasks.js";
+import { agendaEscopo, atualizarCampoAgenda, criarAgenda, editarAgenda, salvarEdicaoAgenda, executarAgendaAgora, toggleAgendaAtivo, excluirAgenda, renderAgendaForm } from "./views/agenda.js";
 import { criarReuniao, encerrarReuniao } from "./views/reunioes.js";
-import { executarFlow, detalhesFlow, retomarFlow, abrirFormFlow, fecharFormFlow, addPassoFlow, criarFlow } from "./views/fluxos.js";
+import { executarFlow, detalhesFlow, retomarFlow, abrirFormFlow, fecharFormFlow, addPassoFlow, criarFlow, editarFlow, salvarEdicaoFlow, excluirFlow, migrarTeams, addPassoTemplate } from "./views/fluxos.js";
 import { loadAppsList, abrirApp, fecharApp, renderWidget, enviarForm } from "./views/apps.js";
 import { decidirAprovacao, promptOrdem, rodarFlowHub } from "./views/home.js";
 
@@ -48,10 +48,11 @@ export function configurarIconesIniciais(): void {
   document.getElementById('sidebar-logo')?.insertAdjacentHTML('beforeend', icone('home', 'mr-2') + 'opencorp');
   document.getElementById('nav-icon-home')?.insertAdjacentHTML('beforeend', icone('home'));
   document.getElementById('nav-icon-tasks')?.insertAdjacentHTML('beforeend', icone('tasks'));
+  document.getElementById('nav-icon-agentes')?.insertAdjacentHTML('beforeend', icone('teams'));
   document.getElementById('nav-icon-agenda')?.insertAdjacentHTML('beforeend', icone('agenda'));
-  document.getElementById('nav-icon-teams')?.insertAdjacentHTML('beforeend', icone('teams'));
   document.getElementById('nav-icon-reunioes')?.insertAdjacentHTML('beforeend', icone('reunioes'));
   document.getElementById('nav-icon-fluxos')?.insertAdjacentHTML('beforeend', icone('fluxos'));
+  document.getElementById('nav-icon-hooks')?.insertAdjacentHTML('beforeend', icone('hook'));
   document.getElementById('nav-icon-apps')?.insertAdjacentHTML('beforeend', icone('apps'));
   document.getElementById('nav-icon-historico')?.insertAdjacentHTML('beforeend', icone('history'));
   document.getElementById('nav-icon-secretario')?.insertAdjacentHTML('beforeend', icone('chat'));
@@ -228,10 +229,16 @@ function processarEventoSSE(ev: Record<string, unknown>): void {
     return;
   }
   if (view === 'tasks' && tipo.startsWith('task.')) renderTasks();
-  if (view === 'teams' && (tipo.startsWith('team.') || tipo.startsWith('task.'))) renderTeams();
+  if (view === 'agentes') renderAgentes();
   if (view === 'agenda') renderAgenda();
   if (view === 'fluxos') renderFluxos();
-  if (view === 'reunioes') renderReunioes();
+  if (view === 'hooks') renderHooks();
+  if (view === 'reunioes' || view === 'secretario') {
+    // re-render do painel de reuniões via SSE NÃO pode varrer o que o usuário digita (auditoria #8)
+    const ativo = document.activeElement as HTMLElement | null;
+    const digitando = !!ativo && (ativo.tagName === 'INPUT' || ativo.tagName === 'TEXTAREA' || ativo.tagName === 'SELECT');
+    if (!digitando) void renderReunioes();
+  }
   if (view === 'apps') renderApps();
 }
 
@@ -282,18 +289,21 @@ export async function renderView(): Promise<void> {
   const navItems = document.querySelectorAll('.nav-item') as NodeListOf<HTMLElement>;
   navItems.forEach(n => n.classList.toggle('active', n.dataset.view === view));
 
-  // app-detail reutiliza o DOM de apps (#app-view vive dentro de #view-apps)
-  const viewId = view === 'app-detail' ? 'apps' : view;
+  // app-detail reutiliza o DOM de apps (#app-view vive dentro de #view-apps);
+  // reunioes vive DENTRO do secretário (aba) — PLANO-WEB-CRUD D
+  const viewId = view === 'app-detail' ? 'apps' : view === 'reunioes' ? 'secretario' : view;
   const viewEl = document.getElementById('view-' + viewId);
   if (viewEl) viewEl.classList.add('active');
 
   switch (view) {
     case 'home': await renderHome(); break;
     case 'tasks': await renderTasks(); break;
+    case 'agentes': await renderAgentes(); break;
     case 'agenda': await renderAgenda(); break;
-    case 'teams': await renderTeams(); break;
-    case 'reunioes': await renderReunioes(); break;
+    case 'teams': navegar('fluxos'); break; // fusão team×fluxo (PLANO-WEB-CRUD F4)
+    case 'reunioes': await renderSecretario('reunioes'); break;
     case 'fluxos': await renderFluxos(); break;
+    case 'hooks': await renderHooks(); break;
     case 'apps': await renderApps(); break;
     case 'app-detail': await renderAppDetail(); break;
     case 'historico': await renderHistorico(); break;
@@ -370,6 +380,14 @@ export function exporGlobais(): void {
   g.fecharDrawer = fecharDrawer;
   g.criarTask = criarTask;
   g.enviarMsgDrawer = enviarMsgDrawer;
+  g.renderAgentes = renderAgentes;
+  g.chamarAgente = chamarAgente;
+  g.editarAgente = editarAgente;
+  g.salvarAgente = salvarAgente;
+  g.abrirFormAgente = abrirFormAgente;
+  g.fecharFormAgente = fecharFormAgente;
+  g.criarAgente = criarAgente;
+  g.excluirAgente = excluirAgente;
   g.moverTaskColuna = moverTaskColuna;
   g.atualizarTaskPrioridade = atualizarTaskPrioridade;
   g.atualizarTaskResponsavel = atualizarTaskResponsavel;
@@ -379,24 +397,34 @@ export function exporGlobais(): void {
   g.agendaEscopo = agendaEscopo;
   g.atualizarCampoAgenda = atualizarCampoAgenda;
   g.criarAgenda = criarAgenda;
+  g.editarAgenda = editarAgenda;
+  g.salvarEdicaoAgenda = salvarEdicaoAgenda;
   g.executarAgendaAgora = executarAgendaAgora;
   g.toggleAgendaAtivo = toggleAgendaAtivo;
   g.excluirAgenda = excluirAgenda;
-  g.executarTeam = executarTeam;
-  g.abrirFormTeam = abrirFormTeam;
-  g.fecharFormTeam = fecharFormTeam;
-  g.teamCamposPadrao = teamCamposPadrao;
-  g.addPassoTeam = addPassoTeam;
-  g.criarTeam = criarTeam;
   g.criarReuniao = criarReuniao;
   g.encerrarReuniao = encerrarReuniao;
+  g.secretarioAba = secretarioAba;
   g.executarFlow = executarFlow;
   g.detalhesFlow = detalhesFlow;
   g.retomarFlow = retomarFlow;
   g.abrirFormFlow = abrirFormFlow;
   g.fecharFormFlow = fecharFormFlow;
   g.addPassoFlow = addPassoFlow;
+  g.addPassoTemplate = addPassoTemplate;
+  g.migrarTeams = migrarTeams;
   g.criarFlow = criarFlow;
+  g.editarFlow = editarFlow;
+  g.salvarEdicaoFlow = salvarEdicaoFlow;
+  g.excluirFlow = excluirFlow;
+  g.excluirTask = excluirTask;
+  g.renderHooks = renderHooks;
+  g.abrirFormHook = abrirFormHook;
+  g.fecharFormHook = fecharFormHook;
+  g.hookCamposAlvo = hookCamposAlvo;
+  g.criarHook = criarHook;
+  g.excluirHook = excluirHook;
+  g.copiarCurlHook = copiarCurlHook;
   g.rodarFlowHub = rodarFlowHub;
   g.renderAgendaForm = renderAgendaForm;
   g.loadAppsList = loadAppsList;
