@@ -2,7 +2,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FlowError, FlowStore } from "../src/core/flow-store.js";
+import { FlowStore } from "../src/core/flow-store.js";
+import { FlowError } from "../src/core/errors.js";
 import type { OpcoesRun, ResultadoRun } from "../src/core/session-manager.js";
 
 const raizes: string[] = [];
@@ -159,5 +160,141 @@ describe("FlowStore — execução", () => {
     const ultima = await store.ultimaExecucao(ws, "relatorio");
     expect(ultima?.execId).toBe(r.execId);
     expect(ultima?.nos.find((n) => n.id === "coletar")?.exec_id).toBe("exec-no");
+  });
+});
+
+describe("FlowStore — nodes de gestão (task_create, registro, decisao)", () => {
+  it("task_create cria task real no board com contexto interpolado", async () => {
+    const { ws } = await wsNovo();
+    const flow = {
+      id: "fila",
+      nome: "Fila",
+      nos: [
+        { id: "gatilho", tipo: "manual", config: {} },
+        { id: "abrir", tipo: "task_create", config: { titulo: "Tratar: {{entrada}}", prioridade: "alta", responsavel: "agente:executor-padrao" } },
+      ],
+      arestas: [{ de: "gatilho", para: "abrir" }],
+    };
+    const { store } = sessaoFalsa(() => ok("exec-1", "x"));
+    await store.salvar(ws, flow as never);
+    const r = await store.executar(ws, "fila", { entrada: "revisão de custos" });
+    expect(r.contextoFinal).toContain("tsk-");
+    expect(r.contextoFinal).toContain("Tratar: revisão de custos");
+    const { TaskStore } = await import("../src/core/task-store.js");
+    const tasks = await new TaskStore().listar(ws);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.titulo).toBe("Tratar: revisão de custos");
+    expect(tasks[0]!.prioridade).toBe("alta");
+    expect(tasks[0]!.responsavel).toBe("agente:executor-padrao");
+    expect(tasks[0]!.criado_por).toBe("flow:fila");
+  });
+
+  it("registro grava contexto como registro novo em categoria", async () => {
+    const { ws } = await wsNovo();
+    const flow = {
+      id: "memoria",
+      nome: "Memória",
+      nos: [
+        { id: "gatilho", tipo: "manual", config: {} },
+        { id: "anotar", tipo: "registro", config: { categoria: "documentos", id: "aprendizado", titulo: "Aprendizado do dia" } },
+      ],
+      arestas: [{ de: "gatilho", para: "anotar" }],
+    };
+    const { store } = sessaoFalsa(() => ok("exec-1", "insight importantíssimo"));
+    await store.salvar(ws, flow as never);
+    const r = await store.executar(ws, "memoria", { entrada: "insight importantíssimo" });
+    expect(r.contextoFinal).toContain("documentos/aprendizado-");
+    const conteudo = await readFile(join(ws, ".opencorp", "registries", "documentos", r.contextoFinal.split("/")[1]!, "conteudo.md"), "utf8");
+    expect(conteudo).toContain("insight importantíssimo");
+  });
+
+  it("decisao roteia pelo rótulo escolhido pelo agente (e rejeita resposta inválida)", async () => {
+    const { ws } = await wsNovo();
+    const flow = {
+      id: "triagem",
+      nome: "Triagem",
+      nos: [
+        { id: "gatilho", tipo: "manual", config: {} },
+        {
+          id: "julgar",
+          tipo: "decisao",
+          config: {
+            agente: "executor-padrao",
+            pergunta: "qual caminho?",
+            opcoes: [
+              { rotulo: "URGENTE", proximo: "agora" },
+              { rotulo: "FILA", proximo: "depois" },
+            ],
+          },
+        },
+        { id: "agora", tipo: "saida", config: { registro: "documentos/urgentes" } },
+        { id: "depois", tipo: "saida", config: { registro: "documentos/na-fila" } },
+      ],
+      arestas: [{ de: "gatilho", para: "julgar" }],
+    };
+    const { store, chamadas } = sessaoFalsa(() => ok("exec-d", "Resposta: URGENTE"));
+    await store.salvar(ws, flow as never);
+    const r = await store.executar(ws, "triagem", { entrada: "petição chega hoje" });
+    expect(r.nos.find((n) => n.id === "agora")!.status).toBe("ok");
+    expect(r.nos.find((n) => n.id === "depois")!.status).toBe("nao-executado");
+    // ordem da decisão contém os rótulos e o contexto
+    const ordemDecisao = chamadas.find((c) => c.ordem?.includes("RÍGIDO"))!.ordem!;
+    expect(ordemDecisao).toContain("- URGENTE");
+    expect(ordemDecisao).toContain("- FILA");
+
+    // resposta inválida → falha rígida
+    const { store: store2 } = sessaoFalsa(() => ok("exec-d2", "acho que talvez"));
+    const err = await store2.executar(ws, "triagem", { entrada: "ambíguo" }).catch((e) => e);
+    expect(err).toBeInstanceOf(FlowError);
+    expect(err.message).toContain("não correspondeu");
+  });
+
+  it("validação rejeita decisao sem opcoes válidas", async () => {
+    const { ws } = await wsNovo();
+    const flow = {
+      id: "quebrado",
+      nome: "Q",
+      nos: [
+        { id: "gatilho", tipo: "manual", config: {} },
+        { id: "j", tipo: "decisao", config: { agente: "x", pergunta: "y" } },
+      ],
+      arestas: [{ de: "gatilho", para: "j" }],
+    };
+    const store = new FlowStore({ homeDir: (await wsNovo()).home });
+    const err = await store.salvar(ws, flow as never).catch((e) => e);
+    expect(err).toBeInstanceOf(FlowError);
+    expect(err.message).toContain("opcoes");
+  });
+});
+
+describe("FlowStore — decisão anexa ao contexto (não sobrescreve)", () => {
+  it("nós após decisão recebem contexto original + rótulo da decisão", async () => {
+    const { ws } = await wsNovo();
+    const flow = {
+      id: "anexo",
+      nome: "Anexo",
+      nos: [
+        { id: "gatilho", tipo: "manual", config: {} },
+        {
+          id: "julgar",
+          tipo: "decisao",
+          config: {
+            agente: "executor-padrao",
+            pergunta: "q",
+            opcoes: [
+              { rotulo: "A", proximo: "memorizar" },
+              { rotulo: "B", proximo: "memorizar" },
+            ],
+          },
+        },
+        { id: "memorizar", tipo: "registro", config: { categoria: "documentos", id: "com-decisao", titulo: "Com decisão" } },
+      ],
+      arestas: [{ de: "gatilho", para: "julgar" }],
+    };
+    const { store } = sessaoFalsa(() => ok("exec-a", "SUBSTÂNCIA REAL"));
+    await store.salvar(ws, flow as never);
+    const r = await store.executar(ws, "anexo", { entrada: "SUBSTÂNCIA REAL" });
+    expect(r.contextoFinal).toContain("SUBSTÂNCIA REAL");
+    expect(r.contextoFinal).toContain("[decisão (julgar)]: A");
   });
 });

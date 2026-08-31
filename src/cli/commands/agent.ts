@@ -209,6 +209,18 @@ export function registerAgentCommand(program: Command): void {
     );
 
   agent
+    .command("sync")
+    .option("--workspace <id>", "workspace alvo (padrão: ativo)")
+    .description("ressincroniza todos os agentes para o formato opencode (após mudar .md/modelos)")
+    .action((opts: { workspace?: string }) =>
+      comErros(async () => {
+        const ws = await workspaceAlvoId(opts);
+        await store.sincronizarTodos(ws.path);
+        console.log(`ok: agentes sincronizados em ${ws.path}/.opencorp/opencode/agent/`);
+      }),
+    );
+
+  agent
     .command("run")
     .argument("<id>", "id do agente")
     .argument("<ordem>", "instrução para o agente")

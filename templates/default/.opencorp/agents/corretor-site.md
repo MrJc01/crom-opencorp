@@ -2,7 +2,7 @@
 id: corretor-site
 role: Corretor de Site — execução de correções
 category: operario
-model: google/gemini-3.5-flash-lite
+model: opencode-go/glm-5.3-flash
 tools: [read, write, edit, bash, registry]
 permissions: level-2
 budget:

@@ -27,7 +27,7 @@ describe("AgentStore — criar", () => {
     const { ws, store } = await ambiente();
     const r = await store.criar(ws.path, "operador-teste", {});
     expect(r.frontmatter.id).toBe("operador-teste");
-    expect(r.frontmatter.model).toBe("opencode/nemotron-3-ultra-free");
+    expect(r.frontmatter.model).toBe("opencode-go/glm-5.3-flash");
     expect(r.frontmatter.category).toBe("operario");
     expect(existsSync(r.path)).toBe(true);
     expect(r.corpo).toContain("executor padrão");

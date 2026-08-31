@@ -116,3 +116,63 @@ cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node 
 | HTTP 400 `rest_invalid_param: status` | status no JSON do CREATE | mover status p/ 3º argumento |
 | HTTP 404 `rest_post_invalid_id` | id não existe | wp_listar e re-checar |
 | HTTP 401 | senha de aplicação revogada | reportar, não tentar de novo |
+
+## Linhas de pensamento (flows executáveis — n8n da empresa)
+
+> Uma "linha" é um grafo de nós executável: gatilho → agentes → decisões → tasks/registros.
+> Os agentes PODEM criar novas linhas gravando o JSON e rodar as existentes.
+
+**flow_listar()**
+```bash
+cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node bin/opencorp.mjs flow list --workspace <ws>
+```
+
+**flow_run(id, entrada)**
+```bash
+cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node bin/opencorp.mjs flow run <flow-id> --workspace <ws> --entrada "<contexto>"
+```
+→ executa todos os nós; ao final imprime `contextoFinal` (o resultado da linha).
+
+**flow_criar(id, nome, nos_json)** — para criar linha nova, grave o JSON diretamente:
+```bash
+cat > /home/j/.opencorp/workspaces/<ws>/.opencorp/flows/<flow-id>.json << 'EOF'
+{
+  "id": "<flow-id>",
+  "nome": "<nome>",
+  "nos": [
+    {"id": "gatilho", "tipo": "manual", "config": {}},
+    {"id": "pensar", "tipo": "agente", "config": {"agente": "<id-agente>", "ordem": "<instrução com {{entrada}}>"}},
+    {"id": "decidir", "tipo": "decisao", "config": {"agente": "<id-agente>", "pergunta": "<o que julgar>", "opcoes": [
+      {"rotulo": "OPCAO_1", "proximo": "nó-destino-1"},
+      {"rotulo": "OPCAO_2", "proximo": "nó-destino-2"}
+    ]}},
+    {"id": "abrir-task", "tipo": "task_create", "config": {"titulo": "...", "prioridade": "media", "responsavel": "agente:<id>"}},
+    {"id": "memorizar", "tipo": "registro", "config": {"categoria": "documentos", "id": "nome-do-registro", "titulo": "Título"}},
+  ],
+  "arestas": [{"de": "gatilho", "para": "pensar"}, {"de": "pensar", "para": "decidir"}, {"de": "abrir-task", "para": "memorizar"}]
+}
+
+
+## Linhas de pensamento (flows executáveis — n8n da empresa)
+
+> Uma "linha" é um grafo de nós executável: gatilho → agentes → decisões → tasks/registros.
+> Os agentes PODEM criar novas linhas gravando o JSON e rodar as existentes.
+
+**flow_listar()**
+```bash
+cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node bin/opencorp.mjs flow list --workspace <ws>
+```
+
+**flow_run(id, entrada)**
+```bash
+cd /home/j/Documentos/GitHub/crom-worker-opencode && OPENCORP_HOME=/home/j node bin/opencorp.mjs flow run <flow-id> --workspace <ws> --entrada "<contexto>"
+```
+→ executa todos os nós; ao final imprime `contextoFinal` (o resultado da linha).
+
+**flow_criar(id, nome, nos_json)** — para criar linha nova, grave o JSON diretamente (contrato abaixo), depois valide com `flow show <id>`:
+- caminho do arquivo: `/home/j/.opencorp/workspaces/<ws>/.opencorp/flows/<flow-id>.json`
+- 1 nó `manual` obrigatório (gatilho)
+- nós possíveis: `agente` ({agente, ordem com {{entrada}}}), `decisao` ({agente, pergunta, opcoes: [{rotulo, proximo}]}), `task_create` ({titulo, descricao?, prioridade?, responsavel?}), `registro` ({categoria, id?, titulo?}), `saida`, `condicao`
+- arestas: `[{de, para}]` — linear; decisão ramifica via `proximo`
+
+**Linhas padrão já instaladas**: `ceo-analise-board` (CEO analisa o board e abre tasks), `melhorias-continuas` (proposta→task ou arquivo), `ideias-conteudo` (3 ideias→escolha→task editorial), `decisao-opcoes` (ata de decisão A/B).

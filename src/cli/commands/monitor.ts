@@ -101,7 +101,8 @@ async function imprimir(wsId: string | undefined, horas: number): Promise<void> 
       porAgente.set(e.agente, (porAgente.get(e.agente) ?? 0) + 1);
     }
     const statusStr = [...porStatus.entries()].map(([k, v]) => `${k}:${v}`).join("  ") || "nenhuma";
-    console.log(`execuções    (${horas}h)  ${statusStr}`);
+    const taxaOk = janela.length > 0 ? Math.round(((porStatus.get("concluido") ?? 0) / janela.length) * 100) : 0;
+    console.log(`execuções    (${horas}h)  ${statusStr}  ·  taxa ok: ${taxaOk}%`);
     const agentesStr = [...porAgente.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}:${v}`).join("  ") || "—";
     console.log(`  agentes     ${agentesStr}`);
     const falhas = janela.filter((e) => e.status === "falhou").slice(0, 3);
@@ -141,6 +142,16 @@ async function imprimir(wsId: string | undefined, horas: number): Promise<void> 
     // ── Registros (crescimento acúmulo) ──
     const docs = await listarContagem(registros, ws.path, "documentos");
     const chats = await listarContagem(registros, ws.path, "chats");
+    // OUTPUT (7d): coisas que mudaram de estado — tasks fechadas + pareceres novos
+    const dias7d = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+    const feitas7d = todasTasks.filter((t) => t.coluna === "feito" && t.atualizado_em >= dias7d).length;
+    let novosDocs = 0;
+    try {
+      novosDocs = (await registros.listar(ws.path, "documentos")).filter((d) => d.criado_em >= dias7d).length;
+    } catch {
+      novosDocs = 0;
+    }
+    console.log(`outputs 7d   ${feitas7d} task(s) fechada(s) · ${novosDocs} documento(s) novo(s)`);
     console.log(`registries   documentos:${docs}  chats:${chats}  execucoes:${execs.length}`);
   }
   console.log("");

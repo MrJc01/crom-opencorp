@@ -2,7 +2,7 @@
 id: secretario-exec
 role: Secretário Executivo
 category: secretario
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/glm-5.3-flash
 tools: [read, write, edit, bash, registry]
 permissions: level-2
 budget:

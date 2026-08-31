@@ -2,7 +2,7 @@
 id: secretario
 role: Secretário
 category: secretario
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/glm-5.3-flash
 tools: [read, bash, registry]
 permissions: level-1
 budget:

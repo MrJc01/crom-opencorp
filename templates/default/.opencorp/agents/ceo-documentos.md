@@ -2,7 +2,7 @@
 id: ceo-documentos
 role: Chief Knowledge Officer (CEO Documentador)
 category: ceo
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/glm-5.3-flash
 tools: [read, write, registry]
 permissions: level-1
 budget:

@@ -22,3 +22,15 @@
 ## Relatório
 
 Gravar em `.opencorp/registries/documentos/PARECER-AUDITORIA-02-<data>.md`. Última linha: `VEREDITO: PASS|FAIL — <n> PASS, <n> FAIL — parecer: <caminho>`.
+
+## Endurecimento anti-placebo (v2)
+
+**C1 — Volume (revisado)**: contam apenas posts de nicho. Anúncios de lançamento ("site no ar", "bem-vindo") NÃO contam como conteúdo.
+
+**C3 — Tom (revisado)**: a amostra é SEMPRE o conteúdo publicado mais recente + 1 aleatório dos demais. O post mais recente raso (<1200 chars úteis ou <3 parágrafos) = FAIL automático.
+
+**C8 — Verificador determinístico (NOVO, roda PRIMEIRO)**:
+```bash
+cd /home/j/Documentos/GitHub/crom-worker-opencode && node scripts/verificar-site.cjs <workspace>
+```
+Se o script retornar FAIL (exit 1), a auditoria inteira é FAIL — os números do script prevalecem sobre o julgamento do crítico. Cole a saída completa no parecer. O crítico só julga o que o script não consegue: qualidade do texto, aderência editorial, contaminacão de identidade.

@@ -10,7 +10,7 @@ import { opencorpHome } from "../utils/paths.js";
 
 export const nosFlowSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "use kebab-case para o id do nó"),
-  tipo: z.enum(["manual", "agente", "saida", "condicao", "webhook"]),
+  tipo: z.enum(["manual", "agente", "saida", "condicao", "webhook", "task_create", "registro", "decisao"]),
   config: z.record(z.string(), z.unknown()).default({}),
 });
 
@@ -197,13 +197,58 @@ export class FlowStore {
           }
         }
       }
+      if (no.tipo === "task_create") {
+        if (typeof config.titulo !== "string" || config.titulo.length === 0) {
+          throw new FlowError(`flow inválido${onde("")}: nó "task_create" "${no.id}" precisa de config.titulo`);
+        }
+        const coluna = config.coluna as string | undefined;
+        if (coluna !== undefined && !/^[a-z0-9][a-z0-9_-]*$/.test(coluna)) {
+          throw new FlowError(`flow inválido${onde("")}: nó "task_create" "${no.id}" — coluna inválida "${coluna}"`);
+        }
+      }
+      if (no.tipo === "registro") {
+        const categoria = config.categoria as string | undefined;
+        if (typeof categoria !== "string" || !/^[a-z0-9][a-z0-9._-]*$/.test(categoria)) {
+          throw new FlowError(
+            `flow inválido${onde("")}: nó "registro" "${no.id}" precisa de config.categoria (ex.: "documentos")`,
+          );
+        }
+        if (config.id !== undefined && typeof config.id !== "string") {
+          throw new FlowError(`flow inválido${onde("")}: nó "registro" "${no.id}" — config.id deve ser string`);
+        }
+      }
+      if (no.tipo === "decisao") {
+        if (typeof config.agente !== "string" || config.agente.length === 0) {
+          throw new FlowError(`flow inválido${onde("")}: nó "decisao" "${no.id}" precisa de config.agente`);
+        }
+        if (typeof config.pergunta !== "string" || config.pergunta.length === 0) {
+          throw new FlowError(`flow inválido${onde("")}: nó "decisao" "${no.id}" precisa de config.pergunta`);
+        }
+        const opcoes = config.opcoes;
+        if (
+          !Array.isArray(opcoes) ||
+          opcoes.length < 2 ||
+          !opcoes.every((o) => typeof (o as { rotulo?: unknown }).rotulo === "string" && typeof (o as { proximo?: unknown }).proximo === "string")
+        ) {
+          throw new FlowError(
+            `flow inválido${onde("")}: nó "decisao" "${no.id}" precisa de config.opcoes = [{rotulo, proximo}] (≥2)`,
+          );
+        }
+        for (const o of opcoes as { rotulo: string; proximo: string }[]) {
+          if (!porId.has(o.proximo)) {
+            throw new FlowError(
+              `flow inválido${onde("")}: nó "decisao" "${no.id}" → opção "${o.rotulo}" aponta para nó inexistente "${o.proximo}"`,
+            );
+          }
+        }
+      }
     }
     for (const no of flow.nos) {
-      if (no.tipo === "condicao") continue;
+      if (no.tipo === "condicao" || no.tipo === "decisao") continue;
       const saidas = flow.arestas.filter((a) => a.de === no.id);
       if (saidas.length > 1) {
         throw new FlowError(
-          `flow inválido${onde("")}: nó "${no.id}" tem ${saidas.length} arestas de saída — v1 é linear; use um nó "condicao" para ramificar`,
+          `flow inválido${onde("")}: nó "${no.id}" tem ${saidas.length} arestas de saída — v1 é linear; use um nó "condicao"/"decisao" para ramificar`,
         );
       }
     }
@@ -212,6 +257,11 @@ export class FlowStore {
       const lista: string[] = flow.arestas.filter((a) => a.de === no.id).map((a) => a.para);
       if (no.tipo === "condicao") {
         lista.push((no.config.entao as string) ?? "", (no.config.senao as string) ?? "");
+      }
+      if (no.tipo === "decisao") {
+        for (const o of (no.config.opcoes as { proximo: string }[] | undefined) ?? []) {
+          lista.push(o.proximo);
+        }
       }
       adjacentes.set(no.id, lista.filter((x) => x.length > 0));
     }
@@ -237,6 +287,7 @@ export class FlowStore {
 
   async salvar(wsPath: string, flow: Flow): Promise<void> {
     this.validarTexto(JSON.stringify(flow), `flow "${flow.id}" (salvar)`);
+    this.validarSemantica(flow, " (salvar)");
     await mkdirRecursive(this.dir(wsPath));
     await writeFileAtomic(
       this.caminho(wsPath, flow.id),
@@ -310,7 +361,7 @@ export class FlowStore {
     });
     eventBus.emit("flow-inicio", { flow: flowId, exec_id: execId, entrada });
 
-    let contexto = entrada;
+    let contexto = stripAnsi(entrada);
     let atual: NoFlow | undefined = flow.nos.find((n) => n.tipo === "manual");
     let status: "concluido" | "falhou" = "concluido";
     let motivo: string | null = null;
@@ -323,8 +374,14 @@ export class FlowStore {
           contexto = entrada;
           await marcarNo(no.id, "ok");
         } else if (no.tipo === "agente") {
-          const config = no.config as { agente: string; ordem: string };
-          const ordem = config.ordem.replaceAll("{{entrada}}", contexto);
+          const config = no.config as { agente: string; ordem: string; resposta_arquivo?: string };
+          const ordemBase = config.ordem.replaceAll("{{entrada}}", contexto);
+          // contrato de resposta por ARQUIVO: a resposta limpa fica no sandbox
+          // (o terminal do agent run carrega transcript/ANSI — não é canal confiável)
+          const arquivoResposta = config.resposta_arquivo ?? "";
+          const ordem = arquivoResposta
+            ? `${ordemBase}\n\n[contrato de resposta] Salve sua resposta final completa em sandbox/${arquivoResposta} e responda no terminal apenas "ok".`
+            : ordemBase;
           let resultado: ResultadoRun;
           try {
             resultado = await this.sessoes.rodar({
@@ -347,7 +404,15 @@ export class FlowStore {
               `nó "${no.id}" (agente ${config.agente}) falhou — exec ${resultado.id}, exit ${resultado.exit_code}`,
             );
           }
-          contexto = resultado.captura?.trim() ?? "";
+          let contextoNovo = limparCaptura(resultado.captura ?? "");
+          if (arquivoResposta) {
+            const caminhoResposta = join(wsPath, "sandbox", arquivoResposta);
+            if (existsSync(caminhoResposta)) {
+              const doArquivo = readFileSync(caminhoResposta, "utf8").trim();
+              if (doArquivo.length > 0) contextoNovo = stripAnsi(doArquivo);
+            }
+          }
+          contexto = contextoNovo;
           eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok", exec_id: resultado.id });
           await marcarNo(no.id, "ok", resultado.id);
         } else if (no.tipo === "saida") {
@@ -402,6 +467,95 @@ export class FlowStore {
           const casou = contexto.includes(config.chave);
           await marcarNo(no.id, "ok");
           atual = porId(flow, casou ? config.entao : config.senao);
+          continue;
+        } else if (no.tipo === "task_create") {
+          const config = no.config as { titulo: string; descricao?: string; prioridade?: string; responsavel?: string; coluna?: string };
+          const { TaskStore } = await import("./task-store.js");
+          const board = new TaskStore({ agora: this.agora });
+          const prioridade = (config.prioridade === "alta" || config.prioridade === "baixa" ? config.prioridade : "media") as "alta" | "media" | "baixa";
+          const tituloInterpolado = stripAnsi(config.titulo.replaceAll("{{entrada}}", contexto));
+          // título curto: primeira linha significativa (títulos longos quebram o board)
+          const tituloLimpo = tituloInterpolado.length > 90
+            ? (tituloInterpolado.split("\n").map((l) => l.trim()).find((l) => l.length > 12) ?? tituloInterpolado).slice(0, 90)
+            : tituloInterpolado;
+          const task = await board.criar(
+            wsPath,
+            {
+              titulo: tituloLimpo,
+              descricao: stripAnsi((config.descricao ?? "").replaceAll("{{entrada}}", contexto)).slice(0, 600),
+              prioridade,
+              ...(config.responsavel ? { responsavel: config.responsavel } : {}),
+              ...(config.coluna ? { coluna: config.coluna } : {}),
+            },
+            `flow:${flowId}`,
+          );
+          contexto = `${task.id} — ${task.titulo}`;
+          eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok", task: task.id });
+          await marcarNo(no.id, "ok");
+        } else if (no.tipo === "registro") {
+          const config = no.config as { categoria: string; id?: string; titulo?: string };
+          const categoria = config.categoria;
+          const base = (config.id ?? `${flowId}-${no.id}`).replaceAll("{{entrada}}", "").slice(0, 80);
+          const ts = this.agora().toISOString().slice(0, 16).replace("T", "-").replace(":", "");
+          const registroId = `${base.toLowerCase().replace(/[^a-z0-9._-]/g, "-")}-${ts}`;
+          const titulo = (config.titulo ?? `registro do flow "${flowId}"`).replaceAll("{{entrada}}", contexto).slice(0, 140);
+          await this.registros.garantirCategorias(wsPath);
+          await this.registros.criar(wsPath, {
+            categoria,
+            id: registroId,
+            descricao: titulo,
+            criadoPor: `flow:${flowId}`,
+            eventoInicial: { evento: "criado", resumo: `registro gerado pelo flow "${flowId}" (nó ${no.id})` },
+          });
+          await this.registros.appendConteudo(wsPath, categoria, registroId, `${contexto}\n`);
+          // anexa o caminho ao contexto — nós seguintes sabem onde ficou o registro
+          contexto = `${contexto}\n\n[registrado em]: ${categoria}/${registroId}`;
+          eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok", registro: registroId });
+          await marcarNo(no.id, "ok");
+        } else if (no.tipo === "decisao") {
+          const config = no.config as { agente: string; pergunta: string; opcoes: { rotulo: string; proximo: string }[] };
+          const rotulos = config.opcoes.map((o) => o.rotulo);
+          const ordem = `${config.pergunta.replaceAll("{{entrada}}", contexto)}
+
+[contexto]
+${contexto.slice(0, 2000)}
+
+[contrato — RÍGIDO]
+Responda APENAS uma linha com o rótulo exato da sua decisão, sem nada além dele. Rótulos válidos (copie literal, sem aspas):
+${rotulos.map((r) => `- ${r}`).join("\n")}`;
+          let escolha: string | null = null;
+          try {
+            const resultado = await this.sessoes.rodar({
+              agente: config.agente,
+              ordem,
+              model: opts.model,
+              workspaceDir: wsPath,
+              referencias: [execId],
+              tipo: "flow-decisao",
+              tags: [`flow:${flowId}`, `no:${no.id}`, "decisao"],
+            });
+            if (resultado.exit_code !== 0) {
+              throw new FlowError(`exit ${resultado.exit_code}`);
+            }
+            const captura = limparCaptura(resultado.captura ?? "");
+            escolha = rotulos.find((r) => captura.includes(r)) ?? null;
+          } catch (erro) {
+            await marcarNo(no.id, "falhou", null);
+            throw new FlowError(`nó "${no.id}" (decisao) falhou: ${msg(erro)}`);
+          }
+          if (!escolha) {
+            await marcarNo(no.id, "falhou", null);
+            throw new FlowError(
+              `nó "${no.id}" (decisao): resposta não correspondeu a nenhum rótulo válido (${rotulos.join(", ")})`,
+            );
+          }
+          const proximo = config.opcoes.find((o) => o.rotulo === escolha)!.proximo;
+          // decisão ANEXA ao contexto (não sobrescreve) — nós seguintes
+          // (registro/saída) precisam da substância, não só do rótulo
+          contexto = `${contexto}\n\n[decisão (${no.id})]: ${escolha}`;
+          eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok", decisao: escolha });
+          await marcarNo(no.id, "ok");
+          atual = porId(flow, proximo);
           continue;
         }
         const saidas = flow.arestas.filter((a) => a.de === no.id);
@@ -481,6 +635,35 @@ export class FlowStore {
 
 function porId(flow: Flow, id: string): NoFlow | undefined {
   return flow.nos.find((n) => n.id === id);
+}
+
+/** Remove códigos ANSI/escape de terminal (transcripts de exec chegam coloridos) */
+function stripAnsi(texto: string): string {
+  return texto
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
+    .replace(/\x1b\][^\x07]*\x07/g, "")
+    .replace(/[\u0000-\u0008\u000b-\u001f]/g, "");
+}
+
+/**
+ * Limpa a captura de terminal de um `agent run`: remove linhas de status
+ * (prompts, setas, erros de tool, rodapés do opencorp) e devolve o corpo
+ * textual que o agente produziu — usado como contexto entre nós.
+ */
+function limparCaptura(texto: string): string {
+  const limpas = stripAnsi(texto)
+    .split("\n")
+    .filter((l) => {
+      const t = l.trim();
+      if (t.length === 0) return true;
+      if (/^(> |✗ |→ |← |\$ |Index:|\[opencorp\]|\[flow |node:|Error:|at |err_|^---$|^\+\+\+$|^@@ )/.test(t)) return false;
+      if (/^((Invalid Tool|File not found|The arguments provided)|[0-9]+ \||\.\.\.)/.test(t)) return false;
+      return true;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return limpas.length > 0 ? limpas : stripAnsi(texto).trim().slice(0, 2000);
 }
 
 function validarIdFlow(id: string): string {

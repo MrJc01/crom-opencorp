@@ -2,7 +2,7 @@
 id: auditor
 role: Auditor de Presença Digital
 category: custom
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/glm-5.3-flash
 tools: [read, write, edit, bash, registry]
 permissions: level-2
 budget:
