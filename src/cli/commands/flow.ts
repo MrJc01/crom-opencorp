@@ -177,6 +177,29 @@ function wsDe(opts: { workspace?: string }): string | undefined {
     );
 
   flow
+    .command("resume")
+    .argument("<id>", "id do flow")
+    .argument("<execId>", "id da execução falha a retomar")
+    .option("--model <provider/model>", "modelo usado nos nós agente da retomada")
+    .description("retoma uma execução falha do último nó concluído (nós ok não re-executam)")
+    .action((id: string, execId: string, opts: { model?: string; workspace?: string }) =>
+      comErros(async () => {
+        const ws = await manager.resolver(wsDe(opts));
+        try {
+          const r = await store.executar(ws.path, id, { model: opts.model, execId, retomar: true });
+          console.log(`[flow ${id}] ${r.status} (exec ${r.execId}, retomada)`);
+          for (const n of r.nos) {
+            console.log(`  nó ${n.id.padEnd(16)} ${n.tipo.padEnd(9)} ${n.status}${n.exec_id ? ` (exec ${n.exec_id})` : ""}`);
+          }
+          console.log(`contexto final: ${r.contextoFinal.slice(0, 200)}`);
+        } catch (erro) {
+          console.error(`erro: ${erro instanceof Error ? erro.message : String(erro)}`);
+          process.exitCode = 1;
+        }
+      }),
+    );
+
+  flow
     .command("status")
     .argument("<id>", "id do flow")
     .description("mostra a última execução do flow e o status por nó")
