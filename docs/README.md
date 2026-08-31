@@ -37,6 +37,8 @@
 | **13** | [**Plano Extensões da Plataforma (ATUAL)**](13-plano-extensoes-plataforma.md) | **Etapas 19–25: Tasks, Scheduler, Webhooks, Tools/MCP, Mini-apps, Teams, v0.3.0** |
 | 14 | [Análise multi-agente + chat de tasks](14-analise-multiagente-tasks.md) | Padrões de orquestração e chat interno |
 | 15 | [Gestão de Operação](15-gestao-operacao.md) | Tasks, Agenda, Fluxos, Teams, Reuniões, hooks — como funciona (consulta) |
+| — | [PLANO WEB CRUD](PLANO-WEB-CRUD.md) | Plano implementado (v0.6.0): CRUD completo no painel, reuniões no Secretário, fusão team×fluxo |
+| — | [Release v0.6.0](release-v0.6.0.md) | Notas da versão: painel editável, Tailwind local + DaisyUI, nós fanout/review/debate |
 
 ### Pastas auxiliares
 

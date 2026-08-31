@@ -64,13 +64,16 @@ opencorp session kill <id>
 opencorp run "<ordem>" [--agent executor-padrao] [--gatilho <tipo>:<origem>]   # atalho de agent run
 ```
 
-## flow (durável — retomada)
+## flow (durável — retomada e migração)
 
 ```bash
 opencorp flow run <id> [--entrada texto] [--model m]
 opencorp flow status <id>                              # última execução, status por nó
 opencorp flow resume <id> <execId> [--model m]         # retoma execução FALHA do último nó ok
 # nós "ok" do run anterior não re-executam; o contexto final é preservado (mesmo exec)
+opencorp flow migrate-teams                            # converte teams legados em fluxos (v0.6.0)
+# cada teams/<id>.json vira flows/<id>.json (pipeline→nós agente em sequência; fanout/review/debate→nó correspondente)
+# o team original é arquivado como <id>.json.migrado; POST /teams segue existindo (deprecado)
 ```
 
 ## registry (registros globais)

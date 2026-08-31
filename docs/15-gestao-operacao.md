@@ -101,6 +101,9 @@ O spawn é **detached** (processo próprio, sobrevive ao emissor; log em `~/.ope
 | `condicao` | ramifica se `contexto.includes(chave)` | `chave`, `entao`, `senao` |
 | `decisao` | agente escolhe entre rótulos (contrato rígido: 1 linha com o rótulo) | `agente`, `pergunta`, `opcoes: [{rotulo, proximo}]` — decisão é **anexada** ao contexto |
 | `task_create` | cria task no board | `titulo`, `descricao?`, `prioridade?`, `responsavel?`, `coluna?` |
+| `fanout` | **v0.6.0** — passos paralelos + síntese opcional, versão contextual do team (o contexto flui entre nós; **não** cria kanban) | `paralelos` (≥2), `sintese?` |
+| `review` | **v0.6.0** — executor↔revisor com contrato `APROVADO`/`AJUSTES` (versão contextual) | `executor`, `revisor`, `turnos` (≤5) |
+| `debate` | **v0.6.0** — propostas em paralelo + moderador decide (versão contextual) | `proponentes` (≥2), `moderador` |
 
 ### 4.2 Motor de execução
 
@@ -123,6 +126,8 @@ O spawn é **detached** (processo próprio, sobrevive ao emissor; log em `~/.ope
 | **debate** | `proponentes` (≥2) + `moderador` | Propostas em paralelo → moderador recebe propostas e responde `DECISÃO: <escolha>` → registrada como mensagem tipo `decisao` |
 
 Por que 4 padrões: são os modelos de coordenação do doc 14 (pipeline puro, fan-out/fan-in com barreira, revisão cruzada, debate/consenso) — o humano escolhe por config, sem orquestrador improvisado.
+
+> **v0.6.0 — fusão team×fluxo**: os padrões viraram nós do motor de fluxos (`fanout`, `review`, `debate`; pipeline = sequência de nós `agente`) — versões **contextuais** (o contexto flui entre nós; não criam kanban). Times legados viram fluxos com `opencorp flow migrate-teams` (arquivo original arquivado como `<id>.json.migrado`); a UI fundiu os editores (sidebar sem Teams; `#/teams` redireciona) e `POST /teams` segue existindo **deprecado**. Ver também **docs/PLANO-WEB-CRUD.md** (Etapa F).
 
 ---
 

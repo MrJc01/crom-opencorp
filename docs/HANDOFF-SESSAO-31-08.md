@@ -52,3 +52,29 @@ idênticas no baseline); doctor `checkLedger` (órfãs >24h em "executando" → 
 `docs/release-v0.5.0.md`; package.json → **0.5.0**. Validação ao vivo: `agent run --gatilho manual:...`
 → ledger correto no corp.db do pulso-diario + `GET /execucoes` na API. Versão nova exige restart do
 serve/daemon para `/health` mostrar v0.5.0 (daemon já reiniciado nesta sessão).
+
+## PLANO-WEB-CRUD (mesma sessão)
+
+Implementado por completo (docs/PLANO-WEB-CRUD.md marcado; release em `docs/release-v0.6.0.md`):
+
+1. **Etapa 0** — Tailwind v4 + DaisyUI local: `src/web/css/app.css` (tema dark da paleta), `legacy.css`
+   em layer components, script `build:css` no build, index.html sem CDN — corrige CSS quebrado offline/LAN.
+2. **Etapa A** — excluir task no drawer; excluir/detalhe team; view Hooks nova.
+3. **Etapa B** — `PATCH /schedules/:id` amplo + form Editar rotina; `PUT`/`DELETE /flows/:id` + editor
+   linear pré-preenchido (não-lineares avisam p/ CLI); `PUT /teams/:id`. **B4 FORA de escopo** — sessões
+   do secretário vivem no servidor OpenCode externo (movido ao §7 do plano).
+4. **Etapa C** — view Agentes (cards), `PUT`/`DELETE /agents/:id` (DELETE bloqueia 409 se citado, via
+   `citacoesAgente`), criar por clone, botão Chamar; "Run agente" da home leva à view Agentes.
+5. **Etapa D** — Reuniões virou aba no Secretário (`Conversa | Reuniões`; `#/reunioes` ativa a aba),
+   convocação com check-list de agentes, link da ata via `/files`.
+6. **Etapa E** — componente `seletor-agentes.ts` (checkboxes).
+7. **Etapa F** — fusão team×fluxo: nós `fanout`/`review`/`debate` contextuais (sem kanban) no motor;
+   migração `opencorp flow migrate-teams` + `POST /flows/migrate-teams` (legado arquivado como
+   `<id>.json.migrado`); editor único em Fluxos (templates Pipeline/Fanout/Review/Debate); sidebar sem
+   Teams, `#/teams` redireciona; `POST /teams` segue existindo deprecado.
+8. **Infra de testes** — `tests/fixtures/fake-opencode.mjs` ganhou `GET /session/:id/message`
+   (opencode ≥1.18), desbloqueando e2e de secretário/chat presos por stream (falha pré-existente).
+9. **Testes** — 463 unitários ✅ (39 arquivos; novos `tests/web-crud.test.ts` e `tests/flow-migrate.test.ts`);
+   e2e ~56 com 6 falhas PRÉ-existentes no baseline (agenda ×5 — seeder usa `echo` fora da whitelist;
+   chat "markdown rico" ×1).
+10. **Estado** — package.json → **0.6.0**; docs atualizados (release-v0.6.0.md, 08, 15, README). **NÃO commitado ainda.**
