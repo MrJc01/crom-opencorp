@@ -13,6 +13,7 @@ import { BudgetManager } from "../core/budget-manager.js";
 import { ApprovalsStore } from "../core/approvals-store.js";
 import { SettingsError, SettingsStore } from "../core/settings-store.js";
 import { FlowStore, type SessaoFlow } from "../core/flow-store.js";
+import { migrarTeamsParaFlows } from "../core/flow-migrate.js";
 import { MeetingManager } from "../core/meeting-manager.js";
 import { TaskStore, type Task } from "../core/task-store.js";
 import { Scheduler } from "../core/scheduler.js";
@@ -23,6 +24,7 @@ import { TeamStore } from "../core/team-store.js";
 import { OrquestradorDeTeams } from "../core/team-orchestrator.js";
 import { instalarMencoes } from "../core/mention-runner.js";
 import { TaskError, SchedulerError, HookError, AppError, TeamError } from "../core/errors.js";
+import { FlowError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
 import { OpencodeServerManager, SecretarioError } from "../core/opencode-server.js";
@@ -41,6 +43,28 @@ interface DefinicaoRota {
   publico?: boolean;
 }
 
+/** Whitelist de comandos que uma rotina (schedule) pode executar — job inválido
+ *  é barrado na criação/edição, não descoberto em produção (PLANO-WEB-CRUD B1). */
+const COMANDOS_AGENDA = new Set([
+  "agent", "task", "flow", "team", "meeting", "schedule", "workspace", "doctor", "settings",
+  "budget", "approvals", "template", "hook", "tool", "monitor", "app", "registry", "subcorp",
+  "supervisor", "scheduler", "serve", "web", "test",
+]);
+
+/** Normaliza args de rotina: array → strings; string → split por espaços. */
+function normalizarArgsAgenda(args: unknown): string[] {
+  return Array.isArray(args) ? (args as unknown[]).map(String) : String(args ?? "").split(/\s+/).filter(Boolean);
+}
+
+/** Monta a Agenda a partir de agenda_tipo/agenda_valor do corpo HTTP. */
+function parseAgendaCorpo(corpo: Record<string, unknown>): Agenda {
+  return corpo.agenda_tipo === "cron"
+    ? { tipo: "cron", valor: String(corpo.agenda_valor ?? "") }
+    : corpo.agenda_tipo === "data_unica"
+      ? { tipo: "data_unica", valor: String(corpo.agenda_valor ?? "") }
+      : { tipo: "intervalo_min", valor: Number(corpo.agenda_valor ?? 0) };
+}
+
 const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/health", descricao: "Verifica saúde do servidor e versão", publico: true },
   { method: "GET", path: "/status", descricao: "Saúde agregada: scheduler daemon + secretário" },
@@ -50,6 +74,9 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/workspaces/current", descricao: "Retorna workspace atual" },
   { method: "GET", path: "/agents", descricao: "Lista agentes do workspace" },
   { method: "POST", path: "/agents", descricao: "Cria novo agente", corpo: true },
+  { method: "GET", path: "/agents/:id", descricao: "Detalhe do agente (frontmatter + prompt)" },
+  { method: "PUT", path: "/agents/:id", descricao: "Edita frontmatter do agente (model, permissions, budget, tools, role)", corpo: true },
+  { method: "DELETE", path: "/agents/:id", descricao: "Exclui agente (409 se citado em teams/flows/tasks)" },
   { method: "POST", path: "/agents/:id/run", descricao: "Executa agente com ordem", corpo: true },
   { method: "GET", path: "/sessions", descricao: "Lista execuções/sessões" },
   { method: "GET", path: "/historico", descricao: "Histórico unificado (execuções + tasks + rotinas + conversas da secretária) — query: agente, tipo, limite" },
@@ -73,6 +100,9 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/tools", descricao: "Lista ferramentas declarativas do workspace (.opencorp/tools/*.json — só a spec, sem executar)" },
   { method: "GET", path: "/flows", descricao: "Lista flows disponíveis" },
   { method: "POST", path: "/flows", descricao: "Cria novo flow", corpo: true },
+  { method: "POST", path: "/flows/migrate-teams", descricao: "Migra teams legados para flows (fusão team×fluxo)" },
+  { method: "PUT", path: "/flows/:id", descricao: "Salva o grafo completo do flow (valida semântica)", corpo: true },
+  { method: "DELETE", path: "/flows/:id", descricao: "Exclui flow" },
   { method: "GET", path: "/flows/:id", descricao: "Obtém detalhes de um flow" },
   { method: "GET", path: "/flows/:id/status", descricao: "Última execução do flow (status por nó)" },
   { method: "POST", path: "/flows/:id/run", descricao: "Executa um flow", corpo: true },
@@ -93,6 +123,7 @@ const ROUTES: DefinicaoRota[] = [
   { method: "DELETE", path: "/apps/:id", descricao: "Exclui app" },
   { method: "GET", path: "/teams", descricao: "Lista teams do workspace" },
   { method: "POST", path: "/teams", descricao: "Cria/salva spec de team (validado)", corpo: true },
+  { method: "PUT", path: "/teams/:id", descricao: "Edita spec de team (validado)", corpo: true },
   { method: "GET", path: "/teams/:id", descricao: "Obtém spec de um team" },
   { method: "DELETE", path: "/teams/:id", descricao: "Exclui team" },
   { method: "POST", path: "/teams/:id/run", descricao: "Executa team via orquestrador", corpo: true },
@@ -114,9 +145,10 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/schedules", descricao: "Lista rotinas agendadas (query: workspace | all=1)" },
   { method: "POST", path: "/schedules", descricao: "Cria rotina agendada (valida args na criação)", corpo: true },
   { method: "GET", path: "/schedules/:id", descricao: "Detalhe da rotina" },
-  { method: "PATCH", path: "/schedules/:id", descricao: "Pausa/retoma rotina", corpo: true },
+  { method: "PATCH", path: "/schedules/:id", descricao: "Edita rotina (ativo, nome, agenda_tipo/valor, args, graca_min)", corpo: true },
   { method: "DELETE", path: "/schedules/:id", descricao: "Exclui rotina" },
   { method: "POST", path: "/schedules/:id/run", descricao: "Executa rotina imediatamente (run-now)" },
+  { method: "POST", path: "/schedules/:id", descricao: "Alias de /schedules/:id/run" },
   { method: "GET", path: "/schedules/:id/runs", descricao: "Histórico de execuções da rotina (job_runs)" },
   { method: "GET", path: "/secretario/sessoes/:id", descricao: "Detalhe/mensagens de uma sessão do opencode (proxy)", publico: false },
 ];
@@ -280,6 +312,7 @@ function statusHttpDe(erro: unknown): number {
   if (erro instanceof HookError) return ((erro as unknown as { status?: number }).status ?? 400);
   if (erro instanceof AppError) return ((erro as unknown as { status?: number }).status ?? 404);
   if (erro instanceof RegistryError || erro instanceof WorkspaceError || erro instanceof AgentError) return 422;
+  if (erro instanceof FlowError) return /não encontrado/i.test(erro.message) ? 404 : 400;
   if (erro instanceof SecretarioError) return (erro as SecretarioError).status ?? 500;
   return 500;
 }
@@ -358,6 +391,51 @@ export function iniciarPollExecucoes(
       }
     })();
   }, intervaloMs);
+}
+
+/** Onde um agente é citado: specs de teams (.opencorp/teams/*.json), grafos de flows
+ *  (.opencorp/flows/*.json, nós agente/decisao) e tasks abertas (responsavel=agente:id).
+ *  Usado pela guarda de exclusão (PUT DELETE /agents/:id → 409). */
+async function citacoesAgente(
+  wsPath: string,
+  idAgente: string,
+  listarTasks: (p: string) => Promise<Array<{ responsavel?: string; coluna: string; id: string; titulo: string }>>,
+): Promise<string[]> {
+  const citacoes: string[] = [];
+  const { readdirSync, readFileSync, existsSync } = await import("node:fs");
+  const { join } = await import("node:path");
+
+  const varreDirJson = (dir: string, rotulo: string, contemAgente: (obj: Record<string, unknown>, id: string) => boolean): void => {
+    if (!existsSync(dir)) return;
+    for (const f of readdirSync(dir).filter((x) => x.endsWith(".json"))) {
+      try {
+        const obj = JSON.parse(readFileSync(join(dir, f), "utf8")) as Record<string, unknown>;
+        if (contemAgente(obj, String(obj.id ?? f.replace(/\.json$/, "")))) citacoes.push(`${rotulo} ${obj.id ?? f.replace(/\.json$/, "")}`);
+      } catch {
+        /* arquivo ilegível não bloqueia exclusão */
+      }
+    }
+  };
+
+  /** Teams/flows: confere o JSON inteiro — pega nós agente E os nós da fusão
+   *  (fanout.paralelos/sintese, review.executor/revisor, debate.proponentes/moderador),
+   *  que todos usam a forma { "agente": "<id>" } (achado da auditoria #2). */
+  const jsonCita = (obj: Record<string, unknown>): boolean =>
+    JSON.stringify(obj).includes(`"agente":"${idAgente}"`) || JSON.stringify(obj).includes(`"agente": "${idAgente}"`);
+
+  varreDirJson(join(wsPath, ".opencorp", "teams"), "team", (obj) => jsonCita(obj));
+  varreDirJson(join(wsPath, ".opencorp", "flows"), "flow", (obj) => jsonCita(obj));
+
+  try {
+    const abertas = await listarTasks(wsPath);
+    for (const t of abertas) {
+      if (t.responsavel === `agente:${idAgente}` && t.coluna !== "feito") citacoes.push(`task ${t.id} (${t.titulo})`);
+    }
+  } catch {
+    /* board indisponível não bloqueia */
+  }
+
+  return citacoes;
 }
 
 export function createApiServer(opcoes: ApiServerOptions = {}): {
@@ -532,6 +610,55 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const corpo = (await lerCorpo(req)) as { id?: string; from?: string; model?: string };
           const criado = await agentes.criar(ws.path, corpo.id ?? "", { de: corpo.from, model: corpo.model });
           enviar(res, 201, { id: criado.frontmatter.id, modelo: criado.frontmatter.model });
+          return;
+        }
+        const mAgente = /^\/agents\/([^/]+)$/.exec(rota);
+        if (mAgente && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const carregado = await agentes.carregar(ws.path, decodeURIComponent(mAgente[1]!));
+          enviar(res, 200, { ...carregado.frontmatter, corpo_prompt: carregado.corpo });
+          return;
+        }
+        if (mAgente && req.method === "PUT") {
+          // edição do frontmatter (PLANO-WEB-CRUD C2) — zod + bridge no AgentStore.editar
+          const ws = await resolverWs(url);
+          const id = decodeURIComponent(mAgente[1]!);
+          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+          const salvo = await agentes.editar(ws.path, id, {
+            role: corpo.role !== undefined ? String(corpo.role) : undefined,
+            model: corpo.model !== undefined ? String(corpo.model) : undefined,
+            permissions: corpo.permissions !== undefined ? (String(corpo.permissions) as "level-1" | "level-2" | "level-3") : undefined,
+            tools: Array.isArray(corpo.tools) ? (corpo.tools as unknown[]).map(String).filter(Boolean) : undefined,
+            budget_daily_usd: typeof corpo.budget_daily_usd === "number" ? corpo.budget_daily_usd : undefined,
+            budget_max_turns: typeof corpo.budget_max_turns === "number" ? corpo.budget_max_turns : undefined,
+          });
+          eventBus.emit("agente.editado", { agente: id });
+          enviar(res, 200, salvo);
+          return;
+        }
+        if (mAgente && req.method === "DELETE") {
+          // guarda: agente citado em teams/flows/task responsável → 409 (PLANO-WEB-CRUD C3, decisão do dono: bloquear)
+          const ws = await resolverWs(url);
+          const id = decodeURIComponent(mAgente[1]!);
+          const citacoes = await citacoesAgente(ws.path, id, (p) => tasks.listar(p));
+          try {
+            for (const h of hooks.listar(ws.path)) {
+              const alvo = h.alvo as { tipo?: string; agente?: string };
+              if (alvo?.tipo === "agent_run" && alvo.agente === id) citacoes.push(`hook ${h.id}`);
+            }
+          } catch {
+            /* hooks indisponíveis não bloqueiam */
+          }
+          if (citacoes.length) {
+            enviar(res, 409, {
+              erro: `agente "${id}" está em uso e não pode ser excluído — remova-o primeiro de: ${citacoes.slice(0, 8).join(", ")}${citacoes.length > 8 ? ` (+${citacoes.length - 8})` : ""}`,
+              citacoes,
+            });
+            return;
+          }
+          await agentes.excluir(ws.path, id);
+          eventBus.emit("agente.excluido", { agente: id });
+          enviar(res, 200, { ok: true, id });
           return;
         }
         const mAgenteRun = /^\/agents\/([^/]+)\/run$/.exec(rota);
@@ -800,10 +927,38 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           enviar(res, 201, f);
           return;
         }
+        if (rota === "/flows/migrate-teams" && req.method === "POST") {
+          // fusão team×fluxo (PLANO-WEB-CRUD F3): converte teams legados em flows
+          const ws = await resolverWs(url);
+          enviar(res, 200, await migrarTeamsParaFlows(ws.path, teams, flows));
+          return;
+        }
         const mFlow = /^\/flows\/([^/]+)$/.exec(rota);
         if (mFlow && req.method === "GET") {
           const ws = await resolverWs(url);
           enviar(res, 200, await flows.obter(ws.path, decodeURIComponent(mFlow[1]!)));
+          return;
+        }
+        if (mFlow && req.method === "PUT") {
+          // salva o grafo completo (PLANO-WEB-CRUD B2) — zod + semântica no FlowStore.salvar
+          const ws = await resolverWs(url);
+          const flowId = decodeURIComponent(mFlow[1]!);
+          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+          if (corpo.id && corpo.id !== flowId) {
+            enviar(res, 422, { erro: `id do corpo ("${String(corpo.id)}") não bate com a rota ("${flowId}")` });
+            return;
+          }
+          const atual = await flows.obter(ws.path, flowId); // 404 se não existe
+          await flows.salvar(ws.path, { ...corpo, id: flowId, nome: String(corpo.nome ?? atual.nome) } as Parameters<typeof flows.salvar>[1]);          eventBus.emit("flow-salvo", { flow: flowId });
+          enviar(res, 200, await flows.obter(ws.path, flowId));
+          return;
+        }
+        if (mFlow && req.method === "DELETE") {
+          const ws = await resolverWs(url);
+          const flowId = decodeURIComponent(mFlow[1]!);
+          await flows.deletar(ws.path, flowId);
+          eventBus.emit("flow-excluido", { flow: flowId });
+          enviar(res, 200, { ok: true, id: flowId });
           return;
         }
         const mFlowStatus = /^\/flows\/([^/]+)\/status$/.exec(rota);
@@ -968,23 +1123,13 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         }
         if (rota === "/schedules" && req.method === "POST") {
           const corpo = (await lerCorpo(req)) as Record<string, unknown>;
-          const argsJob = Array.isArray(corpo.args) ? (corpo.args as unknown[]).map(String) : String(corpo.args ?? "").split(/\s+/).filter(Boolean);
+          const argsJob = normalizarArgsAgenda(corpo.args);
           // whitelist de comandos reais — job inválido é barrado na criação, não descoberto em produção
-          const comandos = new Set([
-            "agent", "task", "flow", "team", "meeting", "schedule", "workspace", "doctor", "settings",
-            "budget", "approvals", "template", "hook", "tool", "monitor", "app", "registry", "subcorp",
-            "supervisor", "scheduler", "serve", "web", "test",
-          ]);
-          if (argsJob.length === 0 || !comandos.has(argsJob[0]!)) {
+          if (argsJob.length === 0 || !COMANDOS_AGENDA.has(argsJob[0]!)) {
             enviar(res, 422, { erro: `args[0] inválido: "${String(argsJob[0] ?? "")}" não é um comando opencorp` });
             return;
           }
-          const agenda: Agenda =
-            corpo.agenda_tipo === "cron"
-              ? { tipo: "cron", valor: String(corpo.agenda_valor ?? "") }
-              : corpo.agenda_tipo === "data_unica"
-                ? { tipo: "data_unica", valor: String(corpo.agenda_valor ?? "") }
-                : { tipo: "intervalo_min", valor: Number(corpo.agenda_valor ?? 0) };
+          const agenda: Agenda = parseAgendaCorpo(corpo);
           const j = await scheduler.criar({
             nome: String(corpo.nome ?? ""),
             agenda,
@@ -1022,8 +1167,39 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               enviar(res, 200, await scheduler.pausar(id));
             } else if (corpo.ativo === true) {
               enviar(res, 200, await scheduler.retomar(id));
+            } else if (corpo.agenda_tipo !== undefined || corpo.agenda_valor !== undefined) {
+              // edição de agenda exige o PAR (tipo, valor) — evita converter cron em intervalo sem querer (auditoria #4);
+              // nome/args/graca_min podem vir no mesmo PATCH
+              if (corpo.agenda_tipo === undefined || corpo.agenda_valor === undefined) {
+                enviar(res, 422, { erro: "informe agenda_tipo E agenda_valor juntos para editar a agenda" });
+                return;
+              }
+              const argsJob = corpo.args !== undefined ? normalizarArgsAgenda(corpo.args) : undefined;
+              if (argsJob && (argsJob.length === 0 || !COMANDOS_AGENDA.has(argsJob[0]!))) {
+                enviar(res, 422, { erro: `args[0] inválido: "${String(argsJob[0] ?? "")}" não é um comando opencorp` });
+                return;
+              }
+              enviar(res, 200, await scheduler.atualizar(id, {
+                nome: corpo.nome !== undefined ? String(corpo.nome) : undefined,
+                agenda: parseAgendaCorpo(corpo),
+                args: argsJob,
+                graca_min: typeof corpo.graca_min === "number" ? corpo.graca_min : undefined,
+              }));
+            } else if (corpo.nome !== undefined || corpo.args !== undefined || corpo.graca_min !== undefined) {
+              // edição plena (PLANO-WEB-CRUD B1) — mesma whitelist da criação
+              const argsJob = corpo.args !== undefined ? normalizarArgsAgenda(corpo.args) : undefined;
+              if (argsJob && (argsJob.length === 0 || !COMANDOS_AGENDA.has(argsJob[0]!))) {
+                enviar(res, 422, { erro: `args[0] inválido: "${String(argsJob[0] ?? "")}" não é um comando opencorp` });
+                return;
+              }
+              enviar(res, 200, await scheduler.atualizar(id, {
+                nome: corpo.nome !== undefined ? String(corpo.nome) : undefined,
+                agenda: parseAgendaCorpo(corpo),
+                args: argsJob,
+                graca_min: typeof corpo.graca_min === "number" ? corpo.graca_min : undefined,
+              }));
             } else {
-              enviar(res, 400, { erro: "use {ativo: true|false}" });
+              enviar(res, 400, { erro: "corpo vazio — use {ativo}, {nome}, {agenda_tipo/agenda_valor}, {args} ou {graca_min}" });
             }
             return;
           }
@@ -1098,6 +1274,20 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             enviar(res, 200, { ok: true, id: teamId });
             return;
           }
+          if (!acao && req.method === "PUT") {
+            // edição plena do spec (PLANO-WEB-CRUD B3) — zod + validarPadrao no TeamStore.salvar
+            const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+            if (corpo.id && corpo.id !== teamId) {
+              enviar(res, 422, { erro: `id do corpo ("${String(corpo.id)}") não bate com a rota ("${teamId}")` });
+              return;
+            }
+            const atual = teams.obter(ws.path, teamId); // 404 se não existe
+            const spec = { ...corpo, id: teamId, criado_em: String(corpo.criado_em ?? atual.criado_em) };
+            await teams.salvar(ws.path, spec as Parameters<typeof teams.salvar>[1]);
+            eventBus.emit("team.salvo", { team: teamId });
+            enviar(res, 200, spec);
+            return;
+          }
           if (acao === "run" && req.method === "POST") {
             const corpo = (await lerCorpo(req)) as { entrada?: string };
             const resOrq = await orquestrador.executar(ws.path, teamId, String(corpo.entrada ?? ""));
@@ -1108,7 +1298,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
 
         if (rota === "/hooks" && req.method === "GET") {
           const ws = await resolverWs(url);
-          enviar(res, 200, hooks.listar(ws.path));
+          // token NÃO sai na lista — só em GET /hooks/:id (copiar cURL sob demanda)
+          enviar(res, 200, hooks.listar(ws.path).map((h) => ({ ...h, token: undefined })));
           return;
         }
         if (rota === "/hooks" && req.method === "POST") {

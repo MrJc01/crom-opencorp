@@ -307,6 +307,29 @@ export class Scheduler {
     return this.obter(id);
   }
 
+  /**
+   * Edita um job existente (PLANO-WEB-CRUD B1). Campos ausentes são preservados.
+   * Mudou agenda → recalcula proxima_exec. Valida com as mesmas regras da criação.
+   */
+  async atualizar(
+    id: string,
+    dados: { nome?: string; agenda?: Agenda; args?: string[]; graca_min?: number },
+  ): Promise<Job> {
+    const atual = await this.obter(id);
+    const nome = dados.nome !== undefined ? dados.nome.trim() : atual.nome;
+    if (nome.length === 0) throw new SchedulerError("nome não pode ficar vazio");
+    const agenda = dados.agenda ?? atual.agenda;
+    this.validarAgenda(agenda);
+    const args = dados.args ?? atual.args;
+    if (!Array.isArray(args) || args.length === 0) throw new SchedulerError("args obrigatório — comando opencorp a executar");
+    this.validarArgsJob(args);
+    const proxima = this.calcularProxima(agenda, this.agora()).toISOString();
+    (await this.banco())
+      .prepare("UPDATE jobs SET nome = ?, agenda_tipo = ?, agenda_valor = ?, args = ?, graca_min = ?, proxima_exec = ? WHERE id = ?")
+      .run(nome, agenda.tipo, String(agenda.valor), JSON.stringify(args), dados.graca_min ?? atual.graca_min, proxima, id);
+    return this.obter(id);
+  }
+
   async retomar(id: string): Promise<Job> {
     (await this.banco()).prepare("UPDATE jobs SET ativo = 1 WHERE id = ?").run(id);
     const job = await this.obter(id);

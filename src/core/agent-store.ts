@@ -11,7 +11,9 @@ import {
 import { AgentError } from "./errors.js";
 import { OpenCodeBridge } from "./opencode-bridge.js";
 import { RegistryStore } from "./registry-store.js";
+import { unlink } from "node:fs/promises";
 import { writeFileAtomic } from "../utils/fs-safe.js";
+import { agentSchema } from "../schemas/agent.js";
 
 export interface AgenteResumo {
   id: string;
@@ -176,6 +178,65 @@ export class AgentStore {
 
   async preEditar(wsPath: string, id: string): Promise<string> {
     return this.caminhoExistente(wsPath, id);
+  }
+
+  /**
+   * Edita o frontmatter do agente preservando o prompt (corpo) — PLANO-WEB-CRUD C2.
+   * Campos ausentes são preservados. Valida com o agentSchema (zod) antes de gravar,
+   * sincroniza o bridge do OpenCode e registra no agentes-log.
+   */
+  async editar(
+    wsPath: string,
+    id: string,
+    mudancas: {
+      role?: string;
+      model?: string;
+      permissions?: Agente["permissions"];
+      tools?: string[];
+      budget_daily_usd?: number;
+      budget_max_turns?: number;
+    },
+  ): Promise<Agente> {
+    const carregado = await this.carregar(wsPath, id);
+    const fundido: Agente = {
+      ...carregado.frontmatter,
+      role: mudancas.role?.trim() || carregado.frontmatter.role,
+      model: mudancas.model?.trim() || carregado.frontmatter.model,
+      permissions: mudancas.permissions ?? carregado.frontmatter.permissions,
+      tools: mudancas.tools && mudancas.tools.length ? mudancas.tools : carregado.frontmatter.tools,
+      budget: {
+        ...carregado.frontmatter.budget,
+        daily_usd: mudancas.budget_daily_usd ?? carregado.frontmatter.budget.daily_usd,
+        max_turns: mudancas.budget_max_turns ?? carregado.frontmatter.budget.max_turns,
+      },
+    };
+    const parsed = agentSchema.safeParse(fundido);
+    if (!parsed.success) {
+      const detalhe = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+      throw new AgentSchemaError(`spec do agente "${id}" inválido — ${detalhe}`);
+    }
+    const novoMd = serializarAgenteMd(parsed.data, carregado.corpo);
+    await writeFileAtomic(this.caminhoExistente(wsPath, id), novoMd);
+    await this.bridge.sincronizarAgente(wsPath, parsed.data, carregado.corpo);
+    await this.registrarEvento(wsPath, {
+      evento: "modificado",
+      agente: id,
+      resumo: "editado pela web",
+    });
+    return parsed.data;
+  }
+
+  /** Exclui o agente do workspace (e a cópia do bridge do OpenCode) — PLANO-WEB-CRUD C3. */
+  async excluir(wsPath: string, id: string): Promise<void> {
+    const path = this.caminhoExistente(wsPath, id);
+    await unlink(path);
+    const copiaBridge = join(wsPath, ".opencorp", "opencode", "agent", `${id}.md`);
+    if (existsSync(copiaBridge)) await unlink(copiaBridge).catch(() => undefined);
+    await this.registrarEvento(wsPath, {
+      evento: "modificado",
+      agente: id,
+      resumo: "EXCLUÍDO pela web",
+    });
   }
 
   async posEditar(wsPath: string, id: string, mudou: boolean): Promise<void> {

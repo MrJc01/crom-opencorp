@@ -10,7 +10,9 @@ import { opencorpHome } from "../utils/paths.js";
 
 export const nosFlowSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "use kebab-case para o id do nó"),
-  tipo: z.enum(["manual", "agente", "saida", "condicao", "webhook", "task_create", "registro", "decisao"]),
+  // "fanout"/"review"/"debate": fusão team×fluxo (PLANO-WEB-CRUD F) — padrões do
+  // antigo team-orchestrator viram nós do grafo, com contexto fluindo igual aos demais
+  tipo: z.enum(["manual", "agente", "saida", "condicao", "webhook", "task_create", "registro", "decisao", "fanout", "review", "debate"]),
   config: z.record(z.string(), z.unknown()).default({}),
 });
 
@@ -179,6 +181,36 @@ export class FlowStore {
       if (no.tipo === "webhook") {
         if (typeof config.url !== "string" || config.url.length === 0) {
           throw new FlowError(`flow inválido${onde("")}: nó "webhook" "${no.id}" precisa de config.url`);
+        }
+      }
+      // ── nós da fusão team×fluxo (PLANO-WEB-CRUD F1/F2) ──
+      const passoValido = (p: unknown): p is { agente: string; ordem: string } =>
+        !!p && typeof p === "object" && typeof (p as { agente?: unknown }).agente === "string" && (p as { agente: string }).agente.length > 0 &&
+        typeof (p as { ordem?: unknown }).ordem === "string" && (p as { ordem: string }).ordem.length > 0;
+      if (no.tipo === "fanout") {
+        const paralelos = config.paralelos;
+        if (!Array.isArray(paralelos) || paralelos.length < 2 || !paralelos.every(passoValido)) {
+          throw new FlowError(`flow inválido${onde("")}: nó "fanout" "${no.id}" precisa de config.paralelos com 2+ passos {agente, ordem}`);
+        }
+        if (config.sintese !== undefined && !passoValido(config.sintese)) {
+          throw new FlowError(`flow inválido${onde("")}: nó "fanout" "${no.id}" tem config.sintese inválido (use {agente, ordem})`);
+        }
+      }
+      if (no.tipo === "review") {
+        if (!passoValido(config.executor) || !passoValido(config.revisor)) {
+          throw new FlowError(`flow inválido${onde("")}: nó "review" "${no.id}" precisa de config.executor e config.revisor ({agente, ordem})`);
+        }
+        if (config.turnos !== undefined && (typeof config.turnos !== "number" || config.turnos < 1 || config.turnos > 5)) {
+          throw new FlowError(`flow inválido${onde("")}: nó "review" "${no.id}" tem config.turnos fora de 1..5`);
+        }
+      }
+      if (no.tipo === "debate") {
+        const proponentes = config.proponentes;
+        if (!Array.isArray(proponentes) || proponentes.length < 2 || !proponentes.every(passoValido)) {
+          throw new FlowError(`flow inválido${onde("")}: nó "debate" "${no.id}" precisa de config.proponentes com 2+ passos {agente, ordem}`);
+        }
+        if (!passoValido(config.moderador) && !(config.moderador && typeof config.moderador === "object" && typeof (config.moderador as { agente?: unknown }).agente === "string")) {
+          throw new FlowError(`flow inválido${onde("")}: nó "debate" "${no.id}" precisa de config.moderador {agente}`);
         }
       }
       if (no.tipo === "condicao") {
@@ -433,6 +465,98 @@ export class FlowStore {
           contexto = contextoNovo;
           eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok", exec_id: resultado.id });
           await marcarNo(no.id, "ok", resultado.id);
+        } else if (no.tipo === "fanout" || no.tipo === "review" || no.tipo === "debate") {
+          // ── nós da fusão team×fluxo (PLANO-WEB-CRUD F1): padrões de coordenação
+          // como nós do grafo — versões CONTEXTUAIS (não criam kanban; contexto flui)
+          const rodarPasso = async (agente: string, ordem: string, sufixo: string): Promise<string> => {
+            const r = await this.sessoes.rodar({
+              agente,
+              ordem,
+              model: opts.model,
+              workspaceDir: wsPath,
+              referencias: [execId],
+              tipo: "flow-no",
+              tags: [`flow:${flowId}`, `no:${no.id}`],
+              gatilho: { tipo: "dependencia", origem: `flow:${flowId}/${no.id}${sufixo}` },
+            });
+            if (r.exit_code !== 0) {
+              throw new FlowError(`passo "${agente}" falhou — exec ${r.id}, exit ${r.exit_code}`);
+            }
+            return limparCaptura(r.captura ?? "");
+          };
+          const falharNo = async (erro: unknown): Promise<never> => {
+            eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "falhou" });
+            await marcarNo(no.id, "falhou", null);
+            throw new FlowError(`nó "${no.id}" (${no.tipo}) falhou: ${msg(erro)}`);
+          };
+          if (no.tipo === "fanout") {
+            const config = no.config as { paralelos: Array<{ agente: string; ordem: string }>; sintese?: { agente: string; ordem: string } };
+            try {
+              const rodados = await Promise.allSettled(
+                config.paralelos.map((p, i) =>
+                  rodarPasso(p.agente, p.ordem.replaceAll("{{entrada}}", contexto), `/p${i + 1}`).then((s) => `### ${p.agente}\n${s}`),
+                ),
+              );
+              const falhas = rodados.filter((r) => r.status === "rejected");
+              if (falhas.length) throw (falhas[0] as PromiseRejectedResult).reason;
+              const bruto = rodados.map((r) => (r as PromiseFulfilledResult<string>).value).join("\n\n");
+              contexto = config.sintese
+                ? await rodarPasso(config.sintese.agente, config.sintese.ordem.replaceAll("{{entrada}}", bruto), "/sintese")
+                : bruto;
+              eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok" });
+              await marcarNo(no.id, "ok");
+            } catch (erro) {
+              await falharNo(erro);
+            }
+          } else if (no.tipo === "review") {
+            const config = no.config as { executor: { agente: string; ordem: string }; revisor: { agente: string; ordem: string }; turnos?: number };
+            const turnos = Math.min(Math.max(Math.round(config.turnos ?? 2), 1), 5);
+            try {
+              let ajustes = "";
+              let aprovado = false;
+              for (let t = 1; t <= turnos && !aprovado; t++) {
+                const ordemExec = config.executor.ordem
+                  .replaceAll("{{entrada}}", contexto)
+                  .replaceAll("{{ajustes}}", ajustes || "(primeira rodada — sem ajustes)");
+                const saidaExecutor = await rodarPasso(config.executor.agente, ordemExec, `/t${t}/exec`);
+                const respostaRevisor = await rodarPasso(
+                  config.revisor.agente,
+                  `${config.revisor.ordem.replaceAll("{{entrada}}", saidaExecutor)}\n\n[contrato de revisão] Responda NA PRIMEIRA LINHA exatamente "APROVADO" ou "AJUSTES: <o que corrigir>".`,
+                  `/t${t}/rev`,
+                );
+                if (stripAnsi(respostaRevisor).split("\n")[0]?.trim().toUpperCase().startsWith("APROVADO")) {
+                  aprovado = true;
+                  contexto = saidaExecutor;
+                } else {
+                  ajustes = respostaRevisor;
+                }
+              }
+              if (!aprovado) throw new FlowError(`revisor não aprovou após ${turnos} turno(s) — escala humano`);
+              eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok" });
+              await marcarNo(no.id, "ok");
+            } catch (erro) {
+              await falharNo(erro);
+            }
+          } else {
+            // debate
+            const config = no.config as { proponentes: Array<{ agente: string; ordem: string }>; moderador: { agente: string } };
+            try {
+              const propostas = await Promise.all(
+                config.proponentes.map((p, i) =>
+                  rodarPasso(p.agente, p.ordem.replaceAll("{{entrada}}", contexto), `/prop${i + 1}`).then((s) => `### proposta ${p.agente}\n${s}`),
+                ),
+              );
+              contexto = await rodarPasso(
+                config.moderador.agente,
+                `Propostas dos proponentes:\n\n${propostas.join("\n\n")}\n\n[contrato de moderação] Decida e responda começando com "DECISÃO: <escolha>" seguida da justificativa curta.`,
+                "/moderador",
+              );
+              eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok" });
+              await marcarNo(no.id, "ok");
+            } catch (erro) {
+              await falharNo(erro);
+            }
+          }
         } else if (no.tipo === "saida") {
           const config = no.config as { registro: string };
           const [categoria, registroId] = config.registro.split("/") as [string, string];
