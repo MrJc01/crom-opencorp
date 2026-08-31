@@ -43,6 +43,9 @@ opencorp agent show <id>
 opencorp agent edit <id>
 opencorp agent clone <origem> <destino>
 opencorp agent run <id> "<ordem>" [--model m] [--session id] [--file f]
+           [--gatilho <tipo>:<origem>]
+# --gatilho declara quem ativa a execução no ledger unificado (corp.db `execucoes`):
+#   manual|cron|evento|mencao|webhook|dependencia|padrao|turno  (ex.: --gatilho cron:sch-abc)
 opencorp agent history <id>       # últimas execuções (registries/execucoes)
 opencorp agent cost <id>          # gasto acumulado (registries/custos)
 ```
@@ -58,7 +61,16 @@ opencorp session kill <id>
 ## run (ordem rápida no ativo)
 
 ```bash
-opencorp run "<ordem>" [--agent executor-padrao]   # atalho de agent run
+opencorp run "<ordem>" [--agent executor-padrao] [--gatilho <tipo>:<origem>]   # atalho de agent run
+```
+
+## flow (durável — retomada)
+
+```bash
+opencorp flow run <id> [--entrada texto] [--model m]
+opencorp flow status <id>                              # última execução, status por nó
+opencorp flow resume <id> <execId> [--model m]         # retoma execução FALHA do último nó ok
+# nós "ok" do run anterior não re-executam; o contexto final é preservado (mesmo exec)
 ```
 
 ## registry (registros globais)

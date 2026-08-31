@@ -172,7 +172,36 @@ O mesmo esqueleto serve para "fila editorial", "diagnóstico semanal" etc.: **jo
 
 ---
 
-## 9 · Estado atual e aprendizados (sessões 30–31/08)
+---
+
+## 9 · A primitiva unificada: Agente × Gatilho × Execução (v0.5.0)
+
+> Implementado conforme **docs/PLANO-UNIFICACAO.md**. O insight: tasks, agenda, fluxos, automação, teams e
+> reuniões são o mesmo fenômeno — **um agente ativado sob circunstâncias diferentes**. O que mudou no código:
+
+- **Contrato do gatilho** (`src/schemas/gatilho.ts`): `manual | cron | evento | mencao | webhook | dependencia | padrao | turno`
+  — parseado de `<tipo>:<origem>`. `SessionManager.rodar` aceita `gatilho` e o grava nos extras, nos eventos e no ledger.
+- **Ledger unificado** (corp.db, tabela `execucoes`): toda ativação de agente — de qualquer motor — com
+  `agente, modelo, gatilho_tipo, gatilho_origem, status, inicio, fim, duracao_ms, custo_usd, exit_code`.
+  Consulta cross-motor: `GET /execucoes?agente=&gatilho=&origem=&status=&limite=`.
+- **Motores se auto-declaram** (Etapa 2): scheduler → `cron:<jobId>` · mention-runner → `mencao:<task>/<alvo>` ·
+  triggers/hooks → `evento:<id>` · nós de flow → `dependencia:flow:<id>/<no>` · passos de team → `padrao:team:<id>/<passo>` ·
+  turnos e ata de reunião → `turno:<reuniaoId>`.
+- **CLI**: `agent run --gatilho cron:sch-abc` (e atalho `run`).
+- **Eventos**: `exec.iniciada` (unificado, com gatilho) além dos existentes; `sessao-fim` também carrega o gatilho.
+- **Flow durável** (Etapa 4): `opencorp flow resume <id> <execId>` / `POST /flows/:id/resume` retoma uma execução
+  **falha** do último nó ok — nós concluídos não re-executam e o contexto final é preservado (mesmo exec, evento
+  `retomado` no journal). A UI do flow mostra a última execução e o botão "Retomar do último nó ok".
+- **Histórico** (UI): itens de execução exibem `gatilho: <tipo>:<origem>` (sub-linha e detalhe).
+
+**O que NÃO mudou** (deliberado): o Kanban segue sendo view de estado; flows/teams continuam receitas JSON
+("tudo é arquivo"); os registries MD permanecem a fonte documental — o ledger SQLite é índice de leitura.
+Guards unificadas e fusão flow/team num único motor de grafo ficam para depois (registrado no plano).
+
+---
+
+## 10 · Estado atual e aprendizados (sessões 30–31/08)
+
 
 **Consertado/validado:**
 - Pulso diário parado → causa raiz era `agent run --ordem` (flag inexistente) nos 12 jobs; corrigidos + validação na criação (core barra, API valida whitelist e args quotados).

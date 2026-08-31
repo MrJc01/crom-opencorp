@@ -32,3 +32,23 @@
 2. TZ explícita no cron do scheduler (4.5) + doctor `--fix` automático (4.8).
 3. Espelho `job_runs` por workspace no corp.db (5.3) + `PRAGMA user_version` (5.1 formal).
 4. e2e novos: criar fluxo via UI, filtro de histórico, chat streaming.
+
+## PLANO-UNIFICACAO iniciado (31/08 noite) — primitiva de Execução
+
+Base: análise "tudo se resume em agente e como ele é usado/organizado" + pesquisa (Temporal/Inngest, LangGraph/CrewAI/AutoGen). Implementado por estrangulamento (sem big bang):
+
+1. **Contrato do gatilho** (`src/schemas/gatilho.ts`): `manual|cron|evento|mencao|webhook|dependencia|padrao|turno`; `SessionManager.rodar` aceita `gatilho` → extras + eventos + ledger. CLI: `agent run --gatilho <tipo>:<origem>`.
+2. **Ledger unificado** no corp.db (tabela `execucoes`): agente, modelo, gatilho_tipo/origem, status, duração, custo, exit — consulta `GET /execucoes?agente=&gatilho=&origem=&status=`.
+3. **Motores se auto-declaram**: scheduler (`cron:<job>`), mention (`mencao:<task>/<alvo>`), trigger/hook (`evento:<id>`), flow (`dependencia:flow:<id>/<no>`), team (`padrao:team:<id>/<passo>`), reunião (`turno:<id>`, incl. moderação e ata), API run (`manual:api:<ws>`).
+4. **Evento unificado** `exec.iniciada` (com gatilho) além de `sessao-inicio/fim` (que agora carregam gatilho).
+5. **Flow durável**: `opencorp flow resume <id> <execId>` / `POST /flows/:id/resume` — retoma execução falha do último nó ok (mesmo exec, nós ok não re-executam, evento `retomado`). UI: `GET /flows/:id/status` + botão Retomar no drawer. Histórico (web) mostra badge de gatilho.
+
+Testes novos: `tests/exec-ledger.test.ts` (7), `tests/engine-gatilho.test.ts` (6), `tests/flow-resume.test.ts` (2). Doc de consulta: `docs/15-gestao-operacao.md` (§9 primitiva unificada).
+
+**Etapa 6 concluída** (mesma sessão): e2e destravado — 🔥 race de login no painel (IIFE de importação em
+`fluxos.ts` fazia fetch sem token → 401 → sairParaLogin limpava a sessão; fix: `state.ts` hidrata token/ws
+no load do módulo → nav 9/9, suite 47 ✅ com 9 falhas PRÉ-existentes em agenda/apps/chat/secretário,
+idênticas no baseline); doctor `checkLedger` (órfãs >24h em "executando" → warn); release notes
+`docs/release-v0.5.0.md`; package.json → **0.5.0**. Validação ao vivo: `agent run --gatilho manual:...`
+→ ledger correto no corp.db do pulso-diario + `GET /execucoes` na API. Versão nova exige restart do
+serve/daemon para `/health` mostrar v0.5.0 (daemon já reiniciado nesta sessão).
