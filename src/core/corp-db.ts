@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdirRecursive } from "../utils/fs-safe.js";
+import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export interface LinhaRegistro {
@@ -32,11 +32,20 @@ export interface LinhaSessao {
   status: string;
 }
 
+export interface LinhaMensagem {
+  id: string;
+  sessao_id: string;
+  agente: string;
+  role: string;
+  conteudo: string;
+  criado_em: string | null;
+}
+
 export class CorpDb {
   private readonly db: Database.Database;
 
   constructor(dbPath: string) {
-    mkdirRecursive(dirname(dbPath));
+    mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
     this.migrar();
@@ -76,12 +85,21 @@ export class CorpDb {
         custo_usd REAL,
         status TEXT NOT NULL DEFAULT ''
       );
+      CREATE TABLE IF NOT EXISTS mensagens (
+        id TEXT PRIMARY KEY,
+        sessao_id TEXT NOT NULL,
+        agente TEXT NOT NULL DEFAULT '',
+        role TEXT NOT NULL,
+        conteudo TEXT NOT NULL DEFAULT '',
+        criado_em TEXT
+      );
       CREATE INDEX IF NOT EXISTS idx_journal_registro ON journal (categoria, registro_id);
+      CREATE INDEX IF NOT EXISTS idx_mensagens_sessao ON mensagens (sessao_id, criado_em);
     `);
   }
 
   limpar(): void {
-    this.db.exec("DELETE FROM registros; DELETE FROM journal; DELETE FROM sessoes;");
+    this.db.exec("DELETE FROM registros; DELETE FROM journal; DELETE FROM sessoes; DELETE FROM mensagens;");
   }
 
   upsertRegistro(r: LinhaRegistro): void {
@@ -129,6 +147,42 @@ export class CorpDb {
            status = excluded.status`,
       )
       .run(s);
+  }
+
+  inserirMensagem(m: LinhaMensagem): void {
+    this.db.prepare(
+      `INSERT INTO mensagens (id, sessao_id, agente, role, conteudo, criado_em)
+       VALUES (@id, @sessao_id, @agente, @role, @conteudo, @criado_em)
+       ON CONFLICT (id) DO NOTHING`,
+    ).run(m);
+  }
+
+  mensagensDaSessao(sessaoId: string): LinhaMensagem[] {
+    return this.db
+      .prepare("SELECT * FROM mensagens WHERE sessao_id = ? ORDER BY criado_em, rowid")
+      .all(sessaoId) as LinhaMensagem[];
+  }
+
+  listarSessoes(filtro?: { agentePrefixo?: string; limite?: number }): LinhaSessao[] {
+    const sql = `SELECT * FROM sessoes ${filtro?.agentePrefixo ? "WHERE agente LIKE ?" : ""}
+                 ORDER BY COALESCE(NULLIF(inicio,''), '0000') DESC ${filtro?.limite ? "LIMIT " + Math.floor(filtro.limite) : ""}`;
+    const rows = filtro?.agentePrefixo
+      ? this.db.prepare(sql).all(filtro.agentePrefixo + "%")
+      : this.db.prepare(sql).all();
+    return rows as LinhaSessao[];
+  }
+
+  /** Primeira mensagem do usuário por sessão (fonte de título real na lista de conversas) */
+  primeirasMensagensUsuario(ids: string[]): Array<{ sessao_id: string; conteudo: string; criado_em: string | null }> {
+    if (!ids.length) return [];
+    const ph = ids.map(() => "?").join(",");
+    return this.db
+      .prepare(
+        `SELECT sessao_id, conteudo, criado_em FROM mensagens
+         WHERE role = 'user' AND sessao_id IN (${ph})
+         ORDER BY criado_em ASC, rowid ASC`,
+      )
+      .all(...ids) as Array<{ sessao_id: string; conteudo: string; criado_em: string | null }>;
   }
 
   buscar(termo: string): { categoria: string; id: string; descricao: string }[] {

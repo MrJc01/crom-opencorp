@@ -36,6 +36,7 @@
 | 12 | [Plano Fase B/C](12-plano-fase-b-c.md) | Fechamento A + Boardroom + Supervisor + Flows + Web (v0.2) |
 | **13** | [**Plano Extensões da Plataforma (ATUAL)**](13-plano-extensoes-plataforma.md) | **Etapas 19–25: Tasks, Scheduler, Webhooks, Tools/MCP, Mini-apps, Teams, v0.3.0** |
 | 14 | [Análise multi-agente + chat de tasks](14-analise-multiagente-tasks.md) | Padrões de orquestração e chat interno |
+| 15 | [Gestão de Operação](15-gestao-operacao.md) | Tasks, Agenda, Fluxos, Teams, Reuniões, hooks — como funciona (consulta) |
 
 ### Pastas auxiliares
 

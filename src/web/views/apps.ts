@@ -6,31 +6,7 @@
 import { api, toast, icone, escapeHtml } from "../api.js";
 import { estadoVazio, estadoCarregando } from "../estado.js";
 import { ajuda } from "../help.js";
-
-interface WidgetSpec {
-  id: string;
-  titulo: string;
-  tipo: string;
-  fonte?: { rota?: string; rotulo_campo?: string; campo_valor?: string };
-  acao?: { tipo?: string; campos?: Array<{ nome: string; rotulo?: string }> };
-  texto?: string;
-  paginas?: unknown[];
-}
-
-interface AppSpec {
-  id: string;
-  titulo: string;
-  paginas: Array<{
-    titulo?: string;
-    widgets: WidgetSpec[];
-  }>;
-}
-
-interface AppInfo {
-  id: string;
-  titulo: string;
-  widgets: number;
-}
+import type { WidgetSpec, AppSpec, AppInfo } from "../state.js";
 
 /** Renderiza a view Apps (lista) */
 export async function renderApps(): Promise<void> {

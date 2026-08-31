@@ -87,6 +87,13 @@ export const settingsSchema = z.object({
       max_retries: z.number().int().min(0).default(2),
     })
     .prefault({}),
+  scheduler: z
+    .object({
+      // catch-up: executa job atrasado (ex.: máquina dormindo) dentro da janela — senão pula com registro
+      catch_up: z.boolean().default(false),
+      catch_up_max_min: z.number().int().min(1).default(60),
+    })
+    .prefault({}),
 });
 
 export type Settings = z.infer<typeof settingsSchema>;

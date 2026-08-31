@@ -23,6 +23,8 @@ interface SecretarioStatus {
 interface SessaoChat {
   id: string;
   title?: string;
+  titulo_real?: string;
+  sem_conteudo?: boolean;
   created_at?: string;
   updated_at?: string;
   created?: number;
@@ -48,6 +50,20 @@ let carregando = false;
 let controller: AbortController | null = null;
 let busca = '';
 let pertoDoFundo = true;
+let acoesEmAndamento = 0; // turno com ferramentas: nº de ações executadas pela secretária-exec
+interface AnexoImg { nome: string; mime: string; url: string; }
+let anexos: AnexoImg[] = []; // imagens anexadas no composer (data URL)
+
+function renderAnexos(): void {
+  const wrap = document.getElementById('anexos-chips');
+  if (!wrap) return;
+  if (!anexos.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  wrap.style.display = 'flex';
+  wrap.innerHTML = anexos.map((a, i) => `
+    <span class="anexo-chip">🖼 ${escapeHtml(a.nome)}
+      <button onclick="window.__secretarioAnexoRemover(${i})" aria-label="Remover anexo" title="Remover">✕</button>
+    </span>`).join('');
+}
 
 const SUGESTOES = [
   'O que aconteceu hoje?',
@@ -57,6 +73,8 @@ const SUGESTOES = [
 ];
 
 const FOLLOWUPS = ['Detalhe o 1º ponto', 'E o que faço agora?'];
+
+const CHAVE_RASCUNHO = 'opencorp-chat-rascunho';
 
 /** ISO (proxy real) ou ms (fake/proxy) → Date */
 function dataSessao(s: SessaoChat): Date | null {
@@ -71,8 +89,21 @@ function dataSessao(s: SessaoChat): Date | null {
 }
 
 function tituloSessao(s: SessaoChat): string {
-  const t = (s.title || 'Sem título').trim();
-  return t.length > 50 ? t.slice(0, 49) + '…' : t;
+  // título REAL (1ª mensagem do usuário) tem prioridade — "New session - <ts>" não diz nada
+  const t = (s.titulo_real || s.title || 'Sem título').trim();
+  return t.length > 60 ? t.slice(0, 59) + '…' : t;
+}
+
+/** Tempo relativo curto: agora · 5min · 2h · ontem 14:22 · 28/08 */
+function tempoRelativo(d: Date): string {
+  const diffMin = Math.round((Date.now() - d.getTime()) / 60_000);
+  if (diffMin < 2) return 'agora';
+  if (diffMin < 60) return `${diffMin}min`;
+  const diffH = Math.round(diffMin / 60);
+  if (diffH < 24) return `${diffH}h`;
+  const ontem = new Date(); ontem.setDate(ontem.getDate() - 1); ontem.setHours(0, 0, 0, 0);
+  if (d >= ontem) return `ontem ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 /** Renderiza a view Secretário */
@@ -80,16 +111,7 @@ export async function renderSecretario(): Promise<void> {
   const viewEl = document.getElementById('view-secretario');
   if (!viewEl) return;
 
-  // Reset estado local ao entrar na view
-  sessoesCache = [];
-  sessaoAtivaId = null;
-  mensagensCache = [];
-  agenteSelecionado = 'secretario';
-  carregando = false;
-  controller = null;
-  busca = '';
-  pertoDoFundo = true;
-
+  // Estado (conversas/rascunho) SOBREVIVE à navegação — reset só em __secretarioNovaConversa
   viewEl.innerHTML = `
     <div class="flex items-center justify-between mb-4 gap-2">
       <h1 class="text-2xl font-bold flex items-center gap-2">${icone('chat')} Secretário ${ajuda('secretario')}</h1>
@@ -210,13 +232,18 @@ function renderChatLayout(): void {
         </div>
         <button id="btn-ir-fim" class="oc-ir-fim hidden" onclick="window.__secretarioIrFim()" aria-label="Ir para o fim">↓</button>
         <div class="p-3 border-t border-zinc-800">
-          <div class="composer">
+        <div class="composer">
+          <div id="anexos-chips" class="anexos-chips" style="display:none"></div>
+          <div class="composer-row2">
+            <button class="btn-ghost composer-anexo" onclick="window.__secretarioAnexar()" title="Anexar imagem ou arquivo" aria-label="Anexar">📎</button>
+            <input id="anexo-input" type="file" multiple accept="image/*,.txt,.md,.json,.csv,.log,.py,.js,.ts,.sh,.yaml,.yml,.html,.css" style="display:none" onchange="window.__secretarioAnexos(this.files)" />
             <textarea id="chat-input" placeholder="Pergunte qualquer coisa…" rows="1" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); window.__secretarioEnviar()}" oninput="window.__secretarioAutoAltura()"></textarea>
-            <div class="composer-row">
-              <span class="text-xs text-zinc-500 composer-dica">secretário analisa · secretário-exec executa</span>
-              <button class="btn composer-enviar" id="btn-enviar" onclick="window.__secretarioEnviar()" aria-label="Enviar mensagem">${icone('run')}</button>
-            </div>
+            <button class="btn composer-enviar" id="btn-enviar" onclick="window.__secretarioEnviar()" aria-label="Enviar mensagem">${icone('run')}</button>
           </div>
+          <div class="composer-row">
+            <span class="text-xs text-zinc-500 composer-dica">secretário analisa · secretário-exec executa · 📎 anexa imagem/arquivo</span>
+          </div>
+        </div>
         </div>
       </div>
     </div>
@@ -230,9 +257,39 @@ function renderChatLayout(): void {
     });
   }
 
+  // Ctrl+V de imagem: itens de imagem da área de transferência viram anexos
+  const chatInput = document.getElementById('chat-input');
+  chatInput?.addEventListener('paste', (ev: Event) => {
+    const clipboard = (ev as ClipboardEvent).clipboardData;
+    if (!clipboard) return;
+    const imagens = Array.from(clipboard.items).filter((i) => i.type.startsWith('image/'));
+    if (!imagens.length) return; // colagem de texto segue normal
+    ev.preventDefault();
+    const g2 = window as unknown as Record<string, unknown>;
+    imagens.forEach((item, idx) => {
+      const file = item.getAsFile();
+      if (!file) return;
+      const nome = file.name && file.name !== 'image.png' ? file.name : `colado-${Date.now()}${idx ? '-' + idx : ''}.png`;
+      const comNome = new File([file], nome, { type: item.type });
+      const dt = new DataTransfer();
+      dt.items.add(comNome);
+      (g2.__secretarioAnexos as ((f: FileList) => void) | undefined)?.(dt.files);
+    });
+    toast('Imagem colada — pronta para enviar 📎', 'ok');
+  });
+
   renderListaSessoes();
   renderMensagens();
-  (document.getElementById('chat-input') as HTMLTextAreaElement)?.focus();
+  const ta = document.getElementById('chat-input') as HTMLTextAreaElement | null;
+  if (ta) {
+    // restaura rascunho salvo em sessionStorage
+    const rascunho = sessionStorage.getItem(CHAVE_RASCUNHO) ?? '';
+    if (rascunho) {
+      ta.value = rascunho;
+      (window as unknown as { __secretarioAutoAltura?: () => void }).__secretarioAutoAltura?.();
+    }
+    ta.focus();
+  }
 
   const g = window as unknown as Record<string, unknown>;
   g.__secretarioToggleConv = () => {
@@ -248,6 +305,7 @@ function renderChatLayout(): void {
     if (carregando) return;
     sessaoAtivaId = null;
     mensagensCache = [];
+    sessionStorage.removeItem(CHAVE_RASCUNHO);
     document.getElementById('secretario-grid')?.classList.remove('conv-aberta');
     renderListaSessoes();
     renderMensagens();
@@ -266,6 +324,7 @@ function renderChatLayout(): void {
     if (!ta) return;
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
+    sessionStorage.setItem(CHAVE_RASCUNHO, ta.value);
   };
 
   g.__secretarioIrFim = () => {
@@ -274,6 +333,42 @@ function renderChatLayout(): void {
   };
 
   g.__secretarioEnviar = async () => { await enviar(); };
+
+  g.__secretarioAnexar = () => {
+    (document.getElementById('anexo-input') as HTMLInputElement)?.click();
+  };
+
+  g.__secretarioAnexos = (arquivos: FileList | null) => {
+    if (!arquivos) return;
+    for (const f of Array.from(arquivos)) {
+      const reader = new FileReader();
+      if (f.type.startsWith('image/')) {
+        reader.onload = () => {
+          anexos.push({ nome: f.name, mime: f.type, url: String(reader.result) });
+          renderAnexos();
+        };
+        reader.readAsDataURL(f);
+      } else {
+        // arquivos de texto entram no corpo da mensagem (contexto direto para o modelo)
+        reader.onload = () => {
+          const conteudo = String(reader.result ?? '');
+          const texto = conteudo.length > 120_000 ? conteudo.slice(0, 120_000) + '\n…(truncado)' : conteudo;
+          const input = document.getElementById('chat-input') as HTMLTextAreaElement | null;
+          if (input) {
+            input.value = (input.value ? input.value + '\n\n' : '') + `--- arquivo: ${f.name} ---\n${texto}\n--- fim: ${f.name} ---`;
+            (window as unknown as { __secretarioAutoAltura?: () => void }).__secretarioAutoAltura?.();
+          }
+        };
+        reader.readAsText(f);
+      }
+    }
+    (document.getElementById('anexo-input') as HTMLInputElement).value = '';
+  };
+
+  g.__secretarioAnexoRemover = (i: number) => {
+    anexos.splice(i, 1);
+    renderAnexos();
+  };
 
   g.__secretarioSelecionarSessao = async (id: string) => {
     if (carregando) return;
@@ -320,7 +415,9 @@ function renderListaSessoes(): void {
   if (!el) return;
 
   const filtradas = sessoesCache.filter((s) =>
-    !busca || tituloSessao(s).toLowerCase().includes(busca));
+    // sessões sem nenhuma mensagem do usuário são ruído de execuções/testes — some, salvo a ativa
+    (s.id === sessaoAtivaId || !s.sem_conteudo) &&
+    (!busca || tituloSessao(s).toLowerCase().includes(busca)));
 
   if (!filtradas.length) {
     el.innerHTML = `
@@ -351,7 +448,7 @@ function renderListaSessoes(): void {
   const item = (s: SessaoChat) => `
     <button class="sessao-item ${s.id === sessaoAtivaId ? 'ativa' : ''}" onclick="window.__secretarioSelecionarSessao('${escapeHtml(s.id)}')">
       <div class="sessao-titulo">${escapeHtml(tituloSessao(s))}</div>
-      <div class="sessao-data">${(() => { const d = dataSessao(s); return d ? formatarDataLocal(d.toISOString()) : ''; })()}</div>
+      <div class="sessao-data">${(() => { const d = dataSessao(s); return d ? tempoRelativo(d) : ''; })()}</div>
     </button>
   `;
 
@@ -397,10 +494,11 @@ function renderMensagens(): void {
     `;
   }
 
-  if (carregando) {
+  // indicador "Pensando..." só enquanto não há conteúdo parcial do assistant
+  if (carregando && mensagensCache[mensagensCache.length - 1]?.role === 'user') {
     el.innerHTML += `
       <div class="oc-msg oc-assistant oc-pensando">
-        <div class="oc-msg-corpo"><span class="oc-pensando-texto">Pensando<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span></span></div>
+        <div class="oc-msg-corpo">${statusPensando()}</div>
       </div>
     `;
   }
@@ -409,7 +507,28 @@ function renderMensagens(): void {
   if (container && pertoDoFundo) container.scrollTop = container.scrollHeight;
 }
 
-/** Envia mensagem — botão vira STOP durante a espera (AbortController) */
+/** Texto de status quando não há conteúdo ainda (pensando / executando ações) */
+function statusPensando(): string {
+  return acoesEmAndamento > 0
+    ? `<span class="oc-pensando-texto">⚙ Executando ações (${acoesEmAndamento})<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span></span>`
+    : `<span class="oc-pensando-texto">Pensando<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span></span>`;
+}
+
+/** Atualiza só a última bolha assistant (streaming — sem re-render do feed inteiro) */
+function atualizarUltimaBolha(): void {
+  const el = document.getElementById('oc-feed');
+  if (!el) return;
+  const bolhas = el.querySelectorAll('.oc-msg.oc-assistant .oc-msg-corpo');
+  const alvo = bolhas[bolhas.length - 1] as HTMLElement | undefined;
+  if (!alvo) return;
+  const ultima = mensagensCache[mensagensCache.length - 1];
+  if (!ultima || ultima.role !== 'assistant') return;
+  alvo.innerHTML = ultima.content ? renderMarkdown(ultima.content) : statusPensando();
+  const container = document.getElementById('chat-mensagens');
+  if (container && pertoDoFundo) container.scrollTop = container.scrollHeight;
+}
+
+/** Envia mensagem — streaming SSE (delta a delta) com fallback síncrono; botão vira STOP */
 async function enviar(): Promise<void> {
   if (carregando) {
     // segundo clique = parar
@@ -424,13 +543,16 @@ async function enviar(): Promise<void> {
 
   carregando = true;
   controller = new AbortController();
+  acoesEmAndamento = 0;
   btn.innerHTML = icone('stop');
   btn.classList.add('parando');
   btn.setAttribute('aria-label', 'Parar resposta');
 
   mensagensCache.push({ role: 'user', content: texto });
+  const idxAssistant = mensagensCache.push({ role: 'assistant', content: '' }) - 1;
   input.value = '';
   input.style.height = 'auto';
+  sessionStorage.removeItem(CHAVE_RASCUNHO);
   renderMensagens();
   if (!sessaoAtivaId) {
     const titulo = document.getElementById('chat-titulo');
@@ -440,21 +562,73 @@ async function enviar(): Promise<void> {
   try {
     const { headers } = await import("../api.js");
     const ws = getWsAtivo();
-    const res = await fetch('/secretario/conversa' + (ws ? '?workspace=' + encodeURIComponent(ws) : ''), {
+    const qs = ws ? '?workspace=' + encodeURIComponent(ws) : '';
+    const res = await fetch('/secretario/conversa/stream' + qs, {
       method: 'POST',
       headers: headers(),
-      body: JSON.stringify({ mensagem: texto, sessao_id: sessaoAtivaId || undefined, agente: agenteSelecionado }),
+      body: JSON.stringify({
+        mensagem: texto,
+        sessao_id: sessaoAtivaId || undefined,
+        agente: agenteSelecionado,
+        imagens: anexos.length ? anexos : undefined,
+      }),
       signal: controller.signal,
     });
-    if (!res.ok) {
-      const corpo = (await res.json().catch(() => ({}))) as { erro?: string };
-      throw new Error(corpo.erro ?? `HTTP ${res.status}`);
+    anexos = [];
+    renderAnexos();
+    const tipo = res.headers.get('content-type') ?? '';
+    if (!res.ok || !tipo.includes('text/event-stream')) {
+      // servidor antigo/erro → fallback síncrono
+      if (res.ok) {
+        const data = (await res.json()) as ConversaResponse;
+        mensagensCache[idxAssistant].content = data.resposta;
+        sessaoAtivaId = data.sessao_id;
+      } else {
+        const corpo = (await res.json().catch(() => ({}))) as { erro?: string };
+        throw new Error(corpo.erro ?? `HTTP ${res.status}`);
+      }
+    } else {
+      // ── parse do stream SSE ──
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fim = false;
+      while (!fim) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const partes = buffer.split('\n\n');
+        buffer = partes.pop() ?? '';
+        for (const parte of partes) {
+          let evento = 'message';
+          let dados = '';
+          for (const linha of parte.split('\n')) {
+            if (linha.startsWith('event:')) evento = linha.slice(6).trim();
+            else if (linha.startsWith('data:')) dados += linha.slice(5).trim();
+          }
+          if (!dados) continue;
+          const payload = JSON.parse(dados) as { sessao_id?: string; delta?: string; resposta?: string; erro?: string; acoes?: number };
+          if (evento === 'inicio') {
+            if (payload.sessao_id) sessaoAtivaId = payload.sessao_id;
+          } else if (evento === 'acao') {
+            acoesEmAndamento = payload.acoes ?? acoesEmAndamento;
+            atualizarUltimaBolha();
+          } else if (evento === 'delta') {
+            mensagensCache[idxAssistant].content += payload.delta ?? '';
+            atualizarUltimaBolha();
+          } else if (evento === 'fim') {
+            if (payload.resposta) mensagensCache[idxAssistant].content = payload.resposta;
+            if (payload.sessao_id) sessaoAtivaId = payload.sessao_id;
+            fim = true;
+          } else if (evento === 'erro') {
+            throw new Error(payload.erro ?? 'erro no stream');
+          }
+        }
+      }
+      if (!mensagensCache[idxAssistant].content) throw new Error('resposta vazia do servidor');
     }
-    const data = (await res.json()) as ConversaResponse;
-    mensagensCache.push({ role: 'assistant', content: data.resposta });
-    const eraNova = !sessaoAtivaId;
-    sessaoAtivaId = data.sessao_id;
 
+    const eraNova = !sessoesCache.some((s) => s.id === sessaoAtivaId);
     await carregarSessoes();
     renderListaSessoes();
     if (eraNova) {
@@ -465,12 +639,12 @@ async function enviar(): Promise<void> {
   } catch (e) {
     const err = e as Error;
     if (err.name === 'AbortError') {
-      toast('Interrompido — se a resposta terminou no servidor, ela aparece ao reabrir a conversa', 'aviso');
-      if (sessaoAtivaId) await carregarMensagens(sessaoAtivaId);
+      toast('Interrompido — o processamento continua no servidor; reabra a conversa para ver a resposta completa', 'aviso');
+      // mantém o texto parcial recebido até aqui
     } else {
       toast(err.message, 'erro');
-      // remove a msg do usuário se falhou de verdade (sem resposta no server)
-      if (!sessaoAtivaId) mensagensCache.pop();
+      if (!sessaoAtivaId) mensagensCache.splice(idxAssistant - 1, 2); // remove user + assistant vazia
+      else mensagensCache.splice(idxAssistant, 1); // remove assistant vazia
     }
   } finally {
     carregando = false;

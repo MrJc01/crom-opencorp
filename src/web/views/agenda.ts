@@ -4,6 +4,7 @@
 
 import { api, q, toast, icone, escapeHtml } from "../api.js";
 import { getWsAtivo, getAgendaEscopoAtual, setAgendaEscopoAtual } from "../state.js";
+import type { AgendaJob as ScheduleJob } from "../state.js";
 import { formatarAgenda, badgeTipo, formatarDataLocal } from "../format.js";
 import { estadoVazio, estadoErro, estadoCarregando } from "../estado.js";
 import { ajuda } from "../help.js";
@@ -70,16 +71,6 @@ async function carregarAgendaStatus(): Promise<void> {
   `;
 }
 
-interface ScheduleJob {
-  id: string;
-  nome: string;
-  agenda: { tipo: string; valor: string | number };
-  args: string[];
-  workspace: string;
-  ativo: boolean;
-  proxima_exec?: string;
-  ultima_exec?: string;
-}
 
 async function carregarAgendaLista(): Promise<void> {
   const escopo = getAgendaEscopoAtual();
@@ -118,7 +109,9 @@ async function carregarAgendaLista(): Promise<void> {
           <div class="text-xs text-zinc-500 font-mono truncate">${escapeHtml((j.args as string[] || []).join(' '))}</div>
           <div class="text-xs text-zinc-500 font-mono mt-1">workspace: ${escapeHtml(String(j.workspace))}</div>
           ${j.proxima_exec ? '<div class="text-xs text-zinc-500 font-mono mt-1">próxima: ' + formatarDataLocal(String(j.proxima_exec)) + '</div>' : ''}
-          ${j.ultima_exec ? '<div class="text-xs text-zinc-500 font-mono">última: ' + formatarDataLocal(String(j.ultima_exec)) + '</div>' : ''}
+          ${j.ultima_exec
+            ? '<div class="text-xs text-zinc-500 font-mono">última: ' + formatarDataLocal(String(j.ultima_exec)) + '</div>'
+            : '<div class="text-xs mt-1" style="color:var(--warn)">⚠ nunca rodou</div>'}
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
           <button class="btn btn-ghost text-sm" onclick="executarAgendaAgora('${escapeHtml(String(j.id))}')" aria-label="Executar agora">${icone('run')} Agora</button>
@@ -130,7 +123,8 @@ async function carregarAgendaLista(): Promise<void> {
   `).join('');
 }
 
-function renderAgendaForm(): void {
+/** Renderiza (ou reseta) o form de nova rotina — "Cancelar" chama esta função */
+export function renderAgendaForm(): void {
   const el = document.getElementById('agenda-form');
   if (!el) return;
 

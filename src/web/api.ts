@@ -15,13 +15,12 @@ import { sairParaLogin } from "./main.js";
 const TOKEN_KEY = 'oc-token';
 const WS_KEY = 'oc-ws';
 
-/** Headers padrão com Authorization */
+/** Headers padrão — Authorization só quando há token (servidores abertos dispensam) */
 export function headers(): Record<string, string> {
   const token = getToken();
-  return {
-    'Authorization': `Bearer ${token}`,
-    'content-type': 'application/json',
-  };
+  const base: Record<string, string> = { 'content-type': 'application/json' };
+  if (token) base['Authorization'] = `Bearer ${token}`;
+  return base;
 }
 
 /**
@@ -40,8 +39,11 @@ export async function api<T = unknown>(path: string, opts: RequestInit = {}): Pr
 
   let res: Response;
   try {
-    // Timeout de 15s em GETs (POSTs de proxy podem demorar — ex. secretário)
-    const signal = (!opts.method || opts.method === 'GET') ? AbortSignal.timeout(15000) : undefined;
+    // GET: 15s · POST/PATCH/DELETE: 30s (exceção: conversas do secretário podem levar minutos
+    // e usam streaming/fetch cru fora do api())
+    const conversa = path.startsWith('/secretario/conversa');
+    const teto = (!opts.method || opts.method === 'GET') ? 15000 : (conversa ? undefined : 30000);
+    const signal = teto ? AbortSignal.timeout(teto) : undefined;
     res = await fetch(url, { ...opts, headers: headers(), ...(signal ? { signal } : {}) });
   } catch {
     toast('Sem conexão com o servidor', 'erro');
@@ -84,8 +86,12 @@ export async function carregarWorkspaces(): Promise<void> {
 
     if (!ids.includes(wsAtivo)) {
       const novoWs = ids[0] || '';
-      if (novoWs) localStorage.setItem(WS_KEY, novoWs);
-      else localStorage.removeItem(WS_KEY);
+      if (novoWs) {
+        localStorage.setItem(WS_KEY, novoWs);
+        setWsAtivo(novoWs);
+      } else {
+        localStorage.removeItem(WS_KEY);
+      }
     }
 
     atualizarSelectWorkspaces(wsArray);

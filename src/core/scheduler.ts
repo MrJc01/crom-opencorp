@@ -2,8 +2,10 @@ import Database from "better-sqlite3";
 import { spawn } from "node:child_process";
 import { mkdirRecursive } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { openSync } from "node:fs";
 import { SchedulerError } from "./errors.js";
+import { SettingsStore } from "./settings-store.js";
 
 export type Agenda =
   | { tipo: "cron"; valor: string }
@@ -131,6 +133,18 @@ export class Scheduler {
         proxima_exec TEXT,
         criado_em TEXT NOT NULL DEFAULT ''
       );
+      CREATE TABLE IF NOT EXISTS job_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id TEXT NOT NULL,
+        job_nome TEXT NOT NULL DEFAULT '',
+        workspace TEXT NOT NULL DEFAULT '',
+        iniciado_em TEXT NOT NULL,
+        fim_em TEXT,
+        resultado TEXT NOT NULL DEFAULT '',
+        erro TEXT,
+        pulado INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs (job_id, iniciado_em);
     `);
     this.db = db;
     return db;
@@ -176,6 +190,60 @@ export class Scheduler {
     }
   }
 
+  /**
+   * Validação de alto sinal no core: barra o footgun "job que nunca rodaria"
+   * (12 jobs foram criados com `agent run --ordem`, flag inexistente, e morriam em silêncio).
+   * A whitelist completa de comandos é validada na API (entrada de usuário real).
+   */
+  private validarArgsJob(args: string[]): void {
+    if (args[0] === "agent" && args.includes("--ordem")) {
+      throw new SchedulerError(
+        'agent run usa ordem POSICIONAL: ["agent","run","<agente>","<ordem>"] — a flag --ordem não existe',
+      );
+    }
+    // ordem splitada: "agent run <agente> <ordem>" deve ter EXATAMENTE 4 elementos —
+    // mais que isso significa que a ordem (com espaços) não foi quotada e virou N argumentos
+    // (job "ciclo-melhoria" rodou 47 argumentos e falhou em silêncio antes do log de stderr)
+    if (args[0] === "agent" && args[1] === "run" && args.length > 4) {
+      throw new SchedulerError(
+        `ordem com espaços deve vir QUOTADA em --args (ex.: "agent run ${args[2]} \\"sua ordem aqui\\"") — recebi ${args.length} argumentos`,
+      );
+    }
+  }
+
+  /** Registra uma execução/pulo no histórico de runs (observabilidade do pulso) */
+  private async registrarRun(
+    job: Job,
+    dados: { resultado?: string; erro?: string; pulado?: boolean },
+  ): Promise<void> {
+    try {
+      (await this.banco())
+        .prepare(
+          `INSERT INTO job_runs (job_id, job_nome, workspace, iniciado_em, fim_em, resultado, erro, pulado)
+           VALUES (@job_id, @job_nome, @workspace, @iniciado_em, @fim_em, @resultado, @erro, @pulado)`,
+        )
+        .run({
+          job_id: job.id,
+          job_nome: job.nome,
+          workspace: job.workspace,
+          iniciado_em: this.agora().toISOString(),
+          fim_em: this.agora().toISOString(),
+          resultado: dados.resultado ?? "",
+          erro: dados.erro ?? null,
+          pulado: dados.pulado ? 1 : 0,
+        });
+    } catch {
+      /* histórico nunca quebra a execução */
+    }
+  }
+
+  /** Histórico de execuções de um job (mais recente primeiro) */
+  async listarRuns(jobId: string, limite = 20): Promise<unknown[]> {
+    return (await this.banco())
+      .prepare("SELECT * FROM job_runs WHERE job_id = ? ORDER BY id DESC LIMIT ?")
+      .all(jobId, limite);
+  }
+
   async criar(
     dados: { nome: string; agenda: Agenda; args: string[]; workspace?: string; graca_min?: number },
   ): Promise<Job> {
@@ -184,6 +252,7 @@ export class Scheduler {
       throw new SchedulerError("args obrigatório — comando opencorp a executar");
     }
     this.validarAgenda(dados.agenda);
+    this.validarArgsJob(dados.args);
     const agora = this.agora();
     const job: LinhaJob = {
       id: gerarId(),
@@ -245,13 +314,27 @@ export class Scheduler {
   private async executarSpawn(job: Job): Promise<string> {
     const bin = resolve(import.meta.dirname ?? ".", "..", "..", "bin", "opencorp.mjs");
     const args = ["--workspace", job.workspace, ...job.args].filter((a) => a.length > 0);
+    // stderr/stdout do filho vão para log por job — spawn quebrado deixa rastro (não some em silêncio)
+    const logDir = join(this.homeDir, "logs");
+    await mkdirRecursive(logDir);
+    const logFd = openSync(join(logDir, `job-${job.id}.log`), "a");
     const filho = spawn(process.execPath, [bin, ...args], {
       env: { ...process.env, OPENCORP_HOME: this.homeDir },
       detached: true,
-      stdio: "ignore",
+      stdio: ["ignore", logFd, logFd],
     });
     filho.unref();
     return `spawn pid ${filho.pid ?? 0}`;
+  }
+
+  /** Config de catch-up das settings (default seguro se settings indisponível) */
+  private async cfgCatchUp(): Promise<{ catch_up: boolean; catch_up_max_min: number }> {
+    try {
+      const { settings } = await new SettingsStore({ homeDir: this.homeDir }).resolve();
+      return { catch_up: settings.scheduler.catch_up, catch_up_max_min: settings.scheduler.catch_up_max_min };
+    } catch {
+      return { catch_up: false, catch_up_max_min: 60 };
+    }
   }
 
   /** Um passo do loop: executa jobs vencidos e recalcula próximas execuções. */
@@ -265,23 +348,42 @@ export class Scheduler {
       if (prevista.getTime() > agora.getTime()) continue;
       const atrasoMin = (agora.getTime() - prevista.getTime()) / 60_000;
       if (atrasoMin > job.graca_min) {
-        pulados.push(job.id);
-        const proxima = this.calcularProxima(job.agenda, agora).toISOString();
-        (await this.banco()).prepare("UPDATE jobs SET proxima_exec = ? WHERE id = ?").run(proxima, job.id);
-        continue;
+        // catch-up: settings.scheduler.catch_up executa atrasado dentro da janela catch_up_max_min
+        const cfg = await this.cfgCatchUp();
+        const executarAtrasado = cfg.catch_up && atrasoMin <= cfg.catch_up_max_min;
+        if (!executarAtrasado) {
+          // pular com CLAIM atômico: só quem vencer o UPDATE reagenda (sem corrida entre daemons)
+          // data_unica vencida desativa — evita loop eterno de skip
+          const desativarSkip = job.agenda.tipo === "data_unica";
+          const proximaSkip = desativarSkip ? null : this.calcularProxima(job.agenda, agora).toISOString();
+          const claimSkip = (await this.banco())
+            .prepare("UPDATE jobs SET proxima_exec = ?, ativo = ? WHERE id = ? AND proxima_exec = ?")
+            .run(proximaSkip, desativarSkip ? 0 : 1, job.id, job.proxima_exec);
+          if (claimSkip.changes === 1) {
+            pulados.push(job.id);
+            await this.registrarRun(job, { erro: `pulado: atraso de ${Math.round(atrasoMin)}min > graça de ${job.graca_min}min`, pulado: true });
+          }
+          continue;
+        }
+        await this.registrarRun(job, { resultado: `catch-up: executando atrasado (${Math.round(atrasoMin)}min atraso, dentro da janela de ${cfg.catch_up_max_min}min)` });
       }
-      const resultado = await this.executarFn(job);
-      void resultado;
-      executados.push(job.id);
+      // CLAIM atômico ANTES de executar: o UPDATE casa só se proxima_exec ainda é a prevista —
+      // com dois daemons, apenas um ganha o direito de executar (sem execução dupla)
       const desativar = job.agenda.tipo === "data_unica";
-      (await this.banco())
-        .prepare("UPDATE jobs SET ultima_exec = ?, proxima_exec = ?, ativo = ? WHERE id = ?")
-        .run(
-          agora.toISOString(),
-          desativar ? null : this.calcularProxima(job.agenda, agora).toISOString(),
-          desativar ? 0 : 1,
-          job.id,
-        );
+      const proxima = desativar ? null : this.calcularProxima(job.agenda, agora).toISOString();
+      const claim = (await this.banco())
+        .prepare("UPDATE jobs SET ultima_exec = ?, proxima_exec = ?, ativo = ? WHERE id = ? AND proxima_exec = ?")
+        .run(agora.toISOString(), proxima, desativar ? 0 : 1, job.id, job.proxima_exec);
+      if (claim.changes !== 1) continue; // outro daemon/processo já assumiu este tick
+      try {
+        const resultado = await this.executarFn(job);
+        await this.registrarRun(job, { resultado });
+      } catch (erro) {
+        const msgErro = erro instanceof Error ? erro.message : String(erro);
+        console.error(`[scheduler] falha ao executar job ${job.id} (${job.nome}): ${msgErro}`);
+        await this.registrarRun(job, { erro: msgErro });
+      }
+      executados.push(job.id);
     }
     return { executados, pulados };
   }
@@ -289,6 +391,7 @@ export class Scheduler {
   async runNow(id: string): Promise<{ job: Job; resultado: string }> {
     const job = await this.obter(id);
     const resultado = await this.executarFn(job);
+    await this.registrarRun(job, { resultado: resultado + " (run-now)" });
     (await this.banco()).prepare("UPDATE jobs SET ultima_exec = ? WHERE id = ?").run(this.agora().toISOString(), id);
     return { job: await this.obter(id), resultado };
   }
@@ -296,7 +399,10 @@ export class Scheduler {
   iniciar(intervaloSeg = 30, manterVivo = false): void {
     if (this.timer) return;
     this.timer = setInterval(() => {
-      void this.tick().catch(() => undefined);
+      void this.tick().catch((erro) => {
+        // tick falho nunca mais fica invisível (antes: .catch(() => undefined))
+        console.error("[scheduler] erro no tick:", erro instanceof Error ? erro.message : erro);
+      });
     }, intervaloSeg * 1000);
     if (manterVivo) {
       this.keepAlive = setInterval(() => undefined, 60_000);

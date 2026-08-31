@@ -129,6 +129,11 @@ export class RegistryStore {
     return db;
   }
 
+  /** Acesso ao índice SQLite do workspace (corp.db) — p/ persistência de sessões/mensagens fora das categorias */
+  corpDb(wsPath: string): CorpDb {
+    return this.db(wsPath);
+  }
+
   existe(wsPath: string, categoria: string, id: string): boolean {
     return existsSync(join(this.registroDir(wsPath, categoria, id), "meta.json"));
   }

@@ -389,6 +389,112 @@ export async function checkScheduler(
   };
 }
 
+/**
+ * 4.8 — detecta processos duplicados/órfãos (o cenário vivo da auditoria: 2 schedulers,
+ * 4 opencode serve órfãos, N serve órfãos). Varre /proc — sem depender de `ps`.
+ */
+export async function checkDaemonsDuplicados(
+  home: string,
+  opcoes: { pidVivo?: (pid: number) => boolean | Promise<boolean> } = {},
+): Promise<DoctorCheck> {
+  const base = { id: "daemons", label: "processos (duplicados/órfãos)" } as const;
+  const pidVivoFn =
+    opcoes.pidVivo ??
+    ((pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+  // varre /proc contando processos por padrão de cmdline
+  const grupos: Record<string, number[]> = {
+    scheduler: [],
+    "api/serve": [],
+    "opencode serve": [],
+    "daemon supervisor": [],
+  };
+  let pids: number[] = [];
+  try {
+    pids = (await readdir("/proc"))
+      .filter((d) => /^\d+$/.test(d))
+      .map(Number);
+  } catch {
+    return { ...base, status: "info", detail: "/proc indisponível — verificação ignorada" };
+  }
+  for (const pid of pids) {
+    try {
+      const cmd = (await readFile(`/proc/${pid}/cmdline`, "utf8")).replace(/\0/g, " ");
+      if (!cmd.includes("opencorp.mjs") && !/opencode serve/.test(cmd)) continue;
+      if (/scheduler start/.test(cmd)) grupos["scheduler"]!.push(pid);
+      else if (/opencorp\.mjs serve/.test(cmd)) grupos["api/serve"]!.push(pid);
+      else if (/^opencode serve| opencode serve --port/.test(cmd)) grupos["opencode serve"]!.push(pid);
+      else if (/daemon start --foreground/.test(cmd)) grupos["daemon supervisor"]!.push(pid);
+    } catch {
+      /* processo sumiu — ignora */
+    }
+  }
+
+  // quantos de cada grupo são "legítimos" (registrados em pidfile)?
+  const pidDePidfile = async (caminho: string): Promise<number | null> => {
+    try {
+      const dados = JSON.parse(await readFile(caminho, "utf8")) as { pid?: number };
+      return typeof dados.pid === "number" ? dados.pid : null;
+    } catch {
+      return null;
+    }
+  };
+  const pidScheduler = await pidDePidfile(join(home, ".opencorp", "scheduler.pid"));
+  const pidApi = await pidDePidfile(join(home, ".opencorp", "api.pid"));
+  const pidSecretario = await pidDePidfile(join(home, ".opencorp", "opencode-server.json"));
+
+  const problemas: string[] = [];
+  const schedulerVivos = (await Promise.all(grupos["scheduler"]!.map(async (p) => ((await pidVivoFn(p)) ? p : null)))).filter(
+    (p): p is number => p !== null,
+  );
+  if (schedulerVivos.length > 1) {
+    problemas.push(
+      `${schedulerVivos.length} schedulers vivos (${schedulerVivos.join(", ")}) — pidfile registra ${
+        pidScheduler ?? "nenhum"
+      }; matar os excedentes ou usar "opencorp daemon install"`,
+    );
+  }
+  const servesVivos = (await Promise.all(grupos["opencode serve"]!.map(async (p) => ((await pidVivoFn(p)) ? p : null)))).filter(
+    (p): p is number => p !== null,
+  );
+  if (servesVivos.length > 1) {
+    problemas.push(
+      `${servesVivos.length} instâncias de opencode serve (${servesVivos.join(", ")}) — pidfile registra ${
+        pidSecretario ?? "nenhuma"
+      }; órfãs desperdiçam ~300MB cada — "opencorp secretario stop" e iniciar de novo`,
+    );
+  }
+  const apiVivos = (await Promise.all(grupos["api/serve"]!.map(async (p) => ((await pidVivoFn(p)) ? p : null)))).filter(
+    (p): p is number => p !== null,
+  );
+  if (apiVivos.length > 1) {
+    problemas.push(
+      `${apiVivos.length} servidores API (${apiVivos.join(", ")}) — pidfile registra ${pidApi ?? "nenhum"}`,
+    );
+  }
+
+  if (problemas.length > 0) {
+    return {
+      ...base,
+      status: "warn",
+      detail: problemas.join(" · "),
+      items: problemas,
+    };
+  }
+  return {
+    ...base,
+    status: "ok",
+    detail: `sem duplicatas (scheduler ${schedulerVivos.length}, serve ${servesVivos.length}, api ${apiVivos.length})`,
+  };
+}
+
 export async function checkHooks(wsPath: string): Promise<DoctorCheck> {
   const base = { id: "hooks", label: "hooks do workspace" } as const;
   const dir = hooksDir(wsPath);
@@ -679,6 +785,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
 
   checks.push(await checkScheduler(home, { pidVivo: options.pidVivo }));
   checks.push(await checkSecretario(home, { pidVivo: options.pidVivo, fetch: options.fetch }));
+  checks.push(await checkDaemonsDuplicados(home, { pidVivo: options.pidVivo }));
 
   if (options.workspacePath !== undefined) {
     const wsPath = options.workspacePath;

@@ -27,7 +27,7 @@ button:hover:not(:disabled){background:#2563eb}button:disabled{opacity:.5;cursor
 .drawer.open{transform:translateX(0)}.drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;opacity:0;visibility:hidden;transition:all .2s}
 .drawer-overlay.open{opacity:1;visibility:visible}
 @media(max-width:768px){.drawer{width:100vw}}
-.sidebar{position:fixed;top:0;left:0;bottom:0;width:220px;background:#0f0f0f;border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:30}
+.sidebar{position:fixed;top:0;left:0;bottom:0;width:220px;background:#0f0f0f;border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:30;overflow-x:hidden}
 .main{margin-left:220px;min-height:100vh}
 @media(max-width:768px){.sidebar{transform:translateX(-100%);transition:transform .2s}.sidebar.open{transform:translateX(0)}.main{margin-left:0}}
 #sidebar-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:29;opacity:0;visibility:hidden;transition:all .2s}
@@ -200,14 +200,14 @@ input[readonly],select[readonly],textarea[readonly]{background:#1a1a1a}
 .timeline-content{flex:1;min-width:0}
 
 /* ========= SECRETÁRIO / CHAT estilo opencode ========= */
-#secretario-lateral{display:flex;flex-direction:column}
+#secretario-lateral{display:flex;flex-direction:column;min-width:0;overflow:hidden}
 #lista-sessoes button{text-align:left}
-.secretario-grid{display:grid;grid-template-columns:260px 1fr;gap:1rem;height:calc(100dvh - 210px);min-height:440px}
+.secretario-grid{display:grid;grid-template-columns:minmax(210px,280px) minmax(0,1fr);gap:1rem;height:calc(100dvh - 210px);min-height:440px}
 .sessao-grupo{font-size:.625rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#8f8f8f;padding:.75rem .75rem .25rem}
 .sessao-item{display:block;width:100%;padding:.5rem .75rem;border:none;background:transparent;border-radius:.375rem;cursor:pointer}
 .sessao-item:hover{background:#262626}
 .sessao-item.ativa{background:rgba(59,130,246,.15)}
-.sessao-item .sessao-titulo{font-size:.8125rem;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sessao-item .sessao-titulo{font-size:.8125rem;font-weight:500;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35}
 .sessao-item.ativa .sessao-titulo{color:#93c5fd}
 .sessao-item .sessao-data{font-size:.625rem;color:var(--muted);font-family:ui-monospace,monospace;margin-top:.15rem}
 
@@ -216,7 +216,7 @@ input[readonly],select[readonly],textarea[readonly]{background:#1a1a1a}
 .oc-feed{max-width:760px;margin:0 auto;padding:1.25rem 1rem 2rem;display:flex;flex-direction:column;gap:1.1rem}
 .oc-msg{position:relative;font-size:.875rem;line-height:1.6}
 .oc-user{background:#1c1c1c;border:1px solid var(--border);border-radius:10px;padding:.7rem .9rem}
-.oc-assistant .oc-msg-corpo{color:var(--text)}
+.oc-assistant .oc-msg-corpo{overflow-wrap:anywhere;min-width:0;color:var(--text)}
 .oc-copy{position:absolute;top:.35rem;right:.35rem;background:transparent;border:1px solid var(--border);color:var(--muted);font-size:.625rem;padding:.1rem .4rem;border-radius:.25rem;opacity:0;transition:opacity .12s;min-height:0}
 .oc-msg:hover .oc-copy,.oc-copy:focus-visible{opacity:1}
 @media(pointer:coarse){.oc-copy{opacity:.7}}
@@ -425,6 +425,43 @@ button{white-space:nowrap}
 .help-corpo b{color:#fff}
 .help-corpo code{background:#262626;padding:.1rem .35rem;border-radius:4px;font-size:.8rem}
 @media(max-width:640px){.help-pop{bottom:0;top:auto;transform:translateX(-50%);left:50%;border-radius:12px 12px 0 0;max-width:none;width:100%}}
+.drawer-console{border:1px solid var(--border);border-radius:8px;background:#0a0a0a;padding:.6rem .75rem;max-height:220px;overflow:auto}.drawer-console pre{margin:0;font-family:ui-monospace,monospace;font-size:.7rem;line-height:1.45;color:#a1a1aa;white-space:pre-wrap;word-break:break-word}.drawer-console .dc-status{font-size:.7rem;color:#93c5fd;margin-bottom:.35rem;display:flex;align-items:center;gap:.4rem}.dc-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;animation:pulse 1.2s infinite}@keyframes pulse{50%{opacity:.3}}
+
+/* ── Histórico: acordeões ── */
+.hist-acordeao{display:flex;flex-direction:column;gap:.4rem}
+.acc-item{border:1px solid var(--border);border-radius:10px;background:#0c0c0c;overflow:hidden}
+.acc-item.aberto{border-color:#3f3f46}
+.acc-header{display:flex;align-items:center;gap:.65rem;width:100%;padding:.6rem .8rem;background:transparent;border:none;cursor:pointer;text-align:left;color:var(--text)}
+.acc-header:hover{background:#161616}
+.acc-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.acc-titulo{flex:1;min-width:0;display:flex;flex-direction:column;gap:.1rem}
+.acc-titulo-texto{font-size:.85rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acc-sub{font-size:.68rem;color:var(--muted)}
+.acc-quando{font-size:.68rem;color:var(--muted);font-family:ui-monospace,monospace;white-space:nowrap}
+.acc-seta{color:var(--muted);font-size:.7rem;transition:transform .15s}
+.acc-item.aberto .acc-seta{transform:rotate(180deg)}
+.acc-body{padding:.65rem .85rem .8rem;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:.45rem}
+.acc-loading{color:var(--muted);font-size:.78rem}
+.acc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.35rem .9rem}
+.acc-k{font-size:.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.acc-v{font-size:.8rem;color:var(--text)}
+.mono{font-family:ui-monospace,monospace}
+.acc-log{margin:0;background:#0a0a0a;border:1px solid var(--border);border-radius:8px;padding:.55rem .7rem;font-family:ui-monospace,monospace;font-size:.7rem;line-height:1.45;color:#a1a1aa;max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.acc-desc{font-size:.8rem;color:#d4d4d8}
+.acc-run{display:flex;gap:.6rem;font-size:.72rem;color:#a1a1aa;padding:.15rem 0}
+.acc-run.pulou{color:#eab308}
+.acc-conversa{display:flex;flex-direction:column;gap:.5rem;max-height:340px;overflow:auto}
+.acc-msg{border:1px solid var(--border);border-radius:8px;padding:.45rem .6rem}
+.acc-msg.acc-user{background:#141822}
+.acc-role{font-size:.62rem;text-transform:uppercase;color:var(--muted);letter-spacing:.05em}
+.acc-msg-texto{font-size:.78rem;color:#d4d4d8;margin-top:.2rem}
+.acc-msg-texto .md-p{margin:0 0 .3rem}
+/* ── anexos no chat ── */
+.anexos-chips{display:flex;flex-wrap:wrap;gap:.35rem;padding:.25rem 0}
+.anexo-chip{display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;background:#1e293b;color:#93c5fd;border-radius:999px;padding:.2rem .5rem}
+.anexo-chip button{background:transparent;border:none;color:#93c5fd;cursor:pointer;font-size:.7rem;padding:0}
+.composer-row2{display:flex;align-items:flex-end;gap:.4rem}
+.composer-anexo{font-size:1rem;padding:.35rem .5rem}
 </style>
 </head>
 <body>

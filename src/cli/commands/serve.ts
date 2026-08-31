@@ -3,7 +3,7 @@ import { opencorpHome } from "../../utils/paths.js";
 import { tokenAleatorio } from "../../server/index.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
 import type { Command } from "commander";
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { spawn } from "node:child_process";
 import { readFile, rm } from "node:fs/promises";
@@ -89,41 +89,28 @@ export function registerServeCommand(program: Command): void {
     .command("serve")
     .description("API headless REST+SSE sobre o core (para a web da Fase C)")
     .option("--port <porta>", "porta (padrão 4100)", "4100")
-    .option("--token <token>", "token de acesso (gerado e salvo em ~/.opencorp/secrets.json se omitido)")
+    .option("--token [token]", "token de acesso — sem a flag: acesso ABERTO; --token (sem valor): gera aleatório e imprime; --token valor: usa o informado")
     .option("--workspace <id>", "workspace padrão da API")
     .option("--host <host>", "interface de escuta (padrão 127.0.0.1; use 0.0.0.0 para rede local)", "127.0.0.1")
     .option("--foreground", "roda em primeiro plano (debug) — padrão: daemonizado em background");
 
   serve
     .action(
-      async (opts: { port?: string; token?: string; workspace?: string; host?: string; foreground?: boolean }) => {
+      async (opts: { port?: string; token?: string | boolean; workspace?: string; host?: string; foreground?: boolean }) => {
         const home = opencorpHome();
-        let token = opts.token;
-        if (!token) {
-          try {
-            const segredos = JSON.parse(readFileSync(join(home, ".opencorp", "secrets.json"), "utf8")) as {
-              api_token?: string;
-            };
-            token = segredos.api_token ?? tokenAleatorio();
-          } catch {
-            token = tokenAleatorio();
-          }
+        // padrão: acesso ABERTO (""). --token sem valor (boolean true) → gera aleatório e imprime.
+        // --token valor → usa o informado. (secrets.json deixa de ser fonte do token da API)
+        let token = "";
+        if (opts.token === true) {
+          token = tokenAleatorio();
+          console.log(`──────────────────────────────────────────────`);
+          console.log(`  token de acesso: ${token}`);
+          console.log(`──────────────────────────────────────────────`);
+        } else if (typeof opts.token === "string" && opts.token.length > 0) {
+          token = opts.token;
         }
-        try {
-          const dir = join(home, ".opencorp");
-          await mkdirRecursive(dir);
-          const segredos = JSON.parse(readFileSync(join(dir, "secrets.json"), "utf8")) as Record<string, unknown>;
-          segredos.api_token = token;
-          await writeFileAtomic(join(dir, "secrets.json"), `${JSON.stringify(segredos, null, 2)}\n`, { mode: 0o600 });
-        } catch {
-          try {
-            await mkdirRecursive(join(home, ".opencorp"));
-            await writeFileAtomic(join(home, ".opencorp", "secrets.json"), `${JSON.stringify({ api_token: token }, null, 2)}\n`, {
-              mode: 0o600,
-            });
-          } catch {
-            /* sem persistência — token só nesta sessão */
-          }
+        if (token === "") {
+          console.log("acesso ABERTO (sem token) — use --token para proteger a API");
         }
 
         // resolve workspace padrão (para o resolve do ativo funcionar fora de TTY)
@@ -142,7 +129,9 @@ export function registerServeCommand(program: Command): void {
         if (!opts.foreground) {
           // Modo daemon: spawn detached child com --foreground
           const logPath = join(home, "logs", "api-daemon.log");
-          const args = [process.argv[1]!, "serve", "--foreground", "--port", String(portaNum), "--token", token, "--host", opts.host ?? "127.0.0.1"];
+          const args = [process.argv[1]!, "serve", "--foreground", "--port", String(portaNum), "--host", opts.host ?? "127.0.0.1"];
+          // token "" (aberto) não é passado — o filho já nasce aberto por padrão
+          if (token !== "") args.push("--token", token);
           if (opts.workspace) args.push("--workspace", opts.workspace);
           const pid = await spawnDaemon(args, logPath);
 
@@ -176,7 +165,8 @@ export function registerServeCommand(program: Command): void {
         server.listen(portaNum, opts.host ?? "127.0.0.1");
         const porta = await portaPromessa.catch(() => portaNum);
         console.log(`API em http://127.0.0.1:${porta}`);
-        console.log(`token: ${tokenFinal.slice(0, 6)}… (completo em ${join(home, ".opencorp", "secrets.json")})`);
+        if (token === "") console.log("acesso ABERTO (sem token)");
+        else console.log(`token: ${tokenFinal.slice(0, 6)}… (informado via --token)`);
         console.log("Ctrl+C para encerrar");
         process.on("SIGINT", () => {
           console.log("\n[serve] encerrando...");

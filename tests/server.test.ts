@@ -437,9 +437,9 @@ describe("API Server — Tasks", () => {
     expect((chat.json as { autor: string }[]).map((m) => m.autor)).toEqual(["humano", "agente:analista"]);
   });
 
-  it("POST /tasks sem titulo retorna erro e task inexistente 404", async () => {
+  it("POST /tasks sem titulo retorna 422 de validação e task inexistente 404", async () => {
     const semTitulo = await fetchApi("/tasks?workspace=corp-tasks", { method: "POST", body: JSON.stringify({}) });
-    expect(semTitulo.status).toBe(400);
+    expect(semTitulo.status).toBe(422);
     const fantasma = await fetchApi("/tasks/tsk-nada");
     expect(fantasma.status).toBe(404);
     const chatFantasma = await fetchApi("/tasks/tsk-nada/chat");

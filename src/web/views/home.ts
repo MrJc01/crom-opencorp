@@ -6,40 +6,15 @@
 
 import { api, toast, icone, escapeHtml } from "../api.js";
 import { getWsAtivo, getWorkspaces, getViewAtual } from "../state.js";
+import type { SessionInfo, TaskInfo, FlowInfo, ApprovalInfo } from "../state.js";
 import { formatarDataLocal } from "../format.js";
 import { estadoVazio, estadoErro, estadoCarregando } from "../estado.js";
 import { ajuda } from "../help.js";
-
-interface SessionInfo {
-  id?: string;
-  exec_id?: string;
-  agente?: string;
-  status?: string;
-  inicio?: string;
-  criado_em?: string;
-}
-
-interface ApprovalInfo {
-  id: string;
-  padrao?: string;
-  pattern?: string;
-  status?: string;
-}
 
 interface BudgetStatus {
   estado?: {
     workspace_usd_hoje?: number;
   };
-}
-
-interface TaskInfo {
-  coluna?: string;
-  criado_em?: string;
-}
-
-interface FlowInfo {
-  id: string;
-  nome?: string;
 }
 
 interface StatusAgregado {

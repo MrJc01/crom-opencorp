@@ -20,6 +20,7 @@ import { registerToolCommands } from "./commands/tool.js";
 import { registerAppCommand } from "./commands/app.js";
 import { registerTeamCommand } from "./commands/team.js";
 import { registerSupervisorCommand } from "./commands/supervisor.js";
+import { registerDaemonCommand } from "./commands/daemon.js";
 import { registerServeCommand } from "./commands/serve.js";
 import { registerWebCommand } from "./commands/web.js";
 import { registerTemplateCommand } from "./commands/template.js";
@@ -98,6 +99,7 @@ export function buildProgram(): Command {
 
   registerTeamCommand(program);
 
+  registerDaemonCommand(program);
   registerServeCommand(program);
 
   registerWebCommand(program);

@@ -31,12 +31,12 @@ import { renderSecretario } from "./views/secretario.js";
 import { renderConfig } from "./views/config.js";
 import { abrirWizard, exporWizard } from "./views/wizard.js";
 import { criarTask, enviarMsgDrawer, moverTaskColuna, atualizarTaskPrioridade, atualizarTaskResponsavel, atualizarTaskDue, atualizarTaskLabels, atualizarTaskDescricao } from "./views/tasks.js";
-import { agendaEscopo, atualizarCampoAgenda, criarAgenda, executarAgendaAgora, toggleAgendaAtivo, excluirAgenda } from "./views/agenda.js";
-import { executarTeam } from "./views/teams.js";
+import { agendaEscopo, atualizarCampoAgenda, criarAgenda, executarAgendaAgora, toggleAgendaAtivo, excluirAgenda, renderAgendaForm } from "./views/agenda.js";
+import { executarTeam, abrirFormTeam, fecharFormTeam, teamCamposPadrao, addPassoTeam, criarTeam } from "./views/teams.js";
 import { criarReuniao, encerrarReuniao } from "./views/reunioes.js";
-import { executarFlow, detalhesFlow } from "./views/fluxos.js";
+import { executarFlow, detalhesFlow, abrirFormFlow, fecharFormFlow, addPassoFlow, criarFlow } from "./views/fluxos.js";
 import { loadAppsList, abrirApp, fecharApp, renderWidget, enviarForm } from "./views/apps.js";
-import { decidirAprovacao, promptOrdem } from "./views/home.js";
+import { decidirAprovacao, promptOrdem, rodarFlowHub } from "./views/home.js";
 
 /** Configura ícones iniciais no DOM estático. Idempotente via flag de módulo. */
 let iconesConfigurados = false;
@@ -126,8 +126,12 @@ export function sairParaLogin(mensagemErro = 'Sessão encerrada — faça login 
     setRefreshInterval(null);
   }
   clearAuth();
+  sessaoAtiva = false;
   mostrarLogin(mensagemErro);
 }
+
+/** Sessão ativa no cliente (independe de token — servidores abertos têm sessão sim) */
+let sessaoAtiva = false;
 
 /** Fecha o EventSource atual e zera o dot/texto de conexão. Idempotente. */
 function fecharSSE(): void {
@@ -157,6 +161,7 @@ export async function fazerLogin(): Promise<void> {
     // Restaura o workspace persistido se houver (não limpamos no sairParaLogin)
     const wsSalvo = localStorage.getItem('oc-ws');
     if (wsSalvo && !getWsAtivo()) setWsAtivo(wsSalvo);
+    sessaoAtiva = true;
     esconderLogin();
     configurarIconesIniciais();
     // ressincroniza o router com o hash atual da URL (ex.: #historico) antes do boot
@@ -168,21 +173,21 @@ export async function fazerLogin(): Promise<void> {
   }
 }
 
-/** Conecta SSE para eventos em tempo real. No-op se não houver token. */
+/** Conecta SSE para eventos em tempo real. Funciona com ou sem token (servidor aberto). */
 export function conectarSSE(): void {
   const token = getToken();
-  if (!token) return;
-
   const existingEs = getEventSource();
   if (existingEs) existingEs.close();
 
-  const es = new EventSource('/events?token=' + encodeURIComponent(token));
+  const es = token
+    ? new EventSource('/events?token=' + encodeURIComponent(token))
+    : new EventSource('/events');
   setEventSource(es);
 
   es.onopen = () => {
-    // Guard: se o token sumiu (logout/401 durante o CONNECTING), este ES é um
+    // Guard: se a sessão sumiu (logout/401 durante o CONNECTING), este ES é um
     // órfão — fecha e NÃO pinta "conectado" com a tela de login visível.
-    if (!getToken()) {
+    if (!sessaoAtiva) {
       try { es.close(); } catch { /* ignore */ }
       setSseConnected(false);
       return;
@@ -277,7 +282,9 @@ export async function renderView(): Promise<void> {
   const navItems = document.querySelectorAll('.nav-item') as NodeListOf<HTMLElement>;
   navItems.forEach(n => n.classList.toggle('active', n.dataset.view === view));
 
-  const viewEl = document.getElementById('view-' + view);
+  // app-detail reutiliza o DOM de apps (#app-view vive dentro de #view-apps)
+  const viewId = view === 'app-detail' ? 'apps' : view;
+  const viewEl = document.getElementById('view-' + viewId);
   if (viewEl) viewEl.classList.add('active');
 
   switch (view) {
@@ -319,10 +326,25 @@ export function boot(): void {
   if (ws) setWsAtivo(ws);
 
   if (!token) {
-    mostrarLogin();
+    // sem token salvo: servidor pode estar ABERTO (padrão do `opencorp web`) —
+    // tenta entrar anônimo; só pede token se o servidor recusar (401)
+    void (async () => {
+      try {
+        const res = await fetch('/workspaces');
+        if (res.status === 401) { mostrarLogin(); return; }
+        if (!res.ok) { mostrarLogin(); return; }
+        sessaoAtiva = true;
+        esconderLogin();
+        configurarIconesIniciais();
+        iniciarApp();
+      } catch {
+        mostrarLogin();
+      }
+    })();
     return;
   }
 
+  sessaoAtiva = true;
   esconderLogin();
   configurarIconesIniciais();
   iniciarApp();
@@ -361,10 +383,21 @@ export function exporGlobais(): void {
   g.toggleAgendaAtivo = toggleAgendaAtivo;
   g.excluirAgenda = excluirAgenda;
   g.executarTeam = executarTeam;
+  g.abrirFormTeam = abrirFormTeam;
+  g.fecharFormTeam = fecharFormTeam;
+  g.teamCamposPadrao = teamCamposPadrao;
+  g.addPassoTeam = addPassoTeam;
+  g.criarTeam = criarTeam;
   g.criarReuniao = criarReuniao;
   g.encerrarReuniao = encerrarReuniao;
   g.executarFlow = executarFlow;
   g.detalhesFlow = detalhesFlow;
+  g.abrirFormFlow = abrirFormFlow;
+  g.fecharFormFlow = fecharFormFlow;
+  g.addPassoFlow = addPassoFlow;
+  g.criarFlow = criarFlow;
+  g.rodarFlowHub = rodarFlowHub;
+  g.renderAgendaForm = renderAgendaForm;
   g.loadAppsList = loadAppsList;
   g.abrirApp = abrirApp;
   g.fecharApp = fecharApp;

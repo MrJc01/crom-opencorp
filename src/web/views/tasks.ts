@@ -159,19 +159,21 @@ export async function criarTask(): Promise<void> {
   const titulo = input.value.trim();
   if (!titulo) return;
 
-  await api('/tasks', { method: 'POST', body: JSON.stringify({ titulo }) }).catch(() => undefined);
-  input.value = '';
-  renderTasks();
+  try {
+    await api('/tasks', { method: 'POST', body: JSON.stringify({ titulo }) });
+    input.value = '';
+    renderTasks();
+  } catch {
+    // mantém o texto digitado em caso de falha (não finge sucesso)
+  }
 }
 
-/** Abre drawer de detalhes da task */
+/** Abre drawer de detalhes da task — versão canônica vive no router.ts; mantém taskAbertaId local p/ chat/patch */
 export async function abrirDrawer(id: string, titulo: string): Promise<void> {
   taskAbertaId = id;
   setTaskAberta(id);
-  document.getElementById('drawer-title')!.textContent = titulo;
-  document.getElementById('drawer')!.classList.add('open');
-  document.getElementById('drawer-overlay')!.classList.add('open');
-  await carregarDrawerConteudo(id);
+  const { abrirDrawer } = await import("../router.js");
+  await abrirDrawer(id, titulo);
 }
 
 /** Carrega conteúdo do drawer (detalhes + chat) */
@@ -239,7 +241,59 @@ export async function carregarDrawerConteudo(id: string): Promise<void> {
       <h3 class="font-semibold mb-2 flex items-center gap-2">${icone('chat')} Chat</h3>
       <div id="drawer-chat" class="scrollbar-thin max-h-64 overflow-y-auto space-y-2 mb-4">${renderChat(chat)}</div>
     </div>
+    <div id="drawer-console-wrap" class="border-t border-zinc-800 pt-4">
+      <h3 class="font-semibold mb-2 flex items-center gap-2">${icone('run')} Execução ao vivo</h3>
+      <div id="drawer-console" class="drawer-console"><div class="dc-status"><span class="dc-dot"></span>verificando…</div></div>
+    </div>
   `;
+  // console ao vivo: mostra o output do agente enquanto ele trabalha
+  const responsavel = String(task.responsavel || '').replace(/^agente:/, '');
+  if (responsavel) iniciarConsoleAoVivo(responsavel);
+}
+
+/** Timer do console ao vivo — um só, recriado a cada drawer aberto */
+let consoleTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Console ao vivo do drawer — polls a execução EM CURSO do agente responsável
+ * e mostra o tail do log em tempo real (o que o agente está gerando agora).
+ * Auto-encerra quando o drawer fecha.
+ */
+function iniciarConsoleAoVivo(agente: string): void {
+  if (consoleTimer) { clearInterval(consoleTimer); consoleTimer = null; }
+  const container = document.getElementById('drawer-console');
+  if (!container) return;
+
+  const tick = async (): Promise<void> => {
+    const drawer = document.getElementById('drawer');
+    if (!drawer?.classList.contains('open')) {
+      if (consoleTimer) { clearInterval(consoleTimer); consoleTimer = null; }
+      return; // fechou — para o poller
+    }
+    try {
+      const execs = await api<Array<{ id: string; agente?: string; status: string; inicio?: string }>>(
+        '/sessions?agent=' + encodeURIComponent(agente),
+      ).catch(() => []);
+      const rodando = (execs ?? []).find((e) => e.status === 'executando');
+      if (!rodando) {
+        container.innerHTML = '<div class="dc-status" style="color:var(--muted)">nenhuma execução ativa deste agente agora</div>';
+        return;
+      }
+      const inicioMs = rodando.inicio ? Date.parse(rodando.inicio) : 0;
+      const decorrido = inicioMs ? Math.max(1, Math.round((Date.now() - inicioMs) / 1000)) : 0;
+      const { log } = await api<{ log: string }>('/sessions/' + encodeURIComponent(rodando.id) + '/log');
+      const tail = (log || '').split('\n').slice(-22).join('\n');
+      container.innerHTML = `
+        <div class="dc-status"><span class="dc-dot"></span>executando há ${decorrido}s · ${escapeHtml(rodando.id)}</div>
+        <pre>${escapeHtml(tail)}</pre>`;
+      container.scrollTop = container.scrollHeight;
+    } catch {
+      container.innerHTML = '<div class="dc-status" style="color:var(--muted)">sem acesso ao log agora</div>';
+    }
+  };
+
+  void tick();
+  consoleTimer = setInterval(() => { void tick(); }, 3000);
 }
 
 function renderChat(msgs: Record<string, unknown>[]): string {

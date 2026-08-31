@@ -18,7 +18,7 @@ Object.defineProperty(globalThis, 'localStorage', {
   value: localStorageMock,
   writable: true,
 });
-import { escapeHtml, formatarAgenda, badgeTipo, badgeTeamPadrao, formatarDataLocal, formatarHora, truncar, mesclarHistorico } from "../src/web/format.js";
+import { escapeHtml, formatarAgenda, badgeTipo, badgeTeamPadrao, formatarDataLocal, formatarHora, truncar } from "../src/web/format.js";
 import { ICONES, icone } from "../src/web/icons.js";
 import { loadPersistedAuth, getToken, getWsAtivo, setToken, setWsAtivo, setWorkspaces, getWorkspaces, getViewAtual, setViewAtual, getTaskAberta, setTaskAberta, getAgendaEscopoAtual, setAgendaEscopoAtual, isSseConnected, setSseConnected, clearAuth, resetState, subscribe } from "../src/web/state.js";
 
@@ -97,81 +97,7 @@ describe("format.ts — formatters puros", () => {
     });
   });
 
-  describe("mesclarHistorico", () => {
-    const baseSession = { id: 'sess-1', agente: 'executor', status: 'concluido', inicio: '2025-01-15T10:00:00Z', duracao: 30 };
-    const baseTask = { id: 'task-1', titulo: 'Minha task', coluna: 'fazendo', responsavel: 'joao', criado_em: '2025-01-15T11:00:00Z' };
-    const baseJob = { id: 'job-1', nome: 'Rotina diária', agenda: { tipo: 'intervalo_min', valor: 60 }, args: [], workspace: 'ws1', ativo: true, ultima_exec: '2025-01-15T09:00:00Z' };
 
-    it("ordena por quando desc (mais recente primeiro)", () => {
-      const r = mesclarHistorico(
-        [{ ...baseSession, inicio: '2025-01-15T10:00:00Z' }],
-        [{ ...baseTask, criado_em: '2025-01-15T11:00:00Z' }],
-        [{ ...baseJob, ultima_exec: '2025-01-15T09:00:00Z' }]
-      );
-      expect(r[0].tipo).toBe('task'); // 11:00 mais recente
-      expect(r[1].tipo).toBe('execucao'); // 10:00
-      expect(r[2].tipo).toBe('rotina'); // 09:00
-    });
-
-    it("filtra por tipo execucao", () => {
-      const r = mesclarHistorico(
-        [baseSession],
-        [baseTask],
-        [baseJob],
-        { filtro: 'execucao' }
-      );
-      expect(r.length).toBe(1);
-      expect(r[0].tipo).toBe('execucao');
-    });
-
-    it("filtra por tipo task", () => {
-      const r = mesclarHistorico(
-        [baseSession],
-        [baseTask],
-        [baseJob],
-        { filtro: 'task' }
-      );
-      expect(r.length).toBe(1);
-      expect(r[0].tipo).toBe('task');
-    });
-
-    it("filtra por tipo rotina", () => {
-      const r = mesclarHistorico(
-        [baseSession],
-        [baseTask],
-        [baseJob],
-        { filtro: 'rotina' }
-      );
-      expect(r.length).toBe(1);
-      expect(r[0].tipo).toBe('rotina');
-    });
-
-    it("respeita limite", () => {
-      const sessions = Array.from({ length: 10 }, (_, i) => ({ ...baseSession, id: `s-${i}`, inicio: `2025-01-15T${String(10+i).padStart(2,'0')}:00:00Z` }));
-      const r = mesclarHistorico(sessions, [], [], { limite: 3 });
-      expect(r.length).toBe(3);
-    });
-
-    it("campos ausentes não quebram (session sem inicio, job sem ultima_exec)", () => {
-      const r = mesclarHistorico(
-        [{ id: 's-1', agente: 'a' }], // sem inicio
-        [{ titulo: 't', coluna: 'c' }], // sem criado_em
-        [{ id: 'j-1', nome: 'j', agenda: { tipo: 'cron', valor: '*' }, args: [], workspace: 'w', ativo: true }] // sem ultima_exec
-      );
-      // Apenas a task deve aparecer (tem fallback de data)
-      expect(r.length).toBe(1);
-      expect(r[0].tipo).toBe('task');
-    });
-
-    it("task usa status da coluna", () => {
-      const r = mesclarHistorico(
-        [],
-        [{ titulo: 'T', coluna: 'feito', responsavel: 'x' }],
-        []
-      );
-      expect(r[0].status).toBe('feito');
-    });
-  });
 });
 
 describe("icons.ts — mapa de ícones", () => {

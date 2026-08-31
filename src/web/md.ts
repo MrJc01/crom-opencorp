@@ -9,6 +9,7 @@ import { escapeHtml } from "./format.js";
 
 /** Instala (uma vez) o global de copy dos code fences */
 function garantirCopyGlobal(): void {
+  if (typeof window === "undefined") return; // testes em node
   const g = window as unknown as Record<string, unknown>;
   g.__mdCopy = (btn: HTMLButtonElement) => {
     const pre = btn.parentElement?.querySelector("code");
@@ -43,7 +44,7 @@ function separarFences(texto: string): Bloco[] {
   return blocos;
 }
 
-/** Inline: code, bold, italic, links, strikethrough — sobre texto JÁ escapado */
+/** Inline: code, bold, italic, links, autolink de URLs cruas, strikethrough — sobre texto JÁ escapado */
 function inline(escapado: string): string {
   let r = escapado;
   r = r.replace(/`([^`]+)`/g, '<code class="md-code-inline">$1</code>');
@@ -52,6 +53,17 @@ function inline(escapado: string): string {
   r = r.replace(/~~([^~]+)~~/g, "<del>$1</del>");
   // links [texto](url) — só http(s), aspas proibidas no url
   r = r.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s"']+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  // autolink de URLs cruas — não dentro de atributos/links já gerados (precedidos por " ou >)
+  r = r.replace(/(?<!["'>])(https?:\/\/[^\s"'<>]+)/g, (m) => {
+    let url = m;
+    let punct = "";
+    const fim = /[.,;:!?)]+$/.exec(url);
+    if (fim) {
+      punct = fim[0];
+      url = url.slice(0, url.length - punct.length);
+    }
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${punct}`;
+  });
   return r;
 }
 
@@ -125,12 +137,11 @@ export function renderMarkdown(texto: string): string {
   const blocos = separarFences(texto);
   return blocos.map((b) => {
     if (b.tipo === "html") return renderTexto(b.conteudo);
-    const primeira = b.conteudo.split("\n")[0] ?? "";
-    const corpo = /^[\w-]*\s*$/.test(primeira) && primeira.trim() !== "" ? b.conteudo.slice(primeira.length + 1) : b.conteudo;
+    // separarFences já removeu a linha de linguagem; conteúdo cru vai para <pre><code> escapado
     return `
       <div class="md-code">
         <button class="md-copy" onclick="window.__mdCopy(this)" aria-label="Copiar código">copy</button>
-        <pre><code>${escapeHtml(corpo.replace(/\n$/, ""))}</code></pre>
+        <pre><code>${escapeHtml(b.conteudo.replace(/\n$/, ""))}</code></pre>
       </div>`;
   }).join("");
 }

@@ -1,5 +1,5 @@
 import { spawn, type SpawnOptions } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { opencorpHome } from "../utils/paths.js";
@@ -81,7 +81,7 @@ async function removerPidfile(homeDir: string): Promise<void> {
   if (existsSync(path)) rmSync(path, { force: true });
 }
 
-async function esperarPortaResponder(porta: number, homeDir: string, timeoutMs = 15000): Promise<void> {
+async function esperarPortaResponder(porta: number, homeDir: string, timeoutMs = 25000): Promise<void> {
   const inicio = Date.now();
   const urls = [
     `http://127.0.0.1:${porta}/health`,
@@ -103,6 +103,39 @@ async function esperarPortaResponder(porta: number, homeDir: string, timeoutMs =
   throw new Error(
     `opencode serve não respondeu na porta ${porta} após ${timeoutMs}ms — verifique logs em ${homeDir}/logs/opencode-server.log`,
   );
+}
+
+/**
+ * Adota um "órfão saudável": instância que sobreviveu a um boot abortado (pidfile perdido).
+ * Procura no log do servidor a última linha `opencorp-ativa {...}` escrita após health-check OK;
+ * se o pid continua vivo e a porta responde, regrava o pidfile e reusa a instância.
+ */
+async function adotarOrfaoSaudavel(homeDir: string): Promise<OpencodeServerInfo | null> {
+  const logPath = join(homeDir, "logs", "opencode-server.log");
+  if (!existsSync(logPath)) return null;
+  let texto: string;
+  try {
+    texto = readFileSync(logPath, "utf8");
+  } catch {
+    return null;
+  }
+  const linhas = texto.split("\n").filter((l) => l.includes("opencorp-ativa"));
+  for (let i = linhas.length - 1; i >= 0; i--) {
+    try {
+      const info = JSON.parse(linhas[i].slice(linhas[i].indexOf("{"))) as OpencodeServerInfo;
+      if (!info.pid || !info.porta) continue;
+      if (!(await processoVivo(info.pid))) break; // última ativa morreu — nada mais recente para adotar
+      try {
+        const res = await fetch(`http://127.0.0.1:${info.porta}/health`, { signal: AbortSignal.timeout(2000) });
+        if (res.ok || res.status === 401 || res.status === 404) return info;
+      } catch {
+        break; // pid vivo mas porta sem resposta — não adotar
+      }
+    } catch {
+      continue; // linha corrompida — tenta a anterior
+    }
+  }
+  return null;
 }
 
 function binOpencodePath(): string {
@@ -196,6 +229,13 @@ export class OpencodeServerManager {
       return { pid: existente.pid, porta: existente.porta };
     }
 
+    // pidfile perdido/inválido mas há instância saudável de boot anterior → adota em vez de duplicar
+    const orfao = await adotarOrfaoSaudavel(this.homeDir);
+    if (orfao) {
+      await gravarPidfile(this.homeDir, orfao);
+      return { pid: orfao.pid, porta: orfao.porta };
+    }
+
     const porta = await portaLivre();
     const logPath = join(this.homeDir, "logs", "opencode-server.log");
     const logDir = dirname(logPath);
@@ -209,7 +249,8 @@ export class OpencodeServerManager {
       cwd: this.homeDir,
       env: { ...process.env, OPENCORP_HOME: this.homeDir },
       detached: true,
-      stdio: "ignore",
+      // stdout/stderr do filho vão para o log (antes era "ignore" — boot quebrado não deixava rastro)
+      stdio: ["ignore", openSync(logPath, "a"), openSync(logPath, "a")],
     };
 
     const child = spawn(this.binario, argv, options);
@@ -228,8 +269,21 @@ export class OpencodeServerManager {
     try {
       await esperarPortaResponder(porta, this.homeDir);
     } catch (erro) {
+      // boot falhou: matar o filho para não virar órfão em porta aleatória
+      try {
+        if (await processoVivo(pid)) process.kill(pid, "SIGTERM");
+      } catch {
+        /* filho já morreu */
+      }
       await removerPidfile(this.homeDir);
       throw erro;
+    }
+
+    // marca a instância como saudável no log (permite adoção se o pidfile se perder)
+    try {
+      appendFileSync(logPath, `opencorp-ativa ${JSON.stringify(info)}\n`);
+    } catch {
+      /* log é best-effort */
     }
 
     eventBus.emit("secretario.iniciado", { pid, porta, agentes: agentes.total });

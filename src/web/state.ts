@@ -23,17 +23,32 @@ export interface AgendaJob {
 }
 
 export interface SessionInfo {
-  id: string;
+  id?: string;
+  exec_id?: string;
   agente?: string;
   status?: string;
   inicio?: string;
   criado_em?: string;
 }
 
+export interface TaskInfo {
+  id?: string;
+  titulo?: string;
+  coluna?: string;
+  responsavel?: string;
+  criado_em?: string;
+}
+
+export interface FlowInfo {
+  id: string;
+  nome?: string;
+}
+
 export interface ApprovalInfo {
   id: string;
   padrao?: string;
   pattern?: string;
+  status?: string;
 }
 
 export interface AgentInfo {
