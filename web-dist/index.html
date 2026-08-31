@@ -12,7 +12,7 @@
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 input,select,textarea{background:#262626;border:1px solid #404040;border-radius:.375rem;padding:.375rem .5rem;color:var(--text);font-size:.875rem;width:100%}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(37,99,235,.3)}
-button{background:var(--accent);color:#fff;border:none;border-radius:.375rem;padding:.375rem .75rem;font-size:.875rem;cursor:pointer;transition:background .15s}
+button{background:var(--accent);color:#fff;border:none;border-radius:.375rem;padding:.375rem .75rem;font-size:.875rem;cursor:pointer;transition:background .15s;display:inline-flex;align-items:center;justify-content:center;gap:.4rem;vertical-align:middle}
 button:hover:not(:disabled){background:#2563eb}button:disabled{opacity:.5;cursor:not-allowed}
 .btn-ghost{background:transparent;color:var(--text);border:1px solid var(--border)}.btn-ghost:hover{background:#262626}
 .badge{display:inline-flex;align-items:center;padding:.125rem .5rem;border-radius:9999px;font-size:.6875rem;font-weight:600;text-transform:uppercase;letter-spacing:.02em}
@@ -93,7 +93,15 @@ button:hover:not(:disabled){background:#2563eb}button:disabled{opacity:.5;cursor
 .login-input{margin-bottom:1rem}.login-btn{width:100%}.login-link{display:block;margin-top:1rem;font-size:.75rem;color:var(--muted)}
 .empty-state{text-align:center;padding:3rem 1rem;color:var(--muted)}.empty-icon{font-size:3rem;margin-bottom:1rem;opacity:.5;display:flex;justify-content:center}
 .empty-title{font-weight:600;margin-bottom:.5rem}.empty-desc{font-size:.8125rem;max-width:300px;margin:0 auto}
-.nav-item{display:flex;align-items:center;gap:.75rem;width:100%;padding:.625rem 1rem;border:none;background:transparent;color:var(--muted);text-align:left;font-size:.8125rem;border-radius:.375rem;margin:.125rem .5rem;cursor:pointer}
+.empty-acao{margin-top:1rem;display:flex;justify-content:center;gap:.5rem}
+.estado-loading .empty-icon{animation:pulsaEstado 1.2s ease-in-out infinite}
+@keyframes pulsaEstado{0%,100%{opacity:.3}50%{opacity:.7}}
+.nav-item{display:flex;align-items:center;justify-content:flex-start;gap:.75rem;width:100%;padding:.625rem 1rem;border:none;background:transparent;color:var(--muted);text-align:left;font-size:.8125rem;border-radius:.375rem;margin:.125rem .5rem;cursor:pointer}
+.nav-grupo{font-size:.625rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#8f8f8f;padding:.875rem 1rem .25rem;margin:0 .5rem}
+.nav-row{display:flex;align-items:center;gap:.25rem;margin:.125rem .5rem}
+.nav-row .nav-item{margin:0;flex:1;min-width:0}
+.nav-row .help-wrap{margin-left:0;flex-shrink:0}
+.nav-row .help-btn{min-height:0;min-width:18px;height:18px}
 .nav-item:hover{background:#262626;color:var(--text)}.nav-item.active{background:rgba(59,130,246,.15);color:var(--accent);font-weight:500}
 .nav-icon{width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0}.sidebar-footer{margin-top:auto;padding:1rem;border-top:1px solid var(--border)}
 .connection-status{display:flex;align-items:center;gap:.5rem;font-size:.6875rem}.connection-dot{width:6px;height:6px;border-radius:50%}.connection-dot.connected{background:var(--ok)}.connection-dot.disconnected{background:var(--err)}
@@ -191,15 +199,73 @@ input[readonly],select[readonly],textarea[readonly]{background:#1a1a1a}
 .timeline-dot{width:20px;height:20px;border-radius:50%;flex-shrink:0;border:3px solid var(--bg);box-shadow:0 0 0 2px var(--border);z-index:1}
 .timeline-content{flex:1;min-width:0}
 
-/* ========= SECRETÁRIO / CHAT ========= */
+/* ========= SECRETÁRIO / CHAT estilo opencode ========= */
 #secretario-lateral{display:flex;flex-direction:column}
 #lista-sessoes button{text-align:left}
-#chat-mensagens{display:flex;flex-direction:column;gap:1rem}
-.chat-msg{display:flex;gap:.75rem;max-width:100%}
-.chat-msg.flex-row-reverse{flex-direction:row-reverse}
-.chat-msg > div{max-width:85%}
-#chat-input{flex:1;min-height:60px;max-height:150px;resize:none;font-family:inherit;font-size:.875rem;line-height:1.5}
+.secretario-grid{display:grid;grid-template-columns:260px 1fr;gap:1rem;height:calc(100dvh - 210px);min-height:440px}
+.sessao-grupo{font-size:.625rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#8f8f8f;padding:.75rem .75rem .25rem}
+.sessao-item{display:block;width:100%;padding:.5rem .75rem;border:none;background:transparent;border-radius:.375rem;cursor:pointer}
+.sessao-item:hover{background:#262626}
+.sessao-item.ativa{background:rgba(59,130,246,.15)}
+.sessao-item .sessao-titulo{font-size:.8125rem;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sessao-item.ativa .sessao-titulo{color:#93c5fd}
+.sessao-item .sessao-data{font-size:.625rem;color:var(--muted);font-family:ui-monospace,monospace;margin-top:.15rem}
 
+/* feed plano (sem bolhas) — coluna central como no opencode */
+#chat-mensagens{display:block}
+.oc-feed{max-width:760px;margin:0 auto;padding:1.25rem 1rem 2rem;display:flex;flex-direction:column;gap:1.1rem}
+.oc-msg{position:relative;font-size:.875rem;line-height:1.6}
+.oc-user{background:#1c1c1c;border:1px solid var(--border);border-radius:10px;padding:.7rem .9rem}
+.oc-assistant .oc-msg-corpo{color:var(--text)}
+.oc-copy{position:absolute;top:.35rem;right:.35rem;background:transparent;border:1px solid var(--border);color:var(--muted);font-size:.625rem;padding:.1rem .4rem;border-radius:.25rem;opacity:0;transition:opacity .12s;min-height:0}
+.oc-msg:hover .oc-copy,.oc-copy:focus-visible{opacity:1}
+@media(pointer:coarse){.oc-copy{opacity:.7}}
+.oc-vazio{text-align:center;padding:3rem 1rem;color:var(--muted)}
+.oc-vazio-titulo{font-size:1.05rem;font-weight:600;margin-bottom:1.25rem;color:var(--text)}
+.oc-chips{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center}
+.chip{background:#1c1c1c;border:1px solid var(--border);color:var(--text);font-size:.75rem;padding:.45rem .8rem;border-radius:9999px;cursor:pointer;transition:all .15s}
+.chip:hover{border-color:var(--accent);color:#93c5fd}
+.oc-followups{margin-top:-.4rem;justify-content:flex-start}
+.oc-pensando-texto{color:var(--muted)}
+.oc-dots i{animation:ocDot 1.2s infinite;font-style:normal}
+.oc-dots i:nth-child(2){animation-delay:.2s}.oc-dots i:nth-child(3){animation-delay:.4s}
+@keyframes ocDot{0%,60%,100%{opacity:.2}30%{opacity:1}}
+.oc-ir-fim{position:absolute;bottom:110px;left:50%;transform:translateX(-50%);width:34px;height:34px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--text);font-size:1rem;z-index:5}
+.oc-ir-fim:hover{border-color:#404040}
+
+/* composer estilo opencode */
+.composer{background:#1c1c1c;border:1px solid #404040;border-radius:14px;padding:.6rem .7rem .5rem;max-width:760px;margin:0 auto;width:100%}
+.composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px rgba(37,99,235,.25)}
+#chat-input{background:transparent;border:none;padding:.2rem .3rem;flex:1;min-height:28px;max-height:150px;resize:none;font-family:inherit;font-size:.9rem;line-height:1.5;width:100%}
+#chat-input:focus{outline:none;box-shadow:none;border:none}
+.composer-row{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-top:.35rem}
+.composer-dica{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.composer-enviar{width:38px;height:38px;min-width:38px;padding:0;border-radius:10px;flex-shrink:0}
+.composer-enviar.parando{background:#1c1c1c;border:1px solid #404040;color:var(--text)}
+.composer-enviar.parando:hover{border-color:var(--err);color:var(--err)}
+
+/* markdown rico */
+.md-p{margin:0 0 .6rem}.md-p:last-child{margin-bottom:0}
+.md-h{font-weight:700;margin:.8rem 0 .4rem;color:#fff}
+.md-h1{font-size:1.15rem}.md-h2{font-size:1.05rem}.md-h3,.md-h4{font-size:.95rem}
+.md-lista{margin:.4rem 0 .6rem;padding-left:1.3rem;display:flex;flex-direction:column;gap:.25rem}
+.md-code-inline{background:#262626;padding:.08rem .35rem;border-radius:4px;font-size:.8em;font-family:ui-monospace,monospace}
+.md-quote{border-left:3px solid var(--border);padding-left:.75rem;margin:.5rem 0;color:var(--muted)}
+.md-hr{border:none;border-top:1px solid var(--border);margin:.8rem 0}
+.md-code{position:relative;background:#111;border:1px solid var(--border);border-radius:8px;margin:.6rem 0}
+.md-code pre{margin:0;padding:.75rem;overflow-x:auto;scrollbar-width:thin}
+.md-code code{font-family:ui-monospace,monospace;font-size:.78rem;color:#d4d4d8;white-space:pre}
+.md-copy{position:absolute;top:.4rem;right:.4rem;background:#262626;border:1px solid var(--border);color:var(--muted);font-size:.625rem;padding:.15rem .45rem;border-radius:.25rem;opacity:.7;min-height:0}
+.md-copy:hover{color:#fff;border-color:#525252;opacity:1}
+
+/* Secretário: lista de conversas vira overlay deslizante no mobile */
+@media(max-width:767px){
+  .secretario-grid{position:relative;height:calc(100dvh - 230px);min-height:420px;grid-template-columns:1fr}
+  #secretario-lateral{position:absolute;inset:0;z-index:20;transform:translateX(-105%);transition:transform .2s ease}
+  .secretario-grid.conv-aberta #secretario-lateral{transform:translateX(0)}
+  .secretario-grid.conv-aberta::before{content:"";position:absolute;inset:0;background:rgba(0,0,0,.5);z-index:15;border-radius:.5rem}
+  .composer-dica{display:none}
+}
 /* ========= MODAIS (substituem prompt()/confirm() nativos) ========= */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:60;display:flex;align-items:center;justify-content:center;padding:1rem}
 .modal-box{background:var(--card);border:1px solid var(--border);border-radius:.5rem;box-shadow:0 10px 30px rgba(0,0,0,.5);width:100%;max-width:420px;padding:1.25rem;animation:modalIn .15s ease}
@@ -232,14 +298,133 @@ button{white-space:nowrap}
   #view-home .hero-title{font-size:1.5rem}
 }
 
-/* Secretário: lista de conversas vira overlay deslizante no mobile */
-@media(max-width:767px){
-  #secretario-grid{position:relative;height:calc(100dvh - 230px);min-height:420px}
-  #secretario-lateral{position:absolute;inset:0;z-index:20;transform:translateX(-105%);transition:transform .2s ease}
-  #secretario-grid.conv-aberta #secretario-lateral{transform:translateX(0)}
-  #secretario-grid.conv-aberta::before{content:"";position:absolute;inset:0;background:rgba(0,0,0,.5);z-index:15;border-radius:.5rem}
+/* ========= CONFIG (abas, campos, toggle, secrets) ========= */
+.config-abas{display:flex;gap:.5rem;overflow-x:auto;padding-bottom:.25rem;scrollbar-width:thin}
+.config-aba{white-space:nowrap;display:inline-flex;align-items:center;gap:.35rem;padding:.4rem .7rem;border-radius:.375rem}
+.config-aba-ativa{background:var(--accent);color:#fff;border-color:var(--accent)}
+.cfg-campo{display:flex;flex-direction:column;gap:.35rem;padding:.9rem 0;border-bottom:1px solid var(--border)}
+.cfg-campo:last-child{border-bottom:none;padding-bottom:.2rem}
+.cfg-campo-topo{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.cfg-label{font-weight:500;font-size:.8125rem}
+.cfg-dica{font-size:.6875rem;color:var(--muted)}
+.cfg-chave{font-size:.625rem;color:#8f8f8f;font-family:ui-monospace,monospace;margin-left:auto}
+.cfg-linha{display:flex;gap:.5rem;align-items:flex-start;max-width:560px}
+.cfg-linha input,.cfg-linha textarea,.cfg-linha select{flex:1;min-width:0}
+.cfg-linha .btn{flex-shrink:0}
+.toggle{position:relative;display:inline-flex;width:40px;height:22px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0;position:absolute}
+.toggle-slider{position:absolute;inset:0;background:#404040;border-radius:9999px;transition:.15s;cursor:pointer}
+.toggle-slider::before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s}
+.toggle input:checked + .toggle-slider{background:var(--accent)}
+.toggle input:checked + .toggle-slider::before{transform:translateX(18px)}
+.toggle input:focus-visible + .toggle-slider{outline:2px solid var(--accent);outline-offset:2px}
+.secret-row{display:flex;align-items:center;gap:.75rem;padding:.55rem 0;border-bottom:1px solid var(--border)}
+.secret-row:last-child{border-bottom:none}
+@media(max-width:640px){
+  .cfg-linha{flex-direction:column;align-items:stretch}
+  .cfg-linha .btn{width:100%}
+  .cfg-chave{margin-left:0;width:100%}
 }
 
+/* ========= E5 — FIXES VISUAIS ========= */
+/* Badges nunca encolhem (título vizinho é quem trunca) */
+.badge{flex-shrink:0}
+
+/* Hero actions: grid 2 colunas no mobile (sem wrap feio) */
+@media(max-width:640px){
+  .hero-actions{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+  .hero-actions .btn,.hero-actions .btn-ghost{width:100%;justify-content:center}
+}
+
+/* Cards com ações à direita: ações quebram para baixo no mobile */
+@media(max-width:640px){
+  #view-agenda .card > .flex.items-start.justify-between,
+  #view-historico .timeline-content > .flex.items-start.justify-between{flex-wrap:wrap;gap:.6rem}
+  #view-agenda .card .flex.items-center.gap-2.flex-shrink-0{width:100%;justify-content:flex-start}
+}
+
+/* Forms (agenda/reuniões): botões empilhados full-width no mobile */
+@media(max-width:640px){
+  #form-nova-agenda .flex.gap-2,
+  #form-nova-reuniao .flex.gap-2{flex-direction:column}
+  #form-nova-agenda .flex.gap-2 button,
+  #form-nova-reuniao .flex.gap-2 button{width:100%}
+}
+
+/* Contraste AA: text-zinc-500 (#71717a ≈ 3.6:1 em card #171717) → zinc-400 (≈7:1) */
+.text-zinc-500{color:#a1a1aa}
+
+/* Workspace sempre visível no mobile (chip junto ao hamburger → abre sidebar) */
+.ws-chip{display:none}
+@media(max-width:768px){
+  .ws-chip{display:flex;position:fixed;top:8px;left:60px;z-index:35;height:32px;align-items:center;padding:0 .8rem;background:var(--card);border:1px solid var(--border);border-radius:9999px;color:var(--text);font-size:.75rem;font-family:ui-monospace,monospace;max-width:calc(100vw - 76px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+  .ws-chip:hover{border-color:#404040}
+}
+
+/* ========= HOME-HUB + WIZARD (E7) ========= */
+.hub-header{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.hub-header-esq{display:flex;flex-direction:column;gap:.5rem;align-items:flex-start}
+.hub-ws{display:inline-flex;align-items:center;gap:.5rem;background:var(--bg);border:1px solid var(--border);border-radius:9999px;padding:.45rem .9rem;font-size:.9rem;color:var(--text);cursor:pointer}
+.hub-ws:hover{border-color:var(--accent)}
+.hub-ws-count{font-size:.6875rem;color:var(--muted)}
+.hub-saude{display:inline-flex;align-items:center;gap:.4rem;font-size:.6875rem;color:var(--muted);padding-left:.4rem;cursor:help}
+.hub-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;box-shadow:0 0 6px currentColor}
+.hub-acoes{display:flex;gap:.6rem;flex-wrap:wrap}
+.hub-acoes .btn,.hub-acoes .btn-ghost{display:inline-flex;align-items:center;gap:.4rem}
+.zona-rotulo{font-size:.6875rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5rem .1rem}
+.hub-sistema{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+.hub-card{display:flex;align-items:center;gap:.7rem;background:var(--bg);border:1px solid var(--border);border-radius:.5rem;padding:.8rem;color:var(--text);text-align:left;cursor:pointer;transition:border-color .15s;font-size:.8125rem}
+.hub-card:hover{border-color:#404040}
+.hub-card b{display:block;font-size:.8125rem}
+.hub-card small{color:var(--muted);font-size:.6875rem}
+.hub-card-static{cursor:help}
+.hub-flows-lista{display:flex;flex-direction:column}
+.hub-flow{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.6rem 0;border-bottom:1px solid var(--border)}
+.hub-flow:last-child{border-bottom:none}
+
+.wizard-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:80;display:flex;align-items:center;justify-content:center;padding:1rem}
+.wizard-box{background:var(--card);border:1px solid var(--border);border-radius:12px;width:100%;max-width:640px;max-height:92vh;display:flex;flex-direction:column;animation:modalIn .15s ease}
+.wizard-topo{display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:1px solid var(--border)}
+.wizard-titulo{font-weight:700;font-size:1.05rem;margin:0;display:flex;align-items:center;gap:.5rem}
+.wizard-progresso{height:4px;background:var(--bg)}
+.wizard-progresso-barra{height:100%;background:var(--accent);transition:width .2s ease}
+.wizard-passos{font-size:.6875rem;color:var(--muted);padding:.6rem 1.25rem 0;text-transform:uppercase;letter-spacing:.06em}
+.wizard-corpo{padding:1rem 1.25rem;overflow-y:auto;display:flex;flex-direction:column;gap:.7rem;flex:1}
+.wizard-acoes{display:flex;justify-content:flex-end;gap:.5rem;padding:1rem 1.25rem;border-top:1px solid var(--border)}
+.wiz-erro{color:var(--err);font-size:.75rem}
+.wiz-chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem}
+.chip-ativo{background:var(--accent);border-color:var(--accent);color:#fff}
+.wiz-tipos{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+.wiz-tipo{background:var(--bg);border:1px solid var(--border);border-radius:.5rem;padding:.9rem;text-align:left;color:var(--text);cursor:pointer;display:flex;flex-direction:column;gap:.25rem}
+.wiz-tipo:hover{border-color:#404040}
+.wiz-tipo.ativo{border-color:var(--accent);background:rgba(59,130,246,.08)}
+.wiz-tipo b{font-size:.875rem}
+.wiz-tipo small{color:var(--muted);font-size:.7rem}
+.wiz-dica{font-size:.6875rem;color:var(--muted)}
+.wiz-revisao{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.wiz-revisao > div{background:var(--bg);border:1px solid var(--border);border-radius:.4rem;padding:.55rem .7rem;min-width:0}
+.wiz-revisao small{display:block;font-size:.625rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:.15rem}
+.wiz-revisao b{font-size:.8125rem;font-weight:500;word-break:break-word}
+@media(max-width:640px){
+  .wiz-tipos{grid-template-columns:1fr}
+  .wiz-revisao{grid-template-columns:1fr}
+  .hub-sistema{grid-template-columns:1fr}
+  .wizard-box{max-height:96dvh;border-radius:12px 12px 0 0;align-self:flex-end}
+  .wizard-overlay{align-items:flex-end;padding:0}
+}
+
+/* ========= SISTEMA DE AJUDA (?) ========= */.help-wrap{display:inline-flex;align-items:center;margin-left:.4rem}
+.help-btn{width:18px;height:18px;min-width:18px;min-height:18px;border-radius:50%;background:#262626;border:1px solid #404040;color:#a3a3a3;font-size:.65rem;font-weight:700;line-height:1;padding:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;position:relative}
+.help-btn::after{content:"";position:absolute;inset:-12px}
+.help-btn:hover{background:#2563eb;color:#fff;border-color:#2563eb}
+.help-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:70}
+.help-pop{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:71;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.25rem;max-width:440px;width:calc(100vw - 2rem);box-shadow:0 16px 48px rgba(0,0,0,.6);animation:modalIn .15s ease}
+.help-titulo{font-weight:600;font-size:.95rem;margin-bottom:.6rem;display:flex;align-items:center;gap:.5rem}
+.help-badge{width:20px;height:20px;min-width:20px;border-radius:50%;background:var(--accent);color:#fff;font-size:.7rem;display:inline-flex;align-items:center;justify-content:center}
+.help-corpo{font-size:.85rem;line-height:1.6;color:#d4d4d8;margin-bottom:1rem}
+.help-corpo b{color:#fff}
+.help-corpo code{background:#262626;padding:.1rem .35rem;border-radius:4px;font-size:.8rem}
+@media(max-width:640px){.help-pop{bottom:0;top:auto;transform:translateX(-50%);left:50%;border-radius:12px 12px 0 0;max-width:none;width:100%}}
 </style>
 </head>
 <body>
@@ -263,7 +448,7 @@ button{white-space:nowrap}
       <h1 class="text-xl font-bold flex items-center gap-2" id="sidebar-logo"></h1>
     </div>
     <div class="p-4 border-b border-zinc-800">
-      <label class="block text-xs text-zinc-500 mb-1">Workspace</label>
+      <label class="block text-xs text-zinc-500 mb-1">Workspace <span class="help-wrap"><button class="help-btn" aria-label="Ajuda: workspace" onclick="window.__ajuda(event, 'workspace')">?</button></span></label>
       <div class="flex gap-2">
         <select id="ws-select" class="flex-1"></select>
         <button class="btn" onclick="novoWorkspace()" title="Novo workspace" aria-label="Novo workspace">+</button>
@@ -271,14 +456,19 @@ button{white-space:nowrap}
     </div>
     <nav class="flex-1 p-2 overflow-y-auto" id="nav">
       <button class="nav-item active" data-view="home" onclick="navegar('home')"><span class="nav-icon" id="nav-icon-home"></span>Início</button>
+      <div class="nav-grupo">Operação</div>
       <button class="nav-item" data-view="tasks" onclick="navegar('tasks')"><span class="nav-icon" id="nav-icon-tasks"></span>Tasks</button>
+      <button class="nav-item" data-view="secretario" onclick="navegar('secretario')"><span class="nav-icon" id="nav-icon-secretario"></span>Secretário</button>
+      <div class="nav-grupo">Automação</div>
       <button class="nav-item" data-view="agenda" onclick="navegar('agenda')"><span class="nav-icon" id="nav-icon-agenda"></span>Agenda</button>
+      <button class="nav-item" data-view="fluxos" onclick="navegar('fluxos')"><span class="nav-icon" id="nav-icon-fluxos"></span>Fluxos</button>
       <button class="nav-item" data-view="teams" onclick="navegar('teams')"><span class="nav-icon" id="nav-icon-teams"></span>Teams</button>
       <button class="nav-item" data-view="reunioes" onclick="navegar('reunioes')"><span class="nav-icon" id="nav-icon-reunioes"></span>Reuniões</button>
+      <div class="nav-grupo">Dados</div>
       <button class="nav-item" data-view="historico" onclick="navegar('historico')"><span class="nav-icon" id="nav-icon-historico"></span>Histórico</button>
-      <button class="nav-item" data-view="secretario" onclick="navegar('secretario')"><span class="nav-icon" id="nav-icon-secretario"></span>Secretário</button>
-      <button class="nav-item" data-view="fluxos" onclick="navegar('fluxos')"><span class="nav-icon" id="nav-icon-fluxos"></span>Fluxos</button>
       <button class="nav-item" data-view="apps" onclick="navegar('apps')"><span class="nav-icon" id="nav-icon-apps"></span>Apps</button>
+      <div class="nav-grupo">Sistema</div>
+      <button class="nav-item" data-view="config" onclick="navegar('config')"><span class="nav-icon" id="nav-icon-config"></span>Config</button>
     </nav>
     <div class="sidebar-footer">
       <div class="connection-status">
@@ -286,7 +476,7 @@ button{white-space:nowrap}
         <span id="conn-text">desconectado</span>
       </div>
       <button class="btn-ghost sidebar-logout" onclick="sairParaLogin('Sessão encerrada — faça login novamente')" aria-label="Sair">Sair</button>
-      <div class="version" id="version">v0.1.0</div>
+      <div class="version" id="version">v0.4.0</div>
     </div>
   </aside>
   <div id="sidebar-backdrop" onclick="toggleSidebar(false)"></div>
@@ -294,6 +484,7 @@ button{white-space:nowrap}
   <main class="main">
     <button class="menu-btn" id="menu-btn" aria-label="Abrir menu" onclick="toggleSidebar()">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></button>
+    <button class="ws-chip" id="ws-chip" aria-label="Trocar workspace — abre o menu" onclick="toggleSidebar(true)"></button>
     <div class="max-w-6xl mx-auto p-6">
       <div id="ws-banner" class="mb-4"></div>
       <section id="view-home" class="view active"></section>
@@ -306,6 +497,7 @@ button{white-space:nowrap}
       <section id="view-app-detail" class="view"></section>
       <section id="view-historico" class="view"></section>
       <section id="view-secretario" class="view"></section>
+      <section id="view-config" class="view"></section>
     </div>
   </main>
 

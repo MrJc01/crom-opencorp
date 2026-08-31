@@ -15,6 +15,7 @@
 
 import { icone } from "./icons.js";
 import { initRouter, fecharDrawer, abrirDrawer, navegar, parseHash } from "./router.js";
+import { exporAjuda } from "./help.js";
 import { loadPersistedAuth, setToken, setWsAtivo, getToken, setSseConnected, setEventSource, setRefreshInterval, getRefreshInterval, getViewAtual, getEventSource, clearAuth, getWsAtivo } from "./state.js";
 import { carregarWorkspaces } from "./api.js";
 import { renderHome, adicionarFeedItem } from "./views/home.js";
@@ -27,6 +28,8 @@ import { renderApps } from "./views/apps.js";
 import { renderAppDetail } from "./views/app-detail.js";
 import { renderHistorico } from "./views/historico.js";
 import { renderSecretario } from "./views/secretario.js";
+import { renderConfig } from "./views/config.js";
+import { abrirWizard, exporWizard } from "./views/wizard.js";
 import { criarTask, enviarMsgDrawer, moverTaskColuna, atualizarTaskPrioridade, atualizarTaskResponsavel, atualizarTaskDue, atualizarTaskLabels, atualizarTaskDescricao } from "./views/tasks.js";
 import { agendaEscopo, atualizarCampoAgenda, criarAgenda, executarAgendaAgora, toggleAgendaAtivo, excluirAgenda } from "./views/agenda.js";
 import { executarTeam } from "./views/teams.js";
@@ -52,6 +55,7 @@ export function configurarIconesIniciais(): void {
   document.getElementById('nav-icon-apps')?.insertAdjacentHTML('beforeend', icone('apps'));
   document.getElementById('nav-icon-historico')?.insertAdjacentHTML('beforeend', icone('history'));
   document.getElementById('nav-icon-secretario')?.insertAdjacentHTML('beforeend', icone('chat'));
+  document.getElementById('nav-icon-config')?.insertAdjacentHTML('beforeend', icone('gear'));
   document.getElementById('drawer-close-icon')?.insertAdjacentHTML('beforeend', icone('close'));
 }
 
@@ -232,7 +236,14 @@ export async function iniciarApp(): Promise<void> {
   const prevInterval = getRefreshInterval();
   if (prevInterval) clearInterval(prevInterval);
 
-  document.getElementById('version')!.textContent = 'v0.1.0';
+  // Versão real vem do server (/health lê package.json) — fonte única
+  void fetch('/health')
+    .then((r) => r.json())
+    .then((h: { versao?: string }) => {
+      const el = document.getElementById('version');
+      if (el && h.versao) el.textContent = 'v' + h.versao;
+    })
+    .catch(() => undefined);
   await carregarWorkspaces();
   conectarSSE();
   renderView();
@@ -257,6 +268,10 @@ export async function iniciarApp(): Promise<void> {
 export async function renderView(): Promise<void> {
   const view = getViewAtual();
 
+  // Chip mobile: workspace atual sempre visível (clicável → abre sidebar)
+  const chip = document.getElementById('ws-chip');
+  if (chip) chip.textContent = getWsAtivo() || '— empresa —';
+
   // Atualiza classes ativas
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   const navItems = document.querySelectorAll('.nav-item') as NodeListOf<HTMLElement>;
@@ -276,28 +291,13 @@ export async function renderView(): Promise<void> {
     case 'app-detail': await renderAppDetail(); break;
     case 'historico': await renderHistorico(); break;
     case 'secretario': await renderSecretario(); break;
+    case 'config': await renderConfig(); break;
   }
 }
 
-/** Cria novo workspace via modal */
-export async function novoWorkspace(): Promise<void> {
-  const { api } = await import("./api.js");
-  const { setWsAtivo } = await import("./state.js");
-  const { renderView: rv } = await import("./main.js");
-  const { modalPrompt } = await import("./modal.js");
-
-  const id = await modalPrompt({
-    titulo: 'Novo workspace',
-    label: 'ID do workspace (kebab-case):',
-    placeholder: 'ex: minha-empresa',
-    obrigatorio: true,
-  });
-  if (!id) return;
-
-  await api('/workspaces', { method: 'POST', body: JSON.stringify({ id }) });
-  setWsAtivo(id);
-  window.location.hash = '#/home';
-  rv();
+/** Cria novo workspace — abre o wizard com perfil editorial (4 passos) */
+export function novoWorkspace(): void {
+  abrirWizard();
 }
 
 /**
@@ -311,6 +311,8 @@ export function boot(): void {
 
   initRouter();
   exporGlobais();
+  exporAjuda();
+  exporWizard();
 
   const { token, ws } = loadPersistedAuth();
   if (token) setToken(token);
@@ -372,6 +374,7 @@ export function exporGlobais(): void {
   g.promptOrdem = promptOrdem;
   g.fazerLogin = fazerLogin;
   g.novoWorkspace = novoWorkspace;
+  g.abrirWizard = abrirWizard;
   g.mostrarLogin = mostrarLogin;
   g.esconderLogin = esconderLogin;
   g.sairParaLogin = sairParaLogin;
