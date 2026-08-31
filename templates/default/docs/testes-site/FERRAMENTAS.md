@@ -2,6 +2,8 @@
 
 > Como chamar as ferramentas: cada função abaixo é um comando bash EXATO. Siga o contrato literal
 > (argumentos, ordem, JSON). Prefixo obrigatório `OPENCORP_HOME=/home/j` em toda chamada wp_*.
+>
+> **Frontend do painel?** Antes de mexer em `src/web/**` ou `web-dist/index.html`, leia o protocolo de padronização: [`../web-checklist.md`](../web-checklist.md) (10 regras de design + como buildar/testar/e2e).
 
 ## WordPress
 

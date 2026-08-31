@@ -1,6 +1,6 @@
 {
   "name": "opencorp",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Sistema Operacional de Empresas Autônomas dirigido por CLI — orquestra sessões OpenCode em workspaces governados",
   "license": "MIT",
   "type": "module",
