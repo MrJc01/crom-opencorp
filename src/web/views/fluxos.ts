@@ -261,7 +261,40 @@ export async function detalhesFlow(id: string): Promise<void> {
     document.getElementById('drawer-title')!.textContent = 'Flow: ' + id;
     document.getElementById('drawer')!.classList.add('open');
     document.getElementById('drawer-overlay')!.classList.add('open');
-    el.innerHTML = '<pre class="text-xs whitespace-pre-wrap max-h-[70vh] overflow-auto">' + escapeHtml(JSON.stringify(flow, null, 2)) + '</pre>';
+
+    let blocoExec = '';
+    try {
+      const ultima = await api<Record<string, unknown> | null>('/flows/' + id + '/status');
+      if (ultima) {
+        const nos = (ultima.nos as Array<{ id: string; tipo: string; status: string }>) || [];
+        const status = String(ultima.status ?? '?');
+        const linhaNos = nos
+          .map((n) => `${n.status === 'ok' ? '✓' : n.status === 'falhou' ? '✗' : '·'} ${n.id} (${n.status})`)
+          .join('<br>');
+        const falhou = status === 'falhou';
+        blocoExec = `
+          <div class="mt-3 p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 text-xs">
+            <div class="flex items-center justify-between gap-2">
+              <span><strong>última execução</strong> — <span class="mono">${escapeHtml(String(ultima.execId))}</span> · ${escapeHtml(status)}</span>
+              ${falhou ? `<button class="btn btn-ghost text-xs" onclick="retomarFlow('${escapeHtml(id)}','${escapeHtml(String(ultima.execId))}')">Retomar do último nó ok</button>` : ''}
+            </div>
+            <div class="mt-2 text-zinc-500">${linhaNos}</div>
+          </div>`;
+      }
+    } catch {
+      /* sem execução ainda */
+    }
+
+    el.innerHTML = '<pre class="text-xs whitespace-pre-wrap max-h-[45vh] overflow-auto">' + escapeHtml(JSON.stringify(flow, null, 2)) + '</pre>' + blocoExec;
+  } catch (e) {
+    toast('Erro: ' + (e as Error).message, 'erro');
+  }
+}
+
+export async function retomarFlow(id: string, execId: string): Promise<void> {
+  try {
+    await api('/flows/' + id + '/resume', { method: 'POST', body: JSON.stringify({ exec_id: execId }) });
+    toast('Retomando execução ' + execId + ' — nós concluídos serão preservados', 'ok');
   } catch (e) {
     toast('Erro: ' + (e as Error).message, 'erro');
   }

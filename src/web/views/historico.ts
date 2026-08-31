@@ -15,6 +15,12 @@ interface ItemHistorico {
   agente: string;
   quando: string | null;
   status?: string;
+  gatilho?: { tipo: string; origem: string } | null;
+}
+
+function labelGatilho(g: { tipo: string; origem: string } | null | undefined): string {
+  if (!g) return '';
+  return `${g.tipo}${g.origem ? ':' + g.origem : ''}`;
 }
 
 interface AgenteInfo {
@@ -149,7 +155,7 @@ async function carregarERender(): Promise<void> {
         <span class="acc-dot" style="background: ${corDoTipo(e.tipo, e.status)}"></span>
         <span class="acc-titulo">
           <span class="acc-titulo-texto">${escapeHtml(e.titulo)}</span>
-          <span class="acc-sub">${labelDoTipo(e.tipo)}${e.agente ? ' · ' + escapeHtml(e.agente) : ''}${e.status ? ' · ' + escapeHtml(e.status) : ''}</span>
+          <span class="acc-sub">${labelDoTipo(e.tipo)}${e.agente ? ' · ' + escapeHtml(e.agente) : ''}${e.status ? ' · ' + escapeHtml(e.status) : ''}${e.tipo === 'execucao' && e.gatilho ? ' · gatilho: ' + escapeHtml(labelGatilho(e.gatilho)) : ''}</span>
         </span>
         <span class="acc-quando">${e.quando ? formatarDataLocal(e.quando) : '—'}</span>
         <span class="acc-seta">▾</span>
@@ -190,6 +196,7 @@ async function detalhesDoItem(e: ItemHistorico): Promise<string> {
         <div><span class="acc-k">execução</span> <span class="acc-v mono">${esc(e.id)}</span></div>
         <div><span class="acc-k">agente</span> <span class="acc-v">${esc(e.agente || '—')}</span></div>
         <div><span class="acc-k">status</span> <span class="acc-v">${esc(e.status || '—')}</span></div>
+        ${e.gatilho ? `<div><span class="acc-k">gatilho</span> <span class="acc-v">${esc(labelGatilho(e.gatilho))}</span></div>` : ''}
       </div>
       <pre class="acc-log">${escapeHtml(tail || '(log vazio)')}</pre>`;
     }

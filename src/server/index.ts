@@ -53,6 +53,7 @@ const ROUTES: DefinicaoRota[] = [
   { method: "POST", path: "/agents/:id/run", descricao: "Executa agente com ordem", corpo: true },
   { method: "GET", path: "/sessions", descricao: "Lista execuções/sessões" },
   { method: "GET", path: "/historico", descricao: "Histórico unificado (execuções + tasks + rotinas + conversas da secretária) — query: agente, tipo, limite" },
+  { method: "GET", path: "/execucoes", descricao: "Ledger unificado de execuções com gatilho (query: agente, gatilho, origem, status, limite)" },
   { method: "GET", path: "/sessions/:id/log", descricao: "Retorna log de uma execução" },
   { method: "GET", path: "/registries/:categoria", descricao: "Lista registros de uma categoria" },
   { method: "POST", path: "/registries/:categoria", descricao: "Cria registro em uma categoria", corpo: true },
@@ -73,7 +74,9 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/flows", descricao: "Lista flows disponíveis" },
   { method: "POST", path: "/flows", descricao: "Cria novo flow", corpo: true },
   { method: "GET", path: "/flows/:id", descricao: "Obtém detalhes de um flow" },
+  { method: "GET", path: "/flows/:id/status", descricao: "Última execução do flow (status por nó)" },
   { method: "POST", path: "/flows/:id/run", descricao: "Executa um flow", corpo: true },
+  { method: "POST", path: "/flows/:id/resume", descricao: "Retoma execução falha do último nó ok (corpo: { exec_id })", corpo: true },
   { method: "POST", path: "/meetings", descricao: "Inicia nova reunião", corpo: true },
   { method: "GET", path: "/meetings", descricao: "Lista reuniões do workspace" },
   { method: "POST", path: "/meetings/:id/stop", descricao: "Solicita interrupção de reunião ativa" },
@@ -378,12 +381,13 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   const orquestrador = new OrquestradorDeTeams();
   const hooks = new HookStore({
     executores: {
-      agentRun: async (agente: string, ordem: string, wsPath: string) => {
+      agentRun: async (agente: string, ordem: string, wsPath: string, gatilho?: { tipo: string; origem: string }) => {
         const r = await sessoes.rodar({
           agente,
           ordem,
           workspaceDir: wsPath,
           execId: gerarIdExec(),
+          gatilho,
         } as OpcoesRun);
         return { id: r.id, captura: r.captura };
       },
@@ -398,12 +402,13 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   if (opcoes.instalarMencoes !== false) {
     instalarMencoes({
       executores: {
-        rodar: async (agente: string, ordem: string, wsPath: string) => {
+        rodar: async (agente: string, ordem: string, wsPath: string, gatilho?: { tipo: string; origem: string }) => {
           const r = await sessoes.rodar({
             agente,
             ordem,
             workspaceDir: wsPath,
             execId: gerarIdExec(),
+            gatilho,
           } as OpcoesRun);
           return { id: r.id, captura: r.captura };
         },
@@ -541,6 +546,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             workspaceDir: ws.path,
             workspaceId: ws.id,
             execId,
+            gatilho: { tipo: "manual", origem: `api:${ws.id}` },
           };
           void sessoes.rodar(opcoes).catch(() => undefined);
           enviar(res, 202, { exec_id: execId, status: "iniciado" });
@@ -568,7 +574,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const agente = url.searchParams.get("agente")?.trim() || undefined;
           const tipo = url.searchParams.get("tipo")?.trim() || undefined;
           const limite = Math.min(Number(url.searchParams.get("limite")) || 200, 500);
-          const itens: Array<{ id: string; tipo: string; titulo: string; agente: string; quando: string | null; status?: string }> = [];
+          const itens: Array<{ id: string; tipo: string; titulo: string; agente: string; quando: string | null; status?: string; gatilho?: { tipo: string; origem: string } }> = [];
 
           if (!tipo || tipo === "execucao") {
             const execs = (await sessoes.listarExecucoes(ws.path, agente ? { agente } : undefined)) as Array<{
@@ -576,9 +582,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               agente: string;
               inicio: string;
               status: string;
+              gatilho?: { tipo: string; origem: string };
             }>;
             for (const e of execs.slice(0, limite)) {
-              itens.push({ id: e.id, tipo: "execucao", titulo: e.id, agente: e.agente, quando: e.inicio, status: e.status });
+              itens.push({ id: e.id, tipo: "execucao", titulo: e.id, agente: e.agente, quando: e.inicio, status: e.status, gatilho: e.gatilho });
             }
           }
           if (!tipo || tipo === "task") {
@@ -609,6 +616,21 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
 
           itens.sort((a, b) => (b.quando ?? "").localeCompare(a.quando ?? ""));
           enviar(res, 200, itens.slice(0, limite));
+          return;
+        }
+
+        // ── /execucoes — ledger unificado (PLANO-UNIFICACAO): toda ativação de agente, de qualquer
+        // motor, com gatilho (cron/mencao/dependencia/padrao/turno/evento/manual) — a leitura cross-motor ──
+        if (rota === "/execucoes" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const filtro = {
+            agente: url.searchParams.get("agente")?.trim() || undefined,
+            gatilho_tipo: url.searchParams.get("gatilho")?.trim() || undefined,
+            gatilho_origem: url.searchParams.get("origem")?.trim() || undefined,
+            status: url.searchParams.get("status")?.trim() || undefined,
+            limite: Math.min(Number(url.searchParams.get("limite")) || 100, 500),
+          };
+          enviar(res, 200, registros.corpDb(ws.path).listarExecucoes(filtro));
           return;
         }
 
@@ -784,6 +806,12 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           enviar(res, 200, await flows.obter(ws.path, decodeURIComponent(mFlow[1]!)));
           return;
         }
+        const mFlowStatus = /^\/flows\/([^/]+)\/status$/.exec(rota);
+        if (mFlowStatus && req.method === "GET") {
+          const ws = await resolverWs(url);
+          enviar(res, 200, await flows.ultimaExecucao(ws.path, decodeURIComponent(mFlowStatus[1]!)));
+          return;
+        }
         const mFlowRun = /^\/flows\/([^/]+)\/run$/.exec(rota);
         if (mFlowRun && req.method === "POST") {
           const ws = await resolverWs(url);
@@ -791,6 +819,21 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const flowId = decodeURIComponent(mFlowRun[1]!);
           void flows.executar(ws.path, flowId, { entrada: corpo.entrada, model: corpo.model }).catch(() => undefined);
           enviar(res, 202, { status: "iniciado", flow: flowId });
+          return;
+        }
+        const mFlowResume = /^\/flows\/([^/]+)\/resume$/.exec(rota);
+        if (mFlowResume && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { exec_id?: string; model?: string };
+          if (!corpo.exec_id) {
+            enviar(res, 422, { erro: "corpo obrigatório: { exec_id } — id da execução falha a retomar" });
+            return;
+          }
+          const flowId = decodeURIComponent(mFlowResume[1]!);
+          void flows
+            .executar(ws.path, flowId, { model: corpo.model, execId: corpo.exec_id, retomar: true })
+            .catch(() => undefined);
+          enviar(res, 202, { status: "retomando", flow: flowId, exec: corpo.exec_id });
           return;
         }
 

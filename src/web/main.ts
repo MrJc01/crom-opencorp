@@ -34,7 +34,7 @@ import { criarTask, enviarMsgDrawer, moverTaskColuna, atualizarTaskPrioridade, a
 import { agendaEscopo, atualizarCampoAgenda, criarAgenda, executarAgendaAgora, toggleAgendaAtivo, excluirAgenda, renderAgendaForm } from "./views/agenda.js";
 import { executarTeam, abrirFormTeam, fecharFormTeam, teamCamposPadrao, addPassoTeam, criarTeam } from "./views/teams.js";
 import { criarReuniao, encerrarReuniao } from "./views/reunioes.js";
-import { executarFlow, detalhesFlow, abrirFormFlow, fecharFormFlow, addPassoFlow, criarFlow } from "./views/fluxos.js";
+import { executarFlow, detalhesFlow, retomarFlow, abrirFormFlow, fecharFormFlow, addPassoFlow, criarFlow } from "./views/fluxos.js";
 import { loadAppsList, abrirApp, fecharApp, renderWidget, enviarForm } from "./views/apps.js";
 import { decidirAprovacao, promptOrdem, rodarFlowHub } from "./views/home.js";
 
@@ -392,6 +392,7 @@ export function exporGlobais(): void {
   g.encerrarReuniao = encerrarReuniao;
   g.executarFlow = executarFlow;
   g.detalhesFlow = detalhesFlow;
+  g.retomarFlow = retomarFlow;
   g.abrirFormFlow = abrirFormFlow;
   g.fecharFormFlow = fecharFormFlow;
   g.addPassoFlow = addPassoFlow;

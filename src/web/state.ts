@@ -138,8 +138,19 @@ const initialState: ViewState = {
   eventSource: null,
 };
 
-/** Estado mutável (singleton) */
-let state: ViewState = { ...initialState };
+/** Estado mutável (singleton) — token/ws hidratados do localStorage no LOAD do módulo.
+ *  Views com IIFE de importação (ex.: cache de agentes em fluxos.ts) disparam fetches
+ *  ANTES do boot de main.ts; sem hidratação, esses requests saem sem Authorization →
+ *  401 → sairParaLogin() limpava a sessão inteira (race de login do painel/e2e).
+ *  try/catch: em Node (testes) não há localStorage — cai no estado inicial. */
+let state: ViewState = (() => {
+  try {
+    const { token, ws } = loadPersistedAuth();
+    return { ...initialState, token, wsAtivo: ws };
+  } catch {
+    return { ...initialState };
+  }
+})();
 
 /** Listeners de mudança de estado */
 const listeners: Set<() => void> = new Set();
