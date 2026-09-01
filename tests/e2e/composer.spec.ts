@@ -60,7 +60,8 @@ test.describe("Composer inteligente — / comandos, @ contexto, ! terminal (PLAN
     await page.click('button[title="Nova conversa"]');
     await page.fill("#chat-input", "@");
     await expect(page.locator(".palette-menu")).toBeVisible();
-    const agente = page.locator('.palette-item[data-tipo="agente"]').first();
+    // alvo explícito (o catálogo de agentes pode ter ids alfabeticamente anteriores)
+    const agente = page.locator('.palette-item[data-tipo="agente"]', { hasText: "e2e-atendente" }).first();
     await expect(agente).toBeVisible();
     await agente.click();
     await expect(page.locator("#chat-input")).toHaveValue(/@e2e-atendente /);

@@ -150,13 +150,21 @@ describe("API Server — REST + SSE", () => {
     // Note: /workspaces returns workspace list, we need /agents endpoint
   });
 
-  it("GET /agents?workspace=... lista 8 agentes do template", async () => {
+  it("GET /agents?workspace=... lista os 14 agentes do template (8 base + 6 do catálogo)", async () => {
     const { status, json } = await fetchApi("/agents?workspace=corp-agentes");
     expect(status).toBe(200);
     const agentes = json as Array<{ id: string }>;
-    expect(agentes.length).toBe(8);
+    expect(agentes.length).toBe(14);
     const ids = agentes.map((a) => a.id).sort();
-    expect(ids).toEqual(["auditor", "ceo-documentos", "corretor-site", "critico-site", "executor-padrao", "frontend-especialista", "secretario", "secretario-exec"]);
+    expect(ids).toEqual([
+      "agente-financeiro", "agente-juridico", "agente-marketing", "agente-ops", "agente-suporte", "agente-vendas",
+      "auditor", "ceo-documentos", "corretor-site", "critico-site", "executor-padrao", "frontend-especialista", "secretario", "secretario-exec",
+    ]);
+    // catálogo nascido do template vem desativado; base vem ativa
+    const vendas = agentes.find((a) => a.id === "agente-vendas") as { ativo: boolean };
+    expect(vendas.ativo).toBe(false);
+    const executor = agentes.find((a) => a.id === "executor-padrao") as { ativo: boolean };
+    expect(executor.ativo).toBe(true);
   });
 
   // (6) POST /agents/:id/run com sessoes MOCKADA

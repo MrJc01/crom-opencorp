@@ -22,6 +22,7 @@ export interface AgenteResumo {
   model: string;
   permissions: string;
   budget_daily_usd: number;
+  ativo: boolean;
 }
 
 export interface EventoAgente {
@@ -47,6 +48,7 @@ export function serializarFrontmatter(ag: Agente): string {
   saida += linhaFrontmatter("id", ag.id);
   saida += linhaFrontmatter("role", ag.role);
   saida += linhaFrontmatter("category", ag.category);
+  saida += linhaFrontmatter("ativo", String(ag.ativo));
   saida += linhaFrontmatter("model", ag.model);
   if (ag.inherits) saida += linhaFrontmatter("inherits", ag.inherits);
   saida += linhaFrontmatter("tools", listaInline(ag.tools));
@@ -195,6 +197,7 @@ export class AgentStore {
       tools?: string[];
       budget_daily_usd?: number;
       budget_max_turns?: number;
+      ativo?: boolean;
     },
   ): Promise<Agente> {
     const carregado = await this.carregar(wsPath, id);
@@ -204,6 +207,7 @@ export class AgentStore {
       model: mudancas.model?.trim() || carregado.frontmatter.model,
       permissions: mudancas.permissions ?? carregado.frontmatter.permissions,
       tools: mudancas.tools && mudancas.tools.length ? mudancas.tools : carregado.frontmatter.tools,
+      ativo: mudancas.ativo ?? carregado.frontmatter.ativo,
       budget: {
         ...carregado.frontmatter.budget,
         daily_usd: mudancas.budget_daily_usd ?? carregado.frontmatter.budget.daily_usd,
@@ -224,6 +228,45 @@ export class AgentStore {
       resumo: "editado pela web",
     });
     return parsed.data;
+  }
+
+  /**
+   * Etapa 5 — copia do diretório de templates os agentes do CATÁLOGO que AINDA NÃO
+   * existem no workspace (idempotente). Catálogo = todo template com `ativo: false`
+   * no frontmatter (fonte única: o diretório de templates, sem lista hardcoded).
+   */
+  async semearCatalogo(wsPath: string): Promise<{ criados: string[]; existentes: string[] }> {
+    const catalogoDir = join(this.templatesDir, "default", ".opencorp", "agents");
+    const ids: string[] = existsSync(catalogoDir)
+      ? readdirSync(catalogoDir)
+          .filter((arq) => arq.endsWith(".md"))
+          .filter((arq) => /^ativo:\s*false\s*$/m.test(readFileSync(join(catalogoDir, arq), "utf8")))
+          .map((arq) => arq.replace(/\.md$/, ""))
+      : [];
+    const criados: string[] = [];
+    const existentes: string[] = [];
+    for (const idBruto of ids) {
+      const id = validarIdAgente(idBruto);
+      const destino = this.caminho(wsPath, id);
+      if (existsSync(destino)) {
+        existentes.push(id);
+        continue;
+      }
+      const origem = this.resolverOrigem(wsPath, id);
+      const conteudo = readFileSync(origem, "utf8");
+      await writeFileAtomic(destino, conteudo);
+      const carregado = await this.carregar(wsPath, id);
+      await this.bridge.sincronizarAgente(wsPath, carregado.frontmatter, carregado.corpo);
+      criados.push(id);
+    }
+    if (criados.length) {
+      await this.registrarEvento(wsPath, {
+        evento: "criado",
+        agente: criados.join(", "),
+        resumo: `catálogo semeado (${criados.length} agente(s) desativado(s))`,
+      });
+    }
+    return { criados, existentes };
   }
 
   /** Exclui o agente do workspace (e a cópia do bridge do OpenCode) — PLANO-WEB-CRUD C3. */
@@ -280,5 +323,6 @@ function resumo(ag: Agente): AgenteResumo {
     model: ag.model,
     permissions: ag.permissions,
     budget_daily_usd: ag.budget.daily_usd,
+    ativo: ag.ativo,
   };
 }

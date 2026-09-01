@@ -1,6 +1,7 @@
 /**
- * View Agentes — os "funcionários" da empresa (PLANO-WEB-CRUD C).
- * Cards com config resumida + Chamar (run) + Editar (drawer) + Criar (clone) + Excluir (guarda 409).
+ * View Agentes — os "funcionários" da empresa (PLANO-WEB-CRUD C + PLANO-PAINEL-V2 Etapa 5).
+ * Seções Ativos × Catálogo (desativados) + toggle por card + Semear catálogo +
+ * Chamar (run) + Editar (drawer) + Criar (clone) + Excluir (guarda 409).
  */
 
 import { api, toast, icone, escapeHtml } from "../api.js";
@@ -15,6 +16,7 @@ interface AgenteResumoUi {
   model: string;
   permissions: string;
   budget_daily_usd: number;
+  ativo?: boolean;
 }
 
 const badgeCategoria = (c: string): string =>
@@ -22,6 +24,41 @@ const badgeCategoria = (c: string): string =>
 
 const rotuloPermissao = (p: string): string =>
   p === 'level-1' ? 'só leitura' : p === 'level-2' ? 'bash local' : 'rede + HITL';
+
+function cardAgente(a: AgenteResumoUi): string {
+  const desativado = a.ativo === false;
+  const sistema = a.id === 'secretario' || a.id === 'secretario-exec';
+  return `
+    <div class="card p-4 flex flex-col gap-2${desativado ? ' opacity-60' : ''}" data-agente-card="${escapeHtml(a.id)}">
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0">
+          <div class="font-mono text-sm truncate" title="${escapeHtml(a.id)}">${escapeHtml(a.id)}</div>
+          <div class="text-xs text-zinc-400 truncate">${escapeHtml(a.role || '—')}${sistema ? ' · <span class=\\"badge badge-pipeline\\">sistema</span>' : ''}</div>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          ${desativado
+            ? '<span class="badge badge-neutral">desativado</span>'
+            : `<span class="badge ${badgeCategoria(String(a.category))}">${escapeHtml(String(a.category || 'custom'))}</span>`}
+          <label class="toggle" title="${sistema ? 'Agente de sistema — não pode ser desativado' : desativado ? 'Ativar agente' : 'Desativar agente'}">
+            <input type="checkbox" data-toggle-agente="${escapeHtml(a.id)}" ${desativado ? '' : 'checked'} ${sistema ? 'disabled' : ''}
+              onchange="toggleAgenteAtivo('${escapeHtml(a.id)}', this)" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="text-xs text-zinc-500 space-y-1 flex-1">
+        <div class="truncate font-mono" title="${escapeHtml(a.model)}">${escapeHtml(a.model)}</div>
+        <div>${escapeHtml(String(a.permissions))} · ${rotuloPermissao(String(a.permissions))}</div>
+        <div>orçamento: US$ ${escapeHtml(Number(a.budget_daily_usd ?? 0).toFixed(2))}/dia</div>
+      </div>
+      <div class="flex items-center gap-2 pt-1 border-t border-zinc-800">
+        <button class="btn btn-sm flex-1" onclick="chamarAgente('${escapeHtml(a.id)}')" title="Executar ordem">${icone('run')} Chamar</button>
+        <button class="btn btn-ghost btn-sm" onclick="editarAgente('${escapeHtml(a.id)}')" title="Editar config">${icone('gear')}</button>
+        <button class="btn btn-ghost btn-sm text-error" onclick="excluirAgente('${escapeHtml(a.id)}')" title="Excluir">${icone('trash')}</button>
+      </div>
+    </div>
+  `;
+}
 
 /** Renderiza a view Agentes */
 export async function renderAgentes(): Promise<void> {
@@ -48,41 +85,64 @@ export async function renderAgentes(): Promise<void> {
   viewEl.innerHTML = `
     <div class="flex items-center justify-between mb-6 gap-2">
       <h1 class="text-2xl font-bold flex items-center gap-2">${icone('teams')} Agentes ${ajuda('agentes')}</h1>
-      <button class="btn" onclick="abrirFormAgente()">${icone('plus')} Novo agente</button>
+      <div class="flex items-center gap-2">
+        <button class="btn btn-ghost" id="btn-semear-catalogo" onclick="semearCatalogoAgentes()" title="Adicionar agentes prontos do catálogo (vendas, marketing…)">${icone('plus')} Semear catálogo</button>
+        <button class="btn" onclick="abrirFormAgente()">${icone('plus')} Novo agente</button>
+      </div>
     </div>
     <div id="agente-form" class="mb-6"></div>
-    <div id="agentes-lista" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-zinc-400 mb-3">Ativos</h2>
+    <div id="agentes-ativos" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-8"></div>
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-zinc-400 mb-3">Catálogo (desativados)</h2>
+    <div id="agentes-catalogo" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"></div>
   `;
 
-  const el = document.getElementById('agentes-lista');
-  if (!el) return;
-
   if (!agentes.length) {
-    el.innerHTML = estadoVazio('agentes', 'Nenhum agente nesta empresa', 'Todo workspace novo nasce com agentes do template (executor-padrao, secretario…). Crie variações com <strong>Novo agente</strong>.');
+    document.getElementById('agentes-ativos')!.innerHTML = estadoVazio('agentes', 'Nenhum agente nesta empresa', 'Todo workspace novo nasce com agentes do template (executor-padrao, secretario…). Crie variações com <strong>Novo agente</strong> ou use <strong>Semear catálogo</strong>.');
+    document.getElementById('agentes-catalogo')!.innerHTML = '<div class="text-xs text-zinc-500 col-span-full">Catálogo vazio — use <strong>Semear catálogo</strong> para adicionar agentes prontos (vendas, marketing, financeiro, suporte, jurídico, ops).</div>';
     return;
   }
 
-  el.innerHTML = agentes.map(a => `
-    <div class="card p-4 flex flex-col gap-2">
-      <div class="flex items-start justify-between gap-2">
-        <div class="min-w-0">
-          <div class="font-mono text-sm truncate" title="${escapeHtml(a.id)}">${escapeHtml(a.id)}</div>
-          <div class="text-xs text-zinc-400 truncate">${escapeHtml(a.role || '—')}</div>
-        </div>
-        <span class="badge ${badgeCategoria(String(a.category))}">${escapeHtml(String(a.category || 'custom'))}</span>
-      </div>
-      <div class="text-xs text-zinc-500 space-y-1 flex-1">
-        <div class="truncate font-mono" title="${escapeHtml(a.model)}">${escapeHtml(a.model)}</div>
-        <div>${escapeHtml(String(a.permissions))} · ${rotuloPermissao(String(a.permissions))}</div>
-        <div>orçamento: US$ ${escapeHtml(Number(a.budget_daily_usd ?? 0).toFixed(2))}/dia</div>
-      </div>
-      <div class="flex items-center gap-2 pt-1 border-t border-zinc-800">
-        <button class="btn btn-sm flex-1" onclick="chamarAgente('${escapeHtml(a.id)}')" title="Executar ordem">${icone('run')} Chamar</button>
-        <button class="btn btn-ghost btn-sm" onclick="editarAgente('${escapeHtml(a.id)}')" title="Editar config">${icone('gear')}</button>
-        <button class="btn btn-ghost btn-sm text-error" onclick="excluirAgente('${escapeHtml(a.id)}')" title="Excluir">${icone('trash')}</button>
-      </div>
-    </div>
-  `).join('');
+  const ativos = agentes.filter(a => a.ativo !== false);
+  const desativados = agentes.filter(a => a.ativo === false);
+
+  document.getElementById('agentes-ativos')!.innerHTML = ativos.length
+    ? ativos.map(cardAgente).join('')
+    : '<div class="text-xs text-zinc-500 col-span-full">Nenhum agente ativo — ative pelo toggle no catálogo abaixo.</div>';
+  document.getElementById('agentes-catalogo')!.innerHTML = desativados.length
+    ? desativados.map(cardAgente).join('')
+    : '<div class="text-xs text-zinc-500 col-span-full">Todo o catálogo está ativo. Use <strong>Semear catálogo</strong> para adicionar agentes prontos de áreas (vendas, marketing, financeiro, suporte, jurídico, ops).</div>';
+}
+
+/** Etapa 5 — ativa/desativa agente (PUT /agents/:id {ativo}); idempotente e com loading no próprio toggle */
+export async function toggleAgenteAtivo(id: string, input: HTMLInputElement): Promise<void> {
+  const ativo = input.checked;
+  input.disabled = true;
+  try {
+    await api('/agents/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify({ ativo }) });
+    toast(`Agente "${id}" ${ativo ? 'ativado' : 'desativado'}`, 'ok');
+    renderAgentes();
+  } catch (e) {
+    input.checked = ativo;
+    toast('Erro: ' + (e as Error).message, 'erro');
+  } finally {
+    input.disabled = false;
+  }
+}
+
+/** Etapa 5 — semeia o catálogo no workspace (POST /agents/semear-catalogo, idempotente) */
+export async function semearCatalogoAgentes(): Promise<void> {
+  const btn = document.getElementById('btn-semear-catalogo') as HTMLButtonElement | null;
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api<{ criados: string[]; existentes: string[] }>('/agents/semear-catalogo', { method: 'POST' });
+    toast(`Catálogo semeado: ${r.criados.length} criado(s), ${r.existentes.length} já existente(s)`, 'ok');
+    renderAgentes();
+  } catch (e) {
+    toast('Erro: ' + (e as Error).message, 'erro');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 /** Chama um agente com ordem digitada (POST /agents/:id/run) */
@@ -182,6 +242,7 @@ export function abrirFormAgente(): void {
           <div>
             <label class="block text-xs text-zinc-500 mb-1">Clonar de</label>
             <input id="novo-agente-from" value="executor-padrao" placeholder="id do agente base" />
+            <p class="text-xs text-zinc-500 mt-1">O clone <strong>herda o estado ativo/desativado</strong> do base — catálogo (ex.: agente-vendas) nasce desativado; ative com o toggle depois.</p>
           </div>
           <div>
             <label class="block text-xs text-zinc-500 mb-1">Modelo (opcional)</label>

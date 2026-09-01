@@ -16,6 +16,8 @@ export const agentSchema = z.object({
     daily_usd: z.number().nonnegative(),
     max_turns: z.number().int().positive(),
   }),
+  /** Etapa 5 — agentes de catálogo nascem desativados; legados sem o campo = ativos */
+  ativo: z.boolean().default(true),
   memory: z
     .object({
       reads: z.array(z.string().min(1)).default([]),

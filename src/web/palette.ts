@@ -153,7 +153,11 @@ async function buscarFontesContexto(): Promise<FontesContexto> {
   ]);
   return {
     arquivos: (files.itens ?? []).map((i) => String(i.nome ?? '')).filter(Boolean),
-    agentes: (Array.isArray(agentes) ? agentes : []).map((a) => String(a.id ?? '')).filter(Boolean),
+    // agentes desativados ficam fora do @ (mencionar dispara execução — guard Etapa 5)
+    agentes: (Array.isArray(agentes) ? agentes : [])
+      .filter((a) => (a as { ativo?: boolean }).ativo !== false)
+      .map((a) => String(a.id ?? ''))
+      .filter(Boolean),
     tasks: (Array.isArray(tasks) ? tasks : [])
       .filter((t) => t.id)
       .map((t) => ({ id: String(t.id), titulo: String(t.titulo ?? '') })),

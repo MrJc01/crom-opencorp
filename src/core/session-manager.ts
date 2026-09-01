@@ -157,6 +157,14 @@ export class SessionManager {
       ws = info;
     }
     const ag = await this.agentes.carregar(ws.path, opcoes.agente);
+    // Etapa 5 — guard central: agente desativado não roda em NENHUM gatilho
+    // (API, hooks, nós de fluxo fanout/review/debate, reuniões, menções, scheduler, CLI).
+    // O erro é logado pelo chamador (nó do fluxo marca "falhou", hook registra, team escreve na task).
+    if (ag.frontmatter.ativo === false) {
+      throw new SessionError(
+        `agente '${opcoes.agente}' está desativado — ative no painel de agentes`,
+      );
+    }
     let ordem = opcoes.ordem ?? "";
     if (opcoes.file) {
       try {

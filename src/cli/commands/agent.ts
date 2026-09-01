@@ -105,6 +105,7 @@ export function registerAgentCommand(program: Command): void {
                 model: ag.frontmatter.model,
                 permissions: ag.frontmatter.permissions,
                 budget_daily_usd: ag.frontmatter.budget.daily_usd,
+                ativo: ag.frontmatter.ativo,
               });
             } catch {
               continue;

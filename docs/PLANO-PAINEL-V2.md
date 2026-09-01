@@ -166,12 +166,12 @@
 - [x] 4.4 Mini-apps existentes preservados como aba "Apps" na mesma página
 - **Aceite**: salvar/recuperar credenciais sem exposição; cartão sempre com aviso visível. — unitários 489 (+7 app-perfis); e2e apps-perfis.spec 4/4 (inclui prova de que GET não expõe valor); revisão de segurança: masking ✅, regex-filter na lista (anti-XSS de nomes legados), blocklist ampla do cartão; race de gravação corrigido (await).
 
-### Etapa 5 — Catálogo de Agentes *(P-12)*
-- [ ] 5.1 Core: campo de estado no schema do agente (ativo/desativado) + defaults "ativados por padrão" por empresa no template do workspace
-- [ ] 5.2 UI: lista completa com toggle, editar, criar; seções "Ativos" × "Catálogo disponível"
-- [ ] 5.3 Semear catálogo diverso (vendas, marketing, financeiro, suporte, jurídico, ops…)
-- [ ] 5.4 Endpoints: PUT aceita estado; agentes desativados ficam fora de fanouts/flows/runtimes por padrão (mas visíveis na página)
-- **Aceite**: ligar/desligar agente com 1 clique; catálogo semeado e editável.
+### Etapa 5 — Catálogo de Agentes *(P-12)* ✅ 2026-09-01
+- [x] 5.1 Core: campo `ativo` no schema do agente (default true — MDs legados continuam válidos) + catálogo desativado por padrão via templates (`agente-vendas/marketing/financeiro/suporte/juridico/ops`, ativo:false)
+- [x] 5.2 UI: seções "Ativos" × "Catálogo (desativados)", toggle .toggle por card com loading, badge, CRUD preservado; catálogo = templates escaneados do diretório (sem lista hardcoded); agentes de sistema (secretário/secretário-exec) não podem ser desativados (422 + toggle bloqueado)
+- [x] 5.3 Catálogo semeado: **POST /agents/semear-catalogo** idempotente (copia só o que falta) + botão na UI — funciona em workspaces existentes; workspaces novos já recebem tudo
+- [x] 5.4 Runtime: guard único em **SessionManager.rodar** (cobre API/run, hooks, nós de fluxo, reuniões, menções, scheduler) — desativado → falha com mensagem acionável; 409 antes do 202 em POST /agents/:id/run; palette @ lista só ativos; validarSemantica de fluxos NÃO rejeita desativado na criação (só runtime)
+- **Aceite**: ligar/desligar agente com 1 clique; catálogo semeado e editável. — unitários 494 (+5); e2e agentes-catalogo.spec 4/4; hook imediato com log de falha; clone comunica herança do estado no form.
 
 ### Etapa 6 — Reuniões v2 *(P-25, P-26)*
 - [ ] 6.1 Core: sala de reunião com estado consultável (GET /meetings/:id → turno atual, mensagens, participantes) e encerramento real do processo

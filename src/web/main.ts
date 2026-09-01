@@ -24,7 +24,7 @@ import { renderAgenda } from "./views/agenda.js";
 import { renderReunioes } from "./views/reunioes.js";
 import { renderFluxos } from "./views/fluxos.js";
 import { renderHooks, abrirFormHook, fecharFormHook, hookCamposAlvo, criarHook, excluirHook, copiarCurlHook } from "./views/hooks.js";
-import { renderAgentes, chamarAgente, editarAgente, salvarAgente, abrirFormAgente, fecharFormAgente, criarAgente, excluirAgente } from "./views/agentes.js";
+import { renderAgentes, chamarAgente, editarAgente, salvarAgente, abrirFormAgente, fecharFormAgente, criarAgente, excluirAgente, toggleAgenteAtivo, semearCatalogoAgentes } from "./views/agentes.js";
 import { renderApps } from "./views/apps.js";
 import { renderAppDetail } from "./views/app-detail.js";
 import { renderHistorico } from "./views/historico.js";
@@ -422,6 +422,8 @@ export function exporGlobais(): void {
   g.fecharFormAgente = fecharFormAgente;
   g.criarAgente = criarAgente;
   g.excluirAgente = excluirAgente;
+  g.toggleAgenteAtivo = toggleAgenteAtivo;
+  g.semearCatalogoAgentes = semearCatalogoAgentes;
   g.moverTaskColuna = moverTaskColuna;
   g.atualizarTaskPrioridade = atualizarTaskPrioridade;
   g.atualizarTaskResponsavel = atualizarTaskResponsavel;

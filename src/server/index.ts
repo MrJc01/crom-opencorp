@@ -78,9 +78,10 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/agents", descricao: "Lista agentes do workspace" },
   { method: "POST", path: "/agents", descricao: "Cria novo agente", corpo: true },
   { method: "GET", path: "/agents/:id", descricao: "Detalhe do agente (frontmatter + prompt)" },
-  { method: "PUT", path: "/agents/:id", descricao: "Edita frontmatter do agente (model, permissions, budget, tools, role)", corpo: true },
+  { method: "PUT", path: "/agents/:id", descricao: "Edita frontmatter do agente (model, permissions, budget, tools, role, ativo)", corpo: true },
   { method: "DELETE", path: "/agents/:id", descricao: "Exclui agente (409 se citado em teams/flows/tasks)" },
-  { method: "POST", path: "/agents/:id/run", descricao: "Executa agente com ordem", corpo: true },
+  { method: "POST", path: "/agents/semear-catalogo", descricao: "Semeia agentes do catálogo no workspace (idempotente; nascem desativados)" },
+  { method: "POST", path: "/agents/:id/run", descricao: "Executa agente com ordem (409 se desativado)", corpo: true },
   { method: "GET", path: "/sessions", descricao: "Lista execuções/sessões" },
   { method: "GET", path: "/historico", descricao: "Histórico unificado (execuções + tasks + rotinas + conversas da secretária) — query: agente, tipo, limite" },
   { method: "GET", path: "/execucoes", descricao: "Ledger unificado de execuções com gatilho (query: agente, gatilho, origem, status, limite)" },
@@ -715,6 +716,13 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           enviar(res, 201, { id: criado.frontmatter.id, modelo: criado.frontmatter.model });
           return;
         }
+        if (rota === "/agents/semear-catalogo" && req.method === "POST") {
+          // Etapa 5 — copia os agentes do catálogo que ainda não existem (idempotente)
+          const ws = await resolverWs(url);
+          const resultado = await agentes.semearCatalogo(ws.path);
+          enviar(res, 200, resultado);
+          return;
+        }
         const mAgente = /^\/agents\/([^/]+)$/.exec(rota);
         if (mAgente && req.method === "GET") {
           const ws = await resolverWs(url);
@@ -727,6 +735,15 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const ws = await resolverWs(url);
           const id = decodeURIComponent(mAgente[1]!);
           const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+          if (corpo.ativo !== undefined && typeof corpo.ativo !== "boolean") {
+            enviar(res, 422, { erro: "campo 'ativo' deve ser boolean (true/false)" });
+            return;
+          }
+          // agentes de sistema: o Secretário inteiro depende deles — desativação é bloqueada
+          if (corpo.ativo === false && (id === "secretario" || id === "secretario-exec")) {
+            enviar(res, 422, { erro: "secretário e secretário-exec são agentes de sistema e não podem ser desativados" });
+            return;
+          }
           const salvo = await agentes.editar(ws.path, id, {
             role: corpo.role !== undefined ? String(corpo.role) : undefined,
             model: corpo.model !== undefined ? String(corpo.model) : undefined,
@@ -734,6 +751,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             tools: Array.isArray(corpo.tools) ? (corpo.tools as unknown[]).map(String).filter(Boolean) : undefined,
             budget_daily_usd: typeof corpo.budget_daily_usd === "number" ? corpo.budget_daily_usd : undefined,
             budget_max_turns: typeof corpo.budget_max_turns === "number" ? corpo.budget_max_turns : undefined,
+            ativo: corpo.ativo as boolean | undefined,
           });
           eventBus.emit("agente.editado", { agente: id });
           enviar(res, 200, salvo);
@@ -767,10 +785,17 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         const mAgenteRun = /^\/agents\/([^/]+)\/run$/.exec(rota);
         if (mAgenteRun && req.method === "POST") {
           const ws = await resolverWs(url);
+          const idRun = decodeURIComponent(mAgenteRun[1]!);
           const corpo = (await lerCorpo(req)) as { ordem?: string; model?: string };
+          // Etapa 5 — guard antes do 202: agente desativado não entra em execução
+          const alvo = await agentes.carregar(ws.path, idRun);
+          if (alvo.frontmatter.ativo === false) {
+            enviar(res, 409, { erro: `agente '${idRun}' está desativado — ative no painel de agentes` });
+            return;
+          }
           const execId = gerarIdExec();
           const opcoes: OpcoesRun = {
-            agente: decodeURIComponent(mAgenteRun[1]!),
+            agente: idRun,
             ordem: corpo.ordem ?? "",
             model: corpo.model,
             workspaceDir: ws.path,
@@ -1532,7 +1557,9 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             const r = await hooks.disparar(ws.path, h, payload);
             enviar(res, 200, { ok: true, exec_id: r.exec_id, resultado: r.resultado.slice(0, 4096) });
           } else {
-            void hooks.disparar(ws.path, h, payload).catch(() => undefined);
+            void hooks
+              .disparar(ws.path, h, payload)
+              .catch((e: unknown) => console.error(`[hook] disparo imediato de "${h.id}" falhou:`, e instanceof Error ? e.message : e));
             enviar(res, 202, { ok: true, modo: "imediato" });
           }
           return;
