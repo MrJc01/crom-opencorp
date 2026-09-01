@@ -98,6 +98,25 @@ export class FlowStore {
     return flow;
   }
 
+  /** POST com grafo completo (editor da web): 409 se id existe + validação semântica do grafo */
+  async salvarComId(wsPath: string, bruto: { id: string; nome: string; nos: Flow["nos"]; arestas: Flow["arestas"] }): Promise<Flow> {
+    const id = validarIdFlow(bruto.id);
+    if (existsSync(this.caminho(wsPath, id))) {
+      throw new FlowError(`flow "${id}" já existe (${this.caminho(wsPath, id)})`);
+    }
+    if (bruto.nome.trim().length === 0) {
+      throw new FlowError("nome obrigatório: informe --nome ou nome no corpo");
+    }
+    const flow: Flow = {
+      id,
+      nome: bruto.nome.trim(),
+      nos: bruto.nos,
+      arestas: bruto.arestas,
+    };
+    await this.salvar(wsPath, flow);
+    return flow;
+  }
+
   async listar(wsPath: string): Promise<{ id: string; nome: string; nos: number; arestas: number }[]> {
     const dir = this.dir(wsPath);
     if (!existsSync(dir)) return [];

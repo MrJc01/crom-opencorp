@@ -12,7 +12,7 @@ import { RegistryStore } from "../core/registry-store.js";
 import { BudgetManager } from "../core/budget-manager.js";
 import { ApprovalsStore } from "../core/approvals-store.js";
 import { SettingsError, SettingsStore } from "../core/settings-store.js";
-import { FlowStore, type SessaoFlow } from "../core/flow-store.js";
+import { FlowStore, type Flow, type SessaoFlow } from "../core/flow-store.js";
 import { migrarTeamsParaFlows } from "../core/flow-migrate.js";
 import { MeetingManager } from "../core/meeting-manager.js";
 import { TaskStore, type Task } from "../core/task-store.js";
@@ -507,6 +507,15 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
     return workspaces.resolver(id) as unknown as { id: string; path: string };
   }
 
+  // Rejeições órfãs de operações em background (fire-and-forget) não podem
+  // derrubar o server silenciosamente — loga e segue servindo.
+  process.on("unhandledRejection", (motivo) => {
+    console.error("[server] unhandledRejection:", motivo);
+  });
+  process.on("uncaughtException", (erro) => {
+    console.error("[server] uncaughtException:", erro);
+  });
+
   const server: Server = createServer((req, res) => {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://local");
@@ -922,8 +931,20 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         }
         if (rota === "/flows" && req.method === "POST") {
           const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as { id?: string; nome?: string };
-          const f = await flows.criar(ws.path, corpo.id ?? "", corpo.nome ?? corpo.id ?? "");
+          const corpo = (await lerCorpo(req)) as {
+            id?: string; nome?: string;
+            nos?: Flow["nos"];
+            arestas?: Flow["arestas"];
+          };
+          // com grafo no corpo (editor da web), valida e salva inteiro — senão cria só o gatilho
+          const f = Array.isArray(corpo.nos) && corpo.nos.length > 0
+            ? await flows.salvarComId(ws.path, {
+                id: corpo.id ?? "",
+                nome: corpo.nome ?? corpo.id ?? "",
+                nos: corpo.nos,
+                arestas: corpo.arestas ?? [],
+              })
+            : await flows.criar(ws.path, corpo.id ?? "", corpo.nome ?? corpo.id ?? "");
           enviar(res, 201, f);
           return;
         }

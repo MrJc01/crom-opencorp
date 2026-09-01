@@ -123,6 +123,34 @@ describe("API — CRUD da web (B/C)", () => {
     }
   });
 
+  it("A7 — POST /flows ACEITA grafo (editor da web não perde passos)", async () => {
+    const id = `flow-web-${Date.now().toString(36)}`;
+    const criado = await fetchApi(`/flows${wsq}`, {
+      method: "POST",
+      body: JSON.stringify({
+        id,
+        nome: "Fluxo com passos",
+        nos: [
+          { id: "gatilho", tipo: "manual", config: {} },
+          { id: "passo-1", tipo: "task_create", config: { titulo: "Passo um" } },
+        ],
+        arestas: [{ de: "gatilho", para: "passo-1" }],
+      }),
+    });
+    expect(criado.status).toBe(201);
+    const detalhe = await fetchApi(`/flows/${id}${wsq}`);
+    const flow = detalhe.json as { nos: unknown[]; arestas: unknown[] };
+    expect(flow.nos).toHaveLength(2);
+    expect(flow.arestas).toHaveLength(1);
+
+    // sem grafo no corpo → comportamento antigo (só gatilho)
+    const simples = await fetchApi(`/flows${wsq}`, {
+      method: "POST",
+      body: JSON.stringify({ id: `${id}-simples`, nome: "Só gatilho" }),
+    });
+    expect(simples.status).toBe(201);
+  });
+
   it("B2 — PUT/DELETE /flows/:id salvam e removem o grafo (com validação)", async () => {
     const criado = await fetchApi(`/flows${wsq}`, { method: "POST", body: JSON.stringify({ id: "fluxo-web", nome: "Fluxo Web" }) });
     expect(criado.status).toBe(201);
