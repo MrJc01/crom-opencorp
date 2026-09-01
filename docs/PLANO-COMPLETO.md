@@ -79,9 +79,9 @@
 - [x] 1.5 Rascunho não-enviado: singleton `rascunho.ts` (`oc-chat-rascunho`) sincronizado página↔lateral, survives refresh
 - **P cobre:** P-18, P-19, P-23 + P-21-parte · **Aceite:** `chat-lateral.spec 4/4`
 
-### Etapa 1b — Histórico como popup limpo *(P-29)*
-- [ ] 1.6 Histórico **como popup page** sobre o chat — lista agrupada Hoje/Ontem/Anteriores + busca + paginação; clique abre a conversa; limpo estilo opencode/chatGPT
-- [ ] 1.7 Estados vazio ilustrado / loading / erro; fecha em `Escape` / click fora; não quebrar o feed ativo
+### Etapa 1b — Histórico como popup limpo *(P-29)* ✅ 2026-09-01
+- [x] 1.6 Histórico **como popup page** sobre o chat — lista agrupada Hoje/Ontem/Anteriores + busca + paginação; clique abre a conversa; limpo estilo opencode/chatGPT
+- [x] 1.7 Estados vazio ilustrado / loading / erro; fecha em `Escape` / click fora; não quebrar o feed ativo
 - **P cobre:** P-29
 
 ### Etapa 1c — Estrutura Preline (não só CSS, mas páginas) *(P-28)*
@@ -136,9 +136,9 @@
 - [ ] 7.3 Página com feed lidas/não lidas + badge no navbar + push `SSE`
 - **P cobre:** P-24
 
-### Etapa 8 — Config fix *(P-27)*
-- [ ] 8.1 `GET /settings` respeita o toggle (remover `?workspace=` inj. em `web/api.ts:32`)
-- [ ] 8.2 Badges de origem + `PUT` coerente + e2e de regressão
+### Etapa 8 — Config fix *(P-27)* ✅ 2026-09-01
+- [x] 8.1 `GET /settings` respeita o toggle (remover `?workspace=` inj. em `web/api.ts:32`)
+- [x] 8.2 Badges de origem + `PUT` coerente + e2e de regressão
 - **P cobre:** P-27
 
 ### Etapa 9 — Home dashboard *(P-17)*
