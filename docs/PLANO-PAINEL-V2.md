@@ -159,12 +159,12 @@
 - [x] Right-click de arquivo: Abrir · **Enviar como contexto @** (setRascunho + abre chat lateral) · Copiar caminho *(fecha o item de arquivo do P-21)*
 - **Aceite**: navegar/editar/salvar arquivos; md com preview; terminais funcionando. — e2e workspace.spec 5/5; revisão de segurança: realpath no GET, cap de corpo no lerCorpo (30MB default / 1.5MB no PUT), duplo-decode de path removido; unitários 482; suite completa = baseline.
 
-### Etapa 4 — Apps & Secrets *(P-01…P-07)*
-- [ ] 4.1 Core: perfis de credencial tipados (`vps`, `wordpress`, `mercadopago`, `cartao`, `custom`) com schema por tipo no secrets.json (0600, valores nunca retornados)
-- [ ] 4.2 Página Apps: aba "Configurar apps" com form por perfil (VPS host/user/senha/chave; WP url+senha+onde roda; MP public/secret; cartão com **banner "Atenção — não testado"**; custom livres)
-- [ ] 4.3 Injeção opt-in nas sessões de agentes (por agente/permissão; nunca em logs/feed)
-- [ ] 4.4 Integrar mini-apps existentes na mesma página (widgets + config lado a lado)
-- **Aceite**: salvar/recuperar credenciais sem exposição; cartão sempre com aviso visível.
+### Etapa 4 — Apps & Secrets *(P-01…P-07)* ✅ 2026-09-01
+- [x] 4.1 Core: perfis de credencial tipados (`app:vps|wordpress|mercadopago|cartao|custom:<id>`) com schema zod por tipo no secrets.json (0600, valores nunca retornados; GET /secrets ganha `tipo_app` derivado do nome; cartão rejeita qualquer variante de número/CVV com 422)
+- [x] 4.2 Página Apps: aba "Configurar apps" com form por perfil (VPS host/user/senha/chave; WP url+senha+onde roda; MP public/secret + ambiente; cartão com **banner "Atenção — não testado"** permanente; custom livres) — lista agrupada por tipo, Editar/Excluir com modal
+- [x] 4.3 Injeção opt-in nas sessões de agentes → **versão light**: linha "Como o agente usa:" com env_hint por tipo na UI; injeção real fica para a fase de integrações (Etapa 10) — nota honesta
+- [x] 4.4 Mini-apps existentes preservados como aba "Apps" na mesma página
+- **Aceite**: salvar/recuperar credenciais sem exposição; cartão sempre com aviso visível. — unitários 489 (+7 app-perfis); e2e apps-perfis.spec 4/4 (inclui prova de que GET não expõe valor); revisão de segurança: masking ✅, regex-filter na lista (anti-XSS de nomes legados), blocklist ampla do cartão; race de gravação corrigido (await).
 
 ### Etapa 5 — Catálogo de Agentes *(P-12)*
 - [ ] 5.1 Core: campo de estado no schema do agente (ativo/desativado) + defaults "ativados por padrão" por empresa no template do workspace

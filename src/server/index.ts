@@ -31,6 +31,7 @@ import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
 import { OpencodeServerManager, SecretarioError } from "../core/opencode-server.js";
 import { taskCreateSchema } from "../schemas/task.js";
+import { tipoDeNomeApp, validarPerfilApp } from "../schemas/app-perfil.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
@@ -96,8 +97,8 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/settings", descricao: "Lista configurações" },
   { method: "GET", path: "/settings/:chave", descricao: "Obtém uma configuração específica" },
   { method: "PUT", path: "/settings", descricao: "Define uma configuração", corpo: true },
-  { method: "GET", path: "/secrets", descricao: "Lista NOMES de segredos (valores nunca expostos)" },
-  { method: "PUT", path: "/secrets/:chave", descricao: "Define/altera um segredo", corpo: true },
+  { method: "GET", path: "/secrets", descricao: "Lista NOMES de segredos (valores nunca expostos; perfis app:<tipo>:<id> incluem tipo_app)" },
+  { method: "PUT", path: "/secrets/:chave", descricao: "Define/altera um segredo (perfis app:* validam o valor como JSON por tipo)", corpo: true },
   { method: "DELETE", path: "/secrets/:chave", descricao: "Remove um segredo" },
   { method: "GET", path: "/tools", descricao: "Lista ferramentas declarativas do workspace (.opencorp/tools/*.json — só a spec, sem executar)" },
   { method: "GET", path: "/flows", descricao: "Lista flows disponíveis" },
@@ -962,7 +963,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
-        // ── secrets (NUNCA retornam valores — só nomes/máscara) ────
+        // ── secrets (NUNCA retornam valores — só nomes/máscara/tipo de app) ────
         const secretsPath = join(opcoes.homeDir ?? opencorpHome(), ".opencorp", "secrets.json");
         if (rota === "/secrets" && req.method === "GET") {
           let nomes: string[] = [];
@@ -970,7 +971,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             const bruto = JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, unknown>;
             nomes = Object.keys(bruto).sort();
           } catch {}
-          enviar(res, 200, nomes.map((nome) => ({ nome, definido: true })));
+          enviar(res, 200, nomes.map((nome) => ({ nome, definido: true, tipo_app: tipoDeNomeApp(nome) })));
           return;
         }
         const mSecret = /^\/secrets\/([^/]+)$/.exec(rota);
@@ -980,10 +981,17 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             enviar(res, 400, { erro: "valor obrigatório" });
             return;
           }
+          const nomeSecret = decodeURIComponent(mSecret[1]!);
+          // Perfis de app (app:<tipo>:<id>): valor DEVE ser JSON válido contra o schema do tipo
+          const erroPerfil = validarPerfilApp(nomeSecret, corpo.valor);
+          if (erroPerfil) {
+            enviar(res, 422, { erro: erroPerfil });
+            return;
+          }
           let atual: Record<string, unknown> = {};
           try { atual = JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, unknown>; } catch {}
-          atual[decodeURIComponent(mSecret[1]!)] = corpo.valor;
-          writeFileAtomic(secretsPath, `${JSON.stringify(atual, null, 2)}\n`, { mode: 0o600 });
+          atual[nomeSecret] = corpo.valor;
+          await writeFileAtomic(secretsPath, `${JSON.stringify(atual, null, 2)}\n`, { mode: 0o600 });
           enviar(res, 200, { ok: true });
           return;
         }
@@ -991,7 +999,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           let atual: Record<string, unknown> = {};
           try { atual = JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, unknown>; } catch {}
           delete atual[decodeURIComponent(mSecret[1]!)];
-          writeFileAtomic(secretsPath, `${JSON.stringify(atual, null, 2)}\n`, { mode: 0o600 });
+          await writeFileAtomic(secretsPath, `${JSON.stringify(atual, null, 2)}\n`, { mode: 0o600 });
           enviar(res, 200, { ok: true });
           return;
         }
