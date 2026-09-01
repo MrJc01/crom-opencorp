@@ -32,6 +32,7 @@ import { renderSecretario, secretarioAba } from "./views/secretario.js";
 import { renderConfig } from "./views/config.js";
 import { abrirWizard, exporWizard } from "./views/wizard.js";
 import { abrirChatLateral, fecharChatLateral, alternarChatLateral } from "./chat-lateral.js";
+import { registrarMenuContexto } from "./menu-contexto.js";
 import { criarTask, enviarMsgDrawer, moverTaskColuna, atualizarTaskPrioridade, atualizarTaskResponsavel, atualizarTaskDue, atualizarTaskLabels, atualizarTaskDescricao, excluirTask } from "./views/tasks.js";
 import { agendaEscopo, atualizarCampoAgenda, criarAgenda, editarAgenda, salvarEdicaoAgenda, executarAgendaAgora, toggleAgendaAtivo, excluirAgenda, renderAgendaForm } from "./views/agenda.js";
 import { criarReuniao, encerrarReuniao } from "./views/reunioes.js";
@@ -336,6 +337,7 @@ export function boot(): void {
   exporGlobais();
   exporAjuda();
   exporWizard();
+  registrarMenuContexto();
   aplicarColapsoPersistido();
 
   const { token, ws } = loadPersistedAuth();

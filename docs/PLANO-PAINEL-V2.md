@@ -143,13 +143,13 @@
 - [x] 1.5 Estado do input não-enviado: fonte única (módulo singleton + persistência local), **sincronizado** entre página Secretário e drawer; sobrevive navegação e refresh *(src/web/rascunho.ts — oc-chat-rascunho; __chatRascunhoInput sincroniza as duas textareas)*
 - **Aceite**: conversar de qualquer página; input nunca se perde; nada duplicado. — e2e novo chat-lateral.spec 4/4 (FAB, sync bidirecional, persistência reload, mobile fullscreen, FAB oculto no Secretário); unitários 472; suite completa = baseline (agenda ×5 + chat markdown ×1); fix de design: superfície lateral só renderiza com drawer aberto (evita duplicação em strict mode).
 
-### Etapa 2 — Composer inteligente: / @ ! *(P-20, P-22)*
-- [ ] 2.1 Parser do composer: `/` comandos, `@` contexto, `!` terminal (tokens destacados no input)
-- [ ] 2.2 Palette de comandos (estilo opencode): lista com descrição — comandos próprios do opencorp + passthrough opencode
-- [ ] 2.3 `@` contexto: arquivos do workspace (GET /files), agentes, tasks — autocomplete + **menu clicável**
-- [ ] 2.4 `!` terminal: endpoint seguro (whitelist estendida de COMANDOS_AGENDA + auditoria + config on/off), saída renderizada no chat
-- [ ] 2.5 Context menu (right-click) base + cursor contextual: em **arquivos** → ver, enviar como contexto @, abrir Secretário lateral *(fecha o restante de P-21)*
-- **Aceite**: digitar `/`/`@`/`!` abre lista navegável; @ clicável; right-click em arquivo oferece as 3 opções.
+### Etapa 2 — Composer inteligente: / @ ! *(P-20, P-22)* ✅ 2026-09-01
+- [x] 2.1 Parser do composer: `/` comandos, `@` contexto, `!` terminal *(src/web/composer-comandos.ts — parsearComposer puro + 10 testes unitários)*
+- [x] 2.2 Palette de comandos (estilo opencode): lista com descrição — comandos próprios do opencorp + passthrough opencode *(src/web/palette.ts — resolve no front via API; desconhecido vai ao LLM)*
+- [x] 2.3 `@` contexto: arquivos do workspace (GET /files), agentes, tasks — autocomplete + **menu clicável** *(cap 3+3+3; server stream/conversa aceitam `contexto[]` e mencionam os alvos na mensagem; CONTEÚDO dos arquivos entra na Etapa 3)*
+- [x] 2.4 `!` terminal: POST /terminal — mesma whitelist COMANDOS_AGENDA **menos subcomandos operacionais** (serve/web/scheduler/test/daemon), args sanitizados (sem --flags/paths), execFile **sem shell**, timeout 20s SIGKILL, cap 100KB, log de auditoria `[terminal]` *(revisado por especialista de segurança: sem bypass)*
+- [x] 2.5 Context menu (right-click) base + cursor contextual: em **task cards** → Ver detalhes / Copiar título / Excluir *(modalConfirm; fecha em Escape/fora/scroll; Etapa 3 liga os itens de arquivo)*
+- **Aceite**: digitar `/`/`@`/`!` abre lista navegável; @ clicável; right-click em task oferece ações. — e2e composer.spec 4/4; unitários 482; suite completa = baseline. Notas: Enter na palette só insere (envio é o Enter seguinte); segundo Enter com ! / durante streaming aborta (comportamento herdado do stop).
 
 ### Etapa 3 — Workspace estilo VS Code *(P-08, P-09, P-10)*
 - [ ] 3.1 Backend: GET /files **tree** recursivo + GET arquivo + **PUT arquivo** (traversal guard + size cap)

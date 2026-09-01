@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { join, resolve, relative, isAbsolute } from "node:path";
 import { stat, readdir, readFile } from "node:fs/promises";
 import { existsSync, statSync, readFileSync } from "node:fs";
@@ -112,6 +114,7 @@ const ROUTES: DefinicaoRota[] = [
   { method: "POST", path: "/meetings/:id/stop", descricao: "Solicita interrupção de reunião ativa" },
   { method: "GET", path: "/events", descricao: "Stream SSE de eventos do servidor" },
   { method: "GET", path: "/files", descricao: "Lista diretório ou lê arquivo do workspace", publico: false },
+  { method: "POST", path: "/terminal", descricao: "Executa comando opencorp whitelistado (composer !) — corpo { comando }, retorna { saida, codigo }", corpo: true },
   { method: "GET", path: "/hooks", descricao: "Lista hooks do workspace" },
   { method: "POST", path: "/hooks", descricao: "Cria hook de entrada", corpo: true },
   { method: "GET", path: "/hooks/:id", descricao: "Detalhes do hook (inclui token)" },
@@ -1658,13 +1661,16 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         if (rota === "/secretario/conversa" && req.method === "POST") {
           try {
             const porta = await portaOpencodeOuErro();
-            const corpo = (await lerCorpo(req)) as { mensagem: string; sessao_id?: string; agente?: string; imagens?: Array<{ nome?: string; mime?: string; url?: string }> };
-            const mensagem = corpo.mensagem?.trim();
+            const corpo = (await lerCorpo(req)) as { mensagem: string; sessao_id?: string; agente?: string; imagens?: Array<{ nome?: string; mime?: string; url?: string }>; contexto?: string[] };
+            const mensagemBruta = corpo.mensagem?.trim();
             const imagens = (corpo.imagens ?? []).filter((i) => i && typeof i.url === "string" && i.url.startsWith("data:image/")).slice(0, 4);
-            if (!mensagem && imagens.length === 0) {
+            if (!mensagemBruta && imagens.length === 0) {
               enviar(res, 400, { erro: "mensagem obrigatória" });
               return;
             }
+            // Contexto @ do composer (Etapa 2): menciona os alvos; conteúdo dos arquivos na Etapa 3.
+            const contexto = (Array.isArray(corpo.contexto) ? corpo.contexto : []).map((c) => String(c).replace(/^@/, "").slice(0, 120)).filter(Boolean).slice(0, 8);
+            const mensagem = contexto.length ? `${mensagemBruta}\n\n(Contexto referenciado pelo usuário: ${contexto.map((c) => "@" + c).join(" ")})` : mensagemBruta;
             let sessaoId = corpo.sessao_id;
             const baseUrl = `http://127.0.0.1:${porta}`;
 
@@ -1769,13 +1775,16 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           };
           try {
             const porta = await portaOpencodeOuErro();
-            const corpo = (await lerCorpo(req)) as { mensagem: string; sessao_id?: string; agente?: string; imagens?: Array<{ nome?: string; mime?: string; url?: string }> };
-            const mensagem = corpo.mensagem?.trim();
+            const corpo = (await lerCorpo(req)) as { mensagem: string; sessao_id?: string; agente?: string; imagens?: Array<{ nome?: string; mime?: string; url?: string }>; contexto?: string[] };
+            const mensagemBruta = corpo.mensagem?.trim();
             const imagens = (corpo.imagens ?? []).filter((i) => i && typeof i.url === "string" && i.url.startsWith("data:image/")).slice(0, 4);
-            if (!mensagem && imagens.length === 0) {
+            if (!mensagemBruta && imagens.length === 0) {
               enviar(res, 400, { erro: "mensagem obrigatória" });
               return;
             }
+            // Contexto @ do composer (Etapa 2): menciona os alvos; conteúdo dos arquivos na Etapa 3.
+            const contexto = (Array.isArray(corpo.contexto) ? corpo.contexto : []).map((c) => String(c).replace(/^@/, "").slice(0, 120)).filter(Boolean).slice(0, 8);
+            const mensagem = contexto.length ? `${mensagemBruta}\n\n(Contexto referenciado pelo usuário: ${contexto.map((c) => "@" + c).join(" ")})` : mensagemBruta;
 
             res.writeHead(200, {
               "content-type": "text/event-stream; charset=utf-8",
@@ -1899,6 +1908,52 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             }
             return;
           }
+        }
+
+        // ── POST /terminal — executa comando opencorp whitelistado (composer "!") ──
+        // Mesma whitelist das rotinas de agenda (COMANDOS_AGENDA), MINUS subcomandos
+        // operacionais (servidor/processos/testes); sem shell, timeout 20s com SIGKILL,
+        // saída capped em 100KB; flags (--*) e paths são descartados dos args.
+        if (rota === "/terminal" && req.method === "POST") {
+          const TERMINAL_BLOQUEADOS = new Set(["serve", "web", "scheduler", "test", "daemon"]);
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { comando?: string };
+          const argsBrutos = String(corpo.comando ?? "").trim().split(/\s+/).filter(Boolean);
+          if (argsBrutos.length === 0 || !COMANDOS_AGENDA.has(argsBrutos[0]!) || TERMINAL_BLOQUEADOS.has(argsBrutos[0]!)) {
+            enviar(res, 422, { erro: "comando fora da whitelist" });
+            return;
+          }
+          const args = argsBrutos.filter((a) => !a.startsWith("--") && !a.includes("/") && !a.includes("\\") && !a.includes(".."));
+          console.log(`[terminal] ws=${ws.id} comando=${args.join(" ")}`);
+          const bin = resolve(import.meta.dirname ?? ".", "..", "..", "bin", "opencorp.mjs");
+          const home = opcoes.homeDir ?? opencorpHome();
+          const CAP = 100 * 1024;
+          const juntarSaida = (out: string, err: string): string =>
+            (out + (err ? (out ? "\n" : "") + err : "")).trim().slice(0, CAP);
+          try {
+            const { stdout, stderr } = await promisify(execFile)(
+              process.execPath,
+              [bin, "--workspace", ws.id, ...args],
+              {
+                timeout: 20_000,
+                killSignal: "SIGKILL",
+                maxBuffer: CAP,
+                encoding: "utf8",
+                cwd: ws.path,
+                env: { ...process.env, OPENCORP_HOME: home },
+                windowsHide: true,
+              },
+            );
+            enviar(res, 200, { saida: juntarSaida(stdout, stderr), codigo: 0 });
+          } catch (erro) {
+            const e = erro as { code?: number | string; killed?: boolean; signal?: string; stdout?: string; stderr?: string; message?: string };
+            const codigo = typeof e.code === "number" ? e.code : e.killed ? 124 : 1;
+            const saida =
+              juntarSaida(e.stdout ?? "", e.stderr ?? "") ||
+              (e.killed ? `comando interrompido (${e.signal ?? "timeout de 20s"})` : e.message ?? "falha ao executar comando");
+            enviar(res, 200, { saida: saida.slice(0, CAP), codigo });
+          }
+          return;
         }
 
         if (req.method === "GET" && rota !== "/events") {

@@ -13,6 +13,8 @@ import { estadoErro } from "../estado.js";
 import { ajuda } from "../help.js";
 import { renderMarkdown } from "../md.js";
 import { getRascunho, setRascunho, limparRascunho } from "../rascunho.js";
+import { parsearComposer, COMANDOS_OPCORP } from "../composer-comandos.js";
+import { gatilhoComposer, paletteTecla } from "../palette.js";
 
 interface SecretarioStatus {
   rodando: boolean;
@@ -36,6 +38,8 @@ interface MensagemChat {
   role: 'user' | 'assistant';
   content: string;
   criado_em?: string;
+  /** presente → renderiza como bloco de terminal (.terminal-saida) em vez de markdown */
+  terminal?: string;
 }
 
 interface ConversaResponse {
@@ -319,11 +323,11 @@ function renderChatLayout(): void {
           <div class="composer-row2">
             <button class="btn-ghost composer-anexo" onclick="window.__secretarioAnexar()" title="Anexar imagem ou arquivo" aria-label="Anexar">📎</button>
             <input id="anexo-input" type="file" multiple accept="image/*,.txt,.md,.json,.csv,.log,.py,.js,.ts,.sh,.yaml,.yml,.html,.css" style="display:none" onchange="window.__secretarioAnexos(this.files)" />
-            <textarea id="chat-input" placeholder="Pergunte qualquer coisa…" rows="1" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); window.__secretarioEnviar('pagina')}" oninput="window.__chatRascunhoInput(this.value,'pagina')"></textarea>
+            <textarea id="chat-input" placeholder="Pergunte qualquer coisa… (/ comandos · @ contexto · ! terminal)" rows="1" onkeydown="window.__composerTecla(event,'pagina')" oninput="window.__composerInput(this.value,'pagina')"></textarea>
             <button class="btn composer-enviar" id="btn-enviar" onclick="window.__secretarioEnviar()" aria-label="Enviar mensagem">${icone('run')}</button>
           </div>
           <div class="composer-row">
-            <span class="text-xs text-zinc-500 composer-dica">secretário analisa · secretário-exec executa · 📎 anexa imagem/arquivo</span>
+            <span class="text-xs text-zinc-500 composer-dica">secretário analisa · secretário-exec executa · / comandos · @ contexto · ! terminal · 📎 anexa</span>
           </div>
         </div>
         </div>
@@ -395,6 +399,22 @@ function exporHandlersChat(): void {
   };
 
   g.__chatAutoAltura = (el: HTMLTextAreaElement) => autoAltura(el);
+
+  /** keydown do composer (ambas as superfícies): palette consome teclas; senão Enter envia */
+  g.__composerTecla = (ev: KeyboardEvent, origem: Alvo) => {
+    if (paletteTecla(ev)) return;
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      void enviar(origem);
+    }
+  };
+
+  /** input do composer (ambas as superfícies): rascunho/sync + gatilhos / e @ da palette */
+  g.__composerInput = (valor: string, origem: Alvo) => {
+    (g.__chatRascunhoInput as (v: string, o: Alvo) => void)(valor, origem);
+    const ta = document.getElementById(idDe(origem, 'input')) as HTMLTextAreaElement | null;
+    if (ta) gatilhoComposer(valor, ta);
+  };
 
   g.__secretarioToggleConv = () => {
     document.getElementById('secretario-grid')?.classList.toggle('conv-aberta');
@@ -586,7 +606,11 @@ function renderMensagens(alvo: Alvo | 'ambos' = 'ambos'): void {
     } else {
       el.innerHTML = mensagensCache.map((m, i) => `
         <div class="oc-msg ${m.role === 'user' ? 'oc-user' : 'oc-assistant'}">
-          <div class="oc-msg-corpo">${m.role === 'user' ? `<p class="md-p">${escapeHtml(m.content).replace(/\n/g, '<br>')}</p>` : renderMarkdown(m.content)}</div>
+          <div class="oc-msg-corpo">${m.role === 'user'
+            ? `<p class="md-p">${escapeHtml(m.content).replace(/\n/g, '<br>')}</p>`
+            : m.terminal !== undefined
+              ? `<pre class="terminal-saida"><code>${escapeHtml(m.terminal)}</code></pre>`
+              : renderMarkdown(m.content)}</div>
           <button class="oc-copy" title="Copiar mensagem" aria-label="Copiar mensagem" onclick="window.__secretarioCopyMsg(${i}, this)">copy</button>
         </div>
       `).join('');
@@ -661,6 +685,19 @@ async function enviar(alvo: Alvo = 'pagina'): Promise<void> {
   const texto = input?.value.trim();
   if (!texto || !input || !btn) return;
 
+  // Composer inteligente (Etapa 2): / comando próprio resolve no front, ! vai ao
+  // terminal (whitelist no server), @ vira contexto anexado ao body — sem destaque
+  // visual no input nesta etapa.
+  const parse = parsearComposer(texto);
+  if (parse.terminal) {
+    await enviarTerminalLocal(parse.terminal.comando, texto);
+    return;
+  }
+  if (parse.comando && COMANDOS_OPCORP.some((c) => c.nome === parse.comando!.nome)) {
+    await enviarComandoLocal(parse.comando);
+    return;
+  }
+
   carregando = true;
   controller = new AbortController();
   acoesEmAndamento = 0;
@@ -687,10 +724,11 @@ async function enviar(alvo: Alvo = 'pagina'): Promise<void> {
       method: 'POST',
       headers: headers(),
       body: JSON.stringify({
-        mensagem: texto,
+        mensagem: parse.textoLimpo || texto,
         sessao_id: sessaoAtivaId || undefined,
         agente: agenteSelecionado,
         imagens: anexos.length ? anexos : undefined,
+        contexto: parse.contexto.length ? parse.contexto : undefined,
       }),
       signal: controller.signal,
     });
@@ -771,6 +809,111 @@ async function enviar(alvo: Alvo = 'pagina'): Promise<void> {
     setBotaoEnviar(alvo, false);
     renderMensagens();
   }
+}
+
+/** Limpa inputs + rascunho das duas superfícies (usado pelos envios locais). */
+function limparComposers(): void {
+  for (const a of ALVOS) {
+    const inp = document.getElementById(idDe(a, 'input')) as HTMLTextAreaElement | null;
+    if (inp) { inp.value = ''; autoAltura(inp); }
+  }
+  limparRascunho();
+}
+
+/** Resolução LOCAL de comando próprio (/status, /tasks…) — fetch na API e resposta
+ *  como mensagem assistant no feed; nunca chama o servidor de conversa/LLM. */
+async function enviarComandoLocal(comando: { nome: string; args: string }): Promise<void> {
+  if (comando.nome === 'limpar') {
+    (window as unknown as { __secretarioNovaConversa?: () => void }).__secretarioNovaConversa?.();
+    return;
+  }
+  mensagensCache.push({ role: 'user', content: '/' + comando.nome + (comando.args ? ' ' + comando.args : '') });
+  const idx = mensagensCache.push({ role: 'assistant', content: '' }) - 1;
+  limparComposers();
+  renderMensagens();
+  try {
+    mensagensCache[idx].content = await resolverComandoProprio(comando.nome);
+  } catch (e) {
+    mensagensCache[idx].content = '⚠ ' + (e as Error).message;
+  }
+  renderMensagens();
+}
+
+async function resolverComandoProprio(nome: string): Promise<string> {
+  switch (nome) {
+    case 'status': {
+      const [st, ts] = await Promise.all([
+        q<{ scheduler?: boolean; secretario?: boolean }>('/status').catch(() => null),
+        q<Array<{ coluna: string }>>('/tasks').catch(() => null),
+      ]);
+      const porColuna = (ts ?? []).reduce<Record<string, number>>((acc, t) => {
+        acc[t.coluna] = (acc[t.coluna] ?? 0) + 1;
+        return acc;
+      }, {});
+      const total = Object.values(porColuna).reduce((a, b) => a + b, 0);
+      return [
+        '**Estado da empresa**',
+        `- Scheduler: ${st?.scheduler ? '🟢 rodando' : '🔴 parado'}`,
+        `- Secretário: ${st?.secretario ? '🟢 rodando' : '🔴 parado'}`,
+        `- Tasks: ${total}` + (total ? ` — ${Object.entries(porColuna).map(([c, n]) => `${c} ${n}`).join(' · ')}` : ''),
+      ].join('\n');
+    }
+    case 'tasks': {
+      const ts = await q<Array<{ coluna: string; titulo: string }>>('/tasks');
+      if (!ts.length) return 'Board vazio — nenhuma task.';
+      const resto = ts.length > 8 ? `\n… +${ts.length - 8} tasks` : '';
+      return '**Board de tasks**\n' + ts.slice(0, 8).map((t) => `- [${t.coluna}] ${t.titulo}`).join('\n') + resto;
+    }
+    case 'custos': {
+      const b = await q<{
+        estado?: { dia?: string; workspace_usd_hoje?: number };
+        limites?: { daily_usd?: number };
+      }>('/budget/status');
+      const dia = b.estado?.dia ?? new Date().toISOString().slice(0, 10);
+      return `**Custos de hoje** (${dia})`
+        + `\n- Workspace: $${(b.estado?.workspace_usd_hoje ?? 0).toFixed(4)}`
+        + (b.limites?.daily_usd ? `\n- Limite diário: $${b.limites.daily_usd}` : '');
+    }
+    case 'fluxos': {
+      const fs = await q<Array<{ id: string; nome?: string }>>('/flows');
+      if (!fs.length) return 'Nenhum flow disponível.';
+      return '**Flows**\n' + fs.map((f) => `- ${f.id}${f.nome && f.nome !== f.id ? ' — ' + f.nome : ''}`).join('\n');
+    }
+    case 'agenda': {
+      const jobs = await q<Array<{ nome: string; ativo: boolean; agenda: { tipo: string; valor: string | number } }>>('/schedules');
+      if (!jobs.length) return 'Nenhuma rotina agendada.';
+      return '**Rotinas agendadas**\n' + jobs
+        .map((j) => `- ${j.nome} — ${j.agenda.tipo} ${j.agenda.valor} ${j.ativo ? '· ativa' : '· pausada'}`)
+        .join('\n');
+    }
+    case 'agentes': {
+      const as = await q<Array<{ id: string; role?: string }>>('/agents');
+      if (!as.length) return 'Nenhum agente configurado.';
+      return '**Equipe**\n' + as.map((a) => `- **${a.id}**${a.role ? ' — ' + a.role : ''}`).join('\n');
+    }
+    default:
+      throw new Error(`comando /${nome} não suportado`);
+  }
+}
+
+/** `!comando` → POST /terminal (whitelist validada no server) e saída como bloco .terminal-saida. */
+async function enviarTerminalLocal(comando: string, textoBruto: string): Promise<void> {
+  mensagensCache.push({ role: 'user', content: textoBruto });
+  const idx = mensagensCache.push({ role: 'assistant', content: '' }) - 1;
+  limparComposers();
+  renderMensagens();
+  try {
+    const r = await api<{ saida: string; codigo: number }>('/terminal', {
+      method: 'POST',
+      body: JSON.stringify({ comando }),
+    });
+    const saida = r.saida || '(sem saída)';
+    mensagensCache[idx].content = saida;
+    mensagensCache[idx].terminal = `$ ${comando}\n${saida}` + (r.codigo !== 0 ? `\n[código de saída: ${r.codigo}]` : '');
+  } catch (e) {
+    mensagensCache[idx].content = '⚠ ' + (e as Error).message;
+  }
+  renderMensagens();
 }
 
 function renderErro(): void {

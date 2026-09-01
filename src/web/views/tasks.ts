@@ -384,15 +384,16 @@ export async function atualizarTaskDescricao(): Promise<void> {
   await api('/tasks/' + taskAbertaId, { method: 'PATCH', body: JSON.stringify({ descricao }) }).catch(() => undefined);
 }
 
-/** Exclui a task aberta no drawer (com confirmação) */
-export async function excluirTask(): Promise<void> {
-  if (!taskAbertaId) return;
-  const id = taskAbertaId;
+/** Exclui uma task (com confirmação) — por padrão a aberta no drawer; menu de
+ *  contexto (right-click) passa o id do card diretamente. */
+export async function excluirTask(id?: string): Promise<void> {
+  const alvo = id ?? taskAbertaId;
+  if (!alvo) return;
   const { modalConfirm } = await import("../modal.js");
-  if (!(await modalConfirm(`Excluir a task ${escapeHtml(id)}? Esta ação não pode ser desfeita.`, { titulo: 'Excluir task', confirmar: 'Excluir' }))) return;
+  if (!(await modalConfirm(`Excluir a task ${escapeHtml(alvo)}? Esta ação não pode ser desfeita.`, { titulo: 'Excluir task', confirmar: 'Excluir' }))) return;
 
   try {
-    await api('/tasks/' + id, { method: 'DELETE' });
+    await api('/tasks/' + alvo, { method: 'DELETE' });
     toast('Task excluída', 'ok');
     fecharDrawer();
     renderTasks();

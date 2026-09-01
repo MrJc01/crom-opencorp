@@ -108,7 +108,7 @@
     <div class="p-3 border-t border-zinc-800">
       <div class="composer">
         <div class="composer-row2">
-          <textarea id="lat-input" placeholder="Pergunte ao Secretário…" rows="1" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); window.__secretarioEnviar('lateral')}" oninput="window.__chatRascunhoInput(this.value,'lateral')"></textarea>
+          <textarea id="lat-input" placeholder="Pergunte ao Secretário… (/ comandos · @ contexto · ! terminal)" rows="1" onkeydown="window.__composerTecla(event,'lateral')" oninput="window.__composerInput(this.value,'lateral')"></textarea>
           <button class="btn composer-enviar" id="lat-enviar" onclick="window.__secretarioEnviar('lateral')" aria-label="Enviar mensagem"></button>
         </div>
         <div class="composer-row">

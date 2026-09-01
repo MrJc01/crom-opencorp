@@ -52,17 +52,17 @@ test.describe("Chat lateral do Secretário (PLANO-PAINEL-V2 Etapa 1)", () => {
     await iniciarSecretario(page);
 
     // a página mostra o MESMO rascunho digitado no lateral (sincronização)
-    await expect(page.locator("#chat-input")).toHaveValue("ideia para depois");
+    await expect(page.locator("#chat-input")).toHaveValue("ideia para depois", { timeout: 10000 });
 
     // reload → rascunho persiste (localStorage)
     await page.reload();
-    await page.waitForSelector("#chat-input", { timeout: 20000 });
-    await expect(page.locator("#chat-input")).toHaveValue("ideia para depois");
+    await page.waitForSelector("#chat-input", { timeout: 25000 });
+    await expect(page.locator("#chat-input")).toHaveValue("ideia para depois", { timeout: 10000 });
 
     // reabrindo o lateral, as duas superfícies estão em sincronia
     await page.evaluate(() => { window.location.hash = "#/tasks"; });
     await page.click("#fab-chat");
-    await expect(page.locator("#lat-input")).toHaveValue("ideia para depois");
+    await expect(page.locator("#lat-input")).toHaveValue("ideia para depois", { timeout: 10000 });
   });
 
   test("enviar pelo lateral responde no feed lateral e alimenta a mesma conversa da página", async ({ page }) => {

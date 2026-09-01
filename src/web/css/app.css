@@ -93,3 +93,25 @@ body.sidebar-colapsada .sidebar-collapse svg{transform:rotate(180deg)}
   .kanban-col{height:auto;min-height:200px}
 }
 
+/* ========= PAINEL V2 — ETAPA 2: composer / @ ! + menu de contexto (P-20/P-21/P-22) ========= */
+
+/* Palette de comandos e menu de @ contexto (singleton fixed, acima do drawer z-50) */
+.palette-menu{position:fixed;z-index:60;width:320px;max-width:calc(100vw - 16px);max-height:320px;overflow-y:auto;background:#1c1c1c;border:1px solid var(--border);border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,.5);padding:.3rem}
+.palette-rotulo{padding:.4rem .55rem .1rem;font-size:.625rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.palette-item{display:block;width:100%;text-align:left;background:transparent;border:none;color:var(--text);padding:.45rem .55rem;border-radius:6px;font-size:.8125rem;line-height:1.35;cursor:pointer}
+.palette-item:hover,.palette-item.ativa{background:#262626}
+.palette-item .palette-desc{display:block;color:var(--muted);font-size:.6875rem;margin-top:.05rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.palette-vazio{padding:.6rem;color:var(--muted);font-size:.8125rem;text-align:center}
+
+/* Menu de contexto (right-click) reusa .palette-item */
+.ctx-menu{position:fixed;z-index:60;width:210px;background:#1c1c1c;border:1px solid var(--border);border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,.5);padding:.3rem}
+.ctx-menu .palette-item.perigoso{color:var(--err)}
+.ctx-menu .palette-item.perigoso:hover{background:rgba(248,113,113,.12)}
+
+/* Cursor contextual em task-card (P-21) */
+.task-card{cursor:context-menu}
+
+/* Saída do ! terminal no feed do chat */
+.terminal-saida{margin:0;background:#0a0a0a;border:1px solid var(--border);border-radius:8px;padding:.6rem .75rem;font-family:ui-monospace,monospace;font-size:.72rem;line-height:1.5;color:#a1a1aa;white-space:pre-wrap;word-break:break-word;max-height:320px;overflow-y:auto}
+
+
