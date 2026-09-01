@@ -811,7 +811,10 @@ async function enviarComandoLocal(comando: { nome: string; args: string }): Prom
   renderMensagens();
 }
 
-async function resolverComandoProprio(nome: string): Promise<string> {
+/** Resolução LOCAL de comando próprio (/status, /tasks…) — fetch na API e resposta
+ *  como mensagem assistant no feed; nunca chama o servidor de conversa/LLM.
+ *  Exportada para a home reusar a MESMA lógica na barra de comando (Etapa 9.2). */
+export async function resolverComandoProprio(nome: string): Promise<string> {
   switch (nome) {
     case 'status': {
       const [st, ts] = await Promise.all([

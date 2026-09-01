@@ -80,13 +80,15 @@ export async function seederEmpresaBasica(api: APIRequestContext, token: string,
   }
 
   // 5. Criar job/agenda no workspace
+  // args deve estar na whitelist COMANDOS_AGENDA (validada no POST /schedules) —
+  // "echo" não está e rejeitava a criação com 422 (agenda.spec ficava sem job).
   await api.post("/schedules", {
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     data: {
       nome: "job-e2e-corp",
       agenda_tipo: "intervalo_min",
       agenda_valor: 60,
-      args: "echo hello",
+      args: "task list",
       workspace: wsId,
     },
   });

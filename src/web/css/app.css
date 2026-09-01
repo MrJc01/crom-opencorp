@@ -178,15 +178,19 @@ body.sidebar-colapsada .sidebar-collapse svg{transform:rotate(180deg)}
 .topbar-avatar{width:28px;height:28px;min-width:28px;min-height:28px;border-radius:9999px;background:#262626;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.75rem;flex-shrink:0}
 @media(max-width:768px){.topbar{display:none}}
 
-.page-header{display:flex;justify-content:space-between;align-items:flex-start;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap}
+.page-header{display:flex;justify-content:space-between;align-items:flex-start;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap;max-width:100%;min-width:0}
 .page-header-esq{flex:1;min-width:0}
-.page-header-titulo{font-size:1.5rem;font-weight:700;line-height:1.2;display:flex;align-items:center;gap:.5rem}
+.page-header-titulo{font-size:1.5rem;font-weight:700;line-height:1.2;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .page-header-titulo .nav-icon{width:20px;height:20px}
-.page-header-sub{font-size:.8125rem;color:var(--muted);margin-top:.2rem;line-height:1.4}
+.page-header-sub{font-size:.8125rem;color:var(--muted);margin-top:.2rem;line-height:1.4;overflow-wrap:anywhere}
 .page-header-breadcrumb{display:flex;gap:.25rem;font-size:.6875rem;color:var(--muted);margin-bottom:.25rem;flex-wrap:wrap}
 .page-header-breadcrumb a{color:var(--muted)}
 .page-header-breadcrumb a:hover{color:var(--text)}
-.page-header-acoes{display:flex;align-items:center;gap:.5rem;flex-shrink:0;flex-wrap:wrap}
+.page-header-acoes{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;max-width:100%;min-width:0}
+/* inputs/selects herdam width:100% do legado — dentro do header isso estoura a viewport */
+.page-header-acoes input,.page-header-acoes select{width:auto;max-width:100%}
+/* abas/filtros com scroll próprio não podem expandir o body */
+.config-abas,.tabs-filtros{max-width:100%;overflow-x:auto}
 .card-header{display:flex;align-items:center;justify-content:space-between;padding:.9rem 1rem;border-bottom:1px solid var(--border)}
 .card-body{padding:1rem}
 
@@ -211,3 +215,15 @@ body.sidebar-colapsada .sidebar-collapse svg{transform:rotate(180deg)}
 .hist-popup-lista .sessao-item{text-align:left}
 
 
+
+/* ========= TOGGLE CUSTOM × DaisyUI (Etapa 9 — correção config.spec:20) =========
+ * DaisyUI 5 emite seu próprio componente ".toggle" SEM layer — sobrescrevia a
+ * geometria do toggle custom (legacy.css está em layer(components) e perdia):
+ * o checkbox ficava ~4×255px invisível e ROUBAVA os cliques dos botões Salvar
+ * do Config. Regras aqui fora de layer (mesmo padrão do .fab-chat) com
+ * especificidade maior devolvem a geometria (config + agentes usam este toggle). */
+label.toggle{position:relative;display:inline-flex;width:40px;height:22px;flex-shrink:0;appearance:none;-webkit-appearance:none;padding:0;border:0;border-radius:0;box-shadow:none;background:none;cursor:pointer;grid-template-columns:none;place-content:initial}
+label.toggle>input[type="checkbox"]{opacity:0;width:0;min-width:0;height:0;min-height:0;position:absolute;left:0;top:0;margin:0;border:0;padding:0;appearance:none;-webkit-appearance:none;pointer-events:none;z-index:auto;grid-column:auto;grid-row:auto}
+label.toggle>span.toggle-slider{position:absolute;inset:0;background:#404040;border-radius:9999px;transition:.15s;cursor:pointer;z-index:auto;grid-column:auto;grid-row:auto;padding:0;border:0;opacity:1;rotate:none}
+label.toggle>input:checked+span.toggle-slider{background:var(--accent)}
+label.toggle>input:checked+span.toggle-slider::before{transform:translateX(18px)}

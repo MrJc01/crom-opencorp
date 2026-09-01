@@ -36,6 +36,7 @@ export interface TaskInfo {
   titulo?: string;
   coluna?: string;
   responsavel?: string;
+  due?: string | null;
   criado_em?: string;
 }
 

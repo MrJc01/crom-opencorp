@@ -21,11 +21,12 @@ import { TaskStore, type Task } from "../core/task-store.js";
 import { Scheduler } from "../core/scheduler.js";
 import type { Agenda } from "../core/scheduler.js";
 import { HookStore, type Hook, type AlvoHook, type PayloadHook } from "../core/hook-store.js";
+import { NotificationStore, type TipoNotificacao } from "../core/notification-store.js";
 import { AppStore } from "../core/app-store.js";
 import { TeamStore } from "../core/team-store.js";
 import { OrquestradorDeTeams } from "../core/team-orchestrator.js";
 import { instalarMencoes } from "../core/mention-runner.js";
-import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError } from "../core/errors.js";
+import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError, NotificationError } from "../core/errors.js";
 import { FlowError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
@@ -125,6 +126,11 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/hooks/:id", descricao: "Detalhes do hook (inclui token)" },
   { method: "DELETE", path: "/hooks/:id", descricao: "Exclui hook" },
   { method: "POST", path: "/hooks/:workspace/:id", descricao: "Disparo público do hook (header x-opencorp-token)" },
+  { method: "GET", path: "/notifications", descricao: "Lista notificações do workspace (query: nao_lidas=1) — inclui resumo.nao_lidas" },
+  { method: "POST", path: "/notifications", descricao: "Cria notificação (titulo, corpo, tipo: resumo|aviso|erro|info, origem)", corpo: true },
+  { method: "POST", path: "/notifications/lidas", descricao: "Marca todas as notificações como lidas" },
+  { method: "POST", path: "/notifications/:id/lida", descricao: "Marca uma notificação como lida" },
+  { method: "DELETE", path: "/notifications", descricao: "Limpa todas as notificações do workspace" },
   { method: "GET", path: "/apps", descricao: "Lista mini-apps do workspace" },
   { method: "GET", path: "/apps/:id/spec", descricao: "Spec declarativo de um app" },
   { method: "POST", path: "/apps", descricao: "Cria/salva spec de app (validado)", corpo: true },
@@ -398,6 +404,7 @@ function statusHttpDe(erro: unknown): number {
   if (erro instanceof TeamError) return (erro as TeamError).status ?? 400;
   if (erro instanceof SchedulerError) return 400;
   if (erro instanceof HookError) return ((erro as unknown as { status?: number }).status ?? 400);
+  if (erro instanceof NotificationError) return ((erro as unknown as { status?: number }).status ?? 400);
   if (erro instanceof AppError) return ((erro as unknown as { status?: number }).status ?? 404);
   if (erro instanceof RegistryError || erro instanceof WorkspaceError || erro instanceof AgentError) return 422;
   if (erro instanceof FlowError) return /não encontrado/i.test(erro.message) ? 404 : 400;
@@ -552,6 +559,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   const scheduler = new Scheduler({ homeDir: opcoes.homeDir });
   const apps = new AppStore();
   const teams = new TeamStore();
+  const notificacoes = new NotificationStore();
   const orquestrador = new OrquestradorDeTeams();
   const hooks = new HookStore({
     executores: {
@@ -1609,6 +1617,49 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               .catch((e: unknown) => console.error(`[hook] disparo imediato de "${h.id}" falhou:`, e instanceof Error ? e.message : e));
             enviar(res, 202, { ok: true, modo: "imediato" });
           }
+          return;
+        }
+
+        // ── notificações (Etapa 7 / P-24) ───────────────────────────
+        if (rota === "/notifications" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const apenasNaoLidas = url.searchParams.get("nao_lidas") === "1";
+          const lista = notificacoes.listar(ws.path, { apenasNaoLidas });
+          enviar(res, 200, {
+            notificacoes: lista,
+            resumo: { nao_lidas: notificacoes.naoLidas(ws.path), total: lista.length },
+          });
+          return;
+        }
+        if (rota === "/notifications" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+          const n = await notificacoes.adicionar(ws.path, {
+            titulo: String(corpo.titulo ?? ""),
+            corpo: String(corpo.corpo ?? ""),
+            tipo: corpo.tipo as TipoNotificacao | undefined,
+            origem: corpo.origem !== undefined ? String(corpo.origem) : "painel",
+          });
+          enviar(res, 201, n);
+          return;
+        }
+        if (rota === "/notifications/lidas" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const marcadas = await notificacoes.marcarTodasLidas(ws.path);
+          enviar(res, 200, { ok: true, marcadas });
+          return;
+        }
+        const mNotifLida = /^\/notifications\/([^/]+)\/lida$/.exec(rota);
+        if (mNotifLida && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const n = await notificacoes.marcarLida(ws.path, decodeURIComponent(mNotifLida[1]!));
+          enviar(res, 200, n);
+          return;
+        }
+        if (rota === "/notifications" && req.method === "DELETE") {
+          const ws = await resolverWs(url);
+          await notificacoes.limpar(ws.path);
+          enviar(res, 200, { ok: true });
           return;
         }
 

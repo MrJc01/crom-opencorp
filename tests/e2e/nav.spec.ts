@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { logado, seederEmpresaBasica, api, esperarNavegacao, esperarElementoTexto } from "./helpers.js";
 
 const views = [
-  { hash: "home", titulo: "Operação hoje" },
+  { hash: "home", titulo: "Informações importantes" },
   { hash: "tasks", titulo: "Tasks" },
   { hash: "agenda", titulo: "Agenda" },
   { hash: "fluxos", titulo: "Fluxos" },

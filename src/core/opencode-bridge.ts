@@ -35,6 +35,12 @@ function yamlString(valor: string): string {
   return `"${valor.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+/** Guidance da tool `notificar` (Etapa 7 / P-24) — injetado no system prompt de
+ *  TODOS os agentes: o corpo do agente vira o prompt do arquivo
+ *  `.opencorp/opencode/agent/<id>.md` que o opencode carrega. */
+const GUIDANCE_NOTIFICAR =
+  "Ao finalizar uma execução relevante, chame a tool notificar com um resumo do que foi feito (titulo ≤80 chars, corpo ≤500 chars) para o painel mostrar ao usuário.";
+
 export function gerarAgenteOpencode(agente: Agente, corpo: string): string {
   const linhas: string[] = ["---"];
   const description = `${agente.role} (agente opencorp "${agente.id}", categoria ${agente.category})`;
@@ -50,7 +56,7 @@ export function gerarAgenteOpencode(agente: Agente, corpo: string): string {
     linhas.push(`  ${chave}: ${valor}`);
   }
   linhas.push("---", "");
-  return `${linhas.join("\n")}\n${corpo.trimEnd()}\n`;
+  return `${linhas.join("\n")}\n${corpo.trimEnd()}\n\n${GUIDANCE_NOTIFICAR}\n`;
 }
 
 export class OpenCodeBridge {

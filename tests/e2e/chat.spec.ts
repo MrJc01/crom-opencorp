@@ -71,7 +71,9 @@ test.describe("Chat do Secretário (estilo opencode)", () => {
 
   test("markdown rico: code fence tem botão copy", async ({ page }) => {
     // intercepta a resposta com markdown (exercita md.ts sem custo de LLM)
-    await page.route("**/secretario/conversa*", async (route) => {
+    // `**` no fim: o endpoint é /secretario/conversa/stream (Etapa 2) e um único
+    // `*` não casa com `/` — o intercept nunca pegava a rota do stream.
+    await page.route("**/secretario/conversa**", async (route) => {
       const req = route.request().postDataJSON();
       await route.fulfill({
         status: 200,

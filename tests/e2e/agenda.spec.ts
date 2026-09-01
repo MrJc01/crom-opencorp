@@ -34,7 +34,7 @@ test.describe("Agenda / Rotinas", () => {
         nome: "job-outro-ws",
         agenda_tipo: "intervalo_min",
         agenda_valor: 30,
-        args: "echo outro",
+        args: "task list",
         workspace: "outro-ws",
       },
     });
@@ -59,7 +59,7 @@ test.describe("Agenda / Rotinas", () => {
     await page.fill("#agenda-nome", "Nova Rotina E2E");
     await page.selectOption("#agenda-tipo", "intervalo_min");
     await page.fill("#agenda-valor", "15");
-    await page.fill("#agenda-args", "echo nova rotina");
+    await page.fill("#agenda-args", "task list");
 
     // Clica em criar (submit do form Nova rotina)
     await page.click('#form-nova-agenda button[type="submit"]');

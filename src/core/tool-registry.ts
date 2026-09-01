@@ -6,6 +6,7 @@ import { ToolError } from "./errors.js";
 import { eventBus } from "./event-bus.js";
 import { opencorpHome } from "../utils/paths.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
+import { NotificationStore, type TipoNotificacao } from "./notification-store.js";
 
 export interface ManifestFerramenta {
   id: string;
@@ -129,6 +130,22 @@ function ferramentasInternas(): ManifestFerramenta[] {
       approval: "sempre",
       rate_limit_min: 30,
     },
+    {
+      id: "notificar",
+      titulo: "Notificar o painel",
+      descricao: "Envia uma notificação ao painel do usuário — use ao finalizar uma execução relevante para resumir o que foi feito",
+      inputSchema: {
+        type: "object",
+        properties: {
+          titulo: { type: "string", description: "título curto do resumo (≤80 chars)" },
+          corpo: { type: "string", description: "resumo do que foi feito (≤500 chars)" },
+          tipo: { type: "string", description: "resumo | aviso | erro | info (padrão: info)" },
+        },
+        required: ["titulo", "corpo"],
+      },
+      handler: { tipo: "interno", id: "notificar" },
+      approval: "nunca",
+    },
   ];
 }
 
@@ -245,6 +262,15 @@ export class ToolRegistry {
         const resp = await fetch(String(input.url), { headers: { "user-agent": "opencorp-tool" } });
         const texto = await resp.text();
         return `HTTP ${resp.status}: ${texto.slice(0, 4096)}`;
+      }
+      case "notificar": {
+        const n = await new NotificationStore().adicionar(wsPath, {
+          titulo: String(input.titulo ?? ""),
+          corpo: String(input.corpo ?? ""),
+          tipo: input.tipo as TipoNotificacao | undefined,
+          origem: "tool:notificar",
+        });
+        return `notificação ${n.id} enviada ao painel`;
       }
       default:
         throw new ToolError(`ferramenta interna desconhecida: "${(f.handler as { id: string }).id}"`);

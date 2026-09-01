@@ -1,19 +1,28 @@
 /**
- * View Home — HUB da empresa (estilo Linear/Vercel):
- * header com workspace + saúde dos daemons, KPIs de operação, aprovações,
- * linhas de pensamento executáveis, feed ao vivo e atalhos de sistema.
+ * View Home — HUB da empresa (PLANO-COMPLETO Etapa 9 / P-17, estrutura Preline):
+ * page-header → KPIs de infos importantes → barra de comando → Secretário
+ * (/ comandos, @ contexto, ! terminal) → sistema/atalhos → aprovações →
+ * fluxos → feed ao vivo (SSE incremental).
  */
 
 import { api, toast, icone, escapeHtml } from "../api.js";
 import { getWsAtivo, getWorkspaces, getViewAtual } from "../state.js";
-import type { SessionInfo, TaskInfo, FlowInfo, ApprovalInfo } from "../state.js";
+import type { TaskInfo, FlowInfo, ApprovalInfo } from "../state.js";
 import { formatarDataLocal } from "../format.js";
 import { estadoVazio, estadoErro, estadoCarregando } from "../estado.js";
 import { ajuda } from "../help.js";
+import { parsearComposer, COMANDOS_OPCORP } from "../composer-comandos.js";
+import { setRascunho } from "../rascunho.js";
+import { gatilhoComposer, paletteTecla, fecharPalette } from "../palette.js";
+import { renderMarkdown } from "../md.js";
+import { resolverComandoProprio } from "./secretario.js";
 
 interface BudgetStatus {
   estado?: {
     workspace_usd_hoje?: number;
+  };
+  limites?: {
+    daily_usd?: number;
   };
 }
 
@@ -22,7 +31,26 @@ interface StatusAgregado {
   secretario?: boolean;
 }
 
-const DIA_MS = 24 * 60 * 60 * 1000;
+interface NotificacoesResposta {
+  resumo?: {
+    nao_lidas?: number;
+    total?: number;
+  };
+}
+
+/** Data local de hoje como AAAA-MM-DD — compara com o prefixo do campo `due` */
+function hojeIso(): string {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${dia}`;
+}
+
+/** Dot verde/vermelho/cinza do card de saúde */
+function dotSaude(v: boolean | undefined): string {
+  const cor = v === undefined ? '#737373' : v ? 'var(--ok)' : 'var(--err)';
+  return `<span class="hub-dot" style="background:${cor}"></span>`;
+}
 
 /** Renderiza a view Home (hub) */
 export async function renderHome(): Promise<void> {
@@ -32,16 +60,25 @@ export async function renderHome(): Promise<void> {
   // Loading apenas no primeiro render (evita piscar no refresh de 8s)
   if (!viewEl.innerHTML.trim()) viewEl.innerHTML = estadoCarregando('Carregando hub…');
 
-  const [status, sessions, aprovs, budget, tasks, flows] = await Promise.all([
-    api<StatusAgregado>('/status').catch(() => null),
-    api<SessionInfo[]>('/sessions').catch(() => null),
-    api<ApprovalInfo[]>('/approvals').catch(() => null),
-    api<BudgetStatus>('/budget/status').catch(() => null),
-    api<TaskInfo[]>('/tasks').catch(() => null),
-    api<FlowInfo[]>('/flows').catch(() => null),
+  // Etapa 9: allSettled — API que falha vira card "—" sem derrubar os outros
+  const [rStatus, rAprovs, rBudget, rTasks, rFlows, rNotif] = await Promise.allSettled([
+    api<StatusAgregado>('/status'),
+    api<ApprovalInfo[]>('/approvals'),
+    api<BudgetStatus>('/budget/status'),
+    api<TaskInfo[]>('/tasks'),
+    api<FlowInfo[]>('/flows'),
+    api<NotificacoesResposta>('/notifications'),
   ]);
+  const ok = <T>(r: PromiseSettledResult<T>): T | null => (r.status === 'fulfilled' ? r.value : null);
 
-  const tudoFalhou = !sessions && !aprovs && !budget && !tasks && !flows;
+  const status = ok(rStatus);
+  const aprovs = ok(rAprovs);
+  const budget = ok(rBudget);
+  const tasks = ok(rTasks);
+  const flows = ok(rFlows);
+  const notif = ok(rNotif);
+
+  const tudoFalhou = !status && !aprovs && !budget && !tasks && !flows && !notif;
   const wsAtivo = getWsAtivo();
 
   if (tudoFalhou) {
@@ -52,21 +89,48 @@ export async function renderHome(): Promise<void> {
   }
 
   const pendentes = (aprovs || []).filter((a) => a.status === 'pendente');
-  const agora = Date.now();
-  const tasksAbertas = (tasks || []).filter((t) => String(t.coluna) !== 'feito').length;
-  const feitas7d = (tasks || []).filter((t) => {
-    if (String(t.coluna) !== 'feito' || !t.criado_em) return false;
-    return agora - new Date(t.criado_em).getTime() <= 7 * DIA_MS;
-  }).length;
-  const sessions24h = (sessions || []).filter((s) => {
-    const quando = s.inicio || s.criado_em;
-    return quando && agora - new Date(quando).getTime() <= DIA_MS;
-  });
-  const ok24h = sessions24h.filter((s) => String(s.status) === 'concluido').length;
-  const taxa24h = sessions24h.length ? Math.round((ok24h / sessions24h.length) * 100) : null;
+  const hoje = hojeIso();
+  const tasksVencidas = (tasks || []).filter(
+    (t) => String(t.coluna) !== 'feito' && typeof t.due === 'string' && t.due.slice(0, 10) < hoje,
+  ).length;
   const custoHoje = budget?.estado?.workspace_usd_hoje ?? 0;
+  const custoTeto = budget?.limites?.daily_usd ?? 0;
+  // O shape do GET /flows ({id, nome, nos, arestas}) não tem status — todo flow
+  // listado é executável ("ativo"); se a API falhar, o card mostra "—".
+  const fluxosAtivos = flows ? flows.length : null;
+  const naoLidas = notif?.resumo?.nao_lidas ?? 0;
   const wss = getWorkspaces();
   const flowsLista = (flows || []).slice(0, 4);
+
+  // ── KPIs (Etapa 9.1) ──
+  const kpiCards = `
+    <div class="kpi-card" data-kpi="tasks-vencidas" onclick="navegar('tasks')" style="cursor:pointer" title="Tasks com prazo vencido e fora de 'feito'">
+      <div class="kpi-value">${tasks ? tasksVencidas : '—'}</div>
+      <div class="kpi-label">Tasks vencidas ${ajuda('tasks')}</div>
+    </div>
+    <div class="kpi-card" data-kpi="custos" onclick="navegar('config')" style="cursor:pointer" title="Consumo do workspace hoje">
+      <div class="kpi-value">${budget ? '$' + custoHoje.toFixed(2) : '—'}</div>
+      <div class="kpi-label">Custos do dia${budget && custoTeto > 0 ? ' · teto $' + custoTeto.toFixed(2) : ''} ${ajuda('budget')}</div>
+    </div>
+    <div class="kpi-card" id="kpi-saude" data-kpi="saude" onclick="navegar('agenda')" style="cursor:pointer" title="scheduler: ${status ? (status.scheduler ? 'rodando' : 'parado') : 'desconhecido'} · secretário: ${status ? (status.secretario ? 'rodando' : 'parado') : 'desconhecido'}">
+      <div class="kpi-value" style="display:flex;align-items:center;gap:.4rem;min-height:2.4rem">
+        ${status ? dotSaude(status.scheduler) + dotSaude(status.secretario) : '<span class="text-zinc-500">—</span>'}
+      </div>
+      <div class="kpi-label">${
+        status && status.scheduler !== undefined && status.secretario !== undefined
+          ? `scheduler ${status.scheduler ? 'ok' : 'parado'} / secretário ${status.secretario ? 'ok' : 'parado'}`
+          : 'saúde desconhecida'
+      } ${ajuda('agenda')}</div>
+    </div>
+    <div class="kpi-card" data-kpi="fluxos" onclick="navegar('fluxos')" style="cursor:pointer" title="Linhas de pensamento definidas no workspace">
+      <div class="kpi-value">${fluxosAtivos === null ? '—' : fluxosAtivos}</div>
+      <div class="kpi-label">Fluxos ativos ${ajuda('flows')}</div>
+    </div>
+    <div class="kpi-card" data-kpi="notificacoes" onclick="navegar('notificacoes')" style="cursor:pointer;${naoLidas > 0 ? 'border-color:rgba(251,191,36,.55);background:rgba(251,191,36,.06)' : ''}" title="Avisos dos agentes não lidos">
+      <div class="kpi-value"${naoLidas > 0 ? ' style="color:var(--warn)"' : ''}>${notif ? naoLidas : '—'}</div>
+      <div class="kpi-label">Notificações não lidas ${ajuda('notificacoes')}</div>
+    </div>
+  `;
 
   viewEl.innerHTML = `
     <div class="page-header">
@@ -75,6 +139,7 @@ export async function renderHome(): Promise<void> {
         <p class="page-header-sub">Visão geral da empresa · ${escapeHtml(wsAtivo || 'selecione uma empresa')}</p>
       </div>
       <div class="page-header-acoes">
+        <span class="help-wrap">${ajuda('home')}</span>
         <button class="btn" onclick="navegar('tasks');setTimeout(()=>document.getElementById('task-titulo')?.focus(),100)">${icone('plus')} Nova task</button>
         <button class="btn btn-ghost" onclick="abrirWizard()">${icone('spark')} Criar empresa</button>
       </div>
@@ -84,7 +149,6 @@ export async function renderHome(): Promise<void> {
         <button class="hub-ws" onclick="toggleSidebar(true)" title="Trocar empresa">
           ${icone('home')} <span class="font-mono font-semibold">${escapeHtml(wsAtivo || '— empresa —')}</span> <span class="hub-ws-count">${wss.length ? wss.length + ' empresa(s)' : ''}</span>
         </button>
-        ${saudeHtml(status)}
       </div>
       <div class="hub-acoes">
         <button class="btn" onclick="navegar('tasks');setTimeout(()=>document.getElementById('task-titulo')?.focus(),100)">${icone('plus')} Nova task</button>
@@ -93,25 +157,35 @@ export async function renderHome(): Promise<void> {
       </div>
     </div>
 
-    <div class="zona-rotulo">Operação hoje ${ajuda('feed')}</div>
-    <div class="kpi-grid">
-      <div class="kpi-card" onclick="navegar('tasks')" style="cursor:pointer">
-        <div class="kpi-value">${tasksAbertas}</div>
-        <div class="kpi-label">Tasks abertas ${ajuda('tasks')}</div>
+    <div class="zona-rotulo">Informações importantes ${ajuda('home')}</div>
+    <div class="kpi-grid mb-5">${kpiCards}</div>
+
+    <div class="zona-rotulo">Comando ao Secretário ${ajuda('home-comando')}</div>
+    <section class="card p-4 mb-5">
+      <div class="flex items-stretch gap-2">
+        <textarea id="home-comando" rows="1" placeholder="Envie um comando ao Secretário — / comandos, @ contexto, ! terminal…" onkeydown="window.__homeComandoTecla(event)" oninput="window.__homeComandoInput(this.value)"></textarea>
+        <button class="btn flex-shrink-0" onclick="window.__homeComandoEnviar()" title="Enviar ao Secretário (ou executar / e !)" aria-label="Enviar comando">${icone('run')}</button>
       </div>
-      <div class="kpi-card" onclick="navegar('tasks')" style="cursor:pointer">
-        <div class="kpi-value">${feitas7d}</div>
-        <div class="kpi-label">Feitas em 7 dias</div>
+      <div id="home-comando-resultado" class="mt-3" style="display:none"></div>
+    </section>
+
+    <div class="zona-rotulo">Sistema e atalhos ${ajuda('config')}</div>
+    <section class="card p-4 mb-5">
+      <div class="hub-sistema">
+        <button class="hub-card" onclick="navegar('config')">
+          ${icone('gear')} <span><b>Config</b><small>preferências, orçamento, segurança</small></span>
+        </button>
+        <button class="hub-card" onclick="navegar('config');setTimeout(()=>window.__cfgAba?.('secrets'),350)">
+          ${icone('key')} <span><b>Secrets</b><small>credenciais — valores nunca exibidos</small></span>
+        </button>
+        <button class="hub-card" onclick="navegar('config');setTimeout(()=>window.__cfgAba?.('ferramentas'),350)">
+          ${icone('apps')} <span><b>Ferramentas</b><small>specs em .opencorp/tools</small></span>
+        </button>
+        <div class="hub-card hub-card-static" title="Rode no terminal">
+          ${icone('shield')} <span><b>Doutor</b><small><code>opencorp doctor</code> no CLI</small></span>
+        </div>
       </div>
-      <div class="kpi-card" onclick="navegar('historico')" style="cursor:pointer">
-        <div class="kpi-value">${taxa24h === null ? '—' : taxa24h + '%'}</div>
-        <div class="kpi-label">Taxa ok 24h ${ajuda('execucoes')}</div>
-      </div>
-      <div class="kpi-card" onclick="navegar('config')" style="cursor:pointer">
-        <div class="kpi-value">US$ ${custoHoje.toFixed(2)}</div>
-        <div class="kpi-label">Custo hoje ${ajuda('budget')}</div>
-      </div>
-    </div>
+    </section>
 
     <div class="zona-rotulo">Aprovações ${ajuda('hitl')}</div>
     <section class="card p-4 mb-5" id="aprovs-pendentes"></section>
@@ -119,47 +193,108 @@ export async function renderHome(): Promise<void> {
     <div class="zona-rotulo">Linhas de pensamento ${ajuda('flows')}</div>
     <section class="card p-4 mb-5" id="hub-flows"></section>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-      <section class="card p-4">
-        <h2 class="font-semibold mb-3 flex items-center gap-2 text-sm uppercase tracking-wide text-zinc-400">${icone('spark')} Feed ao vivo <span class="badge badge-neutral">todas as empresas</span> ${ajuda('feed')}</h2>
-        <div id="feed-atividade" class="scrollbar-thin max-h-96 overflow-y-auto"></div>
-      </section>
-      <section class="card p-4">
-        <h2 class="font-semibold mb-3 flex items-center gap-2 text-sm uppercase tracking-wide text-zinc-400">${icone('gear')} Sistema ${ajuda('config')}</h2>
-        <div class="hub-sistema">
-          <button class="hub-card" onclick="navegar('config')">
-            ${icone('gear')} <span><b>Config</b><small>preferências, orçamento, segurança</small></span>
-          </button>
-          <button class="hub-card" onclick="navegar('config');setTimeout(()=>window.__cfgAba?.('secrets'),350)">
-            ${icone('key')} <span><b>Secrets</b><small>credenciais — valores nunca exibidos</small></span>
-          </button>
-          <button class="hub-card" onclick="navegar('config');setTimeout(()=>window.__cfgAba?.('ferramentas'),350)">
-            ${icone('apps')} <span><b>Ferramentas</b><small>specs em .opencorp/tools</small></span>
-          </button>
-          <div class="hub-card hub-card-static" title="Rode no terminal">
-            ${icone('shield')} <span><b>Doutor</b><small><code>opencorp doctor</code> no CLI</small></span>
-          </div>
-        </div>
-      </section>
-    </div>
+    <div class="zona-rotulo">Feed ao vivo <span class="badge badge-neutral">todas as empresas</span> ${ajuda('feed')}</div>
+    <section class="card p-4">
+      <div id="feed-atividade" class="scrollbar-thin max-h-96 overflow-y-auto"></div>
+    </section>
   `;
 
+  exporHandlersHome();
   renderFeedAtividade();
   renderAprovsPendentes(pendentes);
   renderFlowsHub(flowsLista, (flows || []).length);
 }
 
-/** Dot de saúde do header: verde (tudo ok), âmbar (parcial), vermelho (parado), cinza (desconhecido) */
-function saudeHtml(status: StatusAgregado | null): string {
-  if (!status || (status.scheduler === undefined && status.secretario === undefined)) {
-    return `<span class="hub-saude" title="Saúde desconhecida"><span class="hub-dot" style="background:#737373"></span> daemon: —</span>`;
+/** Handlers globais da barra de comando da home (palette / @ plugada no input) */
+function exporHandlersHome(): void {
+  const g = window as unknown as Record<string, unknown>;
+  g.__homeComandoTecla = (ev: KeyboardEvent) => {
+    if (paletteTecla(ev)) return; // palette aberta consome ↑↓/Enter/Tab/Escape
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      void enviarComandoHome();
+    }
+  };
+  g.__homeComandoInput = (valor: string) => {
+    const ta = document.getElementById('home-comando') as HTMLTextAreaElement | null;
+    if (ta) gatilhoComposer(valor, ta);
+  };
+  g.__homeComandoEnviar = () => { void enviarComandoHome(); };
+}
+
+/** Enter/botão da barra de comando da home (Etapa 9.2):
+ *  ! → terminal inline · /opencorp → resposta inline · texto → Secretário via rascunho. */
+async function enviarComandoHome(): Promise<void> {
+  const input = document.getElementById('home-comando') as HTMLTextAreaElement | null;
+  if (!input) return;
+  const texto = input.value.trim();
+  if (!texto) return;
+  const resultado = document.getElementById('home-comando-resultado');
+  const parse = parsearComposer(texto);
+
+  if (parse.terminal) {
+    fecharPalette();
+    input.value = '';
+    await executarTerminalHome(parse.terminal.comando, resultado);
+    return;
   }
-  const { scheduler, secretario } = status;
-  const ok = scheduler && secretario;
-  const cor = ok ? 'var(--ok)' : (scheduler || secretario) ? 'var(--warn)' : 'var(--err)';
-  const rotulo = ok ? 'daemons ok' : scheduler ? 'secretário parado' : secretario ? 'scheduler parado' : 'daemons parados';
-  const detalhe = `scheduler: ${scheduler ? 'rodando' : 'parado'} · secretário: ${secretario ? 'rodando' : 'parado'}`;
-  return `<span class="hub-saude" title="${detalhe}"><span class="hub-dot" style="background:${cor}"></span> ${rotulo}</span>`;
+
+  if (parse.comando && COMANDOS_OPCORP.some((c) => c.nome === parse.comando!.nome)) {
+    fecharPalette();
+    input.value = '';
+    await executarComandoHome(parse.comando, resultado);
+    return;
+  }
+
+  // Texto normal (ou /comando passthrough do opencode) → leva ao Secretário:
+  // o rascunho é a fonte única (rascunho.ts) — renderChatLayout restaura o texto
+  // e foca o input; o usuário aperta Enter lá (sem duplicar streaming na home).
+  fecharPalette();
+  setRascunho(parse.textoLimpo || texto);
+  input.value = '';
+  const { navegar } = await import("../router.js");
+  navegar('secretario');
+  toast('Comando levado ao Secretário — aperte Enter para enviar', 'ok');
+}
+
+/** `!comando` → POST /terminal (whitelist validada no server) e saída inline. */
+async function executarTerminalHome(comando: string, resultado: HTMLElement | null): Promise<void> {
+  if (!resultado) return;
+  resultado.style.display = '';
+  resultado.innerHTML = `<pre class="terminal-saida">${escapeHtml('$ ' + comando)}\n…executando</pre>`;
+  try {
+    const r = await api<{ saida: string; codigo: number }>('/terminal', {
+      method: 'POST',
+      body: JSON.stringify({ comando }),
+    });
+    const saida = r.saida || '(sem saída)';
+    resultado.innerHTML = `<pre class="terminal-saida">${escapeHtml('$ ' + comando + '\n' + saida)}${r.codigo !== 0 ? escapeHtml('\n[código de saída: ' + r.codigo + ']') : ''}</pre>`;
+    toast(r.codigo === 0 ? 'Terminal executado' : `Terminal encerrou com código ${r.codigo}`, r.codigo === 0 ? 'ok' : 'aviso');
+  } catch (e) {
+    resultado.innerHTML = `<pre class="terminal-saida">${escapeHtml('$ ' + comando + '\n⚠ ' + (e as Error).message)}</pre>`;
+    toast('Erro: ' + (e as Error).message, 'erro');
+  }
+}
+
+/** `/comando` próprio do opencorp — resolve localmente (mesma lógica do Secretário) e mostra inline. */
+async function executarComandoHome(comando: { nome: string; args: string }, resultado: HTMLElement | null): Promise<void> {
+  if (!resultado) return;
+  if (comando.nome === 'limpar') {
+    // da home não há conversa visível: limpa o rascunho e leva ao Secretário
+    setRascunho('');
+    const { navegar } = await import("../router.js");
+    navegar('secretario');
+    toast('Nova conversa pronta no Secretário', 'ok');
+    return;
+  }
+  resultado.style.display = '';
+  resultado.innerHTML = `<div class="text-sm text-zinc-400">/${escapeHtml(comando.nome)} — carregando…</div>`;
+  try {
+    const md = await resolverComandoProprio(comando.nome);
+    resultado.innerHTML = `<div class="border border-zinc-800 rounded-lg p-3 text-sm">${renderMarkdown(md)}</div>`;
+  } catch (e) {
+    resultado.innerHTML = `<div class="text-sm" style="color:var(--err)">⚠ ${escapeHtml((e as Error).message)}</div>`;
+  }
 }
 
 function renderAprovsPendentes(aprovs: ApprovalInfo[]): void {

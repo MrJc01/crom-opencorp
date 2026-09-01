@@ -66,7 +66,10 @@ describe("gerarAgenteOpencode", () => {
     expect(saida).toContain("  read: true");
     expect(saida).toContain("  webfetch: false");
     expect(saida).toContain("permission:\n  edit: allow\n  bash: allow\n  webfetch: deny");
-    expect(saida.endsWith("Você é o executor padrão do workspace {{workspace}}.\n")).toBe(true);
+    // Etapa 7: guidance da tool notificar é injetado ao fim do system prompt
+    expect(saida).toContain("Você é o executor padrão do workspace {{workspace}}.");
+    expect(saida).toContain("chame a tool notificar");
+    expect(saida.trimEnd().endsWith("para o painel mostrar ao usuário.")).toBe(true);
   });
 
   it("secretario (level-1, sem bash) tem ferramentas e permissões bloqueadas", () => {

@@ -93,3 +93,25 @@ export function truncar(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max - 1) + '…';
 }
+
+/**
+ * Data relativa curta (pt-BR): "agora mesmo", "há 5 min", "há 3h", "há 2d".
+ * Acima de uma semana cai para data local (dd/mm).
+ */
+export function formatarRelativa(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const seg = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (seg < 45) return 'agora mesmo';
+    const min = Math.floor(seg / 60);
+    if (min < 60) return `há ${min} min`;
+    const horas = Math.floor(min / 60);
+    if (horas < 24) return `há ${horas}h`;
+    const dias = Math.floor(horas / 24);
+    if (dias < 7) return `há ${dias}d`;
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  } catch {
+    return iso;
+  }
+}

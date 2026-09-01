@@ -31,6 +31,7 @@ import { renderHistorico } from "./views/historico.js";
 import { renderSecretario, secretarioAba } from "./views/secretario.js";
 import { renderConfig } from "./views/config.js";
 import { renderWorkspace } from "./views/workspace.js";
+import { renderNotificacoes, atualizarBadgeNotificacoes, incrementarBadgeNotificacoes, marcarNotificacaoLida, marcarTodasNotificacoesLidas, limparNotificacoes, alternarFiltroNotificacoes } from "./views/notificacoes.js";
 import { abrirWizard, exporWizard } from "./views/wizard.js";
 import { abrirChatLateral, fecharChatLateral, alternarChatLateral } from "./chat-lateral.js";
 import { abrirHistoricoPopup } from "./historico-popup.js";
@@ -60,6 +61,7 @@ export function configurarIconesIniciais(): void {
   document.getElementById('nav-icon-hooks')?.insertAdjacentHTML('beforeend', icone('hook'));
   document.getElementById('nav-icon-apps')?.insertAdjacentHTML('beforeend', icone('apps'));
   document.getElementById('nav-icon-historico')?.insertAdjacentHTML('beforeend', icone('history'));
+  document.getElementById('nav-icon-notificacoes')?.insertAdjacentHTML('beforeend', icone('sino'));
   document.getElementById('nav-icon-secretario')?.insertAdjacentHTML('beforeend', icone('chat'));
   document.getElementById('nav-icon-config')?.insertAdjacentHTML('beforeend', icone('gear'));
   document.getElementById('drawer-close-icon')?.insertAdjacentHTML('beforeend', icone('close'));
@@ -250,6 +252,13 @@ function processarEventoSSE(ev: Record<string, unknown>): void {
     if (!digitando) void renderReunioes();
   }
   if (view === 'apps') renderApps();
+  if (tipo === 'notificacao.nova') incrementarBadgeNotificacoes();
+  if (view === 'notificacoes' && tipo.startsWith('notificacao.')) {
+    // guard de digitação (mesmo padrão de reuniões): não re-renderiza por cima de input
+    const ativo = document.activeElement as HTMLElement | null;
+    const digitando = !!ativo && (ativo.tagName === 'INPUT' || ativo.tagName === 'TEXTAREA' || ativo.tagName === 'SELECT');
+    if (!digitando) void renderNotificacoes();
+  }
 }
 
 /** Inicializa a aplicação após login. Idempotente quanto ao setInterval (limpa o anterior). */
@@ -268,6 +277,7 @@ export async function iniciarApp(): Promise<void> {
     .catch(() => undefined);
   await carregarWorkspaces();
   conectarSSE();
+  void atualizarBadgeNotificacoes();
   renderView();
 
   // Refresh automático a cada 8s — NÃO destrutivo:
@@ -304,6 +314,7 @@ const MAPA_VIEW_BREADCRUMB: Record<string, string> = {
   config: 'Config',
   workspace: 'Workspace',
   historico: 'Histórico',
+  notificacoes: 'Notificações',
 };
 
 export function atualizarBreadcrumb(view: string): void {
@@ -354,6 +365,7 @@ export async function renderView(): Promise<void> {
     case 'historico': await renderHistorico(); break;
     case 'secretario': await renderSecretario(); break;
     case 'workspace': await renderWorkspace(); break;
+    case 'notificacoes': await renderNotificacoes(); break;
     case 'config': await renderConfig(); break;
   }
 }
@@ -519,6 +531,11 @@ export function exporGlobais(): void {
   g.conectarSSE = conectarSSE;
   g.iniciarApp = iniciarApp;
   g.renderView = renderView;
+  g.renderNotificacoes = renderNotificacoes;
+  g.marcarNotificacaoLida = marcarNotificacaoLida;
+  g.marcarTodasNotificacoesLidas = marcarTodasNotificacoesLidas;
+  g.limparNotificacoes = limparNotificacoes;
+  g.alternarFiltroNotificacoes = alternarFiltroNotificacoes;
 }
 
 // Auto-inicialização

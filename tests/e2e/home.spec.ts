@@ -9,11 +9,10 @@ test.describe("Home / Início (hub)", () => {
     await esperarNavegacao(page, "home");
   });
 
-  test("KPIs de operação aparecem (Tasks abertas, Feitas 7d, Taxa ok 24h, Custo hoje)", async ({ page }) => {
-    await esperarElementoTexto(page, "Tasks abertas");
-    await esperarElementoTexto(page, "Feitas em 7 dias");
-    await esperarElementoTexto(page, "Taxa ok 24h");
-    await esperarElementoTexto(page, "Custo hoje");
+  test("KPIs de operação aparecem (Tasks vencidas, Custos do dia, Fluxos ativos)", async ({ page }) => {
+    await esperarElementoTexto(page, "Tasks vencidas");
+    await esperarElementoTexto(page, "Custos do dia");
+    await esperarElementoTexto(page, "Fluxos ativos");
   });
 
   test('painel "Feed ao vivo" presente com selo "todas as empresas"', async ({ page }) => {
