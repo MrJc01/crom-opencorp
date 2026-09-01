@@ -147,8 +147,16 @@
 ### Etapa 1b — Histórico do Secretário como popup limpo *(P-29 — adicionado 2026-09-01)*
 - [ ] 1.6 Histórico do Secretário **como popup page** para listar conversas — **limpo, estilo ChatGPT/opencode** (overlay + lista agrupada Hoje/Ontem/Anteriores, busca, paginação, clique abre a conversa)
 - [ ] 1.7 Histórico: estado vazio ilustrado + loading + erro (reuso de estado.ts), fechar em Escape/click fora, não quebrar o feed da conversa ativa
-- [ ] 1.8 **Polish de layout (preline — P-28 reforço)**: cards com `shadow-sm/border/hover`, inputs com ícone, botões unificados, tipografia hierárquica, espaçamento 8pt, empty-states ilustrados, drawer com `shadow-2xl/blur` — aplicado em: navbar, task/app/workspace cards, inputs de busca, botões e empty-states (sem bundle)
-- **Aceite**: histórico abre como popup limpo sobre o chat, lista clicável, fecha limpo; layout do painel com acabamento preline-inspired consistente.
+- **Aceite**: histórico abre como popup limpo sobre o chat, lista clicável, fecha limpo.
+
+### Etapa 1c — Estrutura de páginas inspirada no Preline *(P-28 — não é só CSS, é estrutura)* ✅ estudo concluído 2026-09-01, implementação pendente
+> Estudo em 3ª pessoa concluído: Preline tem 22 templates e 972 blocos (Dashboards/Admin 31p, CRM 10p, Chat Workspace 6p, AI Chat 2p, etc.). Estrutura canônica = `aside#hs-sidebar` (push `lg:ps-64`, overlay mobile) + `header.sticky` (breadcrumb + busca + avatar) + `main` com `page-header (breadcrumb + H1 + ações)` + `content grid-12` + footer. O opencorp hoje tem shell mas sem topbar/breadcrumb/page-header padronizado (cada view inventa H1), sem toolbar e com cards flat.
+
+- [ ] 1.8 **Main central + topbar**: header sticky dentro do `main` (breadcrumb + busca global + ações/avatar) — envolver cada `section.view` com wrapper consistente
+- [ ] 1.9 **Page-header padronizado**: componente único `page-header (flex justify-between)` com `ol.breadcrumb > H1 + subtítulo` à esquerda e `filtros/busca/ações` à direita — aplicar em: home (KPI grid 4-col), tasks (kanban toolbar), agentes (tabela com avatar/badge), workspace (breadcrumb caminho + grid/list toggle), secretário (splitter 3-col), apps/config (tabs)
+- [ ] 1.10 **Cards/sistema de design**: `card border-zinc-800 rounded-lg + card-header flex p-4 + card-body p-4 + shadow-sm hover:shadow-md`, tipografia `H1 1.5rem/700, H2 .875rem/600 uppercase muted`, inputs `pl-9 com ícone + focus:ring-2`, botões `h-9 px-4 font-medium loading`, empty-states ilustrados — sem bundle (só classes Tailwind)
+- [ ] 1.11 **Mapeamento de templates**: Dashboard→home, Kanban→tasks, User Tables→agentes, File Views→workspace, Chat Workspace/AI Chat→secretário, Settings Modals→apps/config (6 páginas de referência)
+- **Aceite**: todas as páginas com mesma estrutura Preline-inspired (sidebar push + topbar + page-header + grid), sem importar `preline.js`; design consistente e não só CSS.
 
 ### Etapa 2 — Composer inteligente: / @ ! *(P-20, P-22)* ✅ 2026-09-01
 - [x] 2.1 Parser do composer: `/` comandos, `@` contexto, `!` terminal *(src/web/composer-comandos.ts — parsearComposer puro + 10 testes unitários)*
