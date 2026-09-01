@@ -93,9 +93,9 @@
 
 ### G — Qualidade (~2h)
 - [x] **F1** Unit: rotas novas (PUT/DELETE flows, PUT teams, PUT/DELETE agents, PATCH schedules amplo) — **463 unitários ✅** (39 arquivos; novos `tests/web-crud.test.ts` e `tests/flow-migrate.test.ts`)
-- [ ] **F2** e2e: editar fluxo, reunião no secretário, excluir task *(fix do fixture `fake-opencode.mjs` desbloqueou e2e de secretário/chat; suíte ~56 com 6 falhas pré-existentes no baseline)*
-- [ ] **F3** docs: 06-painel (novas views), AJUDAS/"?" (diferença team×flow), release notes *(release notes ✅ — `docs/release-v0.6.0.md`; 06-painel/AJUDAS pendentes)*
-- [ ] **F4** Revalidar: build + 454 unitários + e2e + doctor ao vivo *(build ✅ · 463 unitários ✅ · e2e ~50/56 com 6 falhas pré-existentes no baseline — agenda ×5, chat ×1; doctor ao vivo não registrado nesta sessão)*
+- [x] **F2** e2e: editar fluxo, reunião no secretário, excluir task — `tests/e2e/crud-ui.spec.ts` (3 testes, 3/3 ✅). Bônus: descoberto e corrigido bug real — POST /flows descartava o grafo (flows web nasciam só com gatilho); agora aceita nos/arestas validados (A7 em web-crud.test)
+- [x] **F3** docs: 06-painel (seção "As views do painel web v0.6.0"), AJUDAS "?" (teams = fusão; flows = 4 templates editáveis), release notes ✅
+- [x] **F4** Revalidar: build ✅ · 465 unitários ✅ · e2e crud-ui 3/3 ✅ · doctor ao vivo 13 ok / 0 falha / 0 alerta (31-08, v0.6.0) · e2e completo 50/6 com 6 falhas pré-existentes no baseline (agenda ×5, chat ×1)
 
 ## 5. Perguntas — RESPONDIDAS pelo dono (31/08)
 1. **Team vs Fluxo** → **Fundir agora num editor só** (Etapa F)
@@ -109,7 +109,7 @@
 - [x] Reunião convocável da página do Secretário com check-list de participantes e link para ata
 - [x] Nenhum `fetch` cru fora dos padrões (q()/api()); estados padronizados; drawer/modal/toast
 - [x] Suítes verdes (unit 463 ≥454 ✅; e2e ~50/56 — 6 falhas pré-existentes no baseline, sem regressão)
-- [ ] AJUDAS explica team×flow×meeting em linguagem de dono *(pendente — ver G-F3)*
+- [x] AJUDAS explica team×flow×meeting em linguagem de dono ('teams' = fusão com Migrar; 'flows' = 4 templates)
 
 ## 7. Fora de escopo (débitos já registrados)
 - **B4 — Secretário: renomear/excluir sessão (API + UI)** → ficou FORA deste plano: as sessões/conversas do secretário vivem no **servidor OpenCode externo** (não são estado do opencorp); expor renomear/excluir exigiria gerir ciclo de vida do opencode — adiado.

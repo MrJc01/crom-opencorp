@@ -90,3 +90,21 @@ O mesmo schema vale para `config.json` do workspace — só as chaves presentes 
 ## Painel de configurações web (Fase C)
 
 A UI web lerá/escreverá **os mesmos arquivos JSON** com os mesmos schemas zod (via API que expõe o core). Nenhum formato novo é criado — o painel CLI e o painel web são duas peles sobre o `SettingsStore`.
+
+## As views do painel web (v0.6.0)
+
+O painel (`opencorp serve` → navegador) organiza a empresa em views, todas com botão "?" de ajuda contextual:
+
+| Grupo | View | O que faz |
+|---|---|---|
+| Operação | **Tasks** | Kanban (backlog → fazendo → bloqueado → feito). Criar, editar coluna/prioridade/responsável no drawer, excluir (com confirmação). |
+| Operação | **Agentes** | Cards dos funcionários: chamar (prompt), editar (modelo/permissões/orçamento), clonar, excluir — bloqueado com 409 se citado em tasks/teams/flows/hooks. |
+| Operação | **Secretário** | Conversa com o assistente executivo + aba **Reuniões** (convocar com check-list de agentes, ver ata). |
+| Automação | **Agenda** | Rotinas (cron/intervalo): criar, pausar, editar (nome/agenda/comando — tipo e valor vão juntos), excluir. |
+| Automação | **Fluxos** | Os 4 templates — Pipeline, Fanout, Review, Debate — num editor único. Criar, executar, editar (linear), excluir. Times legados aparecem aqui com botão **Migrar todos para fluxos**. |
+| Automação | **Hooks** | Webhooks de entrada: criar, copiar cURL (token só no detalhe), excluir. |
+| Dados | **Histórico** | Timeline unificada (execuções, tasks, rotinas, conversas). |
+| Dados | **Apps** | Mini-apps declarativos do workspace. |
+| Sistema | **Config** | As mesmas chaves do `settings` CLI, editáveis por campo (mostra a origem de cada valor). |
+
+Regras de ouro da UI: tudo passa pela API com validação zod (nada de JSON cru), confirmação em ações destrutivas, e estados vazios que ensinam o próximo passo.

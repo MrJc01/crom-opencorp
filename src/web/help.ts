@@ -23,7 +23,7 @@ export const AJUDAS: Record<string, string> = {
   'reunioes': '<b>Reuniões</b> entre agentes com pauta e moderador. Terminam com ata gravada em registros. Útil para decisões entre "áreas".',
   'historico': '<b>Timeline unificada</b> de tudo que aconteceu: execuções de agentes, tasks movidas, rotinas disparadas. É o diário da empresa.',
   'secretario': 'O <b>assistente executivo</b> da empresa — uma sessão real do OpenCode com acesso às ferramentas do opencorp (via MCP). O secretário <b>analisa e relata</b>; o <b>secretário-exec</b> também executa. Pergunte "o que aconteceu hoje?" ou peça ações.',
-  'flows': '<b>Linhas de pensamento</b> executáveis (estilo n8n): gatilho → agentes → decisões → tasks/registros. O CEO analisa o board e abre tasks sozinho. Agentes podem criar novas linhas.',
+  'flows': '<b>Linhas de pensamento</b> executáveis (estilo n8n): gatilho → passos → tasks/registros. Crie com um clique num dos 4 templates — <b>Pipeline</b> (sequência), <b>Fanout</b> (paralelo + síntese), <b>Review</b> (faz→revisa até APROVADO) e <b>Debate</b> (proponentes + moderador decide). Todos são editáveis aqui mesmo (botão Editar).',
   'hooks': '<b>Entradas por webhook</b>: um serviço externo faz POST na URL do hook (com token) e o opencorp reage — cria task, roda agente ou fluxo. Copie a URL + token para colar no serviço externo (GitHub, Stripe, n8n…).',
   'apps': '<b>Mini-apps</b> declarativas do workspace (JSON em .opencorp/apps). Widgets e formulários que o próprio workspace define.',
   'budget': 'Teto de gasto diário em USD. Quando um agente atinge 80% ele avisa; a 100% pausa. Por agente e por workspace.',
