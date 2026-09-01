@@ -57,4 +57,43 @@ test.describe("Config / Settings", () => {
     expect(valor).toBe(!antes);
     await slider.click(); // restaura
   });
+
+  // P-27 — Etapa 8: o toggle Global ⇄ Workspace precisa INJETAR o escopo na request
+  // (?escopo=) — sem isso o api() injeta ?workspace=<ativo> e o server devolve
+  // sempre a lista mesclada, ignorando o toggle.
+  test("toggle de escopo muda ?escopo= na request e a lista/badges (P-27)", async ({ page }) => {
+    const hdr = { authorization: "Bearer test-e2e", "content-type": "application/json" };
+    // valores DIFERENTES por escopo: global e workspace
+    await page.request.put("/settings", { headers: hdr, data: { chave: "default_model", valor: "modelo-global-e2e", scope: "global" } });
+    await page.request.put("/settings?workspace=e2e-corp", { headers: hdr, data: { chave: "default_model", valor: "modelo-ws-e2e", scope: "workspace" } });
+
+    // intercepta GET /settings e registra o parâmetro escopo enviado pelo painel
+    const escopos: string[] = [];
+    await page.route("**/settings*", (route) => {
+      const req = route.request();
+      if (req.method() === "GET") {
+        escopos.push(new URL(req.url()).searchParams.get("escopo") ?? "(sem)");
+      }
+      void route.continue();
+    });
+
+    await page.goto("/#/config");
+    await esperarNavegacao(page, "config");
+
+    // escopo global (default): valor GLOBAL, badge 'global', request com escopo=global
+    const campo = page.locator(".cfg-campo:has(#cfg-default_model)");
+    await expect(campo.locator("input#cfg-default_model")).toHaveValue("modelo-global-e2e", { timeout: 10000 });
+    await expect(campo.locator(".badge")).toHaveText("global");
+    expect(escopos).toContain("global");
+
+    // alterna para Workspace: valor do workspace, badge 'workspace', request escopo=workspace
+    await page.click("#cfg-escopo-workspace");
+    await expect(campo.locator("input#cfg-default_model")).toHaveValue("modelo-ws-e2e", { timeout: 10000 });
+    await expect(campo.locator(".badge")).toHaveText("workspace");
+    expect(escopos).toContain("workspace");
+
+    // restaura valores originais (evita poluição de estado para specs seguintes)
+    await page.request.put("/settings", { headers: hdr, data: { chave: "default_model", valor: "", scope: "global" } });
+    await page.request.put("/settings?workspace=e2e-corp", { headers: hdr, data: { chave: "default_model", valor: "", scope: "workspace" } });
+  });
 });

@@ -190,4 +190,24 @@ body.sidebar-colapsada .sidebar-collapse svg{transform:rotate(180deg)}
 .card-header{display:flex;align-items:center;justify-content:space-between;padding:.9rem 1rem;border-bottom:1px solid var(--border)}
 .card-body{padding:1rem}
 
+/* ========= ETAPA 1b: Histórico do Secretário como popup (P-29) ========= */
+/* Overlay puro sobre o chat (z-60 = acima do drawer z-50); NÃO re-renderiza a view ativa */
+.hist-popup{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:4.5rem 1rem 1rem;animation:histFade .15s ease}
+@keyframes histFade{from{opacity:0}to{opacity:1}}
+.hist-popup-box{width:100%;max-width:32rem;max-height:80vh;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:.5rem;box-shadow:0 25px 60px rgba(0,0,0,.55);overflow:hidden}
+.hist-popup-header{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.85rem 1rem;border-bottom:1px solid var(--border)}
+.hist-popup-titulo{font-size:1rem;font-weight:600;display:flex;align-items:center;gap:.5rem}
+.hist-popup-titulo .nav-icon{width:18px;height:18px}
+.hist-popup-fechar{background:transparent;border:none;color:var(--muted);padding:.25rem;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:.375rem}
+.hist-popup-fechar:hover{color:var(--text);background:#262626}
+.hist-popup-fechar svg{width:16px;height:16px}
+.hist-popup-busca{position:relative;padding:.6rem .85rem;border-bottom:1px solid var(--border)}
+.hist-busca-ico{position:absolute;left:1.4rem;top:50%;transform:translateY(-50%);color:var(--muted);width:14px;height:14px;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.hist-busca-ico svg{width:14px;height:14px}
+.hist-popup-busca input{width:100%;padding:.42rem .6rem .42rem 2.1rem;background:#0a0a0a;border:1px solid var(--border);border-radius:.375rem;font-size:.8125rem;color:var(--text)}
+.hist-popup-busca input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(37,99,235,.25)}
+.hist-popup-lista{flex:1;min-height:0;overflow-y:auto;padding:.15rem 0 .5rem}
+.hist-popup-lista .empty-state{padding:1.5rem 1rem}
+.hist-popup-lista .sessao-item{text-align:left}
+
 

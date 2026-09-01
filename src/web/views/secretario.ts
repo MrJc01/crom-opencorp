@@ -16,23 +16,13 @@ import { getRascunho, setRascunho, limparRascunho } from "../rascunho.js";
 import { parsearComposer, COMANDOS_OPCORP } from "../composer-comandos.js";
 import { gatilhoComposer, paletteTecla } from "../palette.js";
 import { pararPollingSala } from "./reunioes.js";
+import { agruparSessoes, dataSessao, tempoRelativo, tituloSessao, type SessaoChat } from "../sessoes-utils.js";
 
 interface SecretarioStatus {
   rodando: boolean;
   porta?: number;
   agentes?: number;
   configurado?: boolean;
-}
-
-interface SessaoChat {
-  id: string;
-  title?: string;
-  titulo_real?: string;
-  sem_conteudo?: boolean;
-  created_at?: string;
-  updated_at?: string;
-  created?: number;
-  updated?: number;
 }
 
 interface MensagemChat {
@@ -127,35 +117,7 @@ function setBotaoEnviar(alvo: Alvo, parando: boolean): void {
   btn.setAttribute('aria-label', parando ? 'Parar resposta' : 'Enviar mensagem');
 }
 
-/** ISO (proxy real) ou ms (fake/proxy) → Date */
-function dataSessao(s: SessaoChat): Date | null {
-  const iso = s.updated_at ?? s.created_at;
-  if (iso) {
-    const d = new Date(iso);
-    if (!isNaN(d.getTime())) return d;
-  }
-  const ms = s.updated ?? s.created;
-  if (typeof ms === 'number') return new Date(ms);
-  return null;
-}
-
-function tituloSessao(s: SessaoChat): string {
-  // título REAL (1ª mensagem do usuário) tem prioridade — "New session - <ts>" não diz nada
-  const t = (s.titulo_real || s.title || 'Sem título').trim();
-  return t.length > 60 ? t.slice(0, 59) + '…' : t;
-}
-
-/** Tempo relativo curto: agora · 5min · 2h · ontem 14:22 · 28/08 */
-function tempoRelativo(d: Date): string {
-  const diffMin = Math.round((Date.now() - d.getTime()) / 60_000);
-  if (diffMin < 2) return 'agora';
-  if (diffMin < 60) return `${diffMin}min`;
-  const diffH = Math.round(diffMin / 60);
-  if (diffH < 24) return `${diffH}h`;
-  const ontem = new Date(); ontem.setDate(ontem.getDate() - 1); ontem.setHours(0, 0, 0, 0);
-  if (d >= ontem) return `ontem ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
+/** dataSessao/tituloSessao/tempoRelativo/agruparSessoes vivem em sessoes-utils.ts (Etapa 1b) */
 
 /** Renderiza a view Secretário */
 export async function renderSecretario(aba: 'conversa' | 'reunioes' = 'conversa'): Promise<void> {
@@ -227,6 +189,11 @@ export function secretarioAba(aba: 'conversa' | 'reunioes'): void {
   void renderSecretario(aba);
 }
 
+/** Botão de entrada do popup de histórico (Etapa 1b — P-29), reusado nos headers da página */
+function btnHistorico(classe = 'btn-ghost text-xs', id = ''): string {
+  return `<button class="${classe}"${id ? ` id="${id}"` : ''} onclick="abrirHistoricoPopup()" title="Histórico de conversas" aria-label="Histórico de conversas">${icone('history')}</button>`;
+}
+
 function estadoCarregandoCustom(): string {
   return `
     <div class="card p-6 text-center">
@@ -246,7 +213,7 @@ function renderStandby(): void {
         <h1 class="page-header-titulo">${icone('chat')} Secretário</h1>
         <p class="page-header-sub">Chat da empresa em standby</p>
       </div>
-      <div class="page-header-acoes"><span class="help-wrap">${ajuda('secretario')}</span></div>
+      <div class="page-header-acoes"><span class="help-wrap">${ajuda('secretario')}</span>${btnHistorico('btn-ghost text-xs', 'btn-hist-header')}</div>
     </div>
     <div class="card p-8 text-center max-w-md mx-auto">
       <div class="empty-icon mb-4">${icone('chat')}</div>
@@ -299,6 +266,7 @@ function renderChatLayout(): void {
       </div>
       <div class="page-header-acoes">
         <span class="help-wrap">${ajuda('secretario')}</span>
+        ${btnHistorico('btn-ghost text-xs', 'btn-hist-header')}
         <button class="btn-ghost text-xs md:hidden" onclick="window.__secretarioToggleConv()" aria-label="Alternar lista de conversas" title="Conversas">${icone('tasks')}</button>
       </div>
     </div>
@@ -308,6 +276,7 @@ function renderChatLayout(): void {
         <div class="p-3 border-b border-zinc-800 flex items-center justify-between gap-2">
           <h3 class="font-semibold text-sm">Conversas</h3>
           <div class="flex items-center gap-1">
+            ${btnHistorico()}
             <button class="btn" onclick="window.__secretarioNovaConversa()" title="Nova conversa" aria-label="Nova conversa">${icone('plus')}</button>
             <button class="btn-ghost text-xs md:hidden" onclick="window.__secretarioToggleConv()" aria-label="Fechar lista">✕</button>
           </div>
@@ -577,21 +546,6 @@ function renderListaSessoes(): void {
     return;
   }
 
-  const grupos: Record<string, SessaoChat[]> = { 'Hoje': [], 'Ontem': [], 'Anteriores': [] };
-  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-  const ontem = new Date(hoje); ontem.setDate(ontem.getDate() - 1);
-
-  const ts = (s: SessaoChat): number => dataSessao(s)?.getTime() ?? 0;
-  const ordenadas = [...filtradas].sort((a, b) => ts(b) - ts(a));
-
-  for (const s of ordenadas) {
-    const d = dataSessao(s);
-    if (!d) { grupos['Anteriores']!.push(s); continue; }
-    if (d >= hoje) grupos['Hoje']!.push(s);
-    else if (d >= ontem) grupos['Ontem']!.push(s);
-    else grupos['Anteriores']!.push(s);
-  }
-
   const item = (s: SessaoChat) => `
     <button class="sessao-item ${s.id === sessaoAtivaId ? 'ativa' : ''}" onclick="window.__secretarioSelecionarSessao('${escapeHtml(s.id)}')">
       <div class="sessao-titulo">${escapeHtml(tituloSessao(s))}</div>
@@ -599,11 +553,9 @@ function renderListaSessoes(): void {
     </button>
   `;
 
-  el.innerHTML = (['Hoje', 'Ontem', 'Anteriores'] as const)
-    .filter((k) => grupos[k]!.length)
-    .map((k) => `
-      <div class="sessao-grupo">${k}</div>
-      ${grupos[k]!.map(item).join('')}
+  el.innerHTML = agruparSessoes(filtradas).map(({ grupo, itens }) => `
+      <div class="sessao-grupo">${grupo}</div>
+      ${itens.map(item).join('')}
     `).join('');
 }
 
@@ -946,7 +898,7 @@ function renderErro(): void {
         <h1 class="page-header-titulo">${icone('chat')} Secretário</h1>
         <p class="page-header-sub">Erro ao conectar</p>
       </div>
-      <div class="page-header-acoes"><span class="help-wrap">${ajuda('secretario')}</span></div>
+      <div class="page-header-acoes"><span class="help-wrap">${ajuda('secretario')}</span>${btnHistorico('btn-ghost text-xs', 'btn-hist-header')}</div>
     </div>
     ${estadoErro('Não foi possível conectar ao secretário.', () => { void renderSecretario(); })}
   `;

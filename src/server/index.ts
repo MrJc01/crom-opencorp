@@ -95,7 +95,7 @@ const ROUTES: DefinicaoRota[] = [
   { method: "POST", path: "/approvals/:id/reject", descricao: "Rejeita uma solicitação", corpo: true },
   { method: "GET", path: "/budget/status", descricao: "Status e limites do orçamento" },
   { method: "POST", path: "/budget/set", descricao: "Define limites de orçamento", corpo: true },
-  { method: "GET", path: "/settings", descricao: "Lista configurações" },
+  { method: "GET", path: "/settings", descricao: "Lista configurações (?escopo=global|workspace — sem o parâmetro: mesclada)" },
   { method: "GET", path: "/settings/:chave", descricao: "Obtém uma configuração específica" },
   { method: "PUT", path: "/settings", descricao: "Define uma configuração", corpo: true },
   { method: "GET", path: "/secrets", descricao: "Lista NOMES de segredos (valores nunca expostos; perfis app:<tipo>:<id> incluem tipo_app)" },
@@ -966,6 +966,18 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
 
         // ── settings ────────────────────────────────────────────────
         if (rota === "/settings" && req.method === "GET") {
+          // P-27: o painel (web/views/config.ts) injeta ?escopo= explicitamente
+          // porque o api() do front acrescenta ?workspace=<ativo> em TODA request —
+          // sem isso o toggle Global ⇄ Workspace era ignorado (lista sempre mesclada).
+          // Escolha: ?escopo=global lista SÓ o settings global (+ defaults), IGNORANDO
+          // o ?workspace= da query; ?escopo=workspace mantém a lista mesclada com as
+          // badges de origem reais; SEM o parâmetro, comportamento legado (mesclada)
+          // para CLI e consumidores antigos.
+          if (url.searchParams.get("escopo") === "global") {
+            const entradas = await settings.list({ scope: "global" });
+            enviar(res, 200, entradas);
+            return;
+          }
           const ws = await resolverWs(url);
           const entradas = await settings.list({ workspaceDir: ws.path });
           enviar(res, 200, entradas);

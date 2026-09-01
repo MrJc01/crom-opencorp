@@ -33,6 +33,7 @@ import { renderConfig } from "./views/config.js";
 import { renderWorkspace } from "./views/workspace.js";
 import { abrirWizard, exporWizard } from "./views/wizard.js";
 import { abrirChatLateral, fecharChatLateral, alternarChatLateral } from "./chat-lateral.js";
+import { abrirHistoricoPopup } from "./historico-popup.js";
 import { registrarMenuContexto } from "./menu-contexto.js";
 import { criarTask, enviarMsgDrawer, moverTaskColuna, atualizarTaskPrioridade, atualizarTaskResponsavel, atualizarTaskDue, atualizarTaskLabels, atualizarTaskDescricao, excluirTask } from "./views/tasks.js";
 import { agendaEscopo, atualizarCampoAgenda, criarAgenda, editarAgenda, salvarEdicaoAgenda, executarAgendaAgora, toggleAgendaAtivo, excluirAgenda, renderAgendaForm } from "./views/agenda.js";
@@ -63,6 +64,7 @@ export function configurarIconesIniciais(): void {
   document.getElementById('nav-icon-config')?.insertAdjacentHTML('beforeend', icone('gear'));
   document.getElementById('drawer-close-icon')?.insertAdjacentHTML('beforeend', icone('close'));
   document.getElementById('chat-drawer-close-icon')?.insertAdjacentHTML('beforeend', icone('close'));
+  document.getElementById('lat-hist-icon')?.insertAdjacentHTML('beforeend', icone('history'));
   document.getElementById('fab-chat')?.insertAdjacentHTML('beforeend', ICONES.chat);
 }
 
@@ -441,6 +443,7 @@ export function exporGlobais(): void {
   g.abrirChatLateral = abrirChatLateral;
   g.fecharChatLateral = fecharChatLateral;
   g.alternarChatLateral = alternarChatLateral;
+  g.abrirHistoricoPopup = abrirHistoricoPopup;
   g.abrirDrawer = abrirDrawer;
   g.fecharDrawer = fecharDrawer;
   g.criarTask = criarTask;

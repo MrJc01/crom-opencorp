@@ -232,7 +232,15 @@ async function carregarConteudo(): Promise<void> {
 
   let lista: EntradaSetting[] | null;
   try {
-    lista = await api<EntradaSetting[]>('/settings');
+    // P-27: o escopo do toggle é INJETADO explicitamente. O api() sempre acrescenta
+    // ?workspace=<ativo> em toda requisição — sem o ?escopo=, o server devolvia
+    // sempre a lista MESCLADA (global+workspace) e o toggle não tinha efeito.
+    // O server entende ?escopo=global (ignora o workspace da query) e
+    // ?escopo=workspace (lista mesclada com badges de origem reais).
+    // Literais estáticos: o contrato (tests/web-contratos.test.ts) verifica rotas literais.
+    lista = await api<EntradaSetting[]>(
+      escopoAtual === 'global' ? '/settings?escopo=global' : '/settings?escopo=workspace'
+    );
   } catch {
     lista = null;
   }
