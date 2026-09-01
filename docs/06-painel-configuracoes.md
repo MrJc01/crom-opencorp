@@ -91,20 +91,27 @@ O mesmo schema vale para `config.json` do workspace — só as chaves presentes 
 
 A UI web lerá/escreverá **os mesmos arquivos JSON** com os mesmos schemas zod (via API que expõe o core). Nenhum formato novo é criado — o painel CLI e o painel web são duas peles sobre o `SettingsStore`.
 
-## As views do painel web (v0.6.0)
+## As views do painel web (v0.7.0)
 
-O painel (`opencorp serve` → navegador) organiza a empresa em views, todas com botão "?" de ajuda contextual:
+O painel (`opencorp serve` → navegador) organiza a empresa em views, todas com botão "?" de ajuda contextual. A shell segue a **estrutura Preline** (padrões Tailwind copiados, sem bundle): sidebar push colapsável, **topbar sticky** (breadcrumb, busca global, avatar/ações) e **page-header padronizado** (`breadcrumb > H1 + subtítulo` à esquerda, toolbar de ações à direita) em todas as páginas.
 
 | Grupo | View | O que faz |
 |---|---|---|
-| Operação | **Tasks** | Kanban (backlog → fazendo → bloqueado → feito). Criar, editar coluna/prioridade/responsável no drawer, excluir (com confirmação). |
-| Operação | **Agentes** | Cards dos funcionários: chamar (prompt), editar (modelo/permissões/orçamento), clonar, excluir — bloqueado com 409 se citado em tasks/teams/flows/hooks. |
-| Operação | **Secretário** | Conversa com o assistente executivo + aba **Reuniões** (convocar com check-list de agentes, ver ata). |
+| — | **Home** | Dashboard da empresa: KPIs (tasks vencidas, custos do dia, saúde scheduler/secretário, fluxos ativos, notificações não lidas) + barra de comando que inicia conversa no Secretário (reusa o composer `/ @ !`). |
+| Operação | **Tasks** | Kanban (backlog → fazendo → bloqueado → feito) com overflow scroll por coluna. Criar, editar no drawer, excluir (com confirmação). |
+| Operação | **Agentes** | Seções **Ativos × Catálogo**: chamar, editar (modelo/permissões/orçamento), toggle ativo/desativado, semear catálogo de áreas, clonar, excluir — bloqueado com 409 se citado em tasks/flows/hooks. |
+| Operação | **Secretário** | Chat estilo ChatGPT/opencode com **composer `/ @ !`** (comandos, `@` contexto, `!` terminal), **chat lateral direito** (floating; mobile tela cheia), **histórico como popup** (busca + Hoje/Ontem/Anteriores) e aba **Reuniões v2** (chat em grupo, sala ao vivo, consenso, agendamento automático). |
 | Automação | **Agenda** | Rotinas (cron/intervalo): criar, pausar, editar (nome/agenda/comando — tipo e valor vão juntos), excluir. |
 | Automação | **Fluxos** | Os 4 templates — Pipeline, Fanout, Review, Debate — num editor único. Criar, executar, editar (linear), excluir. Times legados aparecem aqui com botão **Migrar todos para fluxos**. |
 | Automação | **Hooks** | Webhooks de entrada: criar, copiar cURL (token só no detalhe), excluir. |
+| Código | **Workspace** | Árvore de arquivos estilo VS Code + tabs com 3 modos (**Editor**, **Preview** — padrão p/ .md, **Lado a lado**) e **terminais em tabs** (até 4, whitelist). Right-click: abrir, `@` contexto, copiar. |
 | Dados | **Histórico** | Timeline unificada (execuções, tasks, rotinas, conversas). |
-| Dados | **Apps** | Mini-apps declarativos do workspace. |
-| Sistema | **Config** | As mesmas chaves do `settings` CLI, editáveis por campo (mostra a origem de cada valor). |
+| Dados | **Apps** | Mini-apps declarativos do workspace + aba **Configurar apps** (perfis de secrets: VPS, WordPress, MercadoPago, cartão, custom — valores nunca voltam à tela). |
+| Sistema | **Notificações** | Feed de avisos dos agentes (tool `notificar`): não lidas em destaque, marcar como lida, **badge no navbar** atualizado via SSE. |
+| Sistema | **Config** | As mesmas chaves do `settings` CLI, editáveis por campo com **badge de origem** (global × workspace) e toggle de escopo respeitado na leitura e na escrita. |
 
 Regras de ouro da UI: tudo passa pela API com validação zod (nada de JSON cru), confirmação em ações destrutivas, e estados vazios que ensinam o próximo passo.
+
+O **chat lateral** é um drawer global (fora do ciclo de navegação): sobrevive a trocas de view e a refresh, sincroniza o rascunho não enviado com o Secretário da página e no mobile ocupa a tela toda. O composer é o mesmo na home, no Secretário e no lateral — `/` abre a paleta (comandos opencorp + passthrough do opencode), `@` anexa contexto (arquivos, agentes, tasks) e `!` executa comandos da whitelist do terminal.
+
+**Notificações** fecham o ciclo de feedback: qualquer agente chama a tool `notificar` ao finalizar um trabalho e o aviso aparece na view, no badge da sidebar e via push SSE — sem recarregar a página.

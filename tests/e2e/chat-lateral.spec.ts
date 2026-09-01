@@ -1,20 +1,22 @@
 import { test, expect, type Page } from "@playwright/test";
 import { logado, seederEmpresaBasica, api, esperarNavegacao } from "./helpers.js";
 
-/** Inicia o fake opencode com retry (mesma corrida rara do chat.spec). */
+/** Inicia o fake opencode com retry (mesma corrida rara do chat.spec).
+ *  Espera resolver o estado da view (standby OU chat pronto) antes de agir:
+ *  isVisible() imediato perde a corrida do render async ("Carregando status…")
+ *  e queimava 20s de waitForSelector até estourar o timeout do teste. */
 async function iniciarSecretario(page: Page): Promise<void> {
   for (let i = 0; i < 2; i++) {
-    const standby = page.locator("#btn-iniciar-secretario");
-    if (await standby.isVisible().catch(() => false)) {
-      await standby.click();
-    }
-    try {
+    const estado = await page
+      .waitForSelector("#btn-iniciar-secretario, #chat-input", { timeout: 25000 })
+      .catch(() => null);
+    if (estado && (await estado.evaluate((el) => el.id)) === "btn-iniciar-secretario") {
+      await estado.click();
       await page.waitForSelector("#chat-input", { timeout: 20000 });
-      return;
-    } catch {
-      if (i === 1) throw new Error("secretário não ficou pronto após 2 tentativas");
     }
+    if (await page.locator("#chat-input").isVisible().catch(() => false)) return;
   }
+  throw new Error("secretário não ficou pronto após 2 tentativas");
 }
 
 test.describe("Chat lateral do Secretário (PLANO-PAINEL-V2 Etapa 1)", () => {
@@ -37,6 +39,12 @@ test.describe("Chat lateral do Secretário (PLANO-PAINEL-V2 Etapa 1)", () => {
     await page.click("#fab-chat");
     await expect(page.locator("#chat-drawer")).toHaveClass(/open/);
 
+    // o drawer renderiza via import() dinâmico — espera os handlers globais do
+    // composer existirem antes de digitar (automação é mais rápida que humanos;
+    // sem isso o oninput do fill dispara antes de __composerInput e o rascunho
+    // não é salvo — fonte única fica vazia e a sincronização falha mais adiante)
+    await page.waitForFunction(() => typeof (window as unknown as Record<string, unknown>).__composerInput === "function");
+
     // digita no lateral → rascunho salvo (fonte única)
     await page.fill("#lat-input", "ideia para depois");
 
@@ -48,6 +56,7 @@ test.describe("Chat lateral do Secretário (PLANO-PAINEL-V2 Etapa 1)", () => {
     // fecha (overlay bloqueia a página atrás — padrão drawer) e inicia o Secretário
     await page.keyboard.press("Escape");
     await expect(page.locator("#chat-drawer")).not.toHaveClass(/open/);
+
     await page.evaluate(() => { window.location.hash = "#/secretario"; });
     await iniciarSecretario(page);
 

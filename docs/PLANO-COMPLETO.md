@@ -146,15 +146,15 @@
 - [x] 9.2 Barra de comando que inicia conversa no Secretário (reusa composer `/ @ !`)
 - **P cobre:** P-17 (estrutura Preline aplicada aqui também)
 
-### Etapa 10 — Integrações: análise *(P-11)*
-- [ ] 10.1 Doc comparando webhook inbound/outbound vs agente-bridge vs plugin opencode para WhatsApp/Telegram
-- [ ] 10.2 ADR + esqueleto `canal` (sem provider)
+### Etapa 10 — Integrações: análise *(P-11)* ✅ 2026-09-01
+- [x] 10.1 Doc comparando webhook inbound/outbound vs agente-bridge vs plugin opencode para WhatsApp/Telegram (`docs/adr/ADR-0001-canais-integracoes.md` — opções A/B/C, decisão B com A, contrato, segurança, esforço por canal)
+- [x] 10.2 ADR + esqueleto `canal` (sem provider) (`src/core/canal.ts`: Canal, RegistroDeCanais, CanalNotificacao fallback via POST /notifications; 4 testes em `tests/canal.test.ts`; parágrafo em docs/02-arquitetura.md)
 - **P cobre:** P-11
 
-### Etapa 11 — QA, docs e segurança
-- [ ] 11.1 e2e finais (drawer, composer, workspace, apps, toggle, reunião v2, notificações, config)
-- [ ] 11.2 Revisão: secrets sem retorno, `!` whitelist, `realpath`, cartão ofuscado
-- [ ] 11.3 `docs/06` + AJUDAS + CHANGELOG
+### Etapa 11 — QA, docs e segurança ✅ 2026-09-01
+- [x] 11.1 e2e finais (drawer, composer, workspace, apps, toggle, reunião v2, notificações, config) — suite completa 96/96; flaky chat-lateral:32 corrigido (corrida do helper `iniciarSecretario` + handlers do composer expostos por `import()` dinâmico — fix test-only)
+- [x] 11.2 Revisão: secrets sem retorno, `!` whitelist, `realpath`, cartão ofuscado — 5/5 ✅ (nota: PUT /files sem realpath explícito; sem escape prático via rename atômico)
+- [x] 11.3 `docs/06` + AJUDAS + CHANGELOG — docs/06 v0.7.0; AJUDAS de workspace-view/notificações já existentes; CHANGELOG.md criado; versão 0.7.0
 
 ---
 

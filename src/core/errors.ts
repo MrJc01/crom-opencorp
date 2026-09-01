@@ -46,3 +46,11 @@ export class NotificationError extends OpencorpError {
     this.status = opts.status;
   }
 }
+export class CanalError extends OpencorpError {
+  readonly status?: number;
+
+  constructor(mensagem: string, opts: { exitCode?: number; status?: number } = {}) {
+    super(mensagem, opts);
+    this.status = opts.status;
+  }
+}

@@ -114,3 +114,7 @@ humano> opencorp agent run executor-padrao "crie o relatório de vendas em docs/
 3. Toda sessão passa por `SecurityGuard` e `BudgetManager` — sem exceção.
 4. Nenhum segredo dentro do workspace — chaves ficam em `~/.opencorp/secrets.json` (fora de git).
 5. Journal é append-only; correção = nova entrada que referencia a anterior.
+
+## Canais de integração (WhatsApp, Telegram, e-mail)
+
+Integrações de mensagem (P-11) entram no opencorp como **canais** mantidos fora do core: um *gateway* externo por canal (`opencorp-channel-gateway`) recebe/envia mensagens do provider e fala com o server pelos endpoints existentes (hooks inbound `POST /hooks/:ws/:id`, `POST /notifications` como fallback, futuro `POST /canais/:canal/enviar`), mantendo dependências pesadas (Baileys, telegraf) e crashes isolados do processo do painel. O esqueleto de interface já vive em `src/core/canal.ts` (`Canal`, `RegistroDeCanais`, `CanalNotificacao`) e credenciais por canal usam os perfis de secrets `app:whatsapp:<id>` / `app:telegram:<id>` com allowlist de chats e rate limit. **Canais de integração — ver `docs/adr/ADR-0001-canais-integracoes.md`.**

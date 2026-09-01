@@ -1268,6 +1268,12 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           }
           try {
             const alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+            // realpath: uniformiza o guard do GET — symlink apontando para FORA do workspace é bloqueado
+            const real = await realpath(alvo).catch(() => null);
+            if (!real || relative(resolve(ws.path), real).startsWith("..")) {
+              enviar(res, 403, { erro: "symlink fora do workspace (bloqueado)" });
+              return;
+            }
             const info = await stat(alvo).catch(() => null);
             if (!info?.isFile()) {
               enviar(res, 404, { erro: "arquivo não encontrado (escrita não cria paths novos nesta etapa)" });
