@@ -4,6 +4,7 @@
 
 import { setViewAtual, setTaskAberta } from "./state.js";
 import { renderView } from "./main.js";
+import { fecharChatLateral } from "./chat-lateral.js";
 
 /**
  * Navega para uma view/hash.
@@ -50,12 +51,14 @@ export function initRouter(): void {
 
   sincronizarComHash();
 
-  // ESC para fechar drawer
+  // ESC fecha o drawer de task OU o chat lateral (o que estiver aberto)
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       const drawer = document.getElementById('drawer');
       if (drawer?.classList.contains('open')) {
         fecharDrawer();
+      } else if (document.getElementById('chat-drawer')?.classList.contains('open')) {
+        fecharChatLateral();
       }
     }
   });
@@ -71,6 +74,9 @@ export function sincronizarComHash(): void {
 /** Abre o drawer de detalhes da task */
 export async function abrirDrawer(id: string, titulo: string): Promise<void> {
   const { carregarDrawerConteudo } = await import("./views/tasks.js");
+
+  // drawer de task e chat lateral são mutuamente exclusivos (mesmo lado da tela)
+  fecharChatLateral();
 
   setTaskAberta(id);
   document.getElementById('drawer-title')!.textContent = titulo;

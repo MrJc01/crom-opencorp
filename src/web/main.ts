@@ -31,6 +31,7 @@ import { renderHistorico } from "./views/historico.js";
 import { renderSecretario, secretarioAba } from "./views/secretario.js";
 import { renderConfig } from "./views/config.js";
 import { abrirWizard, exporWizard } from "./views/wizard.js";
+import { abrirChatLateral, fecharChatLateral, alternarChatLateral } from "./chat-lateral.js";
 import { criarTask, enviarMsgDrawer, moverTaskColuna, atualizarTaskPrioridade, atualizarTaskResponsavel, atualizarTaskDue, atualizarTaskLabels, atualizarTaskDescricao, excluirTask } from "./views/tasks.js";
 import { agendaEscopo, atualizarCampoAgenda, criarAgenda, editarAgenda, salvarEdicaoAgenda, executarAgendaAgora, toggleAgendaAtivo, excluirAgenda, renderAgendaForm } from "./views/agenda.js";
 import { criarReuniao, encerrarReuniao } from "./views/reunioes.js";
@@ -58,6 +59,8 @@ export function configurarIconesIniciais(): void {
   document.getElementById('nav-icon-secretario')?.insertAdjacentHTML('beforeend', icone('chat'));
   document.getElementById('nav-icon-config')?.insertAdjacentHTML('beforeend', icone('gear'));
   document.getElementById('drawer-close-icon')?.insertAdjacentHTML('beforeend', icone('close'));
+  document.getElementById('chat-drawer-close-icon')?.insertAdjacentHTML('beforeend', icone('close'));
+  document.getElementById('fab-chat')?.insertAdjacentHTML('beforeend', ICONES.chat);
 }
 
 /** Marca que boot() já rodou neste módulo — protege contra dupla execução
@@ -284,6 +287,9 @@ export async function renderView(): Promise<void> {
   const chip = document.getElementById('ws-chip');
   if (chip) chip.textContent = getWsAtivo() || '— empresa —';
 
+  // FAB do chat lateral não aparece na própria página do Secretário (redundante)
+  document.body.classList.toggle('view-secretario', view === 'secretario');
+
   // Atualiza classes ativas
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   const navItems = document.querySelectorAll('.nav-item') as NodeListOf<HTMLElement>;
@@ -393,6 +399,9 @@ export function exporGlobais(): void {
   g.parseHash = parseHash;
   g.toggleSidebar = toggleSidebar;
   g.toggleSidebarCollapse = toggleSidebarCollapse;
+  g.abrirChatLateral = abrirChatLateral;
+  g.fecharChatLateral = fecharChatLateral;
+  g.alternarChatLateral = alternarChatLateral;
   g.abrirDrawer = abrirDrawer;
   g.fecharDrawer = fecharDrawer;
   g.criarTask = criarTask;

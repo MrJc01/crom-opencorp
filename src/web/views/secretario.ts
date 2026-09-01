@@ -12,6 +12,7 @@ import { formatarDataLocal } from "../format.js";
 import { estadoErro } from "../estado.js";
 import { ajuda } from "../help.js";
 import { renderMarkdown } from "../md.js";
+import { getRascunho, setRascunho, limparRascunho } from "../rascunho.js";
 
 interface SecretarioStatus {
   rodando: boolean;
@@ -74,7 +75,52 @@ const SUGESTOES = [
 
 const FOLLOWUPS = ['Detalhe o 1º ponto', 'E o que faço agora?'];
 
-const CHAVE_RASCUNHO = 'opencorp-chat-rascunho';
+/** Superfície de chat: página do Secretário ou drawer lateral (Etapa 1). */
+type Alvo = 'pagina' | 'lateral';
+const ALVOS: Alvo[] = ['pagina', 'lateral'];
+
+/** Alvos que DEVEM receber render agora: o lateral só quando o drawer está aberto
+ *  (o DOM dele é estático e existe sempre; fechado, re-renderiza no abrir). */
+function alvosAtivos(pedido: Alvo | 'ambos'): Alvo[] {
+  if (pedido !== 'ambos') return [pedido];
+  const aberto = document.getElementById('chat-drawer')?.classList.contains('open');
+  return aberto ? ALVOS : ['pagina'];
+}
+
+/** Ids de DOM por superfície — ambas compartilham o MESMO estado do módulo. */
+function idDe(alvo: Alvo, campo: 'feed' | 'corpo' | 'input' | 'btn' | 'titulo'): string {
+  const pagina = alvo === 'pagina';
+  switch (campo) {
+    case 'feed': return pagina ? 'chat-mensagens' : 'lat-mensagens';
+    case 'corpo': return pagina ? 'oc-feed' : 'lat-feed';
+    case 'input': return pagina ? 'chat-input' : 'lat-input';
+    case 'btn': return pagina ? 'btn-enviar' : 'lat-enviar';
+    case 'titulo': return pagina ? 'chat-titulo' : 'lat-titulo';
+  }
+}
+
+/** Auto-altura do textarea (cap 150px igual ao composer da página). */
+function autoAltura(ta: HTMLTextAreaElement): void {
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
+}
+
+/** Atualiza o título da conversa nas duas superfícies (quando existirem). */
+function setTitulo(texto: string): void {
+  for (const a of ALVOS) {
+    const el = document.getElementById(idDe(a, 'titulo'));
+    if (el) el.textContent = texto;
+  }
+}
+
+/** Estado do botão enviar/parar de uma superfície. */
+function setBotaoEnviar(alvo: Alvo, parando: boolean): void {
+  const btn = document.getElementById(idDe(alvo, 'btn'));
+  if (!btn) return;
+  btn.innerHTML = parando ? icone('stop') : icone('run');
+  btn.classList.toggle('parando', parando);
+  btn.setAttribute('aria-label', parando ? 'Parar resposta' : 'Enviar mensagem');
+}
 
 /** ISO (proxy real) ou ms (fake/proxy) → Date */
 function dataSessao(s: SessaoChat): Date | null {
@@ -252,13 +298,16 @@ function renderChatLayout(): void {
       <div class="card flex flex-col" id="secretario-chat">
         <div class="p-3 border-b border-zinc-800 flex items-center justify-between gap-2">
           <h3 class="font-semibold text-sm truncate" id="chat-titulo">Nova conversa</h3>
-          <label class="flex items-center gap-1 text-xs text-zinc-400 flex-shrink-0">
-            <select id="chat-agente" class="text-xs w-auto" onchange="window.__secretarioSetAgente(this.value)" title="secretário apenas analisa e relata; secretário-exec também executa ações">
-              <option value="secretario" ${agenteSelecionado === 'secretario' ? 'selected' : ''}>secretário</option>
-              <option value="secretario-exec" ${agenteSelecionado === 'secretario-exec' ? 'selected' : ''}>secretário-exec</option>
-            </select>
-            ${ajuda('secretario')}
-          </label>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <label class="flex items-center gap-1 text-xs text-zinc-400">
+              <select id="chat-agente" class="text-xs w-auto" onchange="window.__secretarioSetAgente(this.value)" title="secretário apenas analisa e relata; secretário-exec também executa ações">
+                <option value="secretario" ${agenteSelecionado === 'secretario' ? 'selected' : ''}>secretário</option>
+                <option value="secretario-exec" ${agenteSelecionado === 'secretario-exec' ? 'selected' : ''}>secretário-exec</option>
+              </select>
+              ${ajuda('secretario')}
+            </label>
+            <button class="btn-ghost text-xs" id="btn-chat-lateral" onclick="abrirChatLateral()" title="Abrir chat lateral (acompanha em qualquer página)" aria-label="Abrir chat lateral">${icone('chat')}</button>
+          </div>
         </div>
         <div class="flex-1 overflow-y-auto scrollbar-thin" id="chat-mensagens">
           <div class="oc-feed" id="oc-feed"></div>
@@ -270,7 +319,7 @@ function renderChatLayout(): void {
           <div class="composer-row2">
             <button class="btn-ghost composer-anexo" onclick="window.__secretarioAnexar()" title="Anexar imagem ou arquivo" aria-label="Anexar">📎</button>
             <input id="anexo-input" type="file" multiple accept="image/*,.txt,.md,.json,.csv,.log,.py,.js,.ts,.sh,.yaml,.yml,.html,.css" style="display:none" onchange="window.__secretarioAnexos(this.files)" />
-            <textarea id="chat-input" placeholder="Pergunte qualquer coisa…" rows="1" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); window.__secretarioEnviar()}" oninput="window.__secretarioAutoAltura()"></textarea>
+            <textarea id="chat-input" placeholder="Pergunte qualquer coisa…" rows="1" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); window.__secretarioEnviar('pagina')}" oninput="window.__chatRascunhoInput(this.value,'pagina')"></textarea>
             <button class="btn composer-enviar" id="btn-enviar" onclick="window.__secretarioEnviar()" aria-label="Enviar mensagem">${icone('run')}</button>
           </div>
           <div class="composer-row">
@@ -312,19 +361,41 @@ function renderChatLayout(): void {
   });
 
   renderListaSessoes();
+  exporHandlersChat();
   renderMensagens();
   const ta = document.getElementById('chat-input') as HTMLTextAreaElement | null;
   if (ta) {
-    // restaura rascunho salvo em sessionStorage
-    const rascunho = sessionStorage.getItem(CHAVE_RASCUNHO) ?? '';
+    // restaura rascunho (fonte única compartilhada com o chat lateral)
+    const rascunho = getRascunho();
     if (rascunho) {
       ta.value = rascunho;
-      (window as unknown as { __secretarioAutoAltura?: () => void }).__secretarioAutoAltura?.();
+      autoAltura(ta);
     }
     ta.focus();
   }
+}
 
+/**
+ * Handlers globais do chat — registrados a partir da página OU do drawer
+ * lateral (quem renderizar primeiro expõe; ambas as superfícies usam os mesmos).
+ */
+function exporHandlersChat(): void {
   const g = window as unknown as Record<string, unknown>;
+
+  g.__chatRascunhoInput = (valor: string, origem: Alvo) => {
+    setRascunho(valor);
+    const el = document.getElementById(idDe(origem, 'input')) as HTMLTextAreaElement | null;
+    if (el) autoAltura(el);
+    // sincroniza a outra superfície sem disparar loop (value ≠ evento)
+    const outro = document.getElementById(idDe(origem === 'pagina' ? 'lateral' : 'pagina', 'input')) as HTMLTextAreaElement | null;
+    if (outro && outro.value !== valor) {
+      outro.value = valor;
+      autoAltura(outro);
+    }
+  };
+
+  g.__chatAutoAltura = (el: HTMLTextAreaElement) => autoAltura(el);
+
   g.__secretarioToggleConv = () => {
     document.getElementById('secretario-grid')?.classList.toggle('conv-aberta');
   };
@@ -338,13 +409,17 @@ function renderChatLayout(): void {
     if (carregando) return;
     sessaoAtivaId = null;
     mensagensCache = [];
-    sessionStorage.removeItem(CHAVE_RASCUNHO);
+    limparRascunho();
+    for (const a of ALVOS) {
+      const inp = document.getElementById(idDe(a, 'input')) as HTMLTextAreaElement | null;
+      if (inp) { inp.value = ''; autoAltura(inp); }
+    }
     document.getElementById('secretario-grid')?.classList.remove('conv-aberta');
     renderListaSessoes();
     renderMensagens();
-    const titulo = document.getElementById('chat-titulo');
-    if (titulo) titulo.textContent = 'Nova conversa';
-    (document.getElementById('chat-input') as HTMLTextAreaElement)?.focus();
+    setTitulo('Nova conversa');
+    (document.getElementById('chat-input') as HTMLTextAreaElement | null
+      ?? document.getElementById('lat-input') as HTMLTextAreaElement | null)?.focus();
   };
 
   g.__secretarioSetAgente = (v: string) => {
@@ -355,9 +430,8 @@ function renderChatLayout(): void {
   g.__secretarioAutoAltura = () => {
     const ta = document.getElementById('chat-input') as HTMLTextAreaElement | null;
     if (!ta) return;
-    ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
-    sessionStorage.setItem(CHAVE_RASCUNHO, ta.value);
+    autoAltura(ta);
+    setRascunho(ta.value);
   };
 
   g.__secretarioIrFim = () => {
@@ -365,7 +439,7 @@ function renderChatLayout(): void {
     if (el) el.scrollTop = el.scrollHeight;
   };
 
-  g.__secretarioEnviar = async () => { await enviar(); };
+  g.__secretarioEnviar = async (alvo?: Alvo) => { await enviar(alvo ?? 'pagina'); };
 
   g.__secretarioAnexar = () => {
     (document.getElementById('anexo-input') as HTMLInputElement)?.click();
@@ -411,9 +485,9 @@ function renderChatLayout(): void {
     renderListaSessoes();
     renderMensagens();
     const sessao = sessoesCache.find((s) => s.id === id);
-    const titulo = document.getElementById('chat-titulo');
-    if (titulo) titulo.textContent = tituloSessao(sessao ?? { id });
-    (document.getElementById('chat-input') as HTMLTextAreaElement)?.focus();
+    setTitulo(tituloSessao(sessao ?? { id }));
+    (document.getElementById('chat-input') as HTMLTextAreaElement | null
+      ?? document.getElementById('lat-input') as HTMLTextAreaElement | null)?.focus();
   };
 
   g.__secretarioCopyMsg = (idx: number, btn: HTMLButtonElement) => {
@@ -426,10 +500,10 @@ function renderChatLayout(): void {
     });
   };
 
-  g.__secretarioSugestao = (texto: string) => {
-    const input = document.getElementById('chat-input') as HTMLTextAreaElement | null;
+  g.__secretarioSugestao = (texto: string, alvo: Alvo = 'pagina') => {
+    const input = document.getElementById(idDe(alvo, 'input')) as HTMLTextAreaElement | null;
     if (input) input.value = texto;
-    void enviar();
+    void enviar(alvo);
   };
 }
 
@@ -493,51 +567,61 @@ function renderListaSessoes(): void {
     `).join('');
 }
 
-/** Feed de mensagens (estilo opencode: user = bloco sutil, assistant = md plano) */
-function renderMensagens(): void {
-  const el = document.getElementById('oc-feed');
-  if (!el) return;
+/** Feed de mensagens (estilo opencode: user = bloco sutil, assistant = md plano). */
+function renderMensagens(alvo: Alvo | 'ambos' = 'ambos'): void {
+  const alvos = alvosAtivos(alvo);
+  for (const a of alvos) {
+    const el = document.getElementById(idDe(a, 'corpo'));
+    if (!el) continue;
 
-  if (!mensagensCache.length) {
-    el.innerHTML = `
-      <div class="oc-vazio">
-        <div class="oc-vazio-titulo">Pergunte qualquer coisa sobre a empresa</div>
-        <div class="oc-chips">
-          ${SUGESTOES.map((s) => `<button class="chip" onclick="window.__secretarioSugestao('${escapeHtml(s).replace(/'/g, '&#39;')}')">${escapeHtml(s)}</button>`).join('')}
+    if (!mensagensCache.length) {
+      el.innerHTML = `
+        <div class="oc-vazio">
+          <div class="oc-vazio-titulo">Pergunte qualquer coisa sobre a empresa</div>
+          <div class="oc-chips">
+            ${SUGESTOES.map((s) => `<button class="chip" onclick="window.__secretarioSugestao('${escapeHtml(s).replace(/'/g, '&#39;')}', '${a}')">${escapeHtml(s)}</button>`).join('')}
+          </div>
         </div>
-      </div>
-    `;
-    return;
-  }
+      `;
+    } else {
+      el.innerHTML = mensagensCache.map((m, i) => `
+        <div class="oc-msg ${m.role === 'user' ? 'oc-user' : 'oc-assistant'}">
+          <div class="oc-msg-corpo">${m.role === 'user' ? `<p class="md-p">${escapeHtml(m.content).replace(/\n/g, '<br>')}</p>` : renderMarkdown(m.content)}</div>
+          <button class="oc-copy" title="Copiar mensagem" aria-label="Copiar mensagem" onclick="window.__secretarioCopyMsg(${i}, this)">copy</button>
+        </div>
+      `).join('');
 
-  el.innerHTML = mensagensCache.map((m, i) => `
-    <div class="oc-msg ${m.role === 'user' ? 'oc-user' : 'oc-assistant'}">
-      <div class="oc-msg-corpo">${m.role === 'user' ? `<p class="md-p">${escapeHtml(m.content).replace(/\n/g, '<br>')}</p>` : renderMarkdown(m.content)}</div>
-      <button class="oc-copy" title="Copiar mensagem" aria-label="Copiar mensagem" onclick="window.__secretarioCopyMsg(${i}, this)">copy</button>
-    </div>
-  `).join('');
-
-  // follow-ups após a última resposta do assistant
-  const ultima = mensagensCache[mensagensCache.length - 1];
-  if (ultima?.role === 'assistant' && !carregando) {
-    el.innerHTML += `
-      <div class="oc-chips oc-followups">
-        ${FOLLOWUPS.map((s) => `<button class="chip" onclick="window.__secretarioSugestao('${escapeHtml(s).replace(/'/g, '&#39;')}')">${escapeHtml(s)}</button>`).join('')}
-      </div>
-    `;
+      // follow-ups após a última resposta do assistant
+      const ultima = mensagensCache[mensagensCache.length - 1];
+      if (ultima?.role === 'assistant' && !carregando) {
+        el.innerHTML += `
+          <div class="oc-chips oc-followups">
+            ${FOLLOWUPS.map((s) => `<button class="chip" onclick="window.__secretarioSugestao('${escapeHtml(s).replace(/'/g, '&#39;')}', '${a}')">${escapeHtml(s)}</button>`).join('')}
+          </div>
+        `;
+      }
+    }
   }
 
   // indicador "Pensando..." só enquanto não há conteúdo parcial do assistant
   if (carregando && mensagensCache[mensagensCache.length - 1]?.role === 'user') {
-    el.innerHTML += `
-      <div class="oc-msg oc-assistant oc-pensando">
-        <div class="oc-msg-corpo">${statusPensando()}</div>
-      </div>
-    `;
+    for (const a of alvos) {
+      const el = document.getElementById(idDe(a, 'corpo'));
+      if (!el) continue;
+      el.innerHTML += `
+        <div class="oc-msg oc-assistant oc-pensando">
+          <div class="oc-msg-corpo">${statusPensando()}</div>
+        </div>
+      `;
+    }
   }
 
-  const container = document.getElementById('chat-mensagens');
-  if (container && pertoDoFundo) container.scrollTop = container.scrollHeight;
+  if (pertoDoFundo) {
+    for (const a of alvos) {
+      const container = document.getElementById(idDe(a, 'feed'));
+      if (container) container.scrollTop = container.scrollHeight;
+    }
+  }
 }
 
 /** Texto de status quando não há conteúdo ainda (pensando / executando ações) */
@@ -547,49 +631,52 @@ function statusPensando(): string {
     : `<span class="oc-pensando-texto">Pensando<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span></span>`;
 }
 
-/** Atualiza só a última bolha assistant (streaming — sem re-render do feed inteiro) */
+/** Atualiza só a última bolha assistant (streaming — sem re-render do feed inteiro), nas duas superfícies */
 function atualizarUltimaBolha(): void {
-  const el = document.getElementById('oc-feed');
-  if (!el) return;
-  const bolhas = el.querySelectorAll('.oc-msg.oc-assistant .oc-msg-corpo');
-  const alvo = bolhas[bolhas.length - 1] as HTMLElement | undefined;
-  if (!alvo) return;
   const ultima = mensagensCache[mensagensCache.length - 1];
   if (!ultima || ultima.role !== 'assistant') return;
-  alvo.innerHTML = ultima.content ? renderMarkdown(ultima.content) : statusPensando();
-  const container = document.getElementById('chat-mensagens');
-  if (container && pertoDoFundo) container.scrollTop = container.scrollHeight;
+  for (const a of alvosAtivos('ambos')) {
+    const el = document.getElementById(idDe(a, 'corpo'));
+    if (!el) continue;
+    const bolhas = el.querySelectorAll('.oc-msg.oc-assistant .oc-msg-corpo');
+    const alvo = bolhas[bolhas.length - 1] as HTMLElement | undefined;
+    if (!alvo) continue;
+    alvo.innerHTML = ultima.content ? renderMarkdown(ultima.content) : statusPensando();
+    const container = document.getElementById(idDe(a, 'feed'));
+    if (container && pertoDoFundo) container.scrollTop = container.scrollHeight;
+  }
 }
 
-/** Envia mensagem — streaming SSE (delta a delta) com fallback síncrono; botão vira STOP */
-async function enviar(): Promise<void> {
+/** Envia mensagem — streaming SSE (delta a delta) com fallback síncrono; botão vira STOP.
+ *  Pode disparar da página OU do chat lateral (mesma conversa, mesmo estado). */
+async function enviar(alvo: Alvo = 'pagina'): Promise<void> {
   if (carregando) {
     // segundo clique = parar
     controller?.abort();
     return;
   }
 
-  const input = document.getElementById('chat-input') as HTMLTextAreaElement | null;
-  const btn = document.getElementById('btn-enviar') as HTMLButtonElement | null;
+  const input = document.getElementById(idDe(alvo, 'input')) as HTMLTextAreaElement | null;
+  const btn = document.getElementById(idDe(alvo, 'btn')) as HTMLButtonElement | null;
   const texto = input?.value.trim();
   if (!texto || !input || !btn) return;
 
   carregando = true;
   controller = new AbortController();
   acoesEmAndamento = 0;
-  btn.innerHTML = icone('stop');
-  btn.classList.add('parando');
-  btn.setAttribute('aria-label', 'Parar resposta');
+  setBotaoEnviar(alvo, true);
 
   mensagensCache.push({ role: 'user', content: texto });
   const idxAssistant = mensagensCache.push({ role: 'assistant', content: '' }) - 1;
-  input.value = '';
-  input.style.height = 'auto';
-  sessionStorage.removeItem(CHAVE_RASCUNHO);
+  // limpa AMBAS as superfícies + rascunho (fonte única)
+  for (const a of ALVOS) {
+    const inp = document.getElementById(idDe(a, 'input')) as HTMLTextAreaElement | null;
+    if (inp) { inp.value = ''; autoAltura(inp); }
+  }
+  limparRascunho();
   renderMensagens();
   if (!sessaoAtivaId) {
-    const titulo = document.getElementById('chat-titulo');
-    if (titulo) titulo.textContent = texto.length > 50 ? texto.slice(0, 49) + '…' : texto;
+    setTitulo(texto.length > 50 ? texto.slice(0, 49) + '…' : texto);
   }
 
   try {
@@ -666,8 +753,7 @@ async function enviar(): Promise<void> {
     renderListaSessoes();
     if (eraNova) {
       const sel = sessoesCache.find((s) => s.id === sessaoAtivaId);
-      const titulo = document.getElementById('chat-titulo');
-      if (titulo && sel) titulo.textContent = tituloSessao(sel);
+      if (sel) setTitulo(tituloSessao(sel));
     }
   } catch (e) {
     const err = e as Error;
@@ -682,9 +768,7 @@ async function enviar(): Promise<void> {
   } finally {
     carregando = false;
     controller = null;
-    btn.innerHTML = icone('run');
-    btn.classList.remove('parando');
-    btn.setAttribute('aria-label', 'Enviar mensagem');
+    setBotaoEnviar(alvo, false);
     renderMensagens();
   }
 }
@@ -699,4 +783,81 @@ function renderErro(): void {
     </div>
     ${estadoErro('Não foi possível conectar ao secretário.', () => { void renderSecretario(); })}
   `;
+}
+
+/**
+ * Renderiza o chat DENTRO do drawer lateral (Etapa 1.2) — mesma conversa,
+ * mesmo estado, mesmo rascunho da página. Chamado a cada abrirChatLateral();
+ * o DOM do drawer é estático no index.html (sobrevive à navegação).
+ */
+export async function renderChatLateral(): Promise<void> {
+  const mensagens = document.getElementById('lat-mensagens');
+  if (!mensagens) return;
+
+  // handlers globais precisam existir mesmo sem a página ter sido aberta
+  exporHandlersChat();
+
+  try {
+    const status = await q<SecretarioStatus>('/secretario/status');
+    if (!status.rodando) {
+      renderStandbyLateral();
+      return;
+    }
+
+    // sessões: garante cache (a página pode nunca ter sido aberta)
+    if (!sessoesCache.length) await carregarSessoes();
+    setTitulo(sessaoAtivaId ? tituloSessao(sessoesCache.find((s) => s.id === sessaoAtivaId) ?? { id: sessaoAtivaId }) : 'Nova conversa');
+
+    renderMensagens('lateral');
+
+    const ta = document.getElementById('lat-input') as HTMLTextAreaElement | null;
+    if (ta) {
+      ta.value = getRascunho();
+      autoAltura(ta);
+      ta.focus();
+    }
+    const btn = document.getElementById('lat-enviar');
+    if (btn) btn.innerHTML = carregando ? icone('stop') : icone('run');
+
+    // listener de scroll compartilhado (uma vez por elemento)
+    if (!mensagens.dataset.scrollOk) {
+      mensagens.dataset.scrollOk = '1';
+      mensagens.addEventListener('scroll', () => {
+        pertoDoFundo = mensagens.scrollHeight - mensagens.scrollTop - mensagens.clientHeight < 80;
+      });
+    }
+  } catch (e) {
+    mensagens.innerHTML = `
+      <div class="oc-feed"><div class="oc-vazio">
+        <div class="oc-vazio-titulo">Erro ao conectar</div>
+        <p class="text-zinc-500 text-sm">${escapeHtml((e as Error).message)}</p>
+      </div></div>
+    `;
+  }
+}
+
+/** Standby dentro do drawer: botão Iniciar sem sair da página atual. */
+function renderStandbyLateral(): void {
+  const mensagens = document.getElementById('lat-mensagens');
+  if (!mensagens) return;
+  mensagens.innerHTML = `
+    <div class="oc-feed"><div class="oc-vazio">
+      <div class="oc-vazio-titulo">Secretário em standby</div>
+      <button class="btn" id="lat-iniciar">${icone('run')} Iniciar secretário</button>
+      <p class="text-zinc-500 text-sm mt-3">Pode demorar ~10s para subir o servidor.</p>
+    </div></div>
+  `;
+  document.getElementById('lat-iniciar')?.addEventListener('click', async () => {
+    const btn = document.getElementById('lat-iniciar') as HTMLButtonElement | null;
+    if (btn) { btn.disabled = true; btn.innerHTML = `${icone('spark')} Iniciando…`; }
+    try {
+      await api('/secretario/start', { method: 'POST' });
+      toast('Secretário iniciado', 'ok');
+      await renderChatLateral();
+      if (document.body.classList.contains('view-secretario')) void renderSecretario();
+    } catch (e) {
+      toast('Erro ao iniciar: ' + (e as Error).message, 'erro');
+      if (btn) { btn.disabled = false; btn.innerHTML = `${icone('run')} Iniciar secretário`; }
+    }
+  });
 }

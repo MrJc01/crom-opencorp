@@ -36,6 +36,18 @@
 /* Legado em layer components: utilitários Tailwind/DaisyUI ganham daqui em diante */
 @import "./legacy.css" layer(components);
 
+/* ========= CHAT LATERAL GLOBAL (PLANO-PAINEL-V2 — Etapa 1) ========= */
+/* Botão floating (P-14/P-19): escondido na página do Secretário e com o drawer aberto */
+.fab-chat{position:fixed;bottom:1.5rem;right:1.5rem;z-index:30;width:52px;height:52px;min-width:52px;min-height:52px;border-radius:9999px;background:var(--accent);color:#fff;border:1px solid #1d4ed8;box-shadow:0 8px 24px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:0}
+.fab-chat:hover{background:#1d4ed8}
+.fab-chat svg{width:22px;height:22px}
+body.chat-lateral-aberto .fab-chat{display:none}
+body.view-secretario .fab-chat{display:none}
+
+/* Drawer do chat: um pouco mais largo que o de task; tela cheia no mobile (P-19) */
+.drawer-chat{width:420px}
+@media(max-width:768px){.drawer-chat{width:100vw}}
+
 /* ========= PAINEL V2 — ETAPA 0 (PLANO-PAINEL-V2) ========= */
 
 /* Scrollbar invisível mantendo a rolagem (P-16: padrões VS Code/ChatGPT) */

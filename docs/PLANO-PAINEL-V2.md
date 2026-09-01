@@ -135,13 +135,13 @@
 - [x] 0.6 Tasks: overflow scroll em cada coluna kanban (backlog/fazendo/bloqueado/feito) *(≥1025px colunas com rolagem própria; abaixo, empilhamento natural)*
 - **Aceite**: shell único; navbar colapsa e persiste; zero scrollbars "feios". — **Validado por QA + Revisor em 3ª pessoa**: build 0 erros, 472 unitários, e2e completa com falhas idênticas ao baseline documentado (agenda ×5 + chat markdown ×1).
 
-### Etapa 1 — Secretário v2: layout + chat lateral global *(P-23, P-18, P-19, P-21-parte)*
-- [ ] 1.1 Layout estilo ChatGPT/opencode (feed centrado, largura máx, composer fixo, cabeçalho de sessão)
-- [ ] 1.2 Primitiva drawer-direito global (`ui/drawer`) — chat disponível em TODAS as páginas
-- [ ] 1.3 Botão no Secretário que abre o chat lateral (desktop)
-- [ ] 1.4 Botão floating global; no mobile o drawer abre **tela cheia**
-- [ ] 1.5 Estado do input não-enviado: fonte única (módulo singleton + persistência local), **sincronizado** entre página Secretário e drawer; sobrevive navegação e refresh
-- **Aceite**: conversar de qualquer página; input nunca se perde; nada duplicado.
+### Etapa 1 — Secretário v2: layout + chat lateral global *(P-23, P-18, P-19, P-21-parte)* ✅ 2026-09-01
+- [x] 1.1 Layout estilo ChatGPT/opencode (feed centrado, largura máx, composer fixo, cabeçalho de sessão) *(já vigente desde v0.6 — .oc-feed 760px + composer; mantido e reutilizado pelo lateral)*
+- [x] 1.2 Primitiva drawer-direito global (`ui/drawer`) — chat disponível em TODAS as páginas *(chat-lateral.ts + #chat-drawer estático no index.html; sobrevive à navegação; mesma conversa/estado da página via superfícies 'pagina'|'lateral' em secretario.ts)*
+- [x] 1.3 Botão no Secretário que abre o chat lateral (desktop) *(#btn-chat-lateral no header do chat)*
+- [x] 1.4 Botão floating global; no mobile o drawer abre **tela cheia** *(#fab-chat com z-30, oculto na view Secretário e com drawer aberto; ≤768px width 100vw — e2e valida)*
+- [x] 1.5 Estado do input não-enviado: fonte única (módulo singleton + persistência local), **sincronizado** entre página Secretário e drawer; sobrevive navegação e refresh *(src/web/rascunho.ts — oc-chat-rascunho; __chatRascunhoInput sincroniza as duas textareas)*
+- **Aceite**: conversar de qualquer página; input nunca se perde; nada duplicado. — e2e novo chat-lateral.spec 4/4 (FAB, sync bidirecional, persistência reload, mobile fullscreen, FAB oculto no Secretário); unitários 472; suite completa = baseline (agenda ×5 + chat markdown ×1); fix de design: superfície lateral só renderiza com drawer aberto (evita duplicação em strict mode).
 
 ### Etapa 2 — Composer inteligente: / @ ! *(P-20, P-22)*
 - [ ] 2.1 Parser do composer: `/` comandos, `@` contexto, `!` terminal (tokens destacados no input)
