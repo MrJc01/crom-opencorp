@@ -85,7 +85,8 @@ test.describe("CRUD via UI (F2)", () => {
     });
     if (respA.status() >= 400 && respA.status() !== 409) throw new Error(`seed agente falhou: ${respA.status()}`);
 
-    await page.click('.nav-item[data-view="reunioes"]');
+    // Reuniões saiu do navbar (P-13) — navegação direta pela rota (aba do Secretário)
+    await page.evaluate(() => { window.location.hash = "#/reunioes"; });
     await page.waitForURL("**/#/reunioes");
     await esperarElementoTexto(page, "Reuniões");
 

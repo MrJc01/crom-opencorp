@@ -67,7 +67,7 @@ export async function renderTasks(): Promise<void> {
         <span class="kanban-title capitalize">${escapeHtml(col)}${AJUDA_COLUNA[col] ? ajudaKanban(col) : ''}</span>
         <span class="kanban-count">${colTasks.length}</span>
       </div>
-      <div class="kanban-cards" id="kanban-${escapeHtml(col)}"></div>
+      <div class="kanban-cards scrollbar-thin" id="kanban-${escapeHtml(col)}"></div>
     `;
     kb.appendChild(div);
     const container = div.querySelector('#kanban-' + escapeHtml(col));

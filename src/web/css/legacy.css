@@ -290,7 +290,8 @@ button{white-space:nowrap}
 }
 
 /* ========= CONFIG (abas, campos, toggle, secrets) ========= */
-.config-abas{display:flex;gap:.5rem;overflow-x:auto;padding-bottom:.25rem;scrollbar-width:thin}
+.config-abas{display:flex;gap:.5rem;overflow-x:auto;padding-bottom:.25rem;scrollbar-width:none}
+.config-abas::-webkit-scrollbar{display:none}
 .config-aba{white-space:nowrap;display:inline-flex;align-items:center;gap:.35rem;padding:.4rem .7rem;border-radius:.375rem}
 .config-aba-ativa{background:var(--accent);color:#fff;border-color:var(--accent)}
 .cfg-campo{display:flex;flex-direction:column;gap:.35rem;padding:.9rem 0;border-bottom:1px solid var(--border)}

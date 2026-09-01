@@ -126,14 +126,14 @@
 
 > Ordem = dependência + valor. Cada etapa fecha com build + testes verdes e commits separados.
 
-### Etapa 0 — Fundação: shell central, navbar e primitivas de layout *(P-16, P-13, P14, P-15, P-28)*
-- [ ] 0.1 Decisão de design registrada: copiar padrões Preline (não adotar bundle); primitivas próprias em `src/web/ui/` (drawer, tabs, dropdown, scrollbar-none) — ~150-250 linhas TS
-- [ ] 0.2 Main central padronizado: todas as views dentro do mesmo shell (consolidar HTML canônico web-dist ↔ views)
-- [ ] 0.3 Navbar: scrollbar invisível (padrão) em `#nav` e onde houver rolagem
-- [ ] 0.4 Collapse do navbar no desktop (toggle ícone-only, estado em localStorage)
-- [ ] 0.5 Remover "Reuniões" do navbar (fica acessível como aba do Secretário — já é assim)
-- [ ] 0.6 Tasks: overflow scroll em cada coluna kanban (backlog/fazendo/bloqueado/feito)
-- **Aceite**: shell único; navbar colapsa e persiste; zero scrollbars "feios".
+### Etapa 0 — Fundação: shell central, navbar e primitivas de layout *(P-16, P-13, P14, P-15, P-28)* ✅ 2026-09-01
+- [x] 0.1 Decisão de design registrada: copiar padrões Preline (não adotar bundle); primitivas próprias em `src/web/ui/` (drawer, tabs, dropdown, scrollbar-none) — ~150-250 linhas TS *(primitivas.ts: posicaoMenu, ocultarScrollbar, criarControladorDrawer, criarTabs; 7 testes unitários puros)*
+- [x] 0.2 Main central padronizado: todas as views dentro do mesmo shell (consolidar HTML canônico web-dist ↔ views) *(shell único já vigente — revisor confirmou; nenhuma view fora do shell)*
+- [x] 0.3 Navbar: scrollbar invisível (padrão) em `#nav` e onde houver rolagem *(scrollbar-none no #nav e config-abas; scrollbar-thin nas colunas kanban)*
+- [x] 0.4 Collapse do navbar no desktop (toggle ícone-only, estado em localStorage) *(body.sidebar-colapsada ≥769px, chave oc-sidebar-colapsada, e2e de persistência)*
+- [x] 0.5 Remover "Reuniões" do navbar (fica acessível como aba do Secretário — já é assim) *(rota #/reunioes mantida; e2e garante ausência no navbar + rota funcionando)*
+- [x] 0.6 Tasks: overflow scroll em cada coluna kanban (backlog/fazendo/bloqueado/feito) *(≥1025px colunas com rolagem própria; abaixo, empilhamento natural)*
+- **Aceite**: shell único; navbar colapsa e persiste; zero scrollbars "feios". — **Validado por QA + Revisor em 3ª pessoa**: build 0 erros, 472 unitários, e2e completa com falhas idênticas ao baseline documentado (agenda ×5 + chat markdown ×1).
 
 ### Etapa 1 — Secretário v2: layout + chat lateral global *(P-23, P-18, P-19, P-21-parte)*
 - [ ] 1.1 Layout estilo ChatGPT/opencode (feed centrado, largura máx, composer fixo, cabeçalho de sessão)

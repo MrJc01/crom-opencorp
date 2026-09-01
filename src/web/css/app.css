@@ -35,3 +35,49 @@
 
 /* Legado em layer components: utilitários Tailwind/DaisyUI ganham daqui em diante */
 @import "./legacy.css" layer(components);
+
+/* ========= PAINEL V2 — ETAPA 0 (PLANO-PAINEL-V2) ========= */
+
+/* Scrollbar invisível mantendo a rolagem (P-16: padrões VS Code/ChatGPT) */
+.scrollbar-none{scrollbar-width:none;-ms-overflow-style:none}
+.scrollbar-none::-webkit-scrollbar{display:none}
+
+/* Tabs acessíveis (primitiva ui/primitivas.ts — usada por terminais etc.) */
+.ui-tab{background:transparent;border:1px solid transparent;color:var(--muted);font-size:.8125rem;padding:.4rem .8rem;border-radius:.375rem;white-space:nowrap}
+.ui-tab:hover{background:#262626;color:var(--text)}
+.ui-tab-ativa{background:var(--bg);border-color:var(--border);color:var(--text);font-weight:500}
+
+/* Botão de colapso do navbar (P-14) — não existe no mobile (hamburger cuida disso) */
+.sidebar-collapse{background:transparent;border:none;color:var(--muted);width:28px;height:28px;min-width:28px;min-height:28px;padding:0;border-radius:.375rem;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.sidebar-collapse:hover{background:#262626;color:var(--text)}
+.sidebar-collapse svg{width:16px;height:16px;transition:transform .2s ease}
+body.sidebar-colapsada .sidebar-collapse svg{transform:rotate(180deg)}
+@media(max-width:768px){.sidebar-collapse{display:none}}
+
+/* Estado colapsado — só desktop (mobile usa off-canvas hamburger) */
+@media(min-width:769px){
+  body.sidebar-colapsada .sidebar{width:64px}
+  body.sidebar-colapsada .main{margin-left:64px}
+  body.sidebar-colapsada .sidebar-logo-text,
+  body.sidebar-colapsada .nav-label,
+  body.sidebar-colapsada .nav-grupo,
+  body.sidebar-colapsada #bloco-workspace,
+  body.sidebar-colapsada #conn-text,
+  body.sidebar-colapsada .sidebar-logout,
+  body.sidebar-colapsada .version{display:none}
+  body.sidebar-colapsada .nav-item{justify-content:center;padding:.625rem .5rem;margin:.125rem .25rem}
+  body.sidebar-colapsada .sidebar-footer{padding:.75rem .5rem}
+}
+
+/* Tasks: cada coluna do kanban rola dentro de si (P-15) — a partir de 1025px
+ * (grid de 4 colunas). Abaixo disso as colunas empilham com altura natural
+ * e a página rola (padrão responsivo; a regra W1 de flex horizontal do
+ * legacy.css já não vence a layer utilities do Tailwind). */
+#kanban{height:calc(100dvh - 240px);min-height:420px}
+#kanban.grid{grid-auto-rows:1fr}
+.kanban-col{min-height:0;height:100%}
+@media(max-width:1024px){
+  #kanban{height:auto;min-height:0;grid-auto-rows:auto}
+  .kanban-col{height:auto;min-height:200px}
+}
+

@@ -5,7 +5,6 @@ const views = [
   { hash: "home", titulo: "Operação hoje" },
   { hash: "tasks", titulo: "Tasks" },
   { hash: "agenda", titulo: "Agenda" },
-  { hash: "reunioes", titulo: "Reuniões" },
   { hash: "fluxos", titulo: "Fluxos" },
   { hash: "historico", titulo: "Histórico" },
   { hash: "secretario", titulo: "Secretário" },
@@ -30,11 +29,40 @@ test.describe("Navegação Sidebar", () => {
       // Verifica se o título da view aparece
       await esperarElementoTexto(page, view.titulo);
       // Verifica se a view está ativa
-      // Reuniões agora é uma ABA dentro da página do Secretário (PLANO-WEB-CRUD D):
-      // o hash #/reunioes ativa #view-secretario e mostra o painel de reuniões.
-      const sectionHash = view.hash === 'reunioes' ? 'secretario' : view.hash;
-      const viewEl = page.locator(`#view-${sectionHash}`);
+      const viewEl = page.locator(`#view-${view.hash}`);
       await expect(viewEl).toHaveClass(/active/);
     });
   }
+
+  test("Reuniões saiu do navbar (P-13) mas a rota #/reunioes continua funcionando como aba do Secretário", async ({ page }) => {
+    await page.goto("/");
+    await esperarNavegacao(page, "home");
+    await expect(page.locator('.nav-item[data-view="reunioes"]')).toHaveCount(0);
+    await page.evaluate(() => { window.location.hash = "#/reunioes"; });
+    await page.waitForURL("**/#/reunioes");
+    await esperarElementoTexto(page, "Reuniões");
+    // Reuniões vive DENTRO da página do Secretário (aba) — PLANO-WEB-CRUD D
+    await expect(page.locator("#view-secretario")).toHaveClass(/active/);
+  });
+
+  test("botão recolher esconde labels do navbar e persiste após reload (P-14)", async ({ page }) => {
+    await page.goto("/");
+    await esperarNavegacao(page, "home");
+    await expect(page.locator("body")).not.toHaveClass(/sidebar-colapsada/);
+
+    await page.click("#sidebar-collapse-btn");
+    await expect(page.locator("body")).toHaveClass(/sidebar-colapsada/);
+    await expect(page.locator(".nav-label").first()).toBeHidden();
+    await expect(page.locator("#nav-icon-tasks")).toBeVisible();
+
+    // Persistência: recarrega e o estado colapsado volta
+    await page.reload();
+    await esperarNavegacao(page, "home");
+    await expect(page.locator("body")).toHaveClass(/sidebar-colapsada/);
+
+    // Volta ao normal
+    await page.click("#sidebar-collapse-btn");
+    await expect(page.locator("body")).not.toHaveClass(/sidebar-colapsada/);
+    await expect(page.locator(".nav-label").first()).toBeVisible();
+  });
 });

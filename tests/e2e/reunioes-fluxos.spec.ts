@@ -10,7 +10,8 @@ test.describe("Reuniões e Fluxos", () => {
   });
 
   test("Reuniões: renderiza com estado vazio que ensina + form de convocar reunião existe (textarea pauta)", async ({ page }) => {
-    await page.click('.nav-item[data-view="reunioes"]');
+    // Reuniões saiu do navbar (P-13) — navegação direta pela rota (aba do Secretário)
+    await page.evaluate(() => { window.location.hash = "#/reunioes"; });
     await page.waitForURL("**/#/reunioes");
     await esperarElementoTexto(page, "Reuniões");
 

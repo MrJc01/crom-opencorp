@@ -25,32 +25,32 @@
 
 <div id="app" class="hidden">
   <aside class="sidebar" id="sidebar">
-    <div class="p-4 border-b border-zinc-800">
-      <h1 class="text-xl font-bold flex items-center gap-2" id="sidebar-logo"></h1>
+    <div class="p-4 border-b border-zinc-800 flex items-center gap-2">
+      <h1 class="text-xl font-bold flex items-center gap-2 flex-1 min-w-0" id="sidebar-logo"></h1>
+      <button class="sidebar-collapse" id="sidebar-collapse-btn" title="Recolher/expandir menu" onclick="toggleSidebarCollapse()"></button>
     </div>
-    <div class="p-4 border-b border-zinc-800">
+    <div class="p-4 border-b border-zinc-800" id="bloco-workspace">
       <label class="block text-xs text-zinc-500 mb-1">Workspace <span class="help-wrap"><button class="help-btn" aria-label="Ajuda: workspace" onclick="window.__ajuda(event, 'workspace')">?</button></span></label>
       <div class="flex gap-2">
         <select id="ws-select" class="flex-1"></select>
         <button class="btn" onclick="novoWorkspace()" title="Novo workspace" aria-label="Novo workspace">+</button>
       </div>
     </div>
-    <nav class="flex-1 p-2 overflow-y-auto" id="nav">
-      <button class="nav-item active" data-view="home" onclick="navegar('home')"><span class="nav-icon" id="nav-icon-home"></span>Início</button>
+    <nav class="flex-1 p-2 overflow-y-auto scrollbar-none" id="nav">
+      <button class="nav-item active" data-view="home" onclick="navegar('home')" title="Início"><span class="nav-icon" id="nav-icon-home"></span><span class="nav-label">Início</span></button>
       <div class="nav-grupo">Operação</div>
-      <button class="nav-item" data-view="tasks" onclick="navegar('tasks')"><span class="nav-icon" id="nav-icon-tasks"></span>Tasks</button>
-      <button class="nav-item" data-view="agentes" onclick="navegar('agentes')"><span class="nav-icon" id="nav-icon-agentes"></span>Agentes</button>
-      <button class="nav-item" data-view="secretario" onclick="navegar('secretario')"><span class="nav-icon" id="nav-icon-secretario"></span>Secretário</button>
+      <button class="nav-item" data-view="tasks" onclick="navegar('tasks')" title="Tasks"><span class="nav-icon" id="nav-icon-tasks"></span><span class="nav-label">Tasks</span></button>
+      <button class="nav-item" data-view="agentes" onclick="navegar('agentes')" title="Agentes"><span class="nav-icon" id="nav-icon-agentes"></span><span class="nav-label">Agentes</span></button>
+      <button class="nav-item" data-view="secretario" onclick="navegar('secretario')" title="Secretário"><span class="nav-icon" id="nav-icon-secretario"></span><span class="nav-label">Secretário</span></button>
       <div class="nav-grupo">Automação</div>
-      <button class="nav-item" data-view="agenda" onclick="navegar('agenda')"><span class="nav-icon" id="nav-icon-agenda"></span>Agenda</button>
-      <button class="nav-item" data-view="fluxos" onclick="navegar('fluxos')"><span class="nav-icon" id="nav-icon-fluxos"></span>Fluxos</button>
-      <button class="nav-item" data-view="hooks" onclick="navegar('hooks')"><span class="nav-icon" id="nav-icon-hooks"></span>Hooks</button>
-      <button class="nav-item" data-view="reunioes" onclick="navegar('reunioes')"><span class="nav-icon" id="nav-icon-reunioes"></span>Reuniões</button>
+      <button class="nav-item" data-view="agenda" onclick="navegar('agenda')" title="Agenda"><span class="nav-icon" id="nav-icon-agenda"></span><span class="nav-label">Agenda</span></button>
+      <button class="nav-item" data-view="fluxos" onclick="navegar('fluxos')" title="Fluxos"><span class="nav-icon" id="nav-icon-fluxos"></span><span class="nav-label">Fluxos</span></button>
+      <button class="nav-item" data-view="hooks" onclick="navegar('hooks')" title="Hooks"><span class="nav-icon" id="nav-icon-hooks"></span><span class="nav-label">Hooks</span></button>
       <div class="nav-grupo">Dados</div>
-      <button class="nav-item" data-view="historico" onclick="navegar('historico')"><span class="nav-icon" id="nav-icon-historico"></span>Histórico</button>
-      <button class="nav-item" data-view="apps" onclick="navegar('apps')"><span class="nav-icon" id="nav-icon-apps"></span>Apps</button>
+      <button class="nav-item" data-view="historico" onclick="navegar('historico')" title="Histórico"><span class="nav-icon" id="nav-icon-historico"></span><span class="nav-label">Histórico</span></button>
+      <button class="nav-item" data-view="apps" onclick="navegar('apps')" title="Apps"><span class="nav-icon" id="nav-icon-apps"></span><span class="nav-label">Apps</span></button>
       <div class="nav-grupo">Sistema</div>
-      <button class="nav-item" data-view="config" onclick="navegar('config')"><span class="nav-icon" id="nav-icon-config"></span>Config</button>
+      <button class="nav-item" data-view="config" onclick="navegar('config')" title="Config"><span class="nav-icon" id="nav-icon-config"></span><span class="nav-label">Config</span></button>
     </nav>
     <div class="sidebar-footer">
       <div class="connection-status">

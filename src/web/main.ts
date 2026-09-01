@@ -13,7 +13,7 @@
  *   - SSE reconecta só com token (conectarSSE() é no-op sem token).
  */
 
-import { icone } from "./icons.js";
+import { icone, ICONES } from "./icons.js";
 import { initRouter, fecharDrawer, abrirDrawer, navegar, parseHash } from "./router.js";
 import { exporAjuda } from "./help.js";
 import { loadPersistedAuth, setToken, setWsAtivo, getToken, setSseConnected, setEventSource, setRefreshInterval, getRefreshInterval, getViewAtual, getEventSource, clearAuth, getWsAtivo } from "./state.js";
@@ -45,12 +45,12 @@ export function configurarIconesIniciais(): void {
   if (iconesConfigurados) return;
   iconesConfigurados = true;
   document.getElementById('login-logo')?.insertAdjacentHTML('beforeend', icone('home', 'text-3xl'));
-  document.getElementById('sidebar-logo')?.insertAdjacentHTML('beforeend', icone('home', 'mr-2') + 'opencorp');
+  document.getElementById('sidebar-logo')?.insertAdjacentHTML('beforeend', icone('home', 'mr-2') + '<span class="sidebar-logo-text">opencorp</span>');
+  document.getElementById('sidebar-collapse-btn')?.insertAdjacentHTML('beforeend', ICONES.chevron);
   document.getElementById('nav-icon-home')?.insertAdjacentHTML('beforeend', icone('home'));
   document.getElementById('nav-icon-tasks')?.insertAdjacentHTML('beforeend', icone('tasks'));
   document.getElementById('nav-icon-agentes')?.insertAdjacentHTML('beforeend', icone('teams'));
   document.getElementById('nav-icon-agenda')?.insertAdjacentHTML('beforeend', icone('agenda'));
-  document.getElementById('nav-icon-reunioes')?.insertAdjacentHTML('beforeend', icone('reunioes'));
   document.getElementById('nav-icon-fluxos')?.insertAdjacentHTML('beforeend', icone('fluxos'));
   document.getElementById('nav-icon-hooks')?.insertAdjacentHTML('beforeend', icone('hook'));
   document.getElementById('nav-icon-apps')?.insertAdjacentHTML('beforeend', icone('apps'));
@@ -330,6 +330,7 @@ export function boot(): void {
   exporGlobais();
   exporAjuda();
   exporWizard();
+  aplicarColapsoPersistido();
 
   const { token, ws } = loadPersistedAuth();
   if (token) setToken(token);
@@ -370,12 +371,28 @@ export function toggleSidebar(acao?: boolean): void {
   backdrop?.classList.toggle('open', abrir);
 }
 
+const CHAVE_COLAPSO = 'oc-sidebar-colapsada';
+
+/** Colapso do navbar no desktop (P-14): aplica estado persistido ao bootar. */
+export function aplicarColapsoPersistido(): void {
+  if (localStorage.getItem(CHAVE_COLAPSO) === '1') {
+    document.body.classList.add('sidebar-colapsada');
+  }
+}
+
+/** Recolhe/expande o navbar (desktop) e persiste a escolha. */
+export function toggleSidebarCollapse(): void {
+  const on = document.body.classList.toggle('sidebar-colapsada');
+  localStorage.setItem(CHAVE_COLAPSO, on ? '1' : '0');
+}
+
 /** Torna funções globais para onclick/HTML inline */
 export function exporGlobais(): void {
   const g = window as unknown as Record<string, unknown>;
   g.navegar = navegar;
   g.parseHash = parseHash;
   g.toggleSidebar = toggleSidebar;
+  g.toggleSidebarCollapse = toggleSidebarCollapse;
   g.abrirDrawer = abrirDrawer;
   g.fecharDrawer = fecharDrawer;
   g.criarTask = criarTask;
