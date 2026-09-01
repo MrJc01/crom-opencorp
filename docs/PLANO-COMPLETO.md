@@ -85,10 +85,10 @@
 - **P cobre:** P-29
 
 ### Etapa 1c — Estrutura Preline (não só CSS, mas páginas) *(P-28)*
-- [ ] 1.8 **Main + topbar sticky**: `header` com `breadcrumb ol + busca global + avatar/ações` dentro do `main`
-- [ ] 1.9 **Page-header padronizado** (`flex justify-between`): `breadcrumb > H1 + subtítulo` + `toolbar (busca/filtros/CTA)` — aplicar em **todas**: home (KPI 4-col), tasks (toolbar + board), agentes (tabela avatar/badge), workspace (breadcrumb caminho), secretário (splitter 3-col), apps/config (tabs)
-- [ ] 1.10 **Card/design system**: `border-zinc-800 rounded-lg p-4/6 + shadow-sm hover:shadow-md`, tipografia `H1 1.5rem/700`, inputs `pl-9 com ícone + ring`, botões `h-9 font-medium`, empty-states ilustrados — sem bundle
-- [ ] 1.11 Templates de referência mapeados: Dashboard→home, Kanban→tasks, User Tables→agentes, File Views→workspace, Chat Workspace/AI Chat→secretário, Settings Modals→apps/config
+- [x] 1.8 **Main + topbar sticky**: `header` com `breadcrumb ol + busca global + avatar/ações` dentro do `main`
+- [x] 1.9 **Page-header padronizado** (`flex justify-between`): `breadcrumb > H1 + subtítulo` + `toolbar (busca/filtros/CTA)` — aplicar em **todas**: home (KPI 4-col), tasks (toolbar + board), agentes (tabela avatar/badge), workspace (breadcrumb caminho), secretário (splitter 3-col), apps/config (tabs)
+- [x] 1.10 **Card/design system**: `border-zinc-800 rounded-lg p-4/6 + shadow-sm hover:shadow-md`, tipografia `H1 1.5rem/700`, inputs `pl-9 com ícone + ring`, botões `h-9 font-medium`, empty-states ilustrados — sem bundle
+- [x] 1.11 Templates de referência mapeados: Dashboard→home, Kanban→tasks, User Tables→agentes, File Views→workspace, Chat Workspace/AI Chat→secretário, Settings Modals→apps/config
 - **P cobre:** P-28
 
 ### Etapa 2 — Composer `/ @ !` ✅ 2026-09-01
@@ -121,13 +121,13 @@
 - [x] 5.4 Guard único em `SessionManager.rodar` + `409` em `POST /agents/:id/run`; `@` lista só ativos
 - **P cobre:** P-12
 
-### Etapa 6 — Reuniões v2 *(P-25/26)* — 95% pronta, falta commit
+### Etapa 6 — Reuniões v2 *(P-25/26)* ✅ 2026-09-01
 - [x] 6.1 Core buffer vivo (`reuniao-<ts+random>`, `anexarBuffer`, `estadoSala`, `MARCA_CONSENSO`)
 - [x] 6.2 Chat em grupo: seleção de participantes, loop com consenso (`pediram.size >= total`), moderador
 - [x] Agendável: `opencorp meeting iniciar --nao-interativo --pauta "..." --agentes a,b` (detached), `POST /meetings → {id}`, agendamento via `POST /schedules`
 - [x] 6.4 Sala ao vivo: poll 2s, feed com `escapeHtml`, `encerrarReuniao`/`fecharSalaViva`, SSE guard (`isSalaAoVivoAberta`)
-- [ ] Correções pendentes do revisor: `salasVivas(wsPath)` filtrar por workspace, `gerarId` com random (feito), `onclick` → `encodeURIComponent`, `criarAgendaReuniao` toast (feitos)
-- [ ] Commit + e2e `reunioes-v2.spec` final
+- [x] Correções do revisor: `salasVivas(wsPath)` filtrar por workspace, `gerarId` com random (feito), `onclick` → `encodeURIComponent`, `criarAgendaReuniao` toast (feitos)
+- [x] Commit + e2e `reunioes-v2.spec` (3/3)
 - **P cobre:** P-25, P-26
 
 ### Etapa 7 — Notificações *(P-24)*
