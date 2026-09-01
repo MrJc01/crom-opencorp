@@ -130,10 +130,10 @@
 - [x] Commit + e2e `reunioes-v2.spec` (3/3)
 - **P cobre:** P-25, P-26
 
-### Etapa 7 — Notificações *(P-24)*
-- [ ] 7.1 Store por workspace + `GET /notifications` / `POST /notifications` + `PATCH :id/lida`
-- [ ] 7.2 Tool `notificar` em `ToolRegistry` + guidance nos prompts
-- [ ] 7.3 Página com feed lidas/não lidas + badge no navbar + push `SSE`
+### Etapa 7 — Notificações *(P-24)* ✅ 2026-09-01
+- [x] 7.1 Store por workspace + `GET /notifications` / `POST /notifications` + `PATCH :id/lida`
+- [x] 7.2 Tool `notificar` em `ToolRegistry` + guidance nos prompts
+- [x] 7.3 Página com feed lidas/não lidas + badge no navbar + push `SSE`
 - **P cobre:** P-24
 
 ### Etapa 8 — Config fix *(P-27)* ✅ 2026-09-01
@@ -141,9 +141,9 @@
 - [x] 8.2 Badges de origem + `PUT` coerente + e2e de regressão
 - **P cobre:** P-27
 
-### Etapa 9 — Home dashboard *(P-17)*
-- [ ] 9.1 Infos importantes (tasks vencidas, custos do dia, saúde daemon/scheduler, fluxos ativos, notificações)
-- [ ] 9.2 Barra de comando que inicia conversa no Secretário (reusa composer `/ @ !`)
+### Etapa 9 — Home dashboard *(P-17)* ✅ 2026-09-01
+- [x] 9.1 Infos importantes (tasks vencidas, custos do dia, saúde daemon/scheduler, fluxos ativos, notificações)
+- [x] 9.2 Barra de comando que inicia conversa no Secretário (reusa composer `/ @ !`)
 - **P cobre:** P-17 (estrutura Preline aplicada aqui também)
 
 ### Etapa 10 — Integrações: análise *(P-11)*
