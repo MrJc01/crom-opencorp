@@ -30,6 +30,7 @@ import { renderAppDetail } from "./views/app-detail.js";
 import { renderHistorico } from "./views/historico.js";
 import { renderSecretario, secretarioAba } from "./views/secretario.js";
 import { renderConfig } from "./views/config.js";
+import { renderWorkspace } from "./views/workspace.js";
 import { abrirWizard, exporWizard } from "./views/wizard.js";
 import { abrirChatLateral, fecharChatLateral, alternarChatLateral } from "./chat-lateral.js";
 import { registrarMenuContexto } from "./menu-contexto.js";
@@ -54,6 +55,7 @@ export function configurarIconesIniciais(): void {
   document.getElementById('nav-icon-agentes')?.insertAdjacentHTML('beforeend', icone('teams'));
   document.getElementById('nav-icon-agenda')?.insertAdjacentHTML('beforeend', icone('agenda'));
   document.getElementById('nav-icon-fluxos')?.insertAdjacentHTML('beforeend', icone('fluxos'));
+  document.getElementById('nav-icon-workspace')?.insertAdjacentHTML('beforeend', icone('folder'));
   document.getElementById('nav-icon-hooks')?.insertAdjacentHTML('beforeend', icone('hook'));
   document.getElementById('nav-icon-apps')?.insertAdjacentHTML('beforeend', icone('apps'));
   document.getElementById('nav-icon-historico')?.insertAdjacentHTML('beforeend', icone('history'));
@@ -271,6 +273,9 @@ export async function iniciarApp(): Promise<void> {
   const interval = setInterval(() => {
     const view = getViewAtual();
     if (view === 'secretario') return;
+    // Workspace (Etapa 3): editor/árvore vivem em memória do módulo — a re-render
+    // de 8s não tem nada a acrescentar e poderia atrapalhar quem está editando.
+    if (view === 'workspace') return;
     const drawer = document.getElementById('drawer');
     if (drawer?.classList.contains('open')) return;
     const ativo = document.activeElement as HTMLElement | null;
@@ -315,6 +320,7 @@ export async function renderView(): Promise<void> {
     case 'app-detail': await renderAppDetail(); break;
     case 'historico': await renderHistorico(); break;
     case 'secretario': await renderSecretario(); break;
+    case 'workspace': await renderWorkspace(); break;
     case 'config': await renderConfig(); break;
   }
 }

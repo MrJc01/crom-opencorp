@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, resolve, relative, isAbsolute } from "node:path";
-import { stat, readdir, readFile } from "node:fs/promises";
+import { stat, readdir, readFile, realpath } from "node:fs/promises";
 import { existsSync, statSync, readFileSync } from "node:fs";
 import { WorkspaceManager } from "../core/workspace-manager.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
@@ -114,6 +114,8 @@ const ROUTES: DefinicaoRota[] = [
   { method: "POST", path: "/meetings/:id/stop", descricao: "Solicita interrupção de reunião ativa" },
   { method: "GET", path: "/events", descricao: "Stream SSE de eventos do servidor" },
   { method: "GET", path: "/files", descricao: "Lista diretório ou lê arquivo do workspace", publico: false },
+  { method: "GET", path: "/files/tree", descricao: "Árvore recursiva de arquivos do workspace (query: workspace, profundidade máx 6 default 4; cap 800 nós)", publico: false },
+  { method: "PUT", path: "/files", descricao: "Salva conteúdo de arquivo EXISTENTE do workspace (query: workspace, path) — corpo { conteudo }, cap 1MB, não cria paths novos", corpo: true },
   { method: "POST", path: "/terminal", descricao: "Executa comando opencorp whitelistado (composer !) — corpo { comando }, retorna { saida, codigo }", corpo: true },
   { method: "GET", path: "/hooks", descricao: "Lista hooks do workspace" },
   { method: "POST", path: "/hooks", descricao: "Cria hook de entrada", corpo: true },
@@ -235,10 +237,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Valida e resolve caminho dentro do workspace (anti path-traversal) */
+/** Valida e resolve caminho dentro do workspace (anti path-traversal).
+ *  pathParam já vem decodificado de searchParams.get — NÃO decodificar de novo. */
 async function resolverCaminhoWorkspace(wsPath: string, pathParam: string): Promise<string> {
   const base = resolve(wsPath);
-  const solicitado = pathParam ? decodeURIComponent(pathParam) : "";
+  const solicitado = pathParam ?? "";
   // Normaliza: remove prefixo "./" e múltiplos // — mas preserva dot-files (.opencorp)
   const normalizado = solicitado.replace(/^\.\//, "").replace(/\/+/g, "/");
   const alvo = resolve(base, normalizado);
@@ -250,8 +253,13 @@ async function resolverCaminhoWorkspace(wsPath: string, pathParam: string): Prom
   return alvo;
 }
 
-/** Lê arquivo com limite de 512KB, retorna {tipo, conteudo} ou {tipo, conteudo: null, motivo} */
-async function lerArquivoWorkspace(alvo: string): Promise<{ tipo: "arquivo"; conteudo: string | null; motivo?: string }> {
+/** Lê arquivo com limite de 512KB, retorna {tipo, conteudo} ou {tipo, conteudo: null, motivo}.
+ *  realpath no alvo: symlink dentro do workspace apontando para FORA é bloqueado. */
+async function lerArquivoWorkspace(alvo: string, base: string): Promise<{ tipo: "arquivo"; conteudo: string | null; motivo?: string }> {
+  const real = await realpath(alvo).catch(() => null);
+  if (!real || (!isAbsolute(base) ? false : relative(resolve(base), real).startsWith(".."))) {
+    return { tipo: "arquivo", conteudo: null, motivo: "symlink fora do workspace (bloqueado)" };
+  }
   const info = await stat(alvo);
   if (info.size > 512 * 1024) {
     return { tipo: "arquivo", conteudo: null, motivo: "arquivo excede 512KB" };
@@ -263,6 +271,80 @@ async function lerArquivoWorkspace(alvo: string): Promise<{ tipo: "arquivo"; con
   }
   const conteudo = await readFile(alvo, "utf8");
   return { tipo: "arquivo", conteudo };
+}
+
+/** Nó da árvore de arquivos (GET /files/tree — PLANO-PAINEL-V2 Etapa 3.1) */
+interface NoArvore {
+  nome: string;
+  /** caminho relativo à raiz do workspace */
+  caminho: string;
+  tipo: "dir" | "arquivo";
+  tamanho?: number;
+  filhos?: NoArvore[];
+}
+
+/** Lista FIXA de diretórios ignorados pela árvore (não configurável nesta etapa) */
+const ARVORE_IGNORAR_DIRS = new Set(["node_modules", ".git", "dist", "web-dist", "__pycache__"]);
+/** Cap total de nós — evita varreduras gigantes; excedido → flag truncado:true */
+const ARVORE_CAP_NOS = 800;
+
+/**
+ * Constrói a árvore recursiva a partir da raiz do workspace: dirs primeiro,
+ * alfabética em cada nível; *.log e .opencorp/logs fora. Ao estourar o cap,
+ * para de listar e marca truncado.
+ */
+async function construirArvore(raiz: string, profundidadeMax: number): Promise<{ arvore: NoArvore[]; truncado: boolean }> {
+  let total = 0;
+  let truncado = false;
+  async function listar(dirAbs: string, rel: string, profundidade: number): Promise<NoArvore[]> {
+    if (total >= ARVORE_CAP_NOS) {
+      truncado = true;
+      return [];
+    }
+    let entradas;
+    try {
+      entradas = await readdir(dirAbs, { withFileTypes: true });
+    } catch {
+      return []; // ramo sem permissão/que sumiu — segue sem ele
+    }
+    const visiveis = entradas.filter((e) => {
+      if (e.name.endsWith(".log")) return false;
+      if (ARVORE_IGNORAR_DIRS.has(e.name)) return false;
+      if (e.name === "logs" && rel === ".opencorp") return false;
+      return true;
+    });
+    const porNome = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+    const dirs = visiveis.filter((e) => e.isDirectory()).sort(porNome);
+    const arquivos = visiveis.filter((e) => !e.isDirectory()).sort(porNome);
+    const nos: NoArvore[] = [];
+    for (const e of [...dirs, ...arquivos]) {
+      if (total >= ARVORE_CAP_NOS) {
+        truncado = true;
+        break;
+      }
+      const caminhoRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        const no: NoArvore = { nome: e.name, caminho: caminhoRel, tipo: "dir", filhos: [] };
+        total++;
+        if (profundidade + 1 < profundidadeMax) {
+          no.filhos = await listar(join(dirAbs, e.name), caminhoRel, profundidade + 1);
+        }
+        nos.push(no);
+      } else {
+        let tamanho = 0;
+        try {
+          tamanho = (await stat(join(dirAbs, e.name))).size;
+        } catch {
+          /* sumiu entre readdir e stat — tamanho 0 */
+        }
+        nos.push({ nome: e.name, caminho: caminhoRel, tipo: "arquivo", tamanho });
+        total++;
+      }
+    }
+    return nos;
+  }
+  const arvore = await listar(raiz, "", 0);
+  return { arvore, truncado };
 }
 
 /**
@@ -346,9 +428,17 @@ function enviarErro(res: ServerResponse, erro: unknown): void {
   enviar(res, 500, { erro: erro instanceof Error ? erro.message : String(erro) });
 }
 
-async function lerCorpo(req: IncomingMessage): Promise<unknown> {
+async function lerCorpo(req: IncomingMessage, maxBytes = 30 * 1024 * 1024): Promise<unknown> {
   const partes: Buffer[] = [];
-  for await (const parte of req) partes.push(parte as Buffer);
+  let total = 0;
+  for await (const parte of req) {
+    total += (parte as Buffer).length;
+    if (total > maxBytes) {
+      req.destroy(); // corta o stream — evita buffering de corpos gigantes
+      throw new Error(`corpo excede ${maxBytes} bytes`);
+    }
+    partes.push(parte as Buffer);
+  }
   const texto = Buffer.concat(partes).toString("utf8").trim();
   if (!texto) return {};
   return JSON.parse(texto) as unknown;
@@ -1054,7 +1144,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               );
               enviar(res, 200, { tipo: "dir", itens: itensComTamanho });
             } else {
-              const resultado = await lerArquivoWorkspace(alvo);
+              const resultado = await lerArquivoWorkspace(alvo, ws.path);
               enviar(res, 200, resultado);
             }
           } catch (erro) {
@@ -1062,6 +1152,56 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               enviar(res, 403, { erro: "caminho fora do workspace (path traversal bloqueado)" });
             } else if ((erro as NodeJS.ErrnoException).code === "ENOENT") {
               enviar(res, 404, { erro: "arquivo ou diretório não encontrado" });
+            } else {
+              throw erro;
+            }
+          }
+          return;
+        }
+
+        // ── GET /files/tree — árvore recursiva do workspace (Etapa 3.1) ──
+        if (rota === "/files/tree" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const profBruta = Number(url.searchParams.get("profundidade"));
+          const profundidade = Math.min(6, Math.max(1, Number.isFinite(profBruta) ? Math.floor(profBruta) : 4));
+          const { arvore, truncado } = await construirArvore(ws.path, profundidade);
+          enviar(res, 200, { tipo: "arvore", arvore, truncado });
+          return;
+        }
+
+        // ── PUT /files — salva conteúdo de arquivo EXISTENTE (Etapa 3.1) ──
+        // Guardas: resolverCaminhoWorkspace (403 fora), arquivo tem que existir
+        // (404 — sem criar paths novos nesta etapa), cap 1MB (413). utf8 sem BOM.
+        if (rota === "/files" && req.method === "PUT") {
+          const ws = await resolverWs(url);
+          const pathParam = url.searchParams.get("path") ?? "";
+          // cap do corpo (1MB de conteúdo + overhead do JSON) — corta no stream, não depois
+          let corpo: { conteudo?: unknown };
+          try {
+            corpo = (await lerCorpo(req, 1.5 * 1024 * 1024)) as { conteudo?: unknown };
+          } catch {
+            enviar(res, 413, { erro: "corpo excede o limite de 1MB" });
+            return;
+          }
+          const conteudo = typeof corpo.conteudo === "string" ? corpo.conteudo : String(corpo.conteudo ?? "");
+          if (Buffer.byteLength(conteudo, "utf8") > 1024 * 1024) {
+            enviar(res, 413, { erro: "conteúdo excede 1MB" });
+            return;
+          }
+          try {
+            const alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+            const info = await stat(alvo).catch(() => null);
+            if (!info?.isFile()) {
+              enviar(res, 404, { erro: "arquivo não encontrado (escrita não cria paths novos nesta etapa)" });
+              return;
+            }
+            await writeFileAtomic(alvo, conteudo, { encoding: "utf8", createDirs: false });
+            enviar(res, 200, { ok: true });
+          } catch (erro) {
+            if (erro instanceof WorkspaceError && erro.exitCode === 3) {
+              enviar(res, 403, { erro: "caminho fora do workspace (path traversal bloqueado)" });
+            } else if ((erro as NodeJS.ErrnoException).code === "ENOENT") {
+              enviar(res, 404, { erro: "arquivo não encontrado (escrita não cria paths novos nesta etapa)" });
             } else {
               throw erro;
             }

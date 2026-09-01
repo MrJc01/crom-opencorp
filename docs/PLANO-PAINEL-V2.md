@@ -151,12 +151,13 @@
 - [x] 2.5 Context menu (right-click) base + cursor contextual: em **task cards** → Ver detalhes / Copiar título / Excluir *(modalConfirm; fecha em Escape/fora/scroll; Etapa 3 liga os itens de arquivo)*
 - **Aceite**: digitar `/`/`@`/`!` abre lista navegável; @ clicável; right-click em task oferece ações. — e2e composer.spec 4/4; unitários 482; suite completa = baseline. Notas: Enter na palette só insere (envio é o Enter seguinte); segundo Enter com ! / durante streaming aborta (comportamento herdado do stop).
 
-### Etapa 3 — Workspace estilo VS Code *(P-08, P-09, P-10)*
-- [ ] 3.1 Backend: GET /files **tree** recursivo + GET arquivo + **PUT arquivo** (traversal guard + size cap)
-- [ ] 3.2 UI: file tree lateral (padrão TreeView) + tabs abertos
-- [ ] 3.3 Modos de ver: **editor** · **preview (padrão p/ .md)** · **lado a lado** (editor|preview)
-- [ ] 3.4 Tabs de **terminais** na mesma página (múltiplas sessões, stream via SSE)
-- **Aceite**: navegar/editar/salvar arquivos; md com preview; terminais funcionando.
+### Etapa 3 — Workspace estilo VS Code *(P-08, P-09, P-10)* ✅ 2026-09-01
+- [x] 3.1 Backend: GET /files/tree (recursivo, ignora node_modules/.git/dist, cap 800 nós, profundidade ≤6, symlinks NÃO seguidos) + GET arquivo (com realpath anti-symlink-para-fora) + **PUT /files** (resolverCaminhoWorkspace, arquivo deve existir, cap 1MB — corpo cortado no stream, writeFileAtomic)
+- [x] 3.2 UI: file tree lateral (chevrons, ícones) + tabs de arquivos abertos (criarTabs) + view "Workspace" no navbar (grupo Código)
+- [x] 3.3 Modos de ver: **editor** · **preview (padrão p/ .md)** · **lado a lado** (.md) — dirty-state ● na tab, Ctrl+S, Salvar via PUT
+- [x] 3.4 Tabs de **terminais** na mesma página (até 4, localStorage, histórico ↑↓) — exec via POST /terminal da Etapa 2 (whitelist), log acumulado por tab
+- [x] Right-click de arquivo: Abrir · **Enviar como contexto @** (setRascunho + abre chat lateral) · Copiar caminho *(fecha o item de arquivo do P-21)*
+- **Aceite**: navegar/editar/salvar arquivos; md com preview; terminais funcionando. — e2e workspace.spec 5/5; revisão de segurança: realpath no GET, cap de corpo no lerCorpo (30MB default / 1.5MB no PUT), duplo-decode de path removido; unitários 482; suite completa = baseline.
 
 ### Etapa 4 — Apps & Secrets *(P-01…P-07)*
 - [ ] 4.1 Core: perfis de credencial tipados (`vps`, `wordpress`, `mercadopago`, `cartao`, `custom`) com schema por tipo no secrets.json (0600, valores nunca retornados)

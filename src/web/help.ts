@@ -15,6 +15,7 @@ export function ajuda(chave: string, texto?: string): string {
 /** Conteúdo das ajudas — single source of truth (editável aqui) */
 export const AJUDAS: Record<string, string> = {
   'workspace': 'Uma <b>empresa autônoma</b>: tem seus próprios agentes, task board, registros, orçamento e site. Cada pasta em ~/.opencorp/workspaces/ é uma empresa. Você alterna entre elas na barra lateral.',
+  'workspace-view': 'A página do <b>código da empresa</b>: à esquerda a árvore de arquivos do workspace; à direita, cada arquivo abre numa aba com 3 modos — <b>Editor</b>, <b>Preview</b> (padrão para .md) e <b>Lado a lado</b> (só .md). Salve com o botão ou <b>Ctrl+S</b> (só arquivos existentes, até 1MB). Embaixo ficam os <b>terminais</b> (até 4): comandos one-shot pela whitelist do opencorp, com histórico ↑↓.',
   'agentes': 'Os <b>funcionários</b> da empresa. Cada agente é um arquivo Markdown com prompt + configuração (modelo, permissões, orçamento). Permissões: level-1 só lê · level-2 executa comandos · level-3 acessa rede.',
   'tasks': 'O <b>quadro kanban</b> da empresa: backlog → fazendo → bloqueado → feito. Agentes assumem tasks, conversam no chat da task e movem entre colunas. Você também pode criar e delegar.',
   'mentions': 'Para chamar um agente dentro de uma task, use <b>@nome-do-agente</b> na mensagem. O orquestrador desperta o agente mencionado com o contexto da task.',
