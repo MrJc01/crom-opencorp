@@ -16,7 +16,7 @@ import { ApprovalsStore } from "../core/approvals-store.js";
 import { SettingsError, SettingsStore } from "../core/settings-store.js";
 import { FlowStore, type Flow, type SessaoFlow } from "../core/flow-store.js";
 import { migrarTeamsParaFlows } from "../core/flow-migrate.js";
-import { MeetingManager } from "../core/meeting-manager.js";
+import { MeetingManager, gerarIdReuniao } from "../core/meeting-manager.js";
 import { TaskStore, type Task } from "../core/task-store.js";
 import { Scheduler } from "../core/scheduler.js";
 import type { Agenda } from "../core/scheduler.js";
@@ -25,7 +25,7 @@ import { AppStore } from "../core/app-store.js";
 import { TeamStore } from "../core/team-store.js";
 import { OrquestradorDeTeams } from "../core/team-orchestrator.js";
 import { instalarMencoes } from "../core/mention-runner.js";
-import { TaskError, SchedulerError, HookError, AppError, TeamError } from "../core/errors.js";
+import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError } from "../core/errors.js";
 import { FlowError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
@@ -111,9 +111,10 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/flows/:id/status", descricao: "Última execução do flow (status por nó)" },
   { method: "POST", path: "/flows/:id/run", descricao: "Executa um flow", corpo: true },
   { method: "POST", path: "/flows/:id/resume", descricao: "Retoma execução falha do último nó ok (corpo: { exec_id })", corpo: true },
-  { method: "POST", path: "/meetings", descricao: "Inicia nova reunião", corpo: true },
-  { method: "GET", path: "/meetings", descricao: "Lista reuniões do workspace" },
-  { method: "POST", path: "/meetings/:id/stop", descricao: "Solicita interrupção de reunião ativa" },
+  { method: "POST", path: "/meetings", descricao: "Inicia nova reunião (202 com id — sala consultável em tempo real)", corpo: true },
+  { method: "GET", path: "/meetings", descricao: "Lista reuniões: salas vivas em memória + históricas do disco" },
+  { method: "GET", path: "/meetings/:id", descricao: "Estado em tempo real da sala (turno, mensagens do buffer vivo, consenso)" },
+  { method: "POST", path: "/meetings/:id/stop", descricao: "Solicita interrupção de reunião ativa (404 se desconhecida)" },
   { method: "GET", path: "/events", descricao: "Stream SSE de eventos do servidor" },
   { method: "GET", path: "/files", descricao: "Lista diretório ou lê arquivo do workspace", publico: false },
   { method: "GET", path: "/files/tree", descricao: "Árvore recursiva de arquivos do workspace (query: workspace, profundidade máx 6 default 4; cap 800 nós)", publico: false },
@@ -1142,16 +1143,40 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         // ── reuniões ────────────────────────────────────────────────
         if (rota === "/meetings" && req.method === "GET") {
           const ws = await resolverWs(url);
-          enviar(res, 200, await meetings.listar(ws.path));
+          const disco = await meetings.listar(ws.path);
+          const vivas = meetings.salasVivas(ws.path);
+          const idsVivas = new Set(vivas.map((v) => v.id));
+          enviar(res, 200, [...vivas, ...disco.filter((s) => !idsVivas.has(s.id))]);
           return;
         }
         if (rota === "/meetings" && req.method === "POST") {
           const ws = await resolverWs(url);
           const corpo = (await lerCorpo(req)) as { pauta?: string; agentes?: string; model?: string };
+          const pauta = String(corpo.pauta ?? "").trim();
+          if (pauta.length === 0) {
+            enviar(res, 422, { erro: 'pauta vazia — informe a pauta: POST /meetings { pauta }' });
+            return;
+          }
+          const novoId = gerarIdReuniao();
           void meetings
-            .iniciar({ pauta: corpo.pauta ?? "", agentes: corpo.agentes, model: corpo.model, workspaceDir: ws.path, workspaceId: ws.id })
+            .iniciar({ pauta, agentes: corpo.agentes, model: corpo.model, workspaceDir: ws.path, workspaceId: ws.id, id: novoId })
             .catch(() => undefined);
-          enviar(res, 202, { status: "iniciado" });
+          enviar(res, 202, { status: "iniciado", id: novoId });
+          return;
+        }
+        const mMeetingGet = /^\/meetings\/([^/]+)$/.exec(rota);
+        if (mMeetingGet && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const meetingId = decodeURIComponent(mMeetingGet[1]!);
+          try {
+            enviar(res, 200, await meetings.estadoSala(ws.path, meetingId));
+          } catch (erro) {
+            if (erro instanceof MeetingError || erro instanceof RegistryError) {
+              enviar(res, 404, { erro: `reunião "${meetingId}" não encontrada` });
+              return;
+            }
+            throw erro;
+          }
           return;
         }
 
@@ -1242,20 +1267,30 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
-        // ── POST /meetings/:id/stop — solicita interrupção de reunião ativa
+        // ── POST /meetings/:id/stop — encerra a sala específica (Etapa 6.2)
         const mMeetingStop = /^\/meetings\/([^/]+)\/stop$/.exec(rota);
         if (mMeetingStop && req.method === "POST") {
           const ws = await resolverWs(url);
           const meetingId = decodeURIComponent(mMeetingStop[1]!);
-          // Verifica se existe reunião ativa no workspace
+          // sala viva NESTE processo e ainda em andamento: flag de interrupção por sala — o loop quebra entre turnos
+          if (meetings.salaVivaEmAndamento(meetingId)) {
+            meetings.solicitarInterrupcao(meetingId);
+            enviar(res, 200, { ok: true, detalhe: `interrupção solicitada para reunião ${meetingId}` });
+            return;
+          }
           const reunioes = await meetings.listar(ws.path);
-          const ativa = reunioes.find((r) => r.id === meetingId && r.status === "em-andamento");
-          if (!ativa) {
+          const alvo = reunioes.find((r) => r.id === meetingId);
+          if (!alvo) {
+            enviar(res, 404, { erro: `reunião "${meetingId}" não encontrada` });
+            return;
+          }
+          if (alvo.status !== "em-andamento") {
             enviar(res, 409, { erro: "nenhuma reunião ativa neste servidor" });
             return;
           }
-          // Solicita interrupção
-          meetings.solicitarInterrupcao();
+          // sala de OUTRO processo (CLI/scheduler): marca no disco — o loop dono
+          // confere o status entre turnos e encerra com ata
+          await meetings.encerrar(ws.path, meetingId, "encerrada pelo humano (meeting end)");
           enviar(res, 200, { ok: true, detalhe: `interrupção solicitada para reunião ${meetingId}` });
           return;
         }

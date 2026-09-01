@@ -36,7 +36,7 @@ import { abrirChatLateral, fecharChatLateral, alternarChatLateral } from "./chat
 import { registrarMenuContexto } from "./menu-contexto.js";
 import { criarTask, enviarMsgDrawer, moverTaskColuna, atualizarTaskPrioridade, atualizarTaskResponsavel, atualizarTaskDue, atualizarTaskLabels, atualizarTaskDescricao, excluirTask } from "./views/tasks.js";
 import { agendaEscopo, atualizarCampoAgenda, criarAgenda, editarAgenda, salvarEdicaoAgenda, executarAgendaAgora, toggleAgendaAtivo, excluirAgenda, renderAgendaForm } from "./views/agenda.js";
-import { criarReuniao, encerrarReuniao } from "./views/reunioes.js";
+import { criarReuniao, encerrarReuniao, abrirSalaViva, fecharSalaViva, pararPollingSala, isSalaAoVivoAberta, criarAgendaReuniao, excluirRotinaReuniao, atualizarFrequenciaReuniao } from "./views/reunioes.js";
 import { executarFlow, detalhesFlow, retomarFlow, abrirFormFlow, fecharFormFlow, addPassoFlow, criarFlow, editarFlow, salvarEdicaoFlow, excluirFlow, migrarTeams, addPassoTemplate } from "./views/fluxos.js";
 import { loadAppsList, abrirApp, fecharApp, renderWidget, enviarForm } from "./views/apps.js";
 import { decidirAprovacao, promptOrdem, rodarFlowHub } from "./views/home.js";
@@ -240,7 +240,9 @@ function processarEventoSSE(ev: Record<string, unknown>): void {
   if (view === 'fluxos') renderFluxos();
   if (view === 'hooks') renderHooks();
   if (view === 'reunioes' || view === 'secretario') {
-    // re-render do painel de reuniões via SSE NÃO pode varrer o que o usuário digita (auditoria #8)
+    // SSE guard (Etapa 6.4): nunca re-renderizar por cima do painel ao vivo;
+    // o polling já mantém o feed — re-render destruiria o estado/intervalo.
+    if (isSalaAoVivoAberta()) return;
     const ativo = document.activeElement as HTMLElement | null;
     const digitando = !!ativo && (ativo.tagName === 'INPUT' || ativo.tagName === 'TEXTAREA' || ativo.tagName === 'SELECT');
     if (!digitando) void renderReunioes();
@@ -273,6 +275,7 @@ export async function iniciarApp(): Promise<void> {
   const interval = setInterval(() => {
     const view = getViewAtual();
     if (view === 'secretario') return;
+    if (view === 'reunioes' && isSalaAoVivoAberta()) return;
     // Workspace (Etapa 3): editor/árvore vivem em memória do módulo — a re-render
     // de 8s não tem nada a acrescentar e poderia atrapalhar quem está editando.
     if (view === 'workspace') return;
@@ -285,9 +288,37 @@ export async function iniciarApp(): Promise<void> {
   setRefreshInterval(interval);
 }
 
+const MAPA_VIEW_BREADCRUMB: Record<string, string> = {
+  home: 'Início',
+  tasks: 'Tasks',
+  agentes: 'Agentes',
+  secretario: 'Secretário',
+  reunioes: 'Secretário',
+  agenda: 'Agenda',
+  fluxos: 'Fluxos',
+  hooks: 'Hooks',
+  apps: 'Apps',
+  'app-detail': 'Apps',
+  config: 'Config',
+  workspace: 'Workspace',
+  historico: 'Histórico',
+};
+
+export function atualizarBreadcrumb(view: string): void {
+  const nome = MAPA_VIEW_BREADCRUMB[view] ?? view;
+  const el = document.getElementById('topbar-view');
+  if (el) el.textContent = nome;
+  const wsEl = document.getElementById('topbar-ws');
+  if (wsEl) wsEl.textContent = getWsAtivo() || '—';
+}
+
 /** Renderiza a view atual baseada no hash/estado */
 export async function renderView(): Promise<void> {
   const view = getViewAtual();
+  atualizarBreadcrumb(view);
+
+  // Sala ao vivo (Etapa 6): polling morre ao sair da aba de reuniões
+  if (view !== 'reunioes') pararPollingSala();
 
   // Chip mobile: workspace atual sempre visível (clicável → abre sidebar)
   const chip = document.getElementById('ws-chip');
@@ -440,6 +471,11 @@ export function exporGlobais(): void {
   g.excluirAgenda = excluirAgenda;
   g.criarReuniao = criarReuniao;
   g.encerrarReuniao = encerrarReuniao;
+  g.abrirSalaViva = abrirSalaViva;
+  g.fecharSalaViva = fecharSalaViva;
+  g.criarAgendaReuniao = criarAgendaReuniao;
+  g.excluirRotinaReuniao = excluirRotinaReuniao;
+  g.atualizarFrequenciaReuniao = atualizarFrequenciaReuniao;
   g.secretarioAba = secretarioAba;
   g.executarFlow = executarFlow;
   g.detalhesFlow = detalhesFlow;

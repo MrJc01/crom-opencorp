@@ -66,7 +66,7 @@ export async function renderAgentes(): Promise<void> {
   if (!viewEl) return;
 
   if (!viewEl.innerHTML.trim()) {
-    viewEl.innerHTML = `<h1 class="text-2xl font-bold flex items-center gap-2 mb-6">${icone('teams')} Agentes</h1>` + estadoCarregando();
+    viewEl.innerHTML = `<div class="page-header"><div class="page-header-esq"><h1 class="page-header-titulo">${icone('teams')} Agentes</h1><p class="page-header-sub">Equipe da empresa</p></div></div>` + estadoCarregando();
   }
 
   let agentes: AgenteResumoUi[] | null;
@@ -77,15 +77,19 @@ export async function renderAgentes(): Promise<void> {
   }
 
   if (!agentes) {
-    viewEl.innerHTML = `<h1 class="text-2xl font-bold flex items-center gap-2 mb-6">${icone('teams')} Agentes ${ajuda('agentes')}</h1>` +
+    viewEl.innerHTML = `<div class="page-header"><div class="page-header-esq"><h1 class="page-header-titulo">${icone('teams')} Agentes</h1><p class="page-header-sub">Equipe da empresa</p></div><div class="page-header-acoes"><span class="help-wrap">${ajuda('agentes')}</span></div></div>` +
       estadoErro('Não foi possível carregar os agentes.', () => { void renderAgentes(); });
     return;
   }
 
   viewEl.innerHTML = `
-    <div class="flex items-center justify-between mb-6 gap-2">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('teams')} Agentes ${ajuda('agentes')}</h1>
-      <div class="flex items-center gap-2">
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('teams')} Agentes</h1>
+        <p class="page-header-sub">Ativos e catálogo · habilite conforme a empresa</p>
+      </div>
+      <div class="page-header-acoes">
+        <span class="help-wrap">${ajuda('agentes')}</span>
         <button class="btn btn-ghost" id="btn-semear-catalogo" onclick="semearCatalogoAgentes()" title="Adicionar agentes prontos do catálogo (vendas, marketing…)">${icone('plus')} Semear catálogo</button>
         <button class="btn" onclick="abrirFormAgente()">${icone('plus')} Novo agente</button>
       </div>

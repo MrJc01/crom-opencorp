@@ -45,10 +45,16 @@ export async function renderTasks(): Promise<void> {
   const todasColunas = [...colunasPadrao, ...extras];
 
   viewEl.innerHTML = `
-    <div class="flex flex-wrap items-center gap-2 mb-6">
-      <input id="task-titulo" placeholder="Título da task — Enter cria" class="flex-1 min-w-0 max-w-80" onkeydown="if(event.key==='Enter')criarTask()"/>
-      <button class="btn" onclick="criarTask()">+ Criar task</button>
-      <span class="help-wrap">${ajuda('tasks')}</span>
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('tasks')} Tasks</h1>
+        <p class="page-header-sub">Kanban · backlog → fazendo → bloqueado → feito</p>
+      </div>
+      <div class="page-header-acoes">
+        <input id="task-titulo" placeholder="Título da task — Enter cria" class="flex-1 min-w-0 max-w-80" onkeydown="if(event.key==='Enter')criarTask()"/>
+        <button class="btn" onclick="criarTask()">+ Criar task</button>
+        <span class="help-wrap">${ajuda('tasks')}</span>
+      </div>
     </div>
     ${tasks.length === 0
       ? estadoVazio('tasks', 'Nenhuma task na empresa', 'Crie a primeira no campo acima — os agentes assumem tasks do board automaticamente conforme a rotina.')

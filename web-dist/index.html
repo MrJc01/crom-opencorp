@@ -69,6 +69,25 @@
     <button class="menu-btn" id="menu-btn" aria-label="Abrir menu" onclick="toggleSidebar()">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></button>
     <button class="ws-chip" id="ws-chip" aria-label="Trocar workspace — abre o menu" onclick="toggleSidebar(true)"></button>
+    <header class="topbar" id="topbar" aria-label="Barra superior">
+      <nav class="topbar-breadcrumb" aria-label="Breadcrumb">
+        <ol id="topbar-breadcrumb" class="flex items-center gap-1 text-xs">
+          <li><a href="#/home" class="hover:text-white transition-colors" onclick="navegar('home')">Home</a></li>
+          <li class="text-zinc-500">›</li>
+          <li id="topbar-view" class="text-zinc-100 font-medium">Início</li>
+        </ol>
+      </nav>
+      <div class="topbar-busca">
+        <div class="relative">
+          <span class="topbar-search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+          <input id="topbar-busca" type="search" placeholder="Buscar…" aria-label="Busca global" />
+        </div>
+      </div>
+      <div class="topbar-acoes">
+        <span id="topbar-ws" class="topbar-ws-chip" title="Workspace ativo"></span>
+        <div class="topbar-avatar" title="Usuário" aria-label="Avatar do usuário">●</div>
+      </div>
+    </header>
     <div class="max-w-6xl mx-auto p-6">
       <div id="ws-banner" class="mb-4"></div>
       <section id="view-home" class="view active"></section>

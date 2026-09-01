@@ -150,11 +150,15 @@ export async function renderWorkspace(): Promise<void> {
   carregarTerminais();
 
   viewEl.innerHTML = `
-    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('folder')} Workspace ${ajuda('workspace-view')}</h1>
-      <div class="flex items-center gap-2">
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('folder')} Workspace</h1>
+        <p class="page-header-sub">Navegue e edite arquivos · preview padrão para .md</p>
+      </div>
+      <div class="page-header-acoes">
         <span class="text-xs" id="ws-truncado"></span>
         <button class="btn btn-ghost" onclick="window.__workspaceAtualizar()" title="Recarregar árvore de arquivos">${icone('run')} Atualizar</button>
+        <span class="help-wrap">${ajuda('workspace-view')}</span>
       </div>
     </div>
     <div class="ws-grid">

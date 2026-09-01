@@ -61,9 +61,13 @@ function cabecalho(): string {
     ['tudo', 'Tudo'], ['execucao', 'Execuções'], ['task', 'Tasks'], ['rotina', 'Rotinas'], ['conversa', 'Conversas'],
   ];
   return `
-    <div class="flex items-center justify-between mb-6 gap-2 flex-wrap">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('history')} Histórico ${ajuda('historico')}</h1>
-      <div class="flex items-center gap-2 flex-wrap">
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('history')} Histórico</h1>
+        <p class="page-header-sub">Execuções · tasks · rotinas · conversas</p>
+      </div>
+      <div class="page-header-acoes flex-wrap">
+        <span class="help-wrap">${ajuda('historico')}</span>
         <div class="flex rounded-lg border border-zinc-700" role="group" aria-label="Filtro por tipo">
           ${opcoesTipo.map(([v, label]) => `<button class="btn-ghost text-xs px-3 py-1 ${filtros.tipo === v ? 'bg-blue-600 text-white' : ''}" onclick="window.__historicoSetFiltro('${v}')">${label}</button>`).join('')}
         </div>

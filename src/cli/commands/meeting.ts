@@ -1,6 +1,9 @@
 import type { Command } from "commander";
-import { MeetingManager } from "../../core/meeting-manager.js";
+import { MeetingError } from "../../core/errors.js";
+import { MeetingManager, gerarIdReuniao } from "../../core/meeting-manager.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { spawnOpencorpDetached } from "../../core/spawn-detached.js";
+import { opencorpHome } from "../../utils/paths.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -34,19 +37,45 @@ export function registerMeetingCommand(program: Command): void {
     .argument("<pauta>", "pauta da reunião")
     .option("--agentes <lista>", "participantes separados por vírgula (padrão: ceo-documentos,ceo-estrategia,secretario)")
     .option("--model <provider/model>", "modelo usado por todos os participantes (padrão: o de cada agente)")
+    .option("--id <id>", "id fixo da sala (usado pelo modo headless `meeting iniciar`)")
     .description("abre a sala, executa os turnos e gera a ata automática")
-    .action((pauta: string, opts: { agentes?: string; model?: string; workspace?: string }) =>
+    .action((pauta: string, opts: { agentes?: string; model?: string; id?: string; workspace?: string }) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(program, opts));
         const sala = await new MeetingManager().iniciar({
           pauta,
           agentes: opts.agentes,
           model: opts.model,
+          id: opts.id,
           workspaceDir: ws.path,
         });
         console.log(
           `[opencorp] reunião ${sala.id} — status: ${sala.status} · turnos: ${sala.turno}/${sala.max_turnos} · motivo: ${sala.motivo_fim} · ata: ${sala.ata ?? "não gerada"}`,
         );
+      }),
+    );
+
+  meeting
+    .command("iniciar")
+    .description("modo headless (agendável): dispara a reunião em processo desacoplado e sai imediatamente")
+    .option("--pauta <texto>", "pauta da reunião")
+    .option("--agentes <lista>", "participantes separados por vírgula")
+    .option("--model <provider/model>", "modelo usado por todos os participantes")
+    .option("--nao-interativo", "implícito — `iniciar` sempre roda headless (flag mantida por clareza/compat)")
+    .action((opts: { pauta?: string; agentes?: string; model?: string; naoInterativo?: boolean; workspace?: string }) =>
+      comErros(async () => {
+        const pauta = (opts.pauta ?? "").trim();
+        if (pauta.length === 0) {
+          throw new MeetingError('pauta vazia — informe a pauta: opencorp meeting iniciar --pauta "<pauta>" --nao-interativo');
+        }
+        const ws = await manager.resolver(wsDe(program, opts));
+        const id = gerarIdReuniao();
+        const args = ["meeting", "start", pauta, "--id", id];
+        if (opts.agentes) args.push("--agentes", opts.agentes);
+        if (opts.model) args.push("--model", opts.model);
+        args.push("--workspace", ws.id);
+        const r = spawnOpencorpDetached(args, { homeDir: opencorpHome(), nomeLog: `reuniao-${id}` });
+        console.log(`[opencorp] reunião ${id} disparada em background — pauta: "${pauta}" · log: ${r.log}`);
       }),
     );
 

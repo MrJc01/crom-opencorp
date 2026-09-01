@@ -69,6 +69,16 @@ export async function renderHome(): Promise<void> {
   const flowsLista = (flows || []).slice(0, 4);
 
   viewEl.innerHTML = `
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('home')} Início</h1>
+        <p class="page-header-sub">Visão geral da empresa · ${escapeHtml(wsAtivo || 'selecione uma empresa')}</p>
+      </div>
+      <div class="page-header-acoes">
+        <button class="btn" onclick="navegar('tasks');setTimeout(()=>document.getElementById('task-titulo')?.focus(),100)">${icone('plus')} Nova task</button>
+        <button class="btn btn-ghost" onclick="abrirWizard()">${icone('spark')} Criar empresa</button>
+      </div>
+    </div>
     <div class="hub-header card p-4 mb-5">
       <div class="hub-header-esq">
         <button class="hub-ws" onclick="toggleSidebar(true)" title="Trocar empresa">

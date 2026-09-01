@@ -15,6 +15,7 @@ import { renderMarkdown } from "../md.js";
 import { getRascunho, setRascunho, limparRascunho } from "../rascunho.js";
 import { parsearComposer, COMANDOS_OPCORP } from "../composer-comandos.js";
 import { gatilhoComposer, paletteTecla } from "../palette.js";
+import { pararPollingSala } from "./reunioes.js";
 
 interface SecretarioStatus {
   rodando: boolean;
@@ -161,6 +162,11 @@ export async function renderSecretario(aba: 'conversa' | 'reunioes' = 'conversa'
   const viewEl = document.getElementById('view-secretario');
   if (!viewEl) return;
 
+  if (aba !== 'reunioes') {
+    // saiu da aba de reuniões (voltou para a conversa) → polling da sala ao vivo morre
+    pararPollingSala();
+  }
+
   if (aba === 'reunioes') {
     // PLANO-WEB-CRUD D: reuniões moram na mesma página do Secretário (aba)
     viewEl.innerHTML = `
@@ -200,13 +206,17 @@ function abasSecretario(ativa: 'conversa' | 'reunioes'): string {
     <button class="btn ${ativa === id ? '' : 'btn-ghost'} text-sm" onclick="secretarioAba('${id}')" aria-label="Aba ${rotulo}">${icone(icon)} ${rotulo}</button>
   `;
   return `
-    <div class="flex items-center justify-between mb-4 gap-2 flex-wrap">
-      <div class="flex items-center gap-2">
-        <h1 class="text-2xl font-bold flex items-center gap-2">${icone('chat')} Secretário ${ajuda('secretario')}</h1>
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('chat')} Secretário</h1>
+        <p class="page-header-sub">Chat da empresa · conversa e reuniões</p>
       </div>
-      <div class="flex items-center gap-1 rounded-lg border border-zinc-700 p-1">
-        ${btn('conversa', 'Conversa', 'chat')}
-        ${btn('reunioes', 'Reuniões', 'reunioes')}
+      <div class="page-header-acoes">
+        <span class="help-wrap">${ajuda('secretario')}</span>
+        <div class="flex items-center gap-1 rounded-lg border border-zinc-700 p-1">
+          ${btn('conversa', 'Conversa', 'chat')}
+          ${btn('reunioes', 'Reuniões', 'reunioes')}
+        </div>
       </div>
     </div>
   `;
@@ -231,8 +241,12 @@ function renderStandby(): void {
   if (!viewEl) return;
 
   viewEl.innerHTML = `
-    <div class="flex items-center justify-between mb-4 gap-2">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('chat')} Secretário ${ajuda('secretario')}</h1>
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('chat')} Secretário</h1>
+        <p class="page-header-sub">Chat da empresa em standby</p>
+      </div>
+      <div class="page-header-acoes"><span class="help-wrap">${ajuda('secretario')}</span></div>
     </div>
     <div class="card p-8 text-center max-w-md mx-auto">
       <div class="empty-icon mb-4">${icone('chat')}</div>
@@ -278,9 +292,15 @@ function renderChatLayout(): void {
   if (!viewEl) return;
 
   viewEl.innerHTML = `
-    <div class="flex items-center justify-between mb-4 gap-2">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('chat')} Secretário ${ajuda('secretario')}</h1>
-      <button class="btn-ghost text-xs md:hidden" onclick="window.__secretarioToggleConv()" aria-label="Alternar lista de conversas" title="Conversas">${icone('tasks')}</button>
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('chat')} Secretário</h1>
+        <p class="page-header-sub">Conversa · / comandos · @ contexto · ! terminal</p>
+      </div>
+      <div class="page-header-acoes">
+        <span class="help-wrap">${ajuda('secretario')}</span>
+        <button class="btn-ghost text-xs md:hidden" onclick="window.__secretarioToggleConv()" aria-label="Alternar lista de conversas" title="Conversas">${icone('tasks')}</button>
+      </div>
     </div>
     <div class="secretario-grid" id="secretario-grid">
       <!-- Coluna esquerda: lista de conversas -->
@@ -921,8 +941,12 @@ function renderErro(): void {
   if (!viewEl) return;
 
   viewEl.innerHTML = `
-    <div class="flex items-center justify-between mb-4 gap-2">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('chat')} Secretário ${ajuda('secretario')}</h1>
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('chat')} Secretário</h1>
+        <p class="page-header-sub">Erro ao conectar</p>
+      </div>
+      <div class="page-header-acoes"><span class="help-wrap">${ajuda('secretario')}</span></div>
     </div>
     ${estadoErro('Não foi possível conectar ao secretário.', () => { void renderSecretario(); })}
   `;

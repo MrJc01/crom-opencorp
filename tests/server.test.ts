@@ -348,11 +348,12 @@ describe("API Server — REST + SSE", () => {
     }
   });
 
-  // (15) POST /meetings/:id/stop sem reunião ativa → 409
-  it("POST /meetings/inexistente/stop sem reunião ativa retorna 409", async () => {
+  // (15) POST /meetings/:id/stop de reunião desconhecida → 404 (Etapa 6.1)
+  it("POST /meetings/inexistente/stop retorna 404", async () => {
     const { status, json } = await fetchApi("/meetings/nao-existe/stop", { method: "POST" });
-    expect(status).toBe(409);
-    expect(json).toHaveProperty("erro", "nenhuma reunião ativa neste servidor");
+    expect(status).toBe(404);
+    expect(json).toHaveProperty("erro");
+    expect((json as { erro: string }).erro).toContain("não encontrada");
   });
 });
 describe("API Server — Tasks", () => {

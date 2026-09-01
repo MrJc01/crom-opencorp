@@ -17,15 +17,21 @@ export async function renderAgenda(): Promise<void> {
   if (!viewEl) return;
 
   if (!viewEl.innerHTML.trim()) {
-    viewEl.innerHTML = `<h1 class="text-2xl font-bold flex items-center gap-2 mb-6">${icone('agenda')} Agenda</h1>` + estadoCarregando();
+    viewEl.innerHTML = `<div class="page-header"><div class="page-header-esq"><h1 class="page-header-titulo">${icone('agenda')} Agenda</h1><p class="page-header-sub">Rotinas agendadas</p></div></div>` + estadoCarregando();
   }
 
   viewEl.innerHTML = `
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('agenda')} Agenda ${ajuda('agenda')}</h1>
-      <div class="flex items-center gap-1 rounded-lg border border-zinc-700 p-1" role="group" aria-label="Escopo da agenda">
-        <button id="agenda-escopo-ws" class="btn text-xs" onclick="agendaEscopo('ws')">só ${escapeHtml(wsAtivo || 'esta empresa')}</button>
-        <button id="agenda-escopo-todas" class="btn text-xs" onclick="agendaEscopo('todas')">todas as empresas</button>
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('agenda')} Agenda</h1>
+        <p class="page-header-sub">Rotinas · cron / intervalo / data única</p>
+      </div>
+      <div class="page-header-acoes">
+        <span class="help-wrap">${ajuda('agenda')}</span>
+        <div class="flex items-center gap-1 rounded-lg border border-zinc-700 p-1" role="group" aria-label="Escopo da agenda">
+          <button id="agenda-escopo-ws" class="btn text-xs" onclick="agendaEscopo('ws')">só ${escapeHtml(wsAtivo || 'esta empresa')}</button>
+          <button id="agenda-escopo-todas" class="btn text-xs" onclick="agendaEscopo('todas')">todas as empresas</button>
+        </div>
       </div>
     </div>
     <div id="agenda-status" class="card p-4 mb-6"></div>

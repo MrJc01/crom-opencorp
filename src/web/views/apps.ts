@@ -19,8 +19,12 @@ export async function renderApps(): Promise<void> {
   if (!viewEl) return;
 
   viewEl.innerHTML = `
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('apps')} Mini-apps ${ajuda('apps')}</h1>
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('apps')} Apps</h1>
+        <p class="page-header-sub">Mini-apps e perfis de credenciais</p>
+      </div>
+      <div class="page-header-acoes"><span class="help-wrap">${ajuda('apps')}</span></div>
     </div>
     <div id="apps-tabs" class="mb-4"></div>
     <div id="apps-painel-apps">

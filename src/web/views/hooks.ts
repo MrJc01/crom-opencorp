@@ -42,7 +42,7 @@ export async function renderHooks(): Promise<void> {
   if (!viewEl) return;
 
   if (!viewEl.innerHTML.trim()) {
-    viewEl.innerHTML = `<h1 class="text-2xl font-bold flex items-center gap-2 mb-6">${icone('hook')} Hooks</h1>` + estadoCarregando();
+    viewEl.innerHTML = `<div class="page-header"><div class="page-header-esq"><h1 class="page-header-titulo">${icone('hook')} Hooks</h1><p class="page-header-sub">Webhooks de entrada</p></div></div>` + estadoCarregando();
   }
 
   let hooks: HookInfo[] | null;
@@ -53,15 +53,21 @@ export async function renderHooks(): Promise<void> {
   }
 
   if (!hooks) {
-    viewEl.innerHTML = `<h1 class="text-2xl font-bold flex items-center gap-2 mb-6">${icone('hook')} Hooks ${ajuda('hooks')}</h1>` +
+    viewEl.innerHTML = `<div class="page-header"><div class="page-header-esq"><h1 class="page-header-titulo">${icone('hook')} Hooks</h1><p class="page-header-sub">Webhooks de entrada</p></div><div class="page-header-acoes"><span class="help-wrap">${ajuda('hooks')}</span></div></div>` +
       estadoErro('Não foi possível carregar os hooks.', () => { void renderHooks(); });
     return;
   }
 
   viewEl.innerHTML = `
-    <div class="flex items-center justify-between mb-6 gap-2">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('hook')} Hooks ${ajuda('hooks')}</h1>
-      <button class="btn" onclick="abrirFormHook()">${icone('plus')} Novo hook</button>
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('hook')} Hooks</h1>
+        <p class="page-header-sub">POST externo → task / agente / fluxo</p>
+      </div>
+      <div class="page-header-acoes">
+        <span class="help-wrap">${ajuda('hooks')}</span>
+        <button class="btn" onclick="abrirFormHook()">${icone('plus')} Novo hook</button>
+      </div>
     </div>
     <div id="hook-form" class="mb-6"></div>
     <div id="hooks-lista" class="space-y-4"></div>

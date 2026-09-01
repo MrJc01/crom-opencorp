@@ -13,17 +13,23 @@ export async function renderFluxos(): Promise<void> {
   if (!viewEl) return;
 
   if (!viewEl.innerHTML.trim()) {
-    viewEl.innerHTML = `<h1 class="text-2xl font-bold flex items-center gap-2 mb-6">${icone('fluxos')} Fluxos</h1>` + estadoCarregando();
+    viewEl.innerHTML = `<div class="page-header"><div class="page-header-esq"><h1 class="page-header-titulo">${icone('fluxos')} Fluxos</h1><p class="page-header-sub">Linhas de pensamento</p></div></div>` + estadoCarregando();
   }
 
   viewEl.innerHTML = `
-    <div class="flex items-center justify-between mb-6 gap-2">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('fluxos')} Fluxos ${ajuda('flows')}</h1>
-      <div class="flex items-center gap-1 rounded-lg border border-zinc-700 p-1" role="group" aria-label="Novo fluxo por template">
-        <button class="btn text-xs" onclick="abrirFormFlow('pipeline')">${icone('plus')} Pipeline</button>
-        <button class="btn btn-ghost text-xs" onclick="abrirFormFlow('fanout')">${icone('plus')} Fanout</button>
-        <button class="btn btn-ghost text-xs" onclick="abrirFormFlow('review')">${icone('plus')} Review</button>
-        <button class="btn btn-ghost text-xs" onclick="abrirFormFlow('debate')">${icone('plus')} Debate</button>
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('fluxos')} Fluxos</h1>
+        <p class="page-header-sub">Pipeline · fanout · review · debate</p>
+      </div>
+      <div class="page-header-acoes">
+        <span class="help-wrap">${ajuda('flows')}</span>
+        <div class="flex items-center gap-1 rounded-lg border border-zinc-700 p-1" role="group" aria-label="Novo fluxo por template">
+          <button class="btn text-xs" onclick="abrirFormFlow('pipeline')">${icone('plus')} Pipeline</button>
+          <button class="btn btn-ghost text-xs" onclick="abrirFormFlow('fanout')">${icone('plus')} Fanout</button>
+          <button class="btn btn-ghost text-xs" onclick="abrirFormFlow('review')">${icone('plus')} Review</button>
+          <button class="btn btn-ghost text-xs" onclick="abrirFormFlow('debate')">${icone('plus')} Debate</button>
+        </div>
       </div>
     </div>
     <div id="flow-form" class="mb-6"></div>

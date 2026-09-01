@@ -179,11 +179,17 @@ export async function renderConfig(): Promise<void> {
   if (!viewEl) return;
 
   viewEl.innerHTML = `
-    <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
-      <h1 class="text-2xl font-bold flex items-center gap-2">${icone('gear')} Config ${ajuda('config')}</h1>
-      <div class="flex items-center gap-1 rounded-lg border border-zinc-700 p-1" role="group" aria-label="Escopo das configurações">
-        <button id="cfg-escopo-global" class="btn-ghost text-xs px-3 py-1" onclick="window.__cfgEscopo('global')">Global</button>
-        <button id="cfg-escopo-workspace" class="btn-ghost text-xs px-3 py-1" onclick="window.__cfgEscopo('workspace')">Workspace${getWsAtivo() ? ': ' + escapeHtml(getWsAtivo()) : ''}</button>
+    <div class="page-header">
+      <div class="page-header-esq">
+        <h1 class="page-header-titulo">${icone('gear')} Config</h1>
+        <p class="page-header-sub">Preferências · segredos · ferramentas</p>
+      </div>
+      <div class="page-header-acoes">
+        <span class="help-wrap">${ajuda('config')}</span>
+        <div class="flex items-center gap-1 rounded-lg border border-zinc-700 p-1" role="group" aria-label="Escopo das configurações">
+          <button id="cfg-escopo-global" class="btn-ghost text-xs px-3 py-1" onclick="window.__cfgEscopo('global')">Global</button>
+          <button id="cfg-escopo-workspace" class="btn-ghost text-xs px-3 py-1" onclick="window.__cfgEscopo('workspace')">Workspace${getWsAtivo() ? ': ' + escapeHtml(getWsAtivo()) : ''}</button>
+        </div>
       </div>
     </div>
     <div class="config-abas mb-4" role="tablist" aria-label="Abas de configuração">

@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import { AgentStore } from "./agent-store.js";
 import { BudgetManager } from "./budget-manager.js";
 import { MeetingError } from "./errors.js";
@@ -16,6 +15,38 @@ import { opencorpHome } from "../utils/paths.js";
 
 export type StatusReuniao = "em-andamento" | "encerrada" | "encerrada-partial";
 export type Moderacao = "moderador" | "rotacao-fixa";
+
+/** Status da sala consultável pela API (snake_case — EstadoSala/GET /meetings/:id). */
+export type StatusSalaViva = "agendando" | "em_andamento" | "encerrada";
+
+export interface MensagemSala {
+  agente: string;
+  texto: string;
+  ts: string;
+}
+
+export interface ParticipanteSala {
+  id: string;
+  ativo: boolean;
+}
+
+export interface EstadoSala {
+  id: string;
+  status: StatusSalaViva;
+  pauta: string;
+  participantes: ParticipanteSala[];
+  turno_atual: number;
+  mensagens: MensagemSala[];
+  consenso: { pedidos: number; total: number };
+  iniciado_em: string;
+  encerrada_em?: string | null;
+}
+
+/** Marcador de consenso (Etapa 6.2): o participante que incluir [CONSENSO-ENCERRAR]
+ *  no fim da fala sinaliza que concorda em encerrar; quando TODOS sinalizam, a
+ *  reunião encerra naquele turno. O moderador também pode encerrar sozinho
+ *  respondendo "ENCERRAR" (parseDecisaoModerador). */
+export const MARCA_CONSENSO = /\[CONSENSO[-_ ]?ENCERRAR\]/i;
 
 export const PARTICIPANTES_PADRAO = ["ceo-documentos", "ceo-estrategia", "secretario"];
 
@@ -66,11 +97,38 @@ function msg(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
 }
 
-function gerarIdReuniao(): string {
-  const agora = new Date();
-  const p2 = (n: number) => String(n).padStart(2, "0");
-  const ts = `${agora.getFullYear()}${p2(agora.getMonth() + 1)}${p2(agora.getDate())}-${p2(agora.getHours())}${p2(agora.getMinutes())}${p2(agora.getSeconds())}`;
-  return `reuniao-${ts}-${randomUUID().slice(0, 4)}`;
+/** Id de sala: `reuniao-<timestamp+random>` (Etapa 6.1). Exportado para o
+ *  servidor/CLI responderem o id antes de disparar o loop em background. */
+export function gerarIdReuniao(): string {
+  return `reuniao-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/** Reconstrói o feed vivo a partir do transcript gravado (salas antigas/de
+ *  outros processos): seções "## Turno N — agente" e "## Moderação — agente". */
+function parseTurnosTranscript(transcript: string): MensagemSala[] {
+  const mensagens: MensagemSala[] = [];
+  let atual: { agente: string; linhas: string[] } | null = null;
+  const fechar = (): void => {
+    if (!atual) return;
+    const texto = atual.linhas.join("\n").trim();
+    if (texto.length > 0) mensagens.push({ agente: atual.agente, texto, ts: "" });
+    atual = null;
+  };
+  for (const linha of transcript.split("\n")) {
+    const abertura = /^## Turno \d+ — (\S+)/.exec(linha) ?? /^## Moderação — (\S+)/.exec(linha);
+    if (abertura) {
+      fechar();
+      atual = { agente: abertura[1]!, linhas: [] };
+      continue;
+    }
+    if (linha.startsWith("## ") || linha.startsWith("---")) {
+      fechar();
+      continue;
+    }
+    atual?.linhas.push(linha);
+  }
+  fechar();
+  return mensagens;
 }
 
 export interface MeetingManagerOptions {
@@ -80,6 +138,17 @@ export interface MeetingManagerOptions {
   sessoes?: SessaoLike;
   budget?: BudgetManager;
   agora?: () => Date;
+}
+
+/** Sala viva em memória (Etapa 6.1): espelha a SalaInfo do disco + buffer de
+ *  mensagens em tempo real e flag de interrupção POR sala (o sinal global
+ *  antigo continua existindo para SIGINT/compat). */
+interface SalaViva {
+  sala: SalaInfo;
+  estado: EstadoSala;
+  interromper: boolean;
+  pediram: Set<string>;
+  wsPath: string;
 }
 
 export interface OpcoesIniciar {
@@ -103,6 +172,7 @@ export class MeetingManager {
   private readonly budget: BudgetManager;
   private readonly agora: () => Date;
   private sinalInterrupcao = false;
+  private readonly vivas = new Map<string, SalaViva>();
 
   constructor(opts: MeetingManagerOptions = {}) {
     this.homeDir = opts.homeDir ?? opencorpHome();
@@ -114,8 +184,78 @@ export class MeetingManager {
     this.agora = opts.agora ?? (() => new Date());
   }
 
-  solicitarInterrupcao(): void {
-    this.sinalInterrupcao = true;
+  /** Sinaliza interrupção: com id → sala específica (true se estava viva);
+   *  sem id → sinal global (SIGINT/compat com chamadores antigos). */
+  solicitarInterrupcao(id?: string): boolean {
+    if (id === undefined) {
+      this.sinalInterrupcao = true;
+      return true;
+    }
+    const viva = this.vivas.get(id);
+    if (!viva) return false;
+    viva.interromper = true;
+    return true;
+  }
+
+  temSalaViva(id: string): boolean {
+    return this.vivas.has(id);
+  }
+
+  /** Sala viva E ainda em andamento (stop válido); encerradas em memória não contam. */
+  salaVivaEmAndamento(id: string): boolean {
+    const viva = this.vivas.get(id);
+    return !!viva && (viva.estado.status === "em_andamento" || viva.estado.status === "agendando");
+  }
+
+  /** Salas vivas/históricas em memória (para mesclar com o disco no GET /meetings).
+   *  Filtra por workspace quando wsPath é informado — sem filtro, vaza salas de
+   *  outros workspaces (auditoria Etapa 6). */
+  salasVivas(wsPath?: string): SalaInfo[] {
+    const todas = [...this.vivas.values()];
+    const filtradas = wsPath ? todas.filter((v) => v.wsPath === wsPath) : todas;
+    return filtradas.map((v) => ({ ...v.sala }));
+  }
+
+  private interrompida(id: string): boolean {
+    return this.sinalInterrupcao || (this.vivas.get(id)?.interromper ?? false);
+  }
+
+  private anexarBuffer(id: string, agente: string, texto: string): void {
+    const viva = this.vivas.get(id);
+    if (!viva || texto.length === 0) return;
+    viva.estado.mensagens.push({ agente, texto, ts: new Date().toISOString() });
+  }
+
+  /** Estado consultável da sala: memória primeiro; fallback do disco (salas
+   *  antigas ou de outros processos) com mensagens parseadas do transcript.
+   *  Lança MeetingError/RegistryError se a sala não existir. */
+  async estadoSala(wsPath: string, id: string): Promise<EstadoSala> {
+    const viva = this.vivas.get(id);
+    if (viva) {
+      return {
+        ...viva.estado,
+        participantes: viva.estado.participantes.map((p) => ({ ...p })),
+        mensagens: viva.estado.mensagens.map((m) => ({ ...m })),
+        consenso: { ...viva.estado.consenso },
+      };
+    }
+    const { sala } = await this.lerSala(wsPath, id);
+    const registro = await this.registros.obter(wsPath, "chats", id).catch(() => null);
+    const mensagens = parseTurnosTranscript(registro?.conteudo ?? "");
+    const pediram = new Set(
+      mensagens.filter((m) => MARCA_CONSENSO.test(m.texto)).map((m) => m.agente),
+    );
+    return {
+      id: sala.id,
+      status: sala.status === "em-andamento" ? "em_andamento" : "encerrada",
+      pauta: sala.pauta,
+      participantes: sala.participantes.map((p) => ({ id: p, ativo: true })),
+      turno_atual: sala.turno,
+      mensagens,
+      consenso: { pedidos: pediram.size, total: sala.participantes.length },
+      iniciado_em: sala.criado_em,
+      encerrada_em: sala.encerrada_em,
+    };
   }
 
   private async cfgMeeting(workspaceDir: string): Promise<ConfigMeeting> {
@@ -262,6 +402,26 @@ export class MeetingManager {
       `[reunião ${id}] aberta — pauta: "${sala.pauta}" · participantes: ${participantes.join(", ")} · moderação: ${moderacao === "moderador" ? `moderador (${moderador})` : "rotação fixa (moderador fora da lista)"} · modelo: ${sala.modelo}`,
     );
 
+    const viva: SalaViva = {
+      sala,
+      estado: {
+        id,
+        status: "agendando",
+        pauta: sala.pauta,
+        participantes: participantes.map((p) => ({ id: p, ativo: true })),
+        turno_atual: 0,
+        mensagens: [],
+        consenso: { pedidos: 0, total: participantes.length },
+        iniciado_em: abertura.toISOString(),
+        encerrada_em: null,
+      },
+      interromper: false,
+      pediram: new Set<string>(),
+      wsPath: ws.path,
+    };
+    this.vivas.set(id, viva);
+    viva.estado.status = "em_andamento";
+
     let falante = participantes[0]!;
     let instrucao = "abertura: apresente sua visão sobre a pauta";
     let falhasConsecutivas = 0;
@@ -281,9 +441,9 @@ export class MeetingManager {
           motivoFim = `tempo máximo (${cfg.max_minutes} min) atingido`;
           break;
         }
-        if (this.sinalInterrupcao) {
+        if (this.interrompida(id)) {
           statusFinal = "encerrada-partial";
-          motivoFim = "interrompida pelo humano (SIGINT)";
+          motivoFim = "interrompida pelo humano (SIGINT/stop)";
           break;
         }
         const estadoAtual = await this.lerSala(ws.path, id);
@@ -361,6 +521,12 @@ export class MeetingManager {
             `## Turno ${sala.turno + 1} — ${falante} (FALHA)\n\n${msg(erro)}\n\n`,
           );
           sala.turno += 1;
+          const vivaFalha = this.vivas.get(id);
+          if (vivaFalha) {
+            vivaFalha.sala.turno = sala.turno;
+            vivaFalha.estado.turno_atual = sala.turno;
+            vivaFalha.estado.mensagens.push({ agente: falante, texto: `⚠ falha no turno: ${msg(erro)}`, ts: new Date().toISOString() });
+          }
           await this.salvarSala(ws.path, sala);
           if (codigo === 4) {
             statusFinal = "encerrada";
@@ -382,6 +548,16 @@ export class MeetingManager {
         }
         falhasConsecutivas = 0;
         sala.turno += 1;
+        const vivaTurno = this.vivas.get(id);
+        if (vivaTurno) {
+          vivaTurno.sala.turno = sala.turno;
+          vivaTurno.estado.turno_atual = sala.turno;
+          this.anexarBuffer(id, falante, resultado.captura.trim());
+          if (MARCA_CONSENSO.test(resultado.captura)) {
+            vivaTurno.pediram.add(falante);
+            vivaTurno.estado.consenso.pedidos = vivaTurno.pediram.size;
+          }
+        }
         await this.registros.appendConteudo(
           ws.path,
           "chats",
@@ -393,9 +569,14 @@ export class MeetingManager {
         console.log(
           `[reunião ${id}] fala registrada (exec ${resultado.id} · ${(resultado.duracao_ms ?? 0) / 1000}s · custo estimado US$ ${resultado.custo_usd?.toFixed(6) ?? "?"})`,
         );
-        if (this.sinalInterrupcao) {
+        if (vivaTurno && vivaTurno.pediram.size >= participantes.length) {
+          statusFinal = "encerrada";
+          motivoFim = "consenso: todos os participantes pediram encerrar";
+          break;
+        }
+        if (this.interrompida(id)) {
           statusFinal = "encerrada-partial";
-          motivoFim = "interrompida pelo humano (SIGINT)";
+          motivoFim = "interrompida pelo humano (SIGINT/stop)";
           break;
         }
         if (sala.turno >= sala.max_turnos) {
@@ -416,6 +597,15 @@ export class MeetingManager {
     sala.status = statusFinal;
     sala.motivo_fim = motivoFim ?? "encerrada";
     sala.encerrada_em = new Date().toISOString();
+    const vivaFim = this.vivas.get(id);
+    if (vivaFim) {
+      vivaFim.sala.status = sala.status;
+      vivaFim.sala.motivo_fim = sala.motivo_fim;
+      vivaFim.sala.encerrada_em = sala.encerrada_em;
+      vivaFim.estado.status = "encerrada";
+      vivaFim.estado.turno_atual = sala.turno;
+      vivaFim.estado.encerrada_em = sala.encerrada_em;
+    }
     await this.registros.appendConteudo(
       ws.path,
       "chats",
@@ -470,6 +660,7 @@ export class MeetingManager {
         gatilho: { tipo: "turno", origem: sala.id },
       });
       const decisao = parseDecisaoModerador(r.captura);
+      this.anexarBuffer(sala.id, sala.moderator, r.captura.trim());
       await this.registros.appendConteudo(
         ws.path,
         "chats",
@@ -541,6 +732,7 @@ export class MeetingManager {
       "",
       "=== SUA FALA ===",
       "Contribua com a reunião: curto, objetivo, em português. Não repita o que já foi dito; avance a discussão.",
+      "Se você considerar a pauta esgotada e concordar em encerrar a reunião, inclua o marcador [CONSENSO-ENCERRAR] no fim da sua fala.",
     ].join("\n");
   }
 
