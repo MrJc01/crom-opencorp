@@ -87,6 +87,11 @@ test.describe("Composer inteligente — / comandos, @ contexto, ! terminal (PLAN
   });
 
   test("(d) !task list executa comando whitelistado e mostra saída .terminal-saida", async ({ page }) => {
+    // garante que há pelo menos uma task para o comando listar (suite completa roda com estado compartilhado)
+    await api(page).post("/tasks", {
+      headers: { authorization: "Bearer test-e2e", "content-type": "application/json" },
+      data: { titulo: "Task backlog e2e-composer-d", coluna: "backlog" },
+    });
     await page.click('button[title="Nova conversa"]');
     await page.fill("#chat-input", "!task list");
     await page.keyboard.press("Enter");

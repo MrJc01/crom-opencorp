@@ -1,6 +1,6 @@
 # PLANO — PAINEL vNext (v0.7 "Painel Completo")
 
-> Origem: pedido do dono (28 itens), registrado na íntegra e organizado por domínio.
+> Origem: pedido do dono (29 itens — 28 iniciais + histórico popup do Secretário adicionado em 2026-09-01), registrado na íntegra e organizado por domínio.
 > Método: inventário do código real (subagentes de exploração frontend + core) + especialistas simulados + estudo do Preline.
 > Data: 2026-09-01 · Estado anterior: v0.6.0 (PLANO-WEB-CRUD 100% [x]).
 
@@ -49,6 +49,7 @@
 | P-21 | **Right-click contextual** (cursor muda, opções: ver, enviar como contexto @, abrir Secretário lateral) + **histórico de input não enviado** persistente (mudança de página/refresh) e **sincronizado** (página Secretário ↔ chat lateral) |
 | P-22 | **@ clicável** (além do padrão) |
 | P-23 | Página do Secretário **estilo ChatGPT/opencode web** |
+| P-29 | **Histórico do Secretário como popup page** para listar conversas — **limpo, estilo ChatGPT/opencode** (adicionado 2026-09-01) |
 
 ### F. Notificações
 | ID | Pedido |
@@ -143,6 +144,12 @@
 - [x] 1.5 Estado do input não-enviado: fonte única (módulo singleton + persistência local), **sincronizado** entre página Secretário e drawer; sobrevive navegação e refresh *(src/web/rascunho.ts — oc-chat-rascunho; __chatRascunhoInput sincroniza as duas textareas)*
 - **Aceite**: conversar de qualquer página; input nunca se perde; nada duplicado. — e2e novo chat-lateral.spec 4/4 (FAB, sync bidirecional, persistência reload, mobile fullscreen, FAB oculto no Secretário); unitários 472; suite completa = baseline (agenda ×5 + chat markdown ×1); fix de design: superfície lateral só renderiza com drawer aberto (evita duplicação em strict mode).
 
+### Etapa 1b — Histórico do Secretário como popup limpo *(P-29 — adicionado 2026-09-01)*
+- [ ] 1.6 Histórico do Secretário **como popup page** para listar conversas — **limpo, estilo ChatGPT/opencode** (overlay + lista agrupada Hoje/Ontem/Anteriores, busca, paginação, clique abre a conversa)
+- [ ] 1.7 Histórico: estado vazio ilustrado + loading + erro (reuso de estado.ts), fechar em Escape/click fora, não quebrar o feed da conversa ativa
+- [ ] 1.8 **Polish de layout (preline — P-28 reforço)**: cards com `shadow-sm/border/hover`, inputs com ícone, botões unificados, tipografia hierárquica, espaçamento 8pt, empty-states ilustrados, drawer com `shadow-2xl/blur` — aplicado em: navbar, task/app/workspace cards, inputs de busca, botões e empty-states (sem bundle)
+- **Aceite**: histórico abre como popup limpo sobre o chat, lista clicável, fecha limpo; layout do painel com acabamento preline-inspired consistente.
+
 ### Etapa 2 — Composer inteligente: / @ ! *(P-20, P-22)* ✅ 2026-09-01
 - [x] 2.1 Parser do composer: `/` comandos, `@` contexto, `!` terminal *(src/web/composer-comandos.ts — parsearComposer puro + 10 testes unitários)*
 - [x] 2.2 Palette de comandos (estilo opencode): lista com descrição — comandos próprios do opencorp + passthrough opencode *(src/web/palette.ts — resolve no front via API; desconhecido vai ao LLM)*
@@ -217,7 +224,7 @@
 - **PUT vs PATCH de agentes**: padronizar para PUT com objeto parcial mesclado (como já aceita) — evitar PATCH duplo.
 
 ## 6. Métricas de sucesso
-- 28/28 pedidos endereçados (implementados ou com ADR, no caso de P-11).
+- 29/29 pedidos endereçados (implementados ou com ADR, no caso de P-11).
 - Zero segredos expostos em qualquer GET; zero execução fora de whitelist.
 - Todas as páginas no shell único; navegação sem scrollbars visíveis.
 - Suite unitária + e2e verdes com cobertura dos novos fluxos.
