@@ -20,7 +20,7 @@ import {
   Timer,
   ListTodo,
   Radio,
-  ExternalLink,
+  Zap,
 } from "lucide-solid";
 import { A, useNavigate } from "@solidjs/router";
 import { fetchApi, wsAtivo } from "../lib/context";
@@ -47,8 +47,8 @@ function formatarDecorrido(ms: number): string {
   const m = Math.floor((s % 3600) / 60);
   const seg = s % 60;
   const p2 = (n: number): string => String(n).padStart(2, "0");
-  if (d > 0) return `${d}d ${p2(h)}:${p2(m)}:${p2(seg)}`;
-  return `${p2(h)}:${p2(m)}:${p2(seg)}`;
+  if (d > 0) return `+${d}d ${p2(h)}:${p2(m)}:${p2(seg)}`;
+  return `+${p2(m)}:${p2(seg)}`;
 }
 
 export const HomeView: Component = () => {
@@ -67,8 +67,9 @@ export const HomeView: Component = () => {
   });
 
   const [schedules, setSchedules] = createSignal<any[]>([]);
+  const [execucoes, setExecucoes] = createSignal<any[]>([]);
+  const [executandoAgora, setExecutandoAgora] = createSignal<any | null>(null);
   const [aprovacoes, setAprovacoes] = createSignal<any[]>([]);
-  const [atividades, setAtividades] = createSignal<any[]>([]);
   const [tasksEmAberto, setTasksEmAberto] = createSignal<any[]>([]);
   const [agentes, setAgentes] = createSignal<any[]>([]);
 
@@ -85,12 +86,12 @@ export const HomeView: Component = () => {
   const [novoResponsavel, setNovoResponsavel] = createSignal("");
   const [criandoTask, setCriandoTask] = createSignal(false);
 
-  // Ticker de 1 segundo para contagem regressiva em tempo real
-  let timerId: any = null;
+  let ticker1s: any = null;
+  let polling5s: any = null;
 
   const carregarDadosHome = async () => {
     try {
-      const [ledger, tasks, ags, flows, aprovs, budget, status, jobs] = await Promise.allSettled([
+      const [ledger, tasks, ags, flows, aprovs, budget, status, jobs, rExecs] = await Promise.allSettled([
         fetchApi<any>("/ledger/resumo"),
         fetchApi<any[]>("/tasks"),
         fetchApi<any[]>("/agents"),
@@ -99,6 +100,7 @@ export const HomeView: Component = () => {
         fetchApi<any>("/budget/status"),
         fetchApi<any>("/status"),
         fetchApi<any[]>("/schedules"),
+        fetchApi<any[]>("/execucoes?limite=15"),
       ]);
 
       const getVal = <T>(r: PromiseSettledResult<T>, def: T): T => (r.status === "fulfilled" ? r.value : def);
@@ -111,9 +113,15 @@ export const HomeView: Component = () => {
       const dBudget = getVal(budget, null);
       const dStatus = getVal(status, null);
       const dJobs = getVal(jobs, []);
+      const dExecs = getVal(rExecs, []);
 
       setAgentes(dAgentes);
       setSchedules(dJobs);
+      setExecucoes(dExecs);
+
+      // Identificar se há algum agente executando agora
+      const emAndamento = dExecs.find((e: any) => e.status === "executando");
+      setExecutandoAgora(emAndamento || null);
 
       const hoje = new Date().toISOString().slice(0, 10);
       const vencidas = dTasks.filter(
@@ -140,10 +148,6 @@ export const HomeView: Component = () => {
 
       // Tasks em aberto (máx 6)
       setTasksEmAberto(dTasks.filter((t: any) => t.coluna !== "feito").slice(0, 6));
-
-      // Últimos runs
-      const ultimos = dLedger?.ultimos_runs || [];
-      setAtividades(ultimos.slice(0, 8));
     } catch {}
   };
 
@@ -231,7 +235,7 @@ export const HomeView: Component = () => {
     return "agente";
   };
 
-  // Lista ordenada das próximas rotinas (com contagem regressiva ao vivo)
+  // Lista ordenada das próximas rotinas (futuras)
   const jobsASeguir = () => {
     const now = agoraMs();
     return schedules()
@@ -244,7 +248,7 @@ export const HomeView: Component = () => {
           agente: extrairAgenteJob(j.args),
         };
       })
-      .filter((j: any) => j.diffMs > -1800000) // até 30min atrás
+      .filter((j: any) => j.diffMs >= -5000) // apenas futuras ou disparando agora
       .sort((a: any, b: any) => a.diffMs - b.diffMs);
   };
 
@@ -255,14 +259,21 @@ export const HomeView: Component = () => {
 
   onMount(() => {
     void carregarDadosHome();
-    // Inicia o timer que atualiza agoraMs a cada segundo
-    timerId = setInterval(() => {
+
+    // 1. Ticker de 1s para o relógio e cronômetros
+    ticker1s = setInterval(() => {
       setAgoraMs(Date.now());
     }, 1000);
+
+    // 2. Polling inteligente a cada 5s para sincronizar status sem recarregar tela
+    polling5s = setInterval(() => {
+      void carregarDadosHome();
+    }, 5000);
   });
 
   onCleanup(() => {
-    if (timerId) clearInterval(timerId);
+    if (ticker1s) clearInterval(ticker1s);
+    if (polling5s) clearInterval(polling5s);
   });
 
   return (
@@ -294,11 +305,51 @@ export const HomeView: Component = () => {
         </div>
       </div>
 
-      {/* BANNER PRINCIPAL COM TIMER AO VIVO EM SEGUNDOS */}
+      {/* CARD 1: EXECUTANDO AGORA (CASO HAJA AGENTE RODANDO) */}
+      <Show when={executandoAgora()}>
+        {(exec) => (
+          <div class="p-4 rounded-xl border border-blue-500/40 bg-gradient-to-r from-blue-950/60 via-zinc-900 to-zinc-900/80 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="flex items-center gap-3.5 min-w-0">
+              <div class="h-11 w-11 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-300 flex-shrink-0">
+                <Zap size={22} class="animate-pulse" />
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/30 text-blue-200 border border-blue-500/50 animate-pulse font-mono">
+                    ● Executando Agora
+                  </span>
+                  <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-blue-300 border border-zinc-800">
+                    ⏱ {formatarDecorrido(agoraMs() - new Date(exec().inicio).getTime())}
+                  </span>
+                </div>
+                <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+                  <span class="text-sm font-bold text-zinc-100 font-mono">
+                    @{exec().agente}
+                  </span>
+                  <span class="text-xs text-zinc-400 font-mono">
+                    · Gatilho: {exec().gatilho_tipo} ({exec().gatilho_origem || exec().id})
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto">
+              <A
+                href="/historico"
+                class="px-3 py-1.5 rounded-lg bg-blue-900/40 hover:bg-blue-800/50 border border-blue-700/60 text-xs text-blue-200 font-medium transition-colors"
+              >
+                Acompanhar Log →
+              </A>
+            </div>
+          </div>
+        )}
+      </Show>
+
+      {/* CARD 2: BANNER PRINCIPAL COM TIMER DA PRÓXIMA RONDA */}
       <Show when={proximoImediato()}>
         {(job) => {
           const diff = () => job().diffMs;
-          const perto = () => diff() > 0 && diff() < 120000; // menos de 2 min
+          const perto = () => diff() > 0 && diff() < 120000;
 
           return (
             <div
@@ -483,7 +534,7 @@ export const HomeView: Component = () => {
               each={jobsASeguir().slice(0, 5)}
               fallback={
                 <div class="py-8 text-center text-xs text-zinc-500">
-                  Nenhuma ronda com próxima execução programada.
+                  Nenhuma ronda futura programada.
                 </div>
               }
             >
@@ -527,7 +578,7 @@ export const HomeView: Component = () => {
           </div>
         </div>
 
-        {/* Coluna 2: Feed de Atividades Recentes do Ledger */}
+        {/* Coluna 2: Feed de Atividades Recentes com Status em Tempo Real */}
         <div class="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 space-y-3">
           <div class="flex items-center justify-between border-b border-zinc-800/80 pb-2">
             <div class="flex items-center gap-2">
@@ -543,7 +594,7 @@ export const HomeView: Component = () => {
 
           <div class="space-y-2 max-h-80 overflow-y-auto scrollbar-thin pr-1">
             <For
-              each={atividades()}
+              each={execucoes()}
               fallback={
                 <div class="py-8 text-center text-xs text-zinc-500">
                   Nenhuma atividade recente registrada neste workspace.
@@ -555,27 +606,38 @@ export const HomeView: Component = () => {
                   <div class="flex items-center gap-2.5 min-w-0">
                     <div
                       class={`h-2 w-2 rounded-full flex-shrink-0 ${
-                        at.status === "concluido"
+                        at.status === "executando"
+                          ? "bg-blue-400 animate-ping"
+                          : at.status === "concluido"
                           ? "bg-emerald-400"
                           : at.status === "falhou"
                           ? "bg-rose-400"
                           : at.status === "hitl_pendente"
                           ? "bg-amber-400 animate-pulse"
-                          : "bg-blue-400"
+                          : "bg-zinc-500"
                       }`}
                     />
                     <div class="min-w-0">
                       <div class="font-medium text-zinc-200 truncate">
                         @{at.agente || "agente"}
+                        <span class="text-[10px] text-zinc-500 ml-1.5 font-mono">
+                          ({at.status})
+                        </span>
                       </div>
                       <div class="text-[10px] text-zinc-500 truncate">
-                        {at.ordem ? at.ordem.slice(0, 48) + "..." : "Rotina periódica"}
+                        {at.gatilho_tipo || "cron"} · {at.gatilho_origem || at.id}
                       </div>
                     </div>
                   </div>
 
                   <div class="text-right flex-shrink-0 text-[10px] text-zinc-400 font-mono">
-                    <div>{at.duracao_ms ? `${(at.duracao_ms / 1000).toFixed(1)}s` : "—"}</div>
+                    <div>
+                      {at.status === "executando"
+                        ? formatarDecorrido(agoraMs() - new Date(at.inicio).getTime())
+                        : at.duracao_ms
+                        ? `${(at.duracao_ms / 1000).toFixed(1)}s`
+                        : "—"}
+                    </div>
                     <div class="text-zinc-500">
                       {at.inicio ? new Date(at.inicio).toLocaleTimeString("pt-BR") : ""}
                     </div>
