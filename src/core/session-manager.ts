@@ -433,6 +433,19 @@ export class SessionManager {
           workspace_path: ws.path,
           exec_id: idHitl,
         });
+        // Notificação + evento para o Secretário/Notificações aparecerem imediatamente
+        try {
+          const { NotificationStore } = await import("./notification-store.js");
+          const notifs = new NotificationStore();
+          await notifs.adicionar(ws.path, {
+            titulo: `Permissão necessária: ${ag.frontmatter.id}`,
+            corpo: `${ordem.slice(0, 120)} — ${pre.motivo} (toque em Notificações para aprovar)`,
+            tipo: "aviso",
+            origem: "hitl",
+          });
+        } catch {}
+        try { eventBus.emit("secretario.mensagem", { sessao_id: pendencia.id, fase: "hitl", workspace: ws.id }); } catch {}
+        try { eventBus.emit("notificacao.nova", { workspace: ws.id }); } catch {}
         throw new SessionError(
           `HITL: a ordem casa com "${pre.padrao}" e aguarda aprovação humana — pendência ${pendencia.id} (opencorp approvals list)`,
           { exitCode: 5 },

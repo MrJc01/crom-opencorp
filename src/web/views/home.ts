@@ -337,7 +337,7 @@ function renderFlowsHub(flows: FlowInfo[], total: number): void {
     el.innerHTML = `
       <div class="flex items-center justify-between gap-2 mb-2">
         <span class="text-sm text-zinc-400">O CEO analisa o board e abre tasks sozinho com elas.</span>
-        <a class="btn-ghost text-xs" onclick="navegar('fluxos')" href="#/fluxos">ver fluxos →</a>
+        <a class="btn-ghost text-xs" onclick="navegar('fluxos')" href="/fluxos">ver fluxos →</a>
       </div>
       ${estadoVazio('fluxos', 'Nenhum fluxo no workspace', 'Crie com <code>opencorp flow create</code> ou instale as linhas de pensamento padrão.')}`;
     return;
@@ -346,7 +346,7 @@ function renderFlowsHub(flows: FlowInfo[], total: number): void {
   el.innerHTML = `
     <div class="flex items-center justify-between gap-2 mb-2">
       <span class="text-sm text-zinc-400">Executáveis a um clique:</span>
-      <a class="btn-ghost text-xs" onclick="navegar('fluxos')" href="#/fluxos">ver todas (${total}) →</a>
+      <a class="btn-ghost text-xs" onclick="navegar('fluxos')" href="/fluxos">ver todas (${total}) →</a>
     </div>
     <div class="hub-flows-lista">
       ${flows.map((f) => `

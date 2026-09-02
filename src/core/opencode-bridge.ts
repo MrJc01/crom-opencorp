@@ -22,13 +22,14 @@ const TOOLS_OPENCODE = [
 function permissoesParaOpencode(agente: Agente): Record<string, string> {
   const editaArquivos = agente.tools.includes("write") || agente.tools.includes("edit");
   const edit = editaArquivos ? "allow" : "deny";
+  // external_directory precisa ser allow para o secretário ler ~/.opencorp (home isolado)
   if (agente.permissions === "level-1") {
-    return { edit, bash: "deny", webfetch: "deny" };
+    return { edit, bash: "deny", webfetch: "deny", external_directory: "allow" };
   }
   if (agente.permissions === "level-2") {
-    return { edit, bash: "allow", webfetch: "deny" };
+    return { edit, bash: "allow", webfetch: "deny", external_directory: "allow" };
   }
-  return { edit, bash: "allow", webfetch: "allow" };
+  return { edit, bash: "allow", webfetch: "allow", external_directory: "allow" };
 }
 
 function yamlString(valor: string): string {

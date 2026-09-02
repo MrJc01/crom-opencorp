@@ -395,7 +395,7 @@ async function carregarRotinasReuniao(): Promise<void> {
 
   const rotinas = jobs.filter(j => Array.isArray(j.args) && j.args[0] === 'meeting');
   if (!rotinas.length) {
-    el.innerHTML = '<p class="text-xs text-zinc-500">Nenhuma reunião automática agendada — gerencie todas as rotinas na aba <a href="#/agenda" class="underline">Agenda</a>.</p>';
+    el.innerHTML = '<p class="text-xs text-zinc-500">Nenhuma reunião automática agendada — gerencie todas as rotinas na aba <a href="/agenda" class="underline">Agenda</a>.</p>';
     return;
   }
 

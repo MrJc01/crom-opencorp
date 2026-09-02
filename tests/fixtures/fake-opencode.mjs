@@ -100,8 +100,45 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // POST /session/:id/truncate - trunca histórico para edição (manter_ate = qtos msgs manter)
+  const matchTrunc = path.match(/^\/session\/([^/]+)\/truncate$/);
+  if (matchTrunc && method === "POST") {
+    const id = matchTrunc[1];
+    const session = sessions.get(id);
+    if (!session) {
+      send(res, 404, { error: "not found" });
+      return;
+    }
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    const { manter_ate } = body ? JSON.parse(body) : {};
+    const manter = typeof manter_ate === "number" ? Math.floor(manter_ate) : -1;
+    if (!Number.isInteger(manter) || manter < 0) {
+      send(res, 400, { error: "manter_ate deve ser >=0" });
+      return;
+    }
+    // mensagem filtrada no proxy = user/assistant com conteúdo; no fake, todas têm conteúdo, então raw length == filtrado
+    // Para simplificar, tratamos manter_ate como índice na lista raw filtrada (user/assistant) — como o proxy faz
+    // Vamos mapear raw -> filtrado da mesma forma que o proxy, depois truncar
+    const filtradosIdx = session.messages
+      .map((m, idx) => ({ m, idx, content: (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim() }))
+      .filter((x) => (x.m.role === "user" || x.m.role === "assistant") && x.content.length > 0)
+      .map((x) => x.idx);
+    if (manter > filtradosIdx.length) {
+      send(res, 400, { error: `manter_ate ${manter} fora do range` });
+      return;
+    }
+    if (manter < filtradosIdx.length) {
+      const corteIdx = filtradosIdx[manter];
+      session.messages = session.messages.slice(0, corteIdx);
+      session.updated = Date.now();
+    }
+    send(res, 200, { ok: true, removidos: session.messages.length });
+    return;
+  }
+
   // POST /session/:id/message - send message (SYNCHRONOUS response with assistant message)
-  const matchMsg = path.match(/^\/session\/([^/]+)\/message$/);
+  const matchMsg = path.match(/^\/session\/([^\/]+)\/message$/);
   if (matchMsg && method === "POST") {
     const id = matchMsg[1];
     const session = sessions.get(id);

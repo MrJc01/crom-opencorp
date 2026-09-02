@@ -92,8 +92,23 @@ async function carregarSessoes(): Promise<void> {
     const msg = (e as Error).message ?? '';
     // standby do Secretário não é um erro do popup — estado vazio orientando o início
     if (msg.includes('não iniciado') || msg.includes('409')) {
-      lista.innerHTML = estadoVazio('history', 'Nenhuma conversa ainda',
-        'Inicie o Secretário e converse — as conversas aparecem aqui.');
+      lista.innerHTML = estadoVazio('history', 'Secretário em standby',
+        'O secretário não foi iniciado. Inicie para ver o histórico.',
+        `<button class="btn" onclick="window.__histIniciarSecretario()">Iniciar secretário</button>`);
+      // expõe handler para o botão do estado vazio
+      (window as unknown as Record<string, unknown>).__histIniciarSecretario = async () => {
+        const btn = document.querySelector('.hist-popup-box .btn') as HTMLButtonElement | null;
+        if (btn) { btn.disabled = true; btn.textContent = 'Iniciando…'; }
+        try {
+          await q('/secretario/start', { method: 'POST' });
+          lista.innerHTML = estadoCarregando();
+          // dá tempo do opencode subir (health check do server leva ~1s)
+          await new Promise((r) => setTimeout(r, 1500));
+          await carregarSessoes();
+        } catch (err) {
+          lista.innerHTML = estadoErro('Falha ao iniciar o secretário: ' + (err as Error).message, () => void carregarSessoes());
+        }
+      };
       return;
     }
     lista.innerHTML = estadoErro('Não foi possível carregar o histórico de conversas.', () => {

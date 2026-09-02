@@ -209,8 +209,9 @@ input[readonly],select[readonly],textarea[readonly]{background:#1a1a1a}
 .oc-user{background:#1c1c1c;border:1px solid var(--border);border-radius:10px;padding:.7rem .9rem}
 .oc-assistant .oc-msg-corpo{overflow-wrap:anywhere;min-width:0;color:var(--text)}
 .oc-copy{position:absolute;top:.35rem;right:.35rem;background:transparent;border:1px solid var(--border);color:var(--muted);font-size:.625rem;padding:.1rem .4rem;border-radius:.25rem;opacity:0;transition:opacity .12s;min-height:0}
-.oc-msg:hover .oc-copy,.oc-copy:focus-visible{opacity:1}
-@media(pointer:coarse){.oc-copy{opacity:.7}}
+.oc-edit{position:absolute;top:.35rem;right:2.6rem;background:transparent;border:1px solid var(--border);color:var(--muted);font-size:.625rem;padding:.1rem .4rem;border-radius:.25rem;opacity:0;transition:opacity .12s;min-height:0}
+.oc-msg:hover .oc-copy,.oc-copy:focus-visible,.oc-msg:hover .oc-edit,.oc-edit:focus-visible{opacity:1}
+@media(pointer:coarse){.oc-copy,.oc-edit{opacity:.7}}
 .oc-vazio{text-align:center;padding:3rem 1rem;color:var(--muted)}
 .oc-vazio-titulo{font-size:1.05rem;font-weight:600;margin-bottom:1.25rem;color:var(--text)}
 .oc-chips{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center}
@@ -221,6 +222,20 @@ input[readonly],select[readonly],textarea[readonly]{background:#1a1a1a}
 .oc-dots i{animation:ocDot 1.2s infinite;font-style:normal}
 .oc-dots i:nth-child(2){animation-delay:.2s}.oc-dots i:nth-child(3){animation-delay:.4s}
 @keyframes ocDot{0%,60%,100%{opacity:.2}30%{opacity:1}}
+.oc-pensamento{border:1px solid var(--border);border-radius:8px;margin-bottom:.6rem;background:#1a1a1a;overflow:hidden}
+.oc-pensamento[open]{background:#1e1e1e}
+.oc-pensamento-sumario{padding:.5rem .7rem;cursor:pointer;font-size:.75rem;color:var(--muted);list-style:none;display:flex;align-items:center;gap:.4rem}
+.oc-pensamento-sumario::-webkit-details-marker{display:none}
+.oc-pensamento-corpo{padding:.6rem .7rem;border-top:1px solid var(--border);font-size:.8rem;line-height:1.6;color:#a1a1aa;max-height:320px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
+.hitl-card{background:#1c1c1c;border:1px solid var(--warn);border-radius:10px;padding:.7rem .9rem;margin-bottom:.75rem}
+.hitl-header{font-weight:600;font-size:.8rem;color:var(--warn);margin-bottom:.3rem}
+.hitl-ordem{font-size:.8rem;color:var(--text);margin-bottom:.25rem;white-space:pre-wrap}
+.hitl-motivo{font-size:.72rem;color:var(--muted);margin-bottom:.5rem}
+.hitl-acoes{display:flex;gap:.5rem}
+@media(max-width:767px){
+  .oc-pensamento-corpo{max-height:40vh}
+  #chat-mensagens,#lat-mensagens{overscroll-behavior:contain}
+}
 .oc-ir-fim{position:absolute;bottom:110px;left:50%;transform:translateX(-50%);width:34px;height:34px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--text);font-size:1rem;z-index:5}
 .oc-ir-fim:hover{border-color:#404040}
 
@@ -258,7 +273,7 @@ input[readonly],select[readonly],textarea[readonly]{background:#1a1a1a}
   .composer-dica{display:none}
 }
 /* ========= MODAIS (substituem prompt()/confirm() nativos) ========= */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:60;display:flex;align-items:center;justify-content:center;padding:1rem}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:70;display:flex;align-items:center;justify-content:center;padding:1rem}
 .modal-box{background:var(--card);border:1px solid var(--border);border-radius:.5rem;box-shadow:0 10px 30px rgba(0,0,0,.5);width:100%;max-width:420px;padding:1.25rem;animation:modalIn .15s ease}
 @keyframes modalIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
 .modal-titulo{font-weight:600;font-size:1rem;margin:0 0 .75rem}

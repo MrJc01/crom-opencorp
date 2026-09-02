@@ -16,5 +16,6 @@
     "noFallthroughCasesInSwitch": true,
     "types": []
   },
-  "include": ["src/web"]
+  "include": ["src/web/**/*.ts", "src/web/**/*.js"],
+  "exclude": ["src/web/**/*.svelte.ts", "src/web/**/*.svelte", "src/web/lib/**", "src/web/stores/**", "src/web/svelte-main.ts", "src/web/App.svelte"]
 }

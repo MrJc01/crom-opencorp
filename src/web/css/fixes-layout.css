@@ -19,8 +19,15 @@
  * Quando a view ativa é o workspace, o wrapper ocupa 100% da largura útil;
  * :has() escopa pela view ativa — as outras views mantêm o max-width normal. */
 .main:has(#view-workspace.active) > .max-w-6xl{max-width:none}
+/* Editor preenche a altura útil: padding só nas laterais/fundo (topbar 3.5rem +
+ * .5rem de respiro inferior + 2px de borda = a conta do height do .vs-root) */
+.main:has(#view-workspace.active) > .max-w-6xl{padding:0 .75rem .5rem}
+/* banner de contexto some na view workspace (a árvore já tem dica de vazio) —
+ * sem isso os 47px+mb-4 empurram o editor e criam overflow vertical */
+.main:has(#view-workspace.active) #ws-banner{display:none}
 
 /* ── Resumo (1 linha por regra) ──
  * .drawer{position:fixed...}            → devolve os drawers ao off-canvas fixo (causa raiz do scroll fantasma: colisão .drawer legacy×DaisyUI).
  * @media .drawer{width:100vw}           → repõe o width mobile do drawer que a regra acima (não-layer) sobrescreveria.
- * .main:has(#view-workspace.active)...  → wrapper full-bleed somente na view workspace (estilo VS Code), sem tocar nas demais views. */
+ * .main:has(#view-workspace.active)...  → wrapper full-bleed somente na view workspace (estilo VS Code), sem tocar nas demais views.
+ * .main:has(...){padding:...}           → padding fino na view workspace — o editor preenche a viewport (copiado do padrão VS Code). */

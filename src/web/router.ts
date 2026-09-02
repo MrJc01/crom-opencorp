@@ -1,5 +1,6 @@
 /**
- * Hash router — navegação SPA via window.location.hash.
+ * History router — URLs amigáveis sem # (ex.: /secretario?sessao=...).
+ * Mantém compatibilidade com hash antigo #/ para links antigos.
  */
 
 import { setViewAtual, setTaskAberta } from "./state.js";
@@ -7,19 +8,22 @@ import { renderView } from "./main.js";
 import { fecharChatLateral } from "./chat-lateral.js";
 
 /**
- * Navega para uma view/hash.
- * @param hash Hash sem # nem #/ (ex: 'home', 'tasks', 'app/meu-app')
+ * Navega para uma view.
+ * @param hash View sem # nem / (ex: 'home', 'tasks', 'app/meu-app')
  */
 export function navegar(hash: string): void {
-  const limpo = hash.replace(/^#\/?/, '');
+  const limpo = hash.replace(/^#\/?/, '').replace(/^\//, '');
   fecharDrawerSeAberto();
   if (limpo.startsWith('app/')) {
     setViewAtual('app-detail');
   } else {
     setViewAtual(limpo || 'home');
   }
-  // Formato canônico: #/view (ex.: #/home, #/tasks, #/app/meu-app)
-  window.location.hash = '/' + limpo;
+  const url = '/' + limpo;
+  // preserva query atual se for navegação para mesma view com sessao
+  if (window.location.pathname !== url || window.location.search) {
+    history.pushState(null, '', url);
+  }
   renderView();
 }
 
@@ -29,27 +33,51 @@ function fecharDrawerSeAberto(): void {
   if (drawer?.classList.contains('open')) fecharDrawer();
 }
 
+/** Extrai caminho da URL limpa (/secretario) com fallback para hash antigo (#/secretario) */
+function caminhoAtual(): string {
+  const hash = window.location.hash;
+  if (hash.startsWith('#/')) return hash.replace(/^#\/?/, '').split('?')[0] ?? '';
+  const p = window.location.pathname.replace(/^\//, '').split('?')[0] ?? '';
+  return p;
+}
+function queryAtual(): string {
+  if (window.location.hash.includes('?')) return window.location.hash.split('?')[1] ?? '';
+  return window.location.search.replace(/^\?/, '');
+}
+
 /**
- * Parseia o hash atual e retorna a view correspondente.
- * Params de hash (ex.: #/secretario?sessao=ses_x) são ignorados aqui —
+ * Parseia o hash/path atual e retorna a view correspondente.
+ * Params (ex.: /secretario?sessao=ses_x) são ignorados aqui —
  * cada view lê os seus via parametroHash().
  */
 export function parseHash(): string {
-  const h = window.location.hash.replace(/^#\/?/, '').split('?')[0] ?? '';
+  const h = caminhoAtual();
   if (!h) return 'home';
   if (h.startsWith('app/')) return 'app-detail';
   return h;
 }
 
-/** Valor de ?nome= no hash atual (ex.: 'sessao' em #/secretario?sessao=ses_x) */
+/** Valor de ?nome= na URL atual (ex.: 'sessao' em /secretario?sessao=ses_x) — suporta hash e history */
 export function parametroHash(nome: string): string | null {
-  const q = window.location.hash.replace(/^#\/?/, '').split('?')[1] ?? '';
+  const q = queryAtual();
   return new URLSearchParams(q).get(nome);
 }
 
-/** Inicializa listener de hashchange */
+/** Inicializa listener de navegação (history + hash fallback) */
 export function initRouter(): void {
+  window.addEventListener('popstate', () => {
+    fecharDrawerSeAberto();
+    const h = parseHash();
+    if (h.startsWith('app/')) setViewAtual('app-detail');
+    else setViewAtual(h);
+    renderView();
+  });
   window.addEventListener('hashchange', () => {
+    // compat: links antigos #/ -> converte para URL limpa sem recarregar
+    if (window.location.hash.startsWith('#/')) {
+      const novo = '/' + window.location.hash.replace(/^#\/?/, '');
+      history.replaceState(null, '', novo);
+    }
     fecharDrawerSeAberto();
     const h = parseHash();
     if (h.startsWith('app/')) setViewAtual('app-detail');

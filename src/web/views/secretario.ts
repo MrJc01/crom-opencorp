@@ -1237,3 +1237,9 @@ function renderStandbyLateral(): void {
     }
   });
 }
+
+// Compatibilidade para testes Svelte — delega para o store quando disponível
+export const eventoRemotoSecretario = (...args: unknown[]) =>
+  import("../stores/secretario.svelte.js")
+    .then((m) => (m as unknown as { eventoRemotoSecretario: (...a: unknown[]) => void }).eventoRemotoSecretario?.(...(args as never[])))
+    .catch(() => {});

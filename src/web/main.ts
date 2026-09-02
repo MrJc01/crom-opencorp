@@ -234,6 +234,12 @@ function processarEventoSSE(ev: Record<string, unknown>): void {
   const tipo = String(ev.tipo || '');
   const view = getViewAtual();
 
+  // Chat do Secretário espelhado entre ABAS (o server emite no stream do chat);
+  // atualiza página + chat lateral da aba que não enviou a mensagem.
+  if (tipo === 'secretario.mensagem') {
+    void import("./views/secretario.js").then((m) => (m as unknown as { eventoRemotoSecretario?: (ev: unknown) => void }).eventoRemotoSecretario?.(ev));
+  }
+
   if (view === 'home') {
     // Feed de atividade é incremental — re-render de home apagaria o feed
     adicionarFeedItem(ev);

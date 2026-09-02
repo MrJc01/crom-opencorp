@@ -66,7 +66,7 @@ function criarEstrutura(titulo: string, textoOk: string): HTMLDivElement {
   `;
 
   overlay.appendChild(box);
-  overlay.addEventListener('mousedown', ev => {
+  overlay.addEventListener('click', ev => {
     if (ev.target === overlay) fecharModal();
   });
 

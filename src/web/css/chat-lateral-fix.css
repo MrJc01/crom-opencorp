@@ -17,7 +17,7 @@
  * propagava para o body e a página atrás se movia; e dentro do feed, ao
  * chegar no fim, o scroll encadeava para o fundo (scroll chaining). */
 body.chat-lateral-aberto{overflow:hidden}
-#lat-mensagens{overscroll-behavior:contain}
+#lat-mensagens{flex:1;overflow-y:auto;min-height:0;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 
 /* ── 3. Composer colado na barra do iPhone ──
  * No mobile o rodapé do composer ignorava a safe-area e ficava sob o indicador

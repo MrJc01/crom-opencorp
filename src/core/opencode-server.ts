@@ -52,6 +52,9 @@ async function portaLivre(): Promise<number> {
 }
 
 async function processoVivo(pid: number): Promise<boolean> {
+  // pid 0/undefined em POSIX significa "grupo de processos do chamador" —
+  // kill(0, sinal) derrubaria o PRÓPRIO servidor (e todos os filhos). Nunca sinalize.
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -453,19 +456,36 @@ export class OpencodeServerManager {
     const pid = child.pid ?? 0;
     child.unref();
 
-    // Se o binário não existir/não for executável, o 'error' event sem
-    // listener viraria uncaughtException e DERRUBARIA o servidor inteiro.
+    // Falha do spawn (binário ausente/fora do PATH/não executável): marca o
+    // erro para falhar RÁPIDO em vez de girar esperarPortaResponder por 25s.
+    const erroSpawn: { msg: string | null } = { msg: null };
     child.on("error", (err) => {
+      erroSpawn.msg = err.message;
       eventBus.emit("secretario.erro", { pid, porta, erro: err.message });
     });
 
     const info: OpencodeServerInfo = { pid, porta, iniciado_em: new Date().toISOString() };
+    if (pid <= 0) {
+      // spawn nem chegou a criar processo — nada a esperar nem a matar
+      await removerPidfile(this.homeDir);
+      throw new Error(
+        `opencode não pôde ser spawnado (${this.binario}) — verifique PATH/execução (log: ${logPath})`,
+      );
+    }
     await gravarPidfile(this.homeDir, info);
 
     try {
-      await esperarPortaResponder(porta, this.homeDir);
+      let concluido = false;
+      await Promise.race([
+        esperarPortaResponder(porta, this.homeDir).then((r) => { concluido = true; return r; }),
+        (async () => {
+          while (!erroSpawn.msg && !concluido) await sleep(150);
+          if (erroSpawn.msg) throw new Error(`spawn do secretário falhou: ${erroSpawn.msg} — verifique PATH/execução (log: ${logPath})`);
+        })(),
+      ]);
     } catch (erro) {
       // boot falhou: matar o filho para não virar órfão em porta aleatória
+      // (pid > 0 garantido — processoVivo nunca sinaliza pid 0: grupo de processos)
       try {
         if (await processoVivo(pid)) process.kill(pid, "SIGTERM");
       } catch {

@@ -31,7 +31,7 @@ interface ToolInfo {
   erro?: string;
 }
 
-type TipoCampo = 'string' | 'numero' | 'bool' | 'lista' | 'enum';
+type TipoCampo = 'string' | 'numero' | 'bool' | 'lista' | 'enum' | 'model';
 
 interface MetaCampo {
   chave: string;
@@ -53,6 +53,24 @@ interface MetaAba {
   secoes: MetaSecao[];
 }
 
+/** Lista curada de modelos disponíveis (para dropdown) — inclui os
+ *  free do opencode/openrouter que o usuário pediu (Muse Spark, Nemotron).
+ *  O input aceita qualquer string provider/model — a lista é só atalho. */
+const MODELOS_SUGERIDOS: string[] = [
+  'opencode/muse-spark-1.2-contributor-free',
+  'opencode/nemotron-3-nano-free',
+  'opencode/nemotron-3-ultra-free',
+  'opencode/nemotron-3-ultra-free:thinking',
+  'openrouter/nvidia/nemotron-3-nano-30b-a3b:free',
+  'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free',
+  'opencode-go/glm-5.3-flash',
+  'opencode-go/mimo-v2.5',
+  'opencode-go/minimax-m3',
+  'openrouter/google/gemini-2.5-flash',
+  'openrouter/anthropic/claude-3.5-haiku',
+  'openrouter/minimax/minimax-m3:free',
+];
+
 const ABAS: MetaAba[] = [
   {
     id: 'modelos',
@@ -62,9 +80,10 @@ const ABAS: MetaAba[] = [
         titulo: 'Modelos de IA',
         ajuda: 'modelos',
         campos: [
-          { chave: 'default_model', label: 'Modelo padrão dos agentes', tipo: 'string', dica: 'formato provedor/modelo — plano Go: opencode-go/glm-5.3-flash' },
-          { chave: 'test_model', label: 'Modelo dos testes cegos', tipo: 'string', dica: 'juiz que avalia outputs' },
-          { chave: 'secretary.agent', label: 'Agente do secretário', tipo: 'string', dica: 'qual agente atende o chat' },
+          { chave: 'secretary.model', label: 'Modelo do secretário (chat)', tipo: 'model', dica: 'vazio = usa o do template (opencode-go/glm-5.3-flash). Digite ou escolha: opencode/muse-spark-1.2-contributor-free, opencode/nemotron-3-nano-free, openrouter/nvidia/nemotron-3-ultra-550b-a55b:free etc. Após salvar, reinicie o secretário.' },
+          { chave: 'default_model', label: 'Modelo padrão dos agentes', tipo: 'model', dica: 'fallback para agentes sem model no frontmatter — formato provedor/modelo' },
+          { chave: 'test_model', label: 'Modelo dos testes cegos', tipo: 'model', dica: 'juiz que avalia outputs' },
+          { chave: 'secretary.agent', label: 'Agente do secretário', tipo: 'string', dica: 'qual agente atende o chat (secretario / secretario-exec)' },
         ],
       },
     ],
@@ -329,6 +348,16 @@ function campoHtml(c: MetaCampo): string {
         <input id="${id}" type="number" step="any" value="${escapeHtml(String(valor ?? ''))}"/>
         <button class="btn" onclick="window.__cfgSalvar('${c.chave}', 'numero')">Salvar</button>
       </div>`;
+  } else if (c.tipo === 'model') {
+    const dlId = 'dl-' + id;
+    const valStr = String(valor ?? '');
+    controle = `
+      <div class="cfg-linha">
+        <input id="${id}" value="${escapeHtml(valStr)}" list="${dlId}" placeholder="ex.: opencode/muse-spark-1.2-contributor-free" autocomplete="off"/>
+        <datalist id="${dlId}">${MODELOS_SUGERIDOS.map((m) => `<option value="${escapeHtml(m)}"></option>`).join('')}</datalist>
+        <button class="btn" onclick="window.__cfgSalvar('${c.chave}', 'model')">Salvar</button>
+      </div>
+      <div class="cfg-dica" style="margin-top:.25rem">Escolha na lista ou digite manualmente (<code>provedor/modelo</code>). Modelos com <code>:free</code> usam cota gratuita quando disponível.</div>`;
   } else {
     controle = `
       <div class="cfg-linha">
@@ -377,7 +406,11 @@ async function salvarCampo(chave: string, tipo: TipoCampo, bruto?: string | bool
 
   try {
     await api('/settings', { method: 'PUT', body: JSON.stringify({ chave, valor, scope: escopoAtual }) });
-    toast(`${chave} salvo (${escopoAtual === 'workspace' ? 'workspace' : 'global'})`, 'ok');
+    if (chave === 'secretary.model' || chave === 'default_model') {
+      toast(`${chave} salvo (${escopoAtual === 'workspace' ? 'workspace' : 'global'}) — reinicie o secretário para aplicar`, 'ok');
+    } else {
+      toast(`${chave} salvo (${escopoAtual === 'workspace' ? 'workspace' : 'global'})`, 'ok');
+    }
     await carregarConteudo();
   } catch {
     // api() já mostrou o toast de erro (ex.: valor rejeitado pelo schema)

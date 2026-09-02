@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, resolve, relative, isAbsolute } from "node:path";
-import { stat, readdir, readFile, realpath } from "node:fs/promises";
+import { stat, readdir, readFile, realpath, open } from "node:fs/promises";
 import { existsSync, rmSync, statSync, readFileSync } from "node:fs";
 import { WorkspaceManager } from "../core/workspace-manager.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
@@ -30,7 +30,7 @@ import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError
 import { FlowError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
-import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, dirOpencodeHome, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc } from "../core/opencode-server.js";
+import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc } from "../core/opencode-server.js";
 import { taskCreateSchema } from "../schemas/task.js";
 import { tipoDeNomeApp, validarPerfilApp } from "../schemas/app-perfil.js";
 
@@ -268,7 +268,9 @@ async function resolverCaminhoWorkspace(wsPath: string, pathParam: string): Prom
 }
 
 /** Lê arquivo com limite de 512KB, retorna {tipo, conteudo} ou {tipo, conteudo: null, motivo}.
- *  realpath no alvo: symlink dentro do workspace apontando para FORA é bloqueado. */
+ *  realpath no alvo: symlink dentro do workspace apontando para FORA é bloqueado.
+ *  Qualquer arquivo de texto abre (sem whitelist de extensão): binário é detectado
+ *  por sniffing de byte NUL nos primeiros 8KB — cobre .ts/.js/.css/.sh/.yml etc. */
 async function lerArquivoWorkspace(alvo: string, base: string): Promise<{ tipo: "arquivo"; conteudo: string | null; motivo?: string }> {
   const real = await realpath(alvo).catch(() => null);
   if (!real || (!isAbsolute(base) ? false : relative(resolve(base), real).startsWith(".."))) {
@@ -278,10 +280,17 @@ async function lerArquivoWorkspace(alvo: string, base: string): Promise<{ tipo: 
   if (info.size > 512 * 1024) {
     return { tipo: "arquivo", conteudo: null, motivo: "arquivo excede 512KB" };
   }
-  const ext = alvo.slice(alvo.lastIndexOf(".")).toLowerCase();
-  const extPermitidas = [".md", ".json", ".txt", ".jsonl", ".log"];
-  if (!extPermitidas.includes(ext)) {
-    return { tipo: "arquivo", conteudo: null, motivo: "binário" };
+  if (info.size > 0) {
+    const fd = await open(alvo, "r");
+    try {
+      const sniff = Buffer.alloc(Math.min(info.size, 8 * 1024));
+      await fd.read(sniff, 0, sniff.length, 0);
+      if (sniff.includes(0)) {
+        return { tipo: "arquivo", conteudo: null, motivo: "binário (abertura só para texto)" };
+      }
+    } finally {
+      await fd.close();
+    }
   }
   const conteudo = await readFile(alvo, "utf8");
   return { tipo: "arquivo", conteudo };
@@ -322,7 +331,6 @@ async function construirArvore(raiz: string, profundidadeMax: number): Promise<{
       return []; // ramo sem permissão/que sumiu — segue sem ele
     }
     const visiveis = entradas.filter((e) => {
-      if (e.name.endsWith(".log")) return false;
       if (ARVORE_IGNORAR_DIRS.has(e.name)) return false;
       if (e.name === "logs" && rel === ".opencorp") return false;
       return true;
@@ -643,6 +651,17 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
       }
+      // SPA fallback para URLs limpas (/secretario, /workspace...) — history API sem # (só para navegação, não para API JSON)
+      const accept = String(req.headers.accept || "");
+      const querHtml = accept.includes("text/html");
+      if (req.method === "GET" && querHtml && /^\/(home|tasks|agentes|secretario|workspace|agenda|fluxos|hooks|apps|historico|notificacoes|config|app)(\/.*)?$/.test(rota)) {
+        const index = servirEstatico("/");
+        if (index) {
+          res.writeHead(200, { "content-type": index.tipo, "access-control-allow-origin": "*", "cache-control": "no-cache" });
+          res.end(index.corpo);
+          return;
+        }
+      }
       if (rota === "/health") {
         enviar(res, 200, { ok: true, versao: version });
         return;
@@ -706,7 +725,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               topicos_editoriais: Array.isArray(p.topicos) ? p.topicos.map(String) : [],
             };
             if (Array.isArray(p.diferenciais)) projeto.diferenciais = p.diferenciais.map(String);
-            writeFileAtomic(join(criado.path, ".opencorp", "projeto.json"), `${JSON.stringify(projeto, null, 2)}\n`);
+            await writeFileAtomic(join(criado.path, ".opencorp", "projeto.json"), `${JSON.stringify(projeto, null, 2)}\n`);
           }
           enviar(res, 201, { id: criado.id, caminho: criado.path });
           return;
@@ -948,6 +967,27 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const id = decodeURIComponent(mAprov[1]!);
           if (mAprov[2] === "approve") {
             const p = await approvals.aprovar(ws.path, id);
+            // retoma imediatamente sem esperar o tick (15min) — dispara o agente para a mesma ordem
+            if (p.exec_id) {
+              void (async () => {
+                try {
+                  const registros = new RegistryStore();
+                  const meta = await registros.lerMeta(ws.path, "execucoes", p.exec_id).catch(() => null);
+                  if (meta && (meta.extras as Record<string, unknown>)?.status === "hitl_pendente") {
+                    const ordem = String((meta.extras as Record<string, unknown>)?.ordem ?? p.ordem ?? "");
+                    const agente = String(p.agente || (meta as unknown as { criadoPor: string }).criadoPor || "wp-admin");
+                    // marca como executando e roda de novo (one-shot)
+                    const sessoes = new SessionManager({ homeDir: opcoes.homeDir ?? opencorpHome() });
+                    // limpa hitl_pendente para não bloquear o retry
+                    const extras = (meta.extras ?? {}) as Record<string, unknown>;
+                    extras.status = "executando";
+                    meta.extras = extras;
+                    await registros.salvarMeta(ws.path, "execucoes", meta.id, meta);
+                    await (sessoes as unknown as { rodar: (o: unknown) => Promise<unknown> }).rodar({ agente, ordem, workspaceDir: ws.path }).catch(() => {});
+                  }
+                } catch {}
+              })();
+            }
             enviar(res, 200, { id: p.id, status: p.status });
           } else {
             const corpo = (await lerCorpo(req)) as { motivo?: string };
@@ -1006,7 +1046,18 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         }
         if (rota === "/settings" && req.method === "PUT") {
           const corpo = (await lerCorpo(req)) as { chave?: string; valor?: unknown; scope?: string };
-          const r = await settings.set(corpo.chave ?? "", String(corpo.valor), {
+          const chave = String(corpo.chave ?? "").trim();
+          const valorRaw = String(corpo.valor ?? "");
+          // secretary.model vazio = reset (volta ao template) — campo opcional, "" não passa no regex
+          if (chave === "secretary.model" && valorRaw.trim() === "") {
+            const r = await settings.reset(chave, {
+              scope: corpo.scope === "workspace" ? "workspace" : "global",
+              workspaceDir: (await resolverWs(url)).path,
+            });
+            enviar(res, 200, r);
+            return;
+          }
+          const r = await settings.set(chave, String(corpo.valor), {
             scope: corpo.scope === "workspace" ? "workspace" : "global",
             workspaceDir: (await resolverWs(url)).path,
           });
@@ -1895,15 +1946,21 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               parts?: Array<{ type: string; text?: string; mime?: string; url?: string }>;
             }>;
             const mensagens = (Array.isArray(data) ? data : [])
-              .map((m) => ({
-                role: m.info?.role ?? "",
-                content: (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim(),
-                criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
-                concluida: m.info?.role === "assistant" ? !!m.info?.time?.completed : true,
-                // imagens anexadas (data URLs) — para reexibir no histórico após F5
-                imagens: (m.parts ?? []).filter((p) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p) => p.url),
-              }))
-              .filter((m) => (m.role === "user" || m.role === "assistant") && (m.content.length > 0 || (m.imagens && m.imagens.length > 0)));
+              .map((m) => {
+                const pensamento = (m.parts ?? []).filter((p) => p.type === "reasoning" || p.type === "thinking").map((p) => p.text ?? "").join("\n").trim();
+                return {
+                  role: m.info?.role ?? "",
+                  content: (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim(),
+                  pensamento: pensamento || undefined,
+                  criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
+                  concluida: m.info?.role === "assistant" ? !!m.info?.time?.completed : true,
+                  // imagens anexadas (data URLs) — para reexibir no histórico após F5
+                  imagens: (m.parts ?? []).filter((p) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p) => p.url),
+                };
+              })
+              // assistant em curso (concluida===false) DEVE passar mesmo vazio — é o marcador de polling;
+              // com pensamento também passa (ver pensamento em tempo real)
+              .filter((m) => (m.role === "user" || m.role === "assistant") && (m.content.length > 0 || (m as unknown as { pensamento?: string }).pensamento || (m.imagens && (m.imagens as unknown[]).length > 0) || (m.role === "assistant" && m.concluida === false)));
             void sincronizarSessaoNoCorp(porta, sessionId);
             enviar(res, 200, mensagens);
           } catch (erro) {
@@ -1940,6 +1997,109 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             } else {
               enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
             }
+          }
+          return;
+        }
+
+        // ── POST /secretario/sessoes/:id/truncar — edita prompt (trunca histórico para reenvio)
+        const mTruncar = /^\/secretario\/sessoes\/([^/]+)\/truncar$/.exec(rota);
+        if (mTruncar && req.method === "POST") {
+          try {
+            const porta = await portaOpencodeOuErro();
+            const sessionId = decodeURIComponent(mTruncar[1]!);
+            const corpo = (await lerCorpo(req)) as { manter_ate?: unknown };
+            const manter = typeof corpo.manter_ate === "number" ? Math.floor(Number(corpo.manter_ate)) : -1;
+            if (!Number.isInteger(manter) || manter < 0) {
+              enviar(res, 400, { erro: "manter_ate deve ser número inteiro >=0" });
+              return;
+            }
+            const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}/message`;
+            const resOp = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
+            if (!resOp.ok) {
+              enviar(res, resOp.status === 404 ? 404 : 502, { erro: resOp.status === 404 ? "sessão não encontrada" : `opencode respondeu ${resOp.status}` });
+              return;
+            }
+            const raw = (await resOp.json()) as Array<{
+              info?: { id?: string; role?: string; time?: { completed?: number } };
+              parts?: Array<{ type: string; text?: string; url?: string }>;
+            }>;
+            const filtrados = (Array.isArray(raw) ? raw : [])
+              .map((m) => {
+                const pensamento = (m.parts ?? []).filter((p) => p.type === "reasoning" || p.type === "thinking").map((p) => p.text ?? "").join("\n").trim();
+                return {
+                  id: m.info?.id,
+                  role: m.info?.role ?? "",
+                  content: (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim(),
+                  pensamento: pensamento || undefined,
+                  imagens: (m.parts ?? []).filter((p) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p) => p.url as string),
+                  concluida: m.info?.role === "assistant" ? !!m.info?.time?.completed : true,
+                };
+              })
+              .filter((m) => (m.role === "user" || m.role === "assistant") && (m.content.length > 0 || (m as unknown as { pensamento?: string }).pensamento || (m.imagens && m.imagens.length > 0) || (m.role === "assistant" && m.concluida === false)));
+            if (manter > filtrados.length) {
+              enviar(res, 400, { erro: `manter_ate ${manter} fora do range (total ${filtrados.length})` });
+              return;
+            }
+            if (manter === filtrados.length) {
+              enviar(res, 200, { ok: true, removidos: 0 });
+              return;
+            }
+            const paraRemover = filtrados.slice(manter);
+            const idsParaRemover = paraRemover.map((m) => m.id).filter(Boolean) as string[];
+            if (!idsParaRemover.length) {
+              enviar(res, 200, { ok: true, removidos: 0 });
+              return;
+            }
+            const homeDir = opcoes.homeDir ?? opencorpHome();
+            const dataHome = dirOpencodeData(homeDir);
+            const dbPath = join(dataHome, "opencode", "opencode.db");
+            let removidos = 0;
+            let dbErro: Error | null = null;
+            try {
+              const mod = await import("better-sqlite3");
+              const BetterSqlite3 = (mod as unknown as { default: unknown }).default ?? mod;
+              // @ts-ignore — construtor dinâmico
+              const db: { prepare: (sql: string) => { run: (id: string) => { changes: number } }; close: () => void; transaction: (fn: (ids: string[]) => void) => (ids: string[]) => void } = new (BetterSqlite3 as unknown as new (path: string) => unknown)(dbPath) as unknown as never;
+              const delPart = db.prepare("DELETE FROM part WHERE message_id = ?");
+              const delMsg = db.prepare("DELETE FROM message WHERE id = ?");
+              const tx = db.transaction((ids: string[]) => {
+                for (const id of ids) {
+                  delPart.run(id);
+                  const inf = delMsg.run(id);
+                  if (inf.changes) removidos++;
+                }
+              });
+              tx(idsParaRemover);
+              db.close();
+            } catch (e) {
+              dbErro = e as Error;
+            }
+            // fallback para fake-opencode (memória) quando DB não tem os dados ou falhou
+            if (removidos === 0 && idsParaRemover.length > 0) {
+              try {
+                const truncRes = await fetch(`http://127.0.0.1:${porta}/session/${sessionId}/truncate`, {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ manter_ate: manter }),
+                  signal: AbortSignal.timeout(3000),
+                });
+                if (truncRes.ok) {
+                  const j = (await truncRes.json().catch(() => ({}))) as { removidos?: number };
+                  removidos = typeof j.removidos === "number" ? j.removidos : idsParaRemover.length;
+                  dbErro = null;
+                }
+              } catch {}
+            }
+            if (dbErro && removidos === 0) {
+              enviar(res, 500, { erro: `falha ao truncar no DB: ${dbErro.message}` });
+              return;
+            }
+            void sincronizarSessaoNoCorp(porta, sessionId);
+            eventBus.emit("secretario.mensagem", { sessao_id: sessionId, fase: "truncar" });
+            enviar(res, 200, { ok: true, removidos });
+          } catch (erro) {
+            if (erro instanceof SecretarioError) enviar(res, erro.status ?? 409, { erro: erro.message });
+            else enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
           }
           return;
         }
@@ -2262,6 +2422,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               sessaoId = sessionData.id;
             }
             sse("inicio", { sessao_id: sessaoId });
+            // espelho no eventBus → todas as abas abertas (SSE /events) sincronizam o chat
+            eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "inicio" });
 
             // Formato opencode ≥1.18 — tipos estruturais em core/opencode-server.ts
             const baseUrlSessao = `${baseUrl}/session/${sessaoId}`;
@@ -2277,6 +2439,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             };
             const textoDe = (m: MensagemOc): string =>
               (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n");
+            const pensamentoDe = (m: MensagemOc): string =>
+              (m.parts ?? []).filter((p) => p.type === "reasoning" || p.type === "thinking").map((p) => p.text ?? "").join("\n");
 
             // baseline: última msg assistant pré-existente (continuação de sessão não deve re-streamar)
             const baseMsgs = (await listarMensagens()) ?? [];
@@ -2298,6 +2462,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             const inicio = Date.now();
             const deadline = 300_000;
             let enviado = "";
+            let enviadoPensamento = "";
             let concluida = false;
             let vazioDesde: number | null = null; // assistant novo, sem parts nem completed, há muito tempo = stream morto
             let acoesAvisadas = 0;
@@ -2309,6 +2474,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               if (res.destroyed || res.writableEnded) return; // cliente abortou — opencode continua; sem persistência parcial
               if (postErro && !concluida) {
                 sse("erro", { erro: `falha ao enviar mensagem ao modelo (${postErro}) — ver ~/.local/share/opencode/log/opencode.log`, sessao_id: sessaoId });
+                eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
                 res.end();
                 return;
               }
@@ -2329,6 +2495,14 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 vazioDesde = null;
                 sse("delta", { delta: texto.slice(enviado.length) });
                 enviado = texto;
+                eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "delta" });
+              }
+              const pensamento = pensamentoDe(atual);
+              if (pensamento.length > enviadoPensamento.length) {
+                vazioDesde = null;
+                sse("pensamento", { delta: pensamento.slice(enviadoPensamento.length) });
+                enviadoPensamento = pensamento;
+                eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "pensamento" });
               }
               if (atual.info?.time?.completed) {
                 concluida = true;
@@ -2337,14 +2511,16 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               // msg assistant recém-criada totalmente vazia p/ muito tempo = falha do modelo —
               // falha rápido com erro claro em vez de girar 300s até o "timeout"
               // Stream travado: nenhum assistant novo APÓS o baseline, ou assistant novo
-              // sem TEXTO, sem tool em curso e sem completed por N segundos.
+              // sem TEXTO, sem pensamento, sem tool em curso e sem completed por N segundos.
               // (step-start sozinho NÃO é atividade — era o falso "vivo" que deixava o
               // chat 300s em silêncio quando o provider congelava sem responder.)
               const temToolEmCurso = (atual.parts ?? []).some((p) => p.type === "tool");
-              if (novas === 0 || (texto.length === 0 && !temToolEmCurso && !atual.info?.time?.completed)) {
+              const temPensamento = pensamento.length > 0;
+              if (novas === 0 || (texto.length === 0 && !temPensamento && !temToolEmCurso && !atual.info?.time?.completed)) {
                 if (vazioDesde === null) vazioDesde = Date.now();
                 else if (Date.now() - vazioDesde > 35_000) {
                   sse("erro", { erro: postErro ?? "modelo sem resposta (stream travado) — reenvie a mensagem", sessao_id: sessaoId });
+                  eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
                   res.end();
                   return;
                 }
@@ -2355,11 +2531,13 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
 
             if (!concluida || !enviado) {
               sse("erro", { erro: concluida ? "resposta vazia" : "timeout aguardando resposta (300s)", sessao_id: sessaoId });
+              eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
               res.end();
               return;
             }
 
             sse("fim", { sessao_id: sessaoId, resposta: enviado });
+            eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "fim" });
             res.end();
             void sincronizarSessaoNoCorp(porta, sessaoId);
             return;

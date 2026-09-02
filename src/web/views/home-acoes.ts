@@ -181,7 +181,7 @@ export async function carregarCardAcoes(): Promise<void> {
         <span class="acao-contagem" data-contagem-fim="${escapeHtml(String(j.proxima_exec))}">…</span>
       </div>
     `).join('')
-    : '<div class="acao-vazio">Nada agendado — crie rotinas em <a href="#/agenda" onclick="navegar(\'agenda\')">Agenda</a>.</div>';
+    : '<div class="acao-vazio">Nada agendado — crie rotinas em <a href="/agenda" onclick="navegar(\'agenda\')">Agenda</a>.</div>';
 
   const lista = execs || [];
   const agora = lista.filter((e) => e.status === 'executando');

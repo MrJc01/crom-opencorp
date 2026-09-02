@@ -6,7 +6,7 @@ export const settingsSchema = z.object({
   test_model: z.string().min(1).default("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"),
   secretary: z
     .object({
-      agent: z.string().min(1).default("secretario"),
+      agent: z.string().min(1).default("secretario-exec"),
       /** override do modelo dos agentes secretário/secretário-exec (default: o do template) */
       model: z
         .string()

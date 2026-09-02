@@ -6,3 +6,5 @@ workspaces/
 *.log
 !templates/default/.opencorp/
 test-results/
+report.*.json
+web-dist/src/

@@ -10,7 +10,6 @@
 import { getToken, getWsAtivo, setWorkspaces, getWorkspaces, setWsAtivo, type WorkspaceInfo } from "./state.js";
 import { icone } from "./icons.js";
 import { escapeHtml } from "./format.js";
-import { sairParaLogin } from "./main.js";
 
 const TOKEN_KEY = 'oc-token';
 const WS_KEY = 'oc-ws';
@@ -51,6 +50,7 @@ export async function api<T = unknown>(path: string, opts: RequestInit = {}): Pr
   }
 
   if (res.status === 401) {
+    const { sairParaLogin } = await import("./main.js");
     sairParaLogin('Sessão inválida — faça login novamente');
     throw new Error('401');
   }
@@ -115,14 +115,12 @@ function atualizarSelectWorkspaces(wsArray: WorkspaceInfo[]): void {
   sel.onchange = (e: Event) => {
     const target = e.target as HTMLSelectElement;
     const novoWs = target.value;
-    // Atualiza o estado em memória (e persiste) — sem isso a API continuaria
-    // usando o workspace antigo até um reload manual da página.
     setWsAtivo(novoWs);
-    if (location.hash === '#/home' || location.hash === '' || location.hash === '#') {
-      // Já estava no Início: hashchange não dispara — re-renderiza manualmente.
+    const atual = location.pathname.replace(/^\//, '');
+    if (!atual || atual === 'home') {
       void import("./main.js").then((m) => m.renderView());
     } else {
-      location.hash = '#/home';
+      void import("./router.js").then((r) => r.navegar('home'));
     }
   };
 }
@@ -174,6 +172,7 @@ export function toast(mensagem: string, tipo: 'ok' | 'erro' | 'aviso' = 'ok'): v
 
 /** Garante keyframes do toast no head */
 function ensureToastStyles(): void {
+  if (typeof document === 'undefined') return;
   if (document.getElementById('toast-keyframes')) return;
   const style = document.createElement('style');
   style.id = 'toast-keyframes';
