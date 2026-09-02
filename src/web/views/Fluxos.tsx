@@ -15,6 +15,10 @@ import {
   HelpCircle,
   FileCheck,
   FileText,
+  Terminal,
+  Users,
+  CheckCircle2,
+  Webhook,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -130,12 +134,24 @@ export const FluxosView: Component = () => {
     switch (tipo) {
       case "agente":
         return <Bot size={14} class="text-emerald-400" />;
+      case "script":
+        return <Terminal size={14} class="text-cyan-400" />;
+      case "reuniao":
+        return <Users size={14} class="text-blue-400" />;
+      case "webhook":
+        return <Webhook size={14} class="text-emerald-400" />;
       case "decisao":
         return <HelpCircle size={14} class="text-amber-400" />;
       case "task_create":
         return <Layers size={14} class="text-blue-400" />;
       case "registro":
         return <FileText size={14} class="text-purple-400" />;
+      case "fanout":
+        return <GitBranch size={14} class="text-indigo-400" />;
+      case "review":
+        return <CheckCircle2 size={14} class="text-rose-400" />;
+      case "debate":
+        return <Users size={14} class="text-orange-400" />;
       default:
         return <Play size={14} class="text-zinc-400" />;
     }

@@ -11,8 +11,23 @@ import { opencorpHome } from "../utils/paths.js";
 export const nosFlowSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "use kebab-case para o id do nó"),
   // "fanout"/"review"/"debate": fusão team×fluxo (PLANO-WEB-CRUD F) — padrões do
-  // antigo team-orchestrator viram nós do grafo, com contexto fluindo igual aos demais
-  tipo: z.enum(["manual", "agente", "saida", "condicao", "webhook", "task_create", "registro", "decisao", "fanout", "review", "debate"]),
+  // antigo team-orchestrator viram nós do grafo, com contexto fluindo igual aos demais.
+  // "script"/"reuniao": nós de lógica avançada e governança inspirados no n8n.
+  tipo: z.enum([
+    "manual",
+    "agente",
+    "saida",
+    "condicao",
+    "webhook",
+    "task_create",
+    "registro",
+    "decisao",
+    "fanout",
+    "review",
+    "debate",
+    "script",
+    "reuniao",
+  ]),
   config: z.record(z.string(), z.unknown()).default({}),
 });
 
@@ -719,6 +734,89 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
           await marcarNo(no.id, "ok");
           atual = porId(flow, proximo);
           continue;
+        } else if (no.tipo === "script") {
+          // Nó de Execução de Script / Código do Workspace (estilo n8n Code/Exec Node)
+          const config = no.config as {
+            comando?: string;
+            arquivo?: string;
+            runtime?: "bash" | "node" | "python";
+            timeout_ms?: number;
+          };
+          const { execFile, exec } = await import("node:child_process");
+          const { promisify } = await import("node:util");
+          const execAsync = promisify(exec);
+          const execFileAsync = promisify(execFile);
+
+          let saidaScript = "";
+          const timeout = Math.min(config.timeout_ms || 60000, 300000);
+
+          try {
+            if (config.arquivo) {
+              const caminhoArq = join(wsPath, config.arquivo);
+              if (!existsSync(caminhoArq)) {
+                throw new FlowError(`Arquivo de script não encontrado no workspace: ${config.arquivo}`);
+              }
+              const runtime =
+                config.runtime ||
+                (config.arquivo.endsWith(".py")
+                  ? "python3"
+                  : config.arquivo.endsWith(".js") || config.arquivo.endsWith(".mjs")
+                  ? "node"
+                  : "bash");
+              const res = await execFileAsync(runtime, [caminhoArq], {
+                cwd: wsPath,
+                timeout,
+                env: { ...process.env, OPENCORP_ENTRADA: contexto, OPENCORP_FLOW_ID: flowId },
+              });
+              saidaScript = (res.stdout || res.stderr || "").trim();
+            } else if (config.comando) {
+              const comandoInterpolado = config.comando.replaceAll("{{entrada}}", contexto);
+              const res = await execAsync(comandoInterpolado, {
+                cwd: wsPath,
+                timeout,
+                env: { ...process.env, OPENCORP_ENTRADA: contexto, OPENCORP_FLOW_ID: flowId },
+              });
+              saidaScript = (res.stdout || res.stderr || "").trim();
+            } else {
+              throw new FlowError(`Nó script "${no.id}" requer 'arquivo' ou 'comando' configurado`);
+            }
+
+            contexto = saidaScript || contexto;
+            eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok" });
+            await marcarNo(no.id, "ok");
+          } catch (erro) {
+            await marcarNo(no.id, "falhou", null);
+            throw new FlowError(`nó "${no.id}" (script) falhou: ${msg(erro)}`);
+          }
+        } else if (no.tipo === "reuniao") {
+          // Nó de Convocação e Execução de Reunião de Diretoria / Agentes
+          const config = no.config as { pauta: string; agentes?: string[] | string; model?: string };
+          const pautaInterpolada = (config.pauta || "Reunião de alinhamento e deliberação").replaceAll("{{entrada}}", contexto);
+          const listaAgentes = Array.isArray(config.agentes)
+            ? config.agentes.join(",")
+            : typeof config.agentes === "string" && config.agentes.length > 0
+            ? config.agentes
+            : "editor,critico-site";
+
+          try {
+            const { MeetingManager } = await import("./meeting-manager.js");
+            const mm = new MeetingManager({ homeDir: this.homeDir, sessoes: this.sessoes as never });
+            const salaId = `reu-${flowId}-${no.id}-${Date.now().toString(36)}`;
+            const sala = await mm.iniciar({
+              id: salaId,
+              pauta: pautaInterpolada,
+              agentes: listaAgentes,
+              model: config.model,
+              workspaceDir: wsPath,
+            });
+            const ata = sala.ata || sala.resultado || `Reunião ${salaId} concluída.`;
+            contexto = `${contexto}\n\n[parecer da reunião (${salaId})]:\n${ata}`;
+            eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok", reuniao: salaId });
+            await marcarNo(no.id, "ok");
+          } catch (erro) {
+            await marcarNo(no.id, "falhou", null);
+            throw new FlowError(`nó "${no.id}" (reuniao) falhou: ${msg(erro)}`);
+          }
         }
         const saidas = flow.arestas.filter((a) => a.de === no.id);
         atual = saidas.length > 0 ? porId(flow, saidas[0]!.para) : undefined;
