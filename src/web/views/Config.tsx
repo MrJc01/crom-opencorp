@@ -1,11 +1,15 @@
-import { type Component, createSignal, onMount, For, Show } from "solid-js";
+import { type Component, createSignal, onMount, createEffect, For, Show } from "solid-js";
+import { useSearchParams } from "@solidjs/router";
 import { Settings, Cpu, Key, Shield, ShieldCheck, Save } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { showToast } from "../ui/Toast";
 import { fetchApi } from "../lib/context";
 
 export const ConfigView: Component = () => {
-  const [abaAtiva, setAbaAtiva] = createSignal<"modelos" | "chaves" | "seguranca" | "geral">("seguranca");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const abaAtiva = () => (searchParams.tab as "modelos" | "chaves" | "seguranca" | "geral") || "seguranca";
+  const setAbaAtiva = (tab: "modelos" | "chaves" | "seguranca" | "geral") => setSearchParams({ tab });
+
   const [settings, setSettings] = createSignal<any>({});
   const [salvando, setSalvando] = createSignal(false);
 

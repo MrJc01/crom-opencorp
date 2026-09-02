@@ -335,7 +335,7 @@ export const HomeView: Component = () => {
 
             <div class="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto">
               <A
-                href="/historico"
+                href={`/historico?run=${encodeURIComponent(exec().id)}`}
                 class="px-3 py-1.5 rounded-lg bg-blue-900/40 hover:bg-blue-800/50 border border-blue-700/60 text-xs text-blue-200 font-medium transition-colors"
               >
                 Acompanhar Log →
@@ -602,7 +602,10 @@ export const HomeView: Component = () => {
               }
             >
               {(at) => (
-                <div class="p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/80 flex items-center justify-between text-xs">
+                <A
+                  href={`/historico?run=${encodeURIComponent(at.id)}`}
+                  class="p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/80 hover:border-zinc-700 flex items-center justify-between text-xs transition-colors"
+                >
                   <div class="flex items-center gap-2.5 min-w-0">
                     <div
                       class={`h-2 w-2 rounded-full flex-shrink-0 ${
@@ -642,7 +645,7 @@ export const HomeView: Component = () => {
                       {at.inicio ? new Date(at.inicio).toLocaleTimeString("pt-BR") : ""}
                     </div>
                   </div>
-                </div>
+                </A>
               )}
             </For>
           </div>
@@ -679,7 +682,10 @@ export const HomeView: Component = () => {
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <For each={tasksEmAberto()}>
               {(task) => (
-                <div class="p-3 rounded-lg bg-zinc-950/80 border border-zinc-800 flex flex-col justify-between gap-2 shadow-xs">
+                <A
+                  href={`/tasks?task=${encodeURIComponent(task.id)}`}
+                  class="p-3 rounded-lg bg-zinc-950/80 border border-zinc-800 hover:border-zinc-700 flex flex-col justify-between gap-2 shadow-xs transition-colors"
+                >
                   <div class="space-y-1">
                     <div class="flex items-start justify-between gap-2">
                       <span class="text-xs font-semibold text-zinc-100 line-clamp-1">{task.titulo}</span>
@@ -710,7 +716,7 @@ export const HomeView: Component = () => {
                       {task.coluna}
                     </span>
                   </div>
-                </div>
+                </A>
               )}
             </For>
           </div>

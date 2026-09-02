@@ -1,4 +1,5 @@
-import { type Component, createSignal, onMount, For, Show } from "solid-js";
+import { type Component, createSignal, onMount, createEffect, For, Show } from "solid-js";
+import { useSearchParams } from "@solidjs/router";
 import {
   Plus,
   Trash2,
@@ -41,6 +42,7 @@ export interface Task {
 
 export const TasksView: Component = () => {
   const [tasks, setTasks] = createSignal<Task[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [agentes, setAgentes] = createSignal<any[]>([]);
   const [filtroResponsavel, setFiltroResponsavel] = createSignal<string>("todos");
   const [busca, setBusca] = createSignal("");
@@ -70,7 +72,7 @@ export const TasksView: Component = () => {
     } catch {}
   };
 
-  const abrirDetalhesTask = async (task: Task) => {
+  const carregarMsgsTask = async (task: Task) => {
     setTaskSelecionada(task);
     try {
       const msgs = await fetchApi<MensagemTask[]>(`/tasks/${encodeURIComponent(task.id)}/mensagens`).catch(() => []);
@@ -80,10 +82,33 @@ export const TasksView: Component = () => {
     }
   };
 
+  const abrirDetalhesTask = (task: Task) => {
+    setSearchParams({ task: task.id });
+  };
+
   const fecharDetalhes = () => {
     setTaskSelecionada(null);
     setMensagens([]);
+    setSearchParams({ task: undefined });
   };
+
+  // Reagir a alteracao na URL (?task=tsk-xxx)
+  createEffect(() => {
+    const taskId = searchParams.task as string | undefined;
+    if (taskId) {
+      const t = tasks().find((item) => item.id === taskId);
+      if (t) {
+        void carregarMsgsTask(t);
+      } else {
+        void fetchApi<Task>(`/tasks/${encodeURIComponent(taskId)}`).then((encontrada) => {
+          if (encontrada) void carregarMsgsTask(encontrada);
+        }).catch(() => {});
+      }
+    } else {
+      setTaskSelecionada(null);
+      setMensagens([]);
+    }
+  });
 
   const enviarComentario = async () => {
     const t = taskSelecionada();

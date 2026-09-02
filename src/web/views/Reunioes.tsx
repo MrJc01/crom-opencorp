@@ -1,4 +1,5 @@
-import { type Component, createSignal, onMount, For, Show } from "solid-js";
+import { type Component, createSignal, onMount, createEffect, For, Show } from "solid-js";
+import { useSearchParams } from "@solidjs/router";
 import { Users, Play, RefreshCw, X, FileText, CheckCircle2, MessageSquare } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -6,6 +7,7 @@ import { showToast } from "../ui/Toast";
 import { fetchApi } from "../lib/context";
 
 export const ReunioesView: Component = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [reunioes, setReunioes] = createSignal<any[]>([]);
   const [agentes, setAgentes] = createSignal<any[]>([]);
   const [modalConvocacao, setModalConvocacao] = createSignal(false);
@@ -41,6 +43,15 @@ export const ReunioesView: Component = () => {
       showToast(`Erro ao abrir reunião: ${err.message}`, "erro");
     }
   };
+
+  createEffect(() => {
+    const reuId = searchParams.reuniao as string | undefined;
+    if (reuId) {
+      void abrirSalaReuniao(reuId);
+    } else {
+      setReuniaoAtiva(null);
+    }
+  });
 
   const iniciarReuniao = async () => {
     const p = pauta().trim();
@@ -104,7 +115,7 @@ export const ReunioesView: Component = () => {
           >
             {(r) => (
               <div
-                onClick={() => abrirSalaReuniao(r.id)}
+                onClick={() => setSearchParams({ reuniao: r.id })}
                 class="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 cursor-pointer transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
               >
                 <div class="space-y-1.5 min-w-0">
@@ -216,7 +227,7 @@ export const ReunioesView: Component = () => {
                 </h2>
                 <p class="text-xs text-zinc-400 mt-0.5">{reuniaoAtiva()!.pauta}</p>
               </div>
-              <IconButton size="xs" variant="ghost" onClick={() => setReuniaoAtiva(null)}>
+              <IconButton size="xs" variant="ghost" onClick={() => setSearchParams({ reuniao: undefined })}>
                 <X size={16} />
               </IconButton>
             </div>
@@ -258,7 +269,7 @@ export const ReunioesView: Component = () => {
             </div>
 
             <div class="pt-3 border-t border-zinc-800 flex justify-end flex-shrink-0">
-              <Button size="sm" variant="secondary" onClick={() => setReuniaoAtiva(null)}>
+              <Button size="sm" variant="secondary" onClick={() => setSearchParams({ reuniao: undefined })}>
                 Fechar
               </Button>
             </div>

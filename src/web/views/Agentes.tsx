@@ -1,4 +1,5 @@
-import { type Component, createSignal, onMount, For, Show } from "solid-js";
+import { type Component, createSignal, onMount, createEffect, For, Show } from "solid-js";
+import { useSearchParams } from "@solidjs/router";
 import { Play, Power, Bot, Search, RefreshCw, X, Shield, Wrench, Eye, Send } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -17,8 +18,10 @@ export interface Agente {
 }
 
 export const AgentesView: Component = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [agentes, setAgentes] = createSignal<Agente[]>([]);
-  const [busca, setBusca] = createSignal("");
+  const busca = () => (searchParams.busca as string) || "";
+  const setBusca = (b: string) => setSearchParams({ busca: b || undefined });
   const [executando, setExecutando] = createSignal<string | null>(null);
 
   // Modal de Execução de Ordem
@@ -28,6 +31,28 @@ export const AgentesView: Component = () => {
 
   // Modal de Detalhes / Prompt do Agente
   const [agenteDetalhes, setAgenteDetalhes] = createSignal<Agente | null>(null);
+
+  // Reagir a URL (?agente= e ?run=)
+  createEffect(() => {
+    const agId = searchParams.agente as string | undefined;
+    const runId = searchParams.run as string | undefined;
+
+    if (agId) {
+      const ag = agentes().find((a) => a.id === agId);
+      if (ag) setAgenteDetalhes(ag);
+    } else {
+      setAgenteDetalhes(null);
+    }
+
+    if (runId) {
+      const ag = agentes().find((a) => a.id === runId);
+      if (ag) {
+        setAgenteParaRodar(ag);
+      }
+    } else {
+      setAgenteParaRodar(null);
+    }
+  });
 
   const carregarAgentes = async () => {
     try {
@@ -194,140 +219,140 @@ export const AgentesView: Component = () => {
                     </div>
                   </div>
 
-                  {/* Ações Inferiores */}
-                  <div class="flex items-center gap-2 pt-3 mt-2 border-t border-zinc-800/50">
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      class="flex-1 text-zinc-400 hover:text-zinc-200"
-                      onClick={() => setAgenteDetalhes(agente)}
-                    >
-                      <Eye size={12} class="mr-1" /> Inspecionar
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="primary"
-                      class="flex-1"
-                      disabled={!ativo}
-                      onClick={() => abrirModalExecucao(agente)}
-                    >
-                      <Play size={11} class="mr-1 fill-current" /> Executar
-                    </Button>
+                    {/* Ações Inferiores */}
+                    <div class="flex items-center gap-2 pt-3 mt-2 border-t border-zinc-800/50">
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        class="flex-1 text-zinc-400 hover:text-zinc-200"
+                        onClick={() => setSearchParams({ agente: agente.id })}
+                      >
+                        <Eye size={12} class="mr-1" /> Inspecionar
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="primary"
+                        class="flex-1"
+                        disabled={!ativo}
+                        onClick={() => setSearchParams({ run: agente.id })}
+                      >
+                        <Play size={11} class="mr-1 fill-current" /> Executar
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              );
-            }}
-          </For>
-        </div>
-      </div>
-
-      {/* Modal de Execução de Ordem */}
-      <Show when={agenteParaRodar()}>
-        <div class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg w-full p-5 space-y-4 shadow-2xl">
-            <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <div>
-                <h2 class="text-sm font-bold text-zinc-100">
-                  Executar Ordem com @{agenteParaRodar()!.id}
-                </h2>
-                <p class="text-[11px] text-zinc-400 mt-0.5">
-                  Dispare uma instrução direta em background para este agente.
-                </p>
-              </div>
-              <IconButton size="xs" variant="ghost" onClick={() => setAgenteParaRodar(null)}>
-                <X size={16} />
-              </IconButton>
-            </div>
-
-            <div class="space-y-3">
-              <label class="block text-xs font-medium text-zinc-300">
-                Instrução / Ordem para o Agente *
-              </label>
-              <textarea
-                rows={4}
-                placeholder="Descreva o que o agente deve analisar, auditar ou executar..."
-                value={ordemTexto()}
-                onInput={(e) => setOrdemTexto(e.currentTarget.value)}
-                class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-xs text-zinc-200 focus:outline-none focus:border-zinc-600 resize-none font-mono"
-              />
-            </div>
-
-            <div class="pt-3 border-t border-zinc-800 flex justify-end gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setAgenteParaRodar(null)}>
-                Cancelar
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                loading={disparando()}
-                onClick={dispararOrdem}
-              >
-                <Send size={12} class="mr-1.5" /> Disparar Execução
-              </Button>
-            </div>
+                );
+              }}
+            </For>
           </div>
         </div>
-      </Show>
 
-      {/* Modal de Inspeção de Prompt do Agente */}
-      <Show when={agenteDetalhes()}>
-        <div class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-2xl w-full p-5 space-y-4 shadow-2xl max-h-[85vh] flex flex-col">
-            <div class="flex items-center justify-between border-b border-zinc-800 pb-3 flex-shrink-0">
-              <div>
-                <h2 class="text-sm font-bold text-zinc-100">
-                  Especificação Técnica: @{agenteDetalhes()!.id}
-                </h2>
-                <span class="text-[11px] text-emerald-400 font-mono">
-                  {agenteDetalhes()!.name} · {agenteDetalhes()!.model}
-                </span>
-              </div>
-              <IconButton size="xs" variant="ghost" onClick={() => setAgenteDetalhes(null)}>
-                <X size={16} />
-              </IconButton>
-            </div>
-
-            <div class="space-y-4 text-xs overflow-y-auto pr-1 scrollbar-thin flex-1">
-              <div>
-                <span class="text-zinc-500 block text-[10px] uppercase font-semibold mb-1">
-                  Descrição do Papel
-                </span>
-                <p class="text-zinc-300 leading-relaxed bg-zinc-950 p-3 rounded-lg border border-zinc-800">
-                  {agenteDetalhes()!.description || "Sem descrição informada."}
-                </p>
-              </div>
-
-              <div>
-                <span class="text-zinc-500 block text-[10px] uppercase font-semibold mb-1">
-                  System Prompt (Instruções de Personalidade & Regras)
-                </span>
-                <pre class="bg-zinc-950 p-3.5 rounded-lg border border-zinc-800 text-[11px] font-mono text-zinc-300 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto scrollbar-thin">
-                  {agenteDetalhes()!.system_prompt || "Instruções carregadas a partir de .opencorp/agents/"}
-                </pre>
-              </div>
-
-              <div class="grid grid-cols-2 gap-3">
-                <div class="bg-zinc-950 p-3 rounded-lg border border-zinc-800">
-                  <span class="text-zinc-500 block text-[10px] uppercase font-semibold mb-1">Nível de Permissão</span>
-                  <span class="font-mono text-zinc-200">{agenteDetalhes()!.permissions || "level-2"}</span>
+        {/* Modal de Execução de Ordem */}
+        <Show when={agenteParaRodar()}>
+          <div class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg w-full p-5 space-y-4 shadow-2xl">
+              <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <div>
+                  <h2 class="text-sm font-bold text-zinc-100">
+                    Executar Ordem com @{agenteParaRodar()!.id}
+                  </h2>
+                  <p class="text-[11px] text-zinc-400 mt-0.5">
+                    Dispare uma instrução direta em background para este agente.
+                  </p>
                 </div>
-                <div class="bg-zinc-950 p-3 rounded-lg border border-zinc-800">
-                  <span class="text-zinc-500 block text-[10px] uppercase font-semibold mb-1">Status</span>
-                  <span class="font-semibold text-emerald-400">
-                    {agenteDetalhes()!.ativo !== false ? "Ativo no Workspace" : "Desativado"}
+                <IconButton size="xs" variant="ghost" onClick={() => setSearchParams({ run: undefined })}>
+                  <X size={16} />
+                </IconButton>
+              </div>
+
+              <div class="space-y-3">
+                <label class="block text-xs font-medium text-zinc-300">
+                  Instrução / Ordem para o Agente *
+                </label>
+                <textarea
+                  rows={4}
+                  placeholder="Descreva o que o agente deve analisar, auditar ou executar..."
+                  value={ordemTexto()}
+                  onInput={(e) => setOrdemTexto(e.currentTarget.value)}
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-xs text-zinc-200 focus:outline-none focus:border-zinc-600 resize-none font-mono"
+                />
+              </div>
+
+              <div class="pt-3 border-t border-zinc-800 flex justify-end gap-2">
+                <Button size="sm" variant="secondary" onClick={() => setSearchParams({ run: undefined })}>
+                  Cancelar
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  loading={disparando()}
+                  onClick={dispararOrdem}
+                >
+                  <Send size={12} class="mr-1.5" /> Disparar Execução
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Show>
+
+        {/* Modal de Inspeção de Prompt do Agente */}
+        <Show when={agenteDetalhes()}>
+          <div class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-2xl w-full p-5 space-y-4 shadow-2xl max-h-[85vh] flex flex-col">
+              <div class="flex items-center justify-between border-b border-zinc-800 pb-3 flex-shrink-0">
+                <div>
+                  <h2 class="text-sm font-bold text-zinc-100">
+                    Especificação Técnica: @{agenteDetalhes()!.id}
+                  </h2>
+                  <span class="text-[11px] text-emerald-400 font-mono">
+                    {agenteDetalhes()!.name} · {agenteDetalhes()!.model}
                   </span>
                 </div>
+                <IconButton size="xs" variant="ghost" onClick={() => setSearchParams({ agente: undefined })}>
+                  <X size={16} />
+                </IconButton>
+              </div>
+
+              <div class="space-y-4 text-xs overflow-y-auto pr-1 scrollbar-thin flex-1">
+                <div>
+                  <span class="text-zinc-500 block text-[10px] uppercase font-semibold mb-1">
+                    Descrição do Papel
+                  </span>
+                  <p class="text-zinc-300 leading-relaxed bg-zinc-950 p-3 rounded-lg border border-zinc-800">
+                    {agenteDetalhes()!.description || "Sem descrição informada."}
+                  </p>
+                </div>
+
+                <div>
+                  <span class="text-zinc-500 block text-[10px] uppercase font-semibold mb-1">
+                    System Prompt (Instruções de Personalidade & Regras)
+                  </span>
+                  <pre class="bg-zinc-950 p-3.5 rounded-lg border border-zinc-800 text-[11px] font-mono text-zinc-300 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto scrollbar-thin">
+                    {agenteDetalhes()!.system_prompt || "Instruções carregadas a partir de .opencorp/agents/"}
+                  </pre>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="bg-zinc-950 p-3 rounded-lg border border-zinc-800">
+                    <span class="text-zinc-500 block text-[10px] uppercase font-semibold mb-1">Nível de Permissão</span>
+                    <span class="font-mono text-zinc-200">{agenteDetalhes()!.permissions || "level-2"}</span>
+                  </div>
+                  <div class="bg-zinc-950 p-3 rounded-lg border border-zinc-800">
+                    <span class="text-zinc-500 block text-[10px] uppercase font-semibold mb-1">Status</span>
+                    <span class="font-semibold text-emerald-400">
+                      {agenteDetalhes()!.ativo !== false ? "Ativo no Workspace" : "Desativado"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="pt-3 border-t border-zinc-800 flex justify-end flex-shrink-0">
+                <Button size="sm" variant="secondary" onClick={() => setSearchParams({ agente: undefined })}>
+                  Fechar
+                </Button>
               </div>
             </div>
-
-            <div class="pt-3 border-t border-zinc-800 flex justify-end flex-shrink-0">
-              <Button size="sm" variant="secondary" onClick={() => setAgenteDetalhes(null)}>
-                Fechar
-              </Button>
-            </div>
           </div>
-        </div>
-      </Show>
+        </Show>
     </div>
   );
 };
