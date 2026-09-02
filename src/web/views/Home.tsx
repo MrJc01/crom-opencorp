@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, For, Show } from "solid-js";
+import { type Component, createSignal, onMount, onCleanup, For, Show } from "solid-js";
 import {
   DollarSign,
   CheckCircle2,
@@ -18,7 +18,9 @@ import {
   X,
   Clock,
   Timer,
-  ListTodo
+  ListTodo,
+  Radio,
+  ExternalLink,
 } from "lucide-solid";
 import { A, useNavigate } from "@solidjs/router";
 import { fetchApi, wsAtivo } from "../lib/context";
@@ -26,8 +28,33 @@ import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
 
+function formatarContagem(ms: number): string {
+  if (ms <= 0) return "agora / a qualquer instante";
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const seg = s % 60;
+  const p2 = (n: number): string => String(n).padStart(2, "0");
+  if (d > 0) return `em ${d}d ${p2(h)}h ${p2(m)}m`;
+  return `em ${p2(h)}:${p2(m)}:${p2(seg)}`;
+}
+
+function formatarDecorrido(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const seg = s % 60;
+  const p2 = (n: number): string => String(n).padStart(2, "0");
+  if (d > 0) return `${d}d ${p2(h)}:${p2(m)}:${p2(seg)}`;
+  return `${p2(h)}:${p2(m)}:${p2(seg)}`;
+}
+
 export const HomeView: Component = () => {
   const navigate = useNavigate();
+  const [agoraMs, setAgoraMs] = createSignal(Date.now());
+
   const [metricas, setMetricas] = createSignal<any>({
     custoHoje: "US$ 0.0000",
     custoTeto: "US$ 5.00",
@@ -39,10 +66,10 @@ export const HomeView: Component = () => {
     secretarioOk: true,
   });
 
+  const [schedules, setSchedules] = createSignal<any[]>([]);
   const [aprovacoes, setAprovacoes] = createSignal<any[]>([]);
   const [atividades, setAtividades] = createSignal<any[]>([]);
   const [tasksEmAberto, setTasksEmAberto] = createSignal<any[]>([]);
-  const [proximoJob, setProximoJob] = createSignal<any | null>(null);
   const [agentes, setAgentes] = createSignal<any[]>([]);
 
   // Linha de Comando Inline
@@ -58,9 +85,12 @@ export const HomeView: Component = () => {
   const [novoResponsavel, setNovoResponsavel] = createSignal("");
   const [criandoTask, setCriandoTask] = createSignal(false);
 
+  // Ticker de 1 segundo para contagem regressiva em tempo real
+  let timerId: any = null;
+
   const carregarDadosHome = async () => {
     try {
-      const [ledger, tasks, ags, flows, aprovs, budget, status, schedules] = await Promise.allSettled([
+      const [ledger, tasks, ags, flows, aprovs, budget, status, jobs] = await Promise.allSettled([
         fetchApi<any>("/ledger/resumo"),
         fetchApi<any[]>("/tasks"),
         fetchApi<any[]>("/agents"),
@@ -80,9 +110,10 @@ export const HomeView: Component = () => {
       const dAprovs = getVal(aprovs, []);
       const dBudget = getVal(budget, null);
       const dStatus = getVal(status, null);
-      const dSchedules = getVal(schedules, []);
+      const dJobs = getVal(jobs, []);
 
       setAgentes(dAgentes);
+      setSchedules(dJobs);
 
       const hoje = new Date().toISOString().slice(0, 10);
       const vencidas = dTasks.filter(
@@ -107,29 +138,12 @@ export const HomeView: Component = () => {
       // Aprovações pendentes
       setAprovacoes(dAprovs.filter((a: any) => a.status === "pendente"));
 
-      // Tasks em aberto (máx 5)
-      setTasksEmAberto(dTasks.filter((t: any) => t.coluna !== "feito").slice(0, 5));
+      // Tasks em aberto (máx 6)
+      setTasksEmAberto(dTasks.filter((t: any) => t.coluna !== "feito").slice(0, 6));
 
       // Últimos runs
       const ultimos = dLedger?.ultimos_runs || [];
       setAtividades(ultimos.slice(0, 8));
-
-      // Calcular o próximo job da agenda
-      const agora = Date.now();
-      const jobsComProxima = dSchedules
-        .filter((j: any) => j.ativo !== false && j.proxima_exec)
-        .map((j: any) => ({
-          ...j,
-          diffMs: new Date(j.proxima_exec).getTime() - agora,
-        }))
-        .filter((j: any) => j.diffMs > -3600000) // até 1h atrás ou futuro
-        .sort((a: any, b: any) => a.diffMs - b.diffMs);
-
-      if (jobsComProxima.length > 0) {
-        setProximoJob(jobsComProxima[0]);
-      } else {
-        setProximoJob(null);
-      }
     } catch {}
   };
 
@@ -200,7 +214,7 @@ export const HomeView: Component = () => {
     }
   };
 
-  const dispararProximoJobAgora = async (id: string) => {
+  const dispararJobAgora = async (id: string) => {
     try {
       await fetchApi(`/schedules/${encodeURIComponent(id)}/run`, { method: "POST" });
       showToast("Execução manual disparada com sucesso!", "sucesso");
@@ -210,15 +224,6 @@ export const HomeView: Component = () => {
     }
   };
 
-  const formatarTempoRestante = (diffMs: number) => {
-    if (diffMs <= 0) return "agora / a qualquer instante";
-    const min = Math.round(diffMs / 60000);
-    if (min < 60) return `em ~${min} min`;
-    const horas = Math.floor(min / 60);
-    const minRest = min % 60;
-    return `em ~${horas}h ${minRest}m`;
-  };
-
   const extrairAgenteJob = (args: any) => {
     if (Array.isArray(args) && args[0] === "agent" && args[1] === "run") {
       return args[2];
@@ -226,8 +231,38 @@ export const HomeView: Component = () => {
     return "agente";
   };
 
+  // Lista ordenada das próximas rotinas (com contagem regressiva ao vivo)
+  const jobsASeguir = () => {
+    const now = agoraMs();
+    return schedules()
+      .filter((j: any) => j.ativo !== false && j.proxima_exec)
+      .map((j: any) => {
+        const diff = new Date(j.proxima_exec).getTime() - now;
+        return {
+          ...j,
+          diffMs: diff,
+          agente: extrairAgenteJob(j.args),
+        };
+      })
+      .filter((j: any) => j.diffMs > -1800000) // até 30min atrás
+      .sort((a: any, b: any) => a.diffMs - b.diffMs);
+  };
+
+  const proximoImediato = () => {
+    const lista = jobsASeguir();
+    return lista.length > 0 ? lista[0] : null;
+  };
+
   onMount(() => {
     void carregarDadosHome();
+    // Inicia o timer que atualiza agoraMs a cada segundo
+    timerId = setInterval(() => {
+      setAgoraMs(Date.now());
+    }, 1000);
+  });
+
+  onCleanup(() => {
+    if (timerId) clearInterval(timerId);
   });
 
   return (
@@ -259,50 +294,79 @@ export const HomeView: Component = () => {
         </div>
       </div>
 
-      {/* Banner de Destaque: PRÓXIMA RONDA AGENDADA */}
-      <Show when={proximoJob()}>
-        <div class="p-4 rounded-xl bg-gradient-to-r from-emerald-950/40 via-zinc-900 to-zinc-900/60 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
-          <div class="flex items-center gap-3 min-w-0">
-            <div class="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0">
-              <Timer size={20} class="animate-pulse" />
-            </div>
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">
-                  Próxima Ronda Automática
-                </span>
-                <span class="text-xs font-mono text-zinc-400">
-                  {formatarTempoRestante(proximoJob()!.diffMs)}
-                </span>
-              </div>
-              <div class="flex items-center gap-2 mt-1">
-                <span class="text-xs font-bold text-zinc-100 font-mono truncate">
-                  {proximoJob()!.nome}
-                </span>
-                <span class="text-xs font-semibold text-emerald-400 font-mono">
-                  @{extrairAgenteJob(proximoJob()!.args)}
-                </span>
-                <span class="text-[11px] text-zinc-500">
-                  · Horário: {new Date(proximoJob()!.proxima_exec).toLocaleTimeString("pt-BR")}
-                </span>
-              </div>
-            </div>
-          </div>
+      {/* BANNER PRINCIPAL COM TIMER AO VIVO EM SEGUNDOS */}
+      <Show when={proximoImediato()}>
+        {(job) => {
+          const diff = () => job().diffMs;
+          const perto = () => diff() > 0 && diff() < 120000; // menos de 2 min
 
-          <div class="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto">
-            <Button
-              size="xs"
-              variant="primary"
-              onClick={() => dispararProximoJobAgora(proximoJob()!.id)}
-              title="Disparar este job agora sem esperar o horário"
+          return (
+            <div
+              class={`p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm ${
+                perto()
+                  ? "bg-gradient-to-r from-amber-950/50 via-zinc-900 to-zinc-900/80 border-amber-500/60 ring-1 ring-amber-500/30"
+                  : "bg-gradient-to-r from-emerald-950/40 via-zinc-900 to-zinc-900/60 border-emerald-500/30"
+              }`}
             >
-              <Play size={12} class="mr-1 fill-current" /> Rodar Agora
-            </Button>
-            <A href="/agenda" class="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1">
-              Ver Agenda →
-            </A>
-          </div>
-        </div>
+              <div class="flex items-center gap-3.5 min-w-0">
+                <div
+                  class={`h-11 w-11 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                    perto()
+                      ? "bg-amber-500/20 border border-amber-500/40 text-amber-300"
+                      : "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
+                  }`}
+                >
+                  <Timer size={22} class={perto() ? "animate-spin" : "animate-pulse"} />
+                </div>
+
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span
+                      class={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded font-mono ${
+                        perto()
+                          ? "bg-amber-500/30 text-amber-200 border border-amber-500/50 animate-pulse"
+                          : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                      }`}
+                    >
+                      Próxima Ronda Automática
+                    </span>
+
+                    {/* TIMER AO VIVO DE SEGUNDO A SEGUNDO */}
+                    <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-emerald-300 border border-zinc-800">
+                      ⏱ {formatarContagem(diff())}
+                    </span>
+                  </div>
+
+                  <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+                    <span class="text-sm font-bold text-zinc-100 font-mono truncate">
+                      {job().nome}
+                    </span>
+                    <span class="text-xs font-semibold text-emerald-400 font-mono">
+                      @{job().agente}
+                    </span>
+                    <span class="text-[11px] text-zinc-400 font-mono">
+                      · Programado para {new Date(job().proxima_exec).toLocaleTimeString("pt-BR")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto">
+                <Button
+                  size="xs"
+                  variant="primary"
+                  onClick={() => dispararJobAgora(job().id)}
+                  title="Disparar este job agora sem esperar o horário"
+                >
+                  <Play size={12} class="mr-1 fill-current" /> Rodar Agora
+                </Button>
+                <A href="/agenda" class="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1">
+                  Ver Agenda Completa →
+                </A>
+              </div>
+            </div>
+          );
+        }}
       </Show>
 
       {/* 5 KPIs de Governança */}
@@ -398,64 +462,69 @@ export const HomeView: Component = () => {
         </Show>
       </div>
 
-      {/* Seção 3: Grid de 2 Colunas - Aprovações HITL & Feed de Execuções Recentes */}
+      {/* Seção 3: Grid de 2 Colunas - A Seguir (Cronômetros ao Vivo) & Feed de Execuções */}
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Coluna 1: Aprovações Pendentes (HITL) */}
+        {/* Coluna 1: A Seguir (Próximas Rondas com Timer em Tempo Real) */}
         <div class="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 space-y-3">
           <div class="flex items-center justify-between border-b border-zinc-800/80 pb-2">
             <div class="flex items-center gap-2">
-              <ShieldAlert size={16} class="text-amber-400" />
+              <Clock size={16} class="text-emerald-400" />
               <h2 class="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
-                Aprovações Pendentes (HITL)
+                A Seguir · Rondas 24h Agendadas
               </h2>
             </div>
-            <span class="text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 font-mono">
-              {aprovacoes().length}
-            </span>
+            <A href="/agenda" class="text-[11px] text-blue-400 hover:underline flex items-center gap-1">
+              Ver todas ({schedules().length}) <ArrowRight size={10} />
+            </A>
           </div>
 
-          <Show
-            when={aprovacoes().length > 0}
-            fallback={
-              <div class="p-6 text-center text-xs text-zinc-500">
-                Nenhuma aprovação pendente no momento. Os agentes estão operando livremente.
-              </div>
-            }
-          >
-            <div class="space-y-2 max-h-80 overflow-y-auto scrollbar-thin pr-1">
-              <For each={aprovacoes()}>
-                {(ap) => (
-                  <div class="p-3 rounded-lg bg-zinc-950/80 border border-zinc-800 space-y-2">
-                    <div class="flex items-center justify-between text-xs">
-                      <span class="font-semibold text-zinc-200">@{ap.agente}</span>
-                      <span class="text-[10px] text-zinc-500 font-mono">
-                        {new Date(ap.criado_em).toLocaleTimeString("pt-BR")}
-                      </span>
+          <div class="space-y-2 max-h-80 overflow-y-auto scrollbar-thin pr-1">
+            <For
+              each={jobsASeguir().slice(0, 5)}
+              fallback={
+                <div class="py-8 text-center text-xs text-zinc-500">
+                  Nenhuma ronda com próxima execução programada.
+                </div>
+              }
+            >
+              {(j) => {
+                const diff = () => new Date(j.proxima_exec).getTime() - agoraMs();
+                const perto = () => diff() > 0 && diff() < 120000;
+
+                return (
+                  <div class="p-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800 flex items-center justify-between gap-3 text-xs">
+                    <div class="flex items-center gap-2.5 min-w-0">
+                      <span class="h-2 w-2 rounded-full bg-emerald-400 flex-shrink-0" />
+                      <div class="min-w-0">
+                        <div class="font-semibold text-zinc-200 font-mono truncate">{j.nome}</div>
+                        <div class="text-[10px] text-zinc-500">@{j.agente} · {j.agenda?.valor || "0 * * * *"}</div>
+                      </div>
                     </div>
-                    <p class="text-xs text-zinc-400 leading-relaxed font-mono text-[11px] bg-zinc-900/50 p-2 rounded border border-zinc-800/50">
-                      {ap.motivo_guard || ap.ordem}
-                    </p>
-                    <div class="flex items-center justify-end gap-2 pt-1">
-                      <Button
-                        size="xs"
-                        variant="secondary"
-                        onClick={() => responderAprovacao(ap.id, false)}
+
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                      <span
+                        class={`text-[11px] font-mono px-2 py-0.5 rounded font-bold ${
+                          perto()
+                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse"
+                            : "bg-zinc-900 text-emerald-400 border border-zinc-800"
+                        }`}
                       >
-                        <X size={12} class="mr-1 text-rose-400" /> Rejeitar
-                      </Button>
-                      <Button
+                        {formatarContagem(diff())}
+                      </span>
+                      <IconButton
                         size="xs"
-                        variant="primary"
-                        onClick={() => responderAprovacao(ap.id, true)}
+                        variant="ghost"
+                        onClick={() => dispararJobAgora(j.id)}
+                        title="Executar agora"
                       >
-                        <Check size={12} class="mr-1 text-emerald-400" /> Aprovar & Continuar
-                      </Button>
+                        <Play size={11} class="fill-current" />
+                      </IconButton>
                     </div>
                   </div>
-                )}
-              </For>
-            </div>
-          </Show>
+                );
+              }}
+            </For>
+          </div>
         </div>
 
         {/* Coluna 2: Feed de Atividades Recentes do Ledger */}
@@ -468,55 +537,53 @@ export const HomeView: Component = () => {
               </h2>
             </div>
             <A href="/historico" class="text-[11px] text-blue-400 hover:underline flex items-center gap-1">
-              Ver tudo <ArrowRight size={10} />
+              Ver histórico <ArrowRight size={10} />
             </A>
           </div>
 
-          <Show
-            when={atividades().length > 0}
-            fallback={
-              <div class="p-6 text-center text-xs text-zinc-500">
-                Nenhuma atividade recente registrada neste workspace.
-              </div>
-            }
-          >
-            <div class="space-y-2 max-h-80 overflow-y-auto scrollbar-thin pr-1">
-              <For each={atividades()}>
-                {(at) => (
-                  <div class="p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/80 flex items-center justify-between text-xs">
-                    <div class="flex items-center gap-2.5 min-w-0">
-                      <div
-                        class={`h-2 w-2 rounded-full flex-shrink-0 ${
-                          at.status === "concluido"
-                            ? "bg-emerald-400"
-                            : at.status === "falhou"
-                            ? "bg-rose-400"
-                            : at.status === "hitl_pendente"
-                            ? "bg-amber-400 animate-pulse"
-                            : "bg-blue-400"
-                        }`}
-                      />
-                      <div class="min-w-0">
-                        <div class="font-medium text-zinc-200 truncate">
-                          @{at.agente || "agente"}
-                        </div>
-                        <div class="text-[10px] text-zinc-500 truncate">
-                          {at.ordem ? at.ordem.slice(0, 50) + "..." : "Rotina periódica"}
-                        </div>
+          <div class="space-y-2 max-h-80 overflow-y-auto scrollbar-thin pr-1">
+            <For
+              each={atividades()}
+              fallback={
+                <div class="py-8 text-center text-xs text-zinc-500">
+                  Nenhuma atividade recente registrada neste workspace.
+                </div>
+              }
+            >
+              {(at) => (
+                <div class="p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/80 flex items-center justify-between text-xs">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <div
+                      class={`h-2 w-2 rounded-full flex-shrink-0 ${
+                        at.status === "concluido"
+                          ? "bg-emerald-400"
+                          : at.status === "falhou"
+                          ? "bg-rose-400"
+                          : at.status === "hitl_pendente"
+                          ? "bg-amber-400 animate-pulse"
+                          : "bg-blue-400"
+                      }`}
+                    />
+                    <div class="min-w-0">
+                      <div class="font-medium text-zinc-200 truncate">
+                        @{at.agente || "agente"}
                       </div>
-                    </div>
-
-                    <div class="text-right flex-shrink-0 text-[10px] text-zinc-400 font-mono">
-                      <div>{at.duracao_ms ? `${(at.duracao_ms / 1000).toFixed(1)}s` : "—"}</div>
-                      <div class="text-zinc-500">
-                        {at.inicio ? new Date(at.inicio).toLocaleTimeString("pt-BR") : ""}
+                      <div class="text-[10px] text-zinc-500 truncate">
+                        {at.ordem ? at.ordem.slice(0, 48) + "..." : "Rotina periódica"}
                       </div>
                     </div>
                   </div>
-                )}
-              </For>
-            </div>
-          </Show>
+
+                  <div class="text-right flex-shrink-0 text-[10px] text-zinc-400 font-mono">
+                    <div>{at.duracao_ms ? `${(at.duracao_ms / 1000).toFixed(1)}s` : "—"}</div>
+                    <div class="text-zinc-500">
+                      {at.inicio ? new Date(at.inicio).toLocaleTimeString("pt-BR") : ""}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </For>
+          </div>
         </div>
       </div>
 
@@ -530,7 +597,7 @@ export const HomeView: Component = () => {
             </h2>
           </div>
           <div class="flex items-center gap-2">
-            <Button size="xs" variant="ghost" onClick={() => setModalNovaTask(true)}>
+            <Button size="xs" variant="primary" onClick={() => setModalNovaTask(true)}>
               <Plus size={12} class="mr-1" /> Criar Task
             </Button>
             <A href="/tasks" class="text-[11px] text-blue-400 hover:underline flex items-center gap-1">
