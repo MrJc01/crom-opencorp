@@ -41,6 +41,8 @@ import {
   MoreVertical,
   ExternalLink,
   Code2,
+  Sliders,
+  CheckSquare,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -67,6 +69,16 @@ export interface FluxoCompleto {
   arestas: ArestaGrafo[];
 }
 
+export const TIPOS_NODE_CATALOGO = [
+  { tipo: "agente", rotulo: "Agente Executor", icone: Bot, cor: "text-emerald-400", desc: "Executa ordens e tarefas especializadas com LLM" },
+  { tipo: "script", rotulo: "Script do Workspace", icone: Terminal, cor: "text-cyan-400", desc: "Executa scripts (.js, .py, .sh) ou comandos bash locais" },
+  { tipo: "reuniao", rotulo: "Reunião de Agentes", icone: Users, cor: "text-indigo-400", desc: "Convoca mesa de deliberação coletiva entre múltiplos agentes" },
+  { tipo: "decisao", rotulo: "Decisão Estruturada", icone: HelpCircle, cor: "text-amber-400", desc: "Bifurcação e ramificação com base em critérios lógicos" },
+  { tipo: "task_create", rotulo: "Criar Tarefa", icone: Layers, cor: "text-blue-400", desc: "Cria um card no Kanban com título e prioridade" },
+  { tipo: "registro", rotulo: "Registro / Documento", icone: FileText, cor: "text-purple-400", desc: "Grava ata, parecer ou relatório nos registries da empresa" },
+  { tipo: "webhook", rotulo: "Gatilho Webhook", icone: Webhook, cor: "text-amber-400", desc: "Recebe requisições HTTP externas para acionar o pipeline" },
+];
+
 export const FluxosView: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [fluxos, setFluxos] = createSignal<any[]>([]);
@@ -74,7 +86,22 @@ export const FluxosView: Component = () => {
   const [fluxoAtivo, setFluxoAtivo] = createSignal<FluxoCompleto | null>(null);
   const [noSelecionado, setNoSelecionado] = createSignal<NoGrafo | null>(null);
 
-  // Busca e Filtros na Lista de Workflows (estilo n8n WorkflowsView)
+  // Modo no NDV: formulário visual ou JSON avançado
+  const [modoNdv, setModoNdv] = createSignal<"form" | "json">("form");
+
+  // Menu de Contexto (Botão Direito no Canvas / Node)
+  const [menuContexto, setMenuContexto] = createSignal<{
+    aberto: boolean;
+    x: number;
+    y: number;
+    noId?: string;
+  }>({ aberto: false, x: 0, y: 0 });
+
+  // Modal / Drawer de Adicionar Novo Node
+  const [modalAdicionarNode, setModalAdicionarNode] = createSignal(false);
+  const [buscaTipoNode, setBuscaTipoNode] = createSignal("");
+
+  // Busca na Lista de Workflows
   const [buscaTexto, setBuscaTexto] = createSignal("");
   const [copiadoId, setCopiadoId] = createSignal<string | null>(null);
 
@@ -84,12 +111,11 @@ export const FluxosView: Component = () => {
   const [isPanning, setIsPanning] = createSignal(false);
   const [startPan, setStartPan] = createSignal({ x: 0, y: 0 });
 
-  // Modais
+  // Modais de Execução e Novo Workflow
   const [modalExecutar, setModalExecutar] = createSignal(false);
   const [entradaTexto, setEntradaTexto] = createSignal("");
   const [executando, setExecutando] = createSignal(false);
 
-  // Modal Novo Workflow
   const [modalNovoFluxo, setModalNovoFluxo] = createSignal(false);
   const [novoFluxoId, setNovoFluxoId] = createSignal("");
   const [novoFluxoNome, setNovoFluxoNome] = createSignal("");
@@ -141,9 +167,31 @@ export const FluxosView: Component = () => {
 
   onMount(() => {
     void carregarFluxos();
+
+    const fecharMenu = () => {
+      if (menuContexto().aberto) {
+        setMenuContexto((prev) => ({ ...prev, aberto: false }));
+      }
+    };
+    window.addEventListener("click", fecharMenu);
+    return () => window.removeEventListener("click", fecharMenu);
   });
 
-  // Copiar Workflow JSON (Paridade com recurso de copiar do n8n)
+  // Salvar alterações do Workflow no backend
+  const salvarAlteracoesWorkflow = async (novoFluxo: FluxoCompleto) => {
+    try {
+      await fetchApi("/flows", {
+        method: "POST",
+        body: JSON.stringify(novoFluxo),
+      });
+      setFluxoAtivo(novoFluxo);
+      showToast("Workflow atualizado!", "sucesso");
+    } catch (err: any) {
+      showToast(`Erro ao salvar: ${err.message}`, "erro");
+    }
+  };
+
+  // Copiar Workflow JSON
   const copiarWorkflowJson = async (fluxo: any, e?: MouseEvent) => {
     if (e) e.stopPropagation();
     try {
@@ -154,117 +202,163 @@ export const FluxosView: Component = () => {
       const jsonStr = JSON.stringify(dados, null, 2);
       await navigator.clipboard.writeText(jsonStr);
       setCopiadoId(fluxo.id);
-      showToast(`Workflow "${fluxo.nome || fluxo.id}" copiado como JSON!`, "sucesso");
+      showToast(`Workflow copiado como JSON!`, "sucesso");
       setTimeout(() => setCopiadoId(null), 2500);
     } catch (err: any) {
       showToast(`Erro ao copiar: ${err.message}`, "erro");
     }
   };
 
-  // Duplicar Workflow
-  const duplicarWorkflow = async (fluxo: any, e?: MouseEvent) => {
-    if (e) e.stopPropagation();
-    try {
-      const original = await fetchApi<FluxoCompleto>(`/flows/${encodeURIComponent(fluxo.id)}`);
-      const novoId = `${fluxo.id}-copia-${Date.now().toString(36).slice(-4)}`;
-      const novoNome = `${original.nome || original.id} (Cópia)`;
-      await fetchApi("/flows", {
-        method: "POST",
-        body: JSON.stringify({
-          id: novoId,
-          nome: novoNome,
-          nos: original.nos,
-          arestas: original.arestas,
-        }),
-      });
-      showToast(`Workflow duplicado como "${novoNome}"!`, "sucesso");
-      await carregarFluxos();
-    } catch (err: any) {
-      showToast(`Erro ao duplicar: ${err.message}`, "erro");
+  // Adicionar Novo Node ao Workflow Ativo
+  const adicionarNodeAoWorkflow = async (tipo: string) => {
+    const f = fluxoAtivo();
+    if (!f) return;
+
+    const baseId = `${tipo}_${Date.now().toString(36).slice(-4)}`;
+    let configPadrao: any = {};
+
+    if (tipo === "agente") {
+      const primeiroAgente = agentes()[0]?.id || "executor-padrao";
+      configPadrao = { agente: primeiroAgente, ordem: "Analise a entrada: {{entrada}}" };
+    } else if (tipo === "script") {
+      configPadrao = { arquivo: "scripts/processar.sh", comando: "echo 'executando...'" };
+    } else if (tipo === "reuniao") {
+      configPadrao = { pauta: "Alinhamento operacional", agentes: ["editor", "critico-site"] };
+    } else if (tipo === "decisao") {
+      configPadrao = { pergunta: "Aprovar conteúdo?", opcoes: [{ rotulo: "Sim", proximo: "saida" }, { rotulo: "Não", proximo: "revisao" }] };
+    } else if (tipo === "task_create") {
+      configPadrao = { titulo: "Nova Tarefa via Workflow", coluna: "backlog", prioridade: "media" };
+    } else if (tipo === "registro") {
+      configPadrao = { categoria: "documentos", titulo: "Resultado do Fluxo" };
     }
+
+    const novoNode: NoGrafo = {
+      id: baseId,
+      tipo,
+      config: configPadrao,
+    };
+
+    // Conecta automaticamente o último nó existente ao novo nó
+    const novosNos = [...(f.nos || []), novoNode];
+    const novasArestas = [...(f.arestas || [])];
+
+    if (f.nos && f.nos.length > 0) {
+      const ultimo = f.nos[f.nos.length - 1];
+      novasArestas.push({ de: ultimo.id, para: baseId });
+    }
+
+    const workflowAtualizado: FluxoCompleto = {
+      ...f,
+      nos: novosNos,
+      arestas: novasArestas,
+    };
+
+    await salvarAlteracoesWorkflow(workflowAtualizado);
+    setNoSelecionado(novoNode);
+    setModalAdicionarNode(false);
   };
 
-  // Excluir Workflow
-  const excluirWorkflow = async (id: string, e?: MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!confirm(`Deseja excluir o workflow "${id}"?`)) return;
-    try {
-      await fetchApi(`/flows/${encodeURIComponent(id)}`, { method: "DELETE" });
-      setFluxos((prev) => prev.filter((f) => f.id !== id));
-      if (fluxoAtivo()?.id === id) {
-        voltarParaLista();
-      }
-      showToast("Workflow excluído", "sucesso");
-    } catch (err: any) {
-      showToast(`Erro ao excluir: ${err.message}`, "erro");
-    }
+  // Duplicar Node
+  const duplicarNodeSelecionado = async (noId: string) => {
+    const f = fluxoAtivo();
+    if (!f) return;
+    const alvo = f.nos.find((n) => n.id === noId);
+    if (!alvo) return;
+
+    const novoId = `${alvo.id}_copia_${Date.now().toString(36).slice(-3)}`;
+    const novoNode: NoGrafo = {
+      id: novoId,
+      tipo: alvo.tipo,
+      config: JSON.parse(JSON.stringify(alvo.config || {})),
+    };
+
+    const workflowAtualizado: FluxoCompleto = {
+      ...f,
+      nos: [...f.nos, novoNode],
+      arestas: [...f.arestas, { de: alvo.id, para: novoId }],
+    };
+
+    await salvarAlteracoesWorkflow(workflowAtualizado);
+    setNoSelecionado(novoNode);
   };
 
-  // Criar Workflow pelo Modal
-  const salvarNovoWorkflow = async () => {
-    const id = novoFluxoId().trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
-    const nome = novoFluxoNome().trim();
-    if (!id || !nome) {
-      showToast("ID e Nome são obrigatórios", "aviso");
+  // Excluir Node
+  const excluirNode = async (noId: string) => {
+    const f = fluxoAtivo();
+    if (!f) return;
+    if (f.nos.length <= 1) {
+      showToast("O workflow precisa ter ao menos um nó", "aviso");
       return;
     }
 
-    const tpl = novoFluxoTemplate();
-    let nos: any[] = [];
-    let arestas: any[] = [];
+    const novosNos = f.nos.filter((n) => n.id !== noId);
+    const novasArestas = f.arestas.filter((a) => a.de !== noId && a.para !== noId);
 
-    if (tpl === "pipeline") {
-      nos = [
-        { id: "gatilho", tipo: "manual", config: {} },
-        { id: "etapa_1", tipo: "agente", config: { agente: "executor-padrao", ordem: "Execute a tarefa com base na entrada: {{entrada}}" } },
-        { id: "saida", tipo: "registro", config: { categoria: "documentos" } },
-      ];
-      arestas = [
-        { de: "gatilho", para: "etapa_1" },
-        { de: "etapa_1", para: "saida" },
-      ];
-    } else if (tpl === "fanout") {
-      nos = [
-        { id: "gatilho", tipo: "manual", config: {} },
-        { id: "fanout", tipo: "fanout", config: { paralelos: [{ agente: "pesquisador-fontes" }, { agente: "analisador-corretor-post" }] } },
-        { id: "sintese", tipo: "agente", config: { agente: "editor", ordem: "Sintetize os resultados: {{entrada}}" } },
-      ];
-      arestas = [
-        { de: "gatilho", para: "fanout" },
-        { de: "fanout", para: "sintese" },
-      ];
-    } else if (tpl === "review") {
-      nos = [
-        { id: "gatilho", tipo: "manual", config: {} },
-        { id: "review", tipo: "review", config: { executor: { agente: "redator-conteudo" }, revisor: { agente: "editor" }, turnos: 2 } },
-      ];
-      arestas = [{ de: "gatilho", para: "review" }];
-    } else {
-      nos = [
-        { id: "gatilho", tipo: "manual", config: {} },
-        { id: "debate", tipo: "debate", config: { proponentes: [{ agente: "analisador-corretor-post" }, { agente: "critico-site" }], moderador: { agente: "ceo" } } },
-      ];
-      arestas = [{ de: "gatilho", para: "debate" }];
-    }
+    const workflowAtualizado: FluxoCompleto = {
+      ...f,
+      nos: novosNos,
+      arestas: novasArestas,
+    };
 
+    await salvarAlteracoesWorkflow(workflowAtualizado);
+    setNoSelecionado(novosNos[0] || null);
+  };
+
+  // Atualizar Configuração do Node no formulário NDV
+  const atualizarConfigNo = (campo: string, valor: any) => {
+    const no = noSelecionado();
+    const f = fluxoAtivo();
+    if (!no || !f) return;
+
+    const novaConfig = { ...(no.config || {}), [campo]: valor };
+    const noAtualizado = { ...no, config: novaConfig };
+
+    setNoSelecionado(noAtualizado);
+
+    const workflowAtualizado: FluxoCompleto = {
+      ...f,
+      nos: f.nos.map((n) => (n.id === no.id ? noAtualizado : n)),
+    };
+    setFluxoAtivo(workflowAtualizado);
+  };
+
+  // Disparar Execução
+  const dispararExecucao = async () => {
+    const f = fluxoAtivo();
+    if (!f) return;
+    setExecutando(true);
     try {
-      await fetchApi("/flows", {
+      await fetchApi(`/flows/${encodeURIComponent(f.id)}/run`, {
         method: "POST",
-        body: JSON.stringify({ id, nome, descricao: novoFluxoDesc().trim() || undefined, nos, arestas }),
+        body: JSON.stringify({ entrada: entradaTexto().trim() || undefined }),
       });
-      showToast(`Workflow "${nome}" criado com sucesso!`, "sucesso");
-      setModalNovoFluxo(false);
-      setNovoFluxoId("");
-      setNovoFluxoNome("");
-      setNovoFluxoDesc("");
-      await carregarFluxos();
-      void abrirEditorCanvas(id);
+      showToast(`Execução do workflow "${f.nome || f.id}" iniciada!`, "sucesso");
+      setModalExecutar(false);
+      setEntradaTexto("");
     } catch (err: any) {
-      showToast(`Erro ao criar: ${err.message}`, "erro");
+      showToast(`Erro ao rodar: ${err.message}`, "erro");
+    } finally {
+      setExecutando(false);
     }
   };
 
-  // Layout Automático de Nós no Canvas estilo n8n (Horizontal Flow)
+  // Menu de Contexto ao Clicar com Botão Direito no Canvas ou no Node
+  const onContextMenuCanvas = (e: MouseEvent, noId?: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuContexto({
+      aberto: true,
+      x: e.clientX,
+      y: e.clientY,
+      noId,
+    });
+    if (noId) {
+      const n = fluxoAtivo()?.nos.find((item) => item.id === noId);
+      if (n) setNoSelecionado(n);
+    }
+  };
+
+  // Layout Automático de Nós no Canvas
   const nosPosicionados = createMemo(() => {
     const f = fluxoAtivo();
     if (!f || !f.nos) return [];
@@ -353,10 +447,6 @@ export const FluxosView: Component = () => {
       case "registro":
       case "saida":
         return <FileText size={15} class="text-purple-400" />;
-      case "fanout":
-      case "debate":
-      case "review":
-        return <GitBranch size={15} class="text-rose-400" />;
       default:
         return <Play size={15} class="text-zinc-400" />;
     }
@@ -379,25 +469,6 @@ export const FluxosView: Component = () => {
         return "border-indigo-500/50 bg-indigo-950/20 text-indigo-300";
       default:
         return "border-zinc-700 bg-zinc-900 text-zinc-300";
-    }
-  };
-
-  const dispararExecucao = async () => {
-    const f = fluxoAtivo();
-    if (!f) return;
-    setExecutando(true);
-    try {
-      await fetchApi(`/flows/${encodeURIComponent(f.id)}/run`, {
-        method: "POST",
-        body: JSON.stringify({ entrada: entradaTexto().trim() || undefined }),
-      });
-      showToast(`Execução do workflow "${f.nome || f.id}" iniciada!`, "sucesso");
-      setModalExecutar(false);
-      setEntradaTexto("");
-    } catch (err: any) {
-      showToast(`Erro ao rodar: ${err.message}`, "erro");
-    } finally {
-      setExecutando(false);
     }
   };
 
@@ -439,7 +510,6 @@ export const FluxosView: Component = () => {
          ───────────────────────────────────────────────────────────── */}
       <Show when={!fluxoAtivo()}>
         <div class="flex flex-col h-full overflow-hidden p-6 space-y-5">
-          {/* Header da Página de Workflows */}
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
             <div class="space-y-1">
               <div class="flex items-center gap-2.5">
@@ -470,7 +540,6 @@ export const FluxosView: Component = () => {
             </div>
           </div>
 
-          {/* Barra de Filtros e Busca estilo n8n */}
           <div class="flex items-center justify-between gap-3">
             <div class="relative w-72">
               <Search size={14} class="absolute left-3 top-2.5 text-zinc-500" />
@@ -488,7 +557,6 @@ export const FluxosView: Component = () => {
             </div>
           </div>
 
-          {/* Lista de Workflow Cards (Estilo WorkflowCard.vue do n8n) */}
           <div class="flex-1 overflow-y-auto min-h-0 space-y-2.5 pr-1 scrollbar-thin">
             <For
               each={fluxosFiltrados()}
@@ -527,9 +595,7 @@ export const FluxosView: Component = () => {
                     </div>
                   </div>
 
-                  {/* Ações Rápidas do Card (Abrir Canvas, Copiar JSON, Executar, Duplicar, Excluir) */}
                   <div class="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                    {/* Botão Copiar JSON estilo n8n */}
                     <Button
                       size="xs"
                       variant="secondary"
@@ -553,32 +619,12 @@ export const FluxosView: Component = () => {
 
                     <Button
                       size="xs"
-                      variant="secondary"
-                      class="border-zinc-800 hover:border-zinc-700 text-zinc-300 text-[11px]"
-                      onClick={(e) => duplicarWorkflow(f, e)}
-                      title="Duplicar Workflow"
-                    >
-                      Duplicar
-                    </Button>
-
-                    <Button
-                      size="xs"
                       variant="primary"
                       class="bg-orange-600 hover:bg-orange-500 text-white font-bold text-[11px]"
                       onClick={() => abrirEditorCanvas(f.id)}
                     >
                       <Eye size={12} class="mr-1.5" /> Abrir Canvas
                     </Button>
-
-                    <IconButton
-                      size="xs"
-                      variant="ghost"
-                      class="text-zinc-500 hover:text-rose-400"
-                      onClick={(e) => excluirWorkflow(f.id, e)}
-                      title="Excluir Workflow"
-                    >
-                      <Trash2 size={13} />
-                    </IconButton>
                   </div>
                 </div>
               )}
@@ -626,7 +672,17 @@ export const FluxosView: Component = () => {
 
             {/* Controles de Canvas e Ações */}
             <div class="flex items-center gap-2">
-              {/* Botão Copiar JSON no Editor */}
+              {/* Botão + Adicionar Node no Topo */}
+              <Button
+                size="sm"
+                variant="secondary"
+                class="border-zinc-800 hover:border-orange-500/50 text-zinc-200 text-xs font-semibold"
+                onClick={() => setModalAdicionarNode(true)}
+              >
+                <Plus size={14} class="mr-1 text-orange-400" /> Adicionar Node
+              </Button>
+
+              {/* Botão Copiar JSON */}
               <Button
                 size="sm"
                 variant="secondary"
@@ -682,6 +738,7 @@ export const FluxosView: Component = () => {
             onMouseMove={onMouseMoveCanvas}
             onMouseUp={onMouseUpCanvas}
             onMouseLeave={onMouseUpCanvas}
+            onContextMenu={(e) => onContextMenuCanvas(e)}
             style={{
               "background-image": "radial-gradient(#27272a 1px, transparent 1px)",
               "background-size": `${24 * zoom()}px ${24 * zoom()}px`,
@@ -747,6 +804,7 @@ export const FluxosView: Component = () => {
                           background: "#18181b",
                         }}
                         onClick={() => setNoSelecionado(no)}
+                        onContextMenu={(e) => onContextMenuCanvas(e, no.id)}
                       >
                         {/* Handle de Entrada (Esquerda) */}
                         <Show when={!isTrigger}>
@@ -789,7 +847,7 @@ export const FluxosView: Component = () => {
                             ? no.config.pergunta
                             : no.config?.titulo
                             ? no.config.titulo
-                            : "Etapa configurada"}
+                            : "Configurado"}
                         </div>
 
                         {/* Handle de Saída (Direita) */}
@@ -806,10 +864,13 @@ export const FluxosView: Component = () => {
               </div>
             </div>
 
-            {/* NDV Lateral (Node Details View) */}
+            {/* ─────────────────────────────────────────────────────────────
+                NDV LATERAL (Node Details View com Formulário Automático + JSON)
+               ───────────────────────────────────────────────────────────── */}
             <Show when={noSelecionado()}>
               <div class="absolute right-4 top-4 bottom-4 w-96 bg-zinc-900/95 backdrop-blur-md border border-zinc-800 rounded-xl shadow-2xl flex flex-col z-30 transition-all">
-                <div class="p-4 border-b border-zinc-800 flex items-center justify-between">
+                {/* Topo do NDV */}
+                <div class="p-3.5 border-b border-zinc-800 flex items-center justify-between">
                   <div class="flex items-center gap-2 min-w-0">
                     <div class="p-1.5 rounded-lg bg-zinc-800 text-orange-400">
                       {iconeDoNo(noSelecionado()!.tipo)}
@@ -824,93 +885,373 @@ export const FluxosView: Component = () => {
                     </div>
                   </div>
 
-                  <IconButton size="xs" variant="ghost" onClick={() => setNoSelecionado(null)}>
-                    <X size={15} />
-                  </IconButton>
-                </div>
-
-                <div class="flex-1 overflow-y-auto p-4 space-y-4 text-xs scrollbar-thin">
-                  <Show when={noSelecionado()!.config?.agente}>
-                    <div class="space-y-1">
-                      <label class="text-[10px] uppercase font-bold text-zinc-500 block">
-                        Agente Executor
-                      </label>
-                      <div class="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 font-mono text-emerald-400">
-                        @{noSelecionado()!.config.agente}
-                      </div>
+                  <div class="flex items-center gap-1">
+                    {/* Toggle de Modos: Formulário Automático vs JSON */}
+                    <div class="flex items-center bg-zinc-950 border border-zinc-800 rounded p-0.5 text-[10px] font-mono">
+                      <button
+                        onClick={() => setModoNdv("form")}
+                        class={`px-2 py-0.5 rounded transition-colors ${
+                          modoNdv() === "form" ? "bg-zinc-800 text-zinc-100 font-bold" : "text-zinc-400"
+                        }`}
+                      >
+                        Form
+                      </button>
+                      <button
+                        onClick={() => setModoNdv("json")}
+                        class={`px-2 py-0.5 rounded transition-colors ${
+                          modoNdv() === "json" ? "bg-zinc-800 text-zinc-100 font-bold" : "text-zinc-400"
+                        }`}
+                      >
+                        JSON
+                      </button>
                     </div>
-                  </Show>
 
-                  <Show when={noSelecionado()!.config?.arquivo}>
-                    <div class="space-y-1">
-                      <label class="text-[10px] uppercase font-bold text-zinc-500 block">
-                        Script do Workspace
-                      </label>
-                      <div class="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 font-mono text-cyan-400">
-                        {noSelecionado()!.config.arquivo}
-                      </div>
-                    </div>
-                  </Show>
-
-                  <Show when={noSelecionado()!.config?.ordem || noSelecionado()!.config?.comando}>
-                    <div class="space-y-1">
-                      <label class="text-[10px] uppercase font-bold text-zinc-500 block">
-                        Instrução / Código
-                      </label>
-                      <pre class="p-2.5 rounded-lg bg-black border border-zinc-800 font-mono text-[11px] text-zinc-300 whitespace-pre-wrap max-h-48 overflow-y-auto scrollbar-thin">
-                        {noSelecionado()!.config.ordem || noSelecionado()!.config.comando}
-                      </pre>
-                    </div>
-                  </Show>
-
-                  <Show when={noSelecionado()!.config?.pergunta}>
-                    <div class="space-y-1">
-                      <label class="text-[10px] uppercase font-bold text-zinc-500 block">
-                        Pergunta de Decisão
-                      </label>
-                      <div class="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 text-amber-300 font-medium">
-                        {noSelecionado()!.config.pergunta}
-                      </div>
-                    </div>
-                  </Show>
-
-                  <Show when={noSelecionado()!.config?.opcoes}>
-                    <div class="space-y-1">
-                      <label class="text-[10px] uppercase font-bold text-zinc-500 block">
-                        Ramos de Decisão
-                      </label>
-                      <div class="space-y-1.5">
-                        <For each={noSelecionado()!.config.opcoes}>
-                          {(op: any) => (
-                            <div class="flex items-center justify-between p-2 rounded bg-zinc-950 border border-zinc-800 font-mono text-[11px]">
-                              <span class="text-zinc-300">{op.rotulo}</span>
-                              <span class="text-blue-400 flex items-center gap-1">
-                                <ArrowRight size={10} /> {op.proximo}
-                              </span>
-                            </div>
-                          )}
-                        </For>
-                      </div>
-                    </div>
-                  </Show>
-
-                  <div class="space-y-1 pt-2 border-t border-zinc-800">
-                    <label class="text-[10px] uppercase font-bold text-zinc-500 block">
-                      Configuração JSON Completa
-                    </label>
-                    <pre class="p-2 rounded bg-black border border-zinc-800 text-[10px] font-mono text-zinc-400 max-h-36 overflow-y-auto whitespace-pre-wrap scrollbar-thin">
-                      {JSON.stringify(noSelecionado()!, null, 2)}
-                    </pre>
+                    <IconButton size="xs" variant="ghost" onClick={() => setNoSelecionado(null)}>
+                      <X size={15} />
+                    </IconButton>
                   </div>
                 </div>
 
-                <div class="p-3 border-t border-zinc-800 flex justify-end">
-                  <Button size="xs" variant="secondary" onClick={() => setNoSelecionado(null)}>
-                    Fechar Detalhes
+                {/* Conteúdo do NDV */}
+                <div class="flex-1 overflow-y-auto p-4 space-y-4 text-xs scrollbar-thin">
+                  <Show
+                    when={modoNdv() === "form"}
+                    fallback={
+                      /* Versão Avançada JSON */
+                      <div class="space-y-2">
+                        <span class="text-[10px] font-bold uppercase text-zinc-500 block font-mono">
+                          Configuração Estruturada (Raw JSON)
+                        </span>
+                        <pre class="p-3 rounded-lg bg-black border border-zinc-800 text-[11px] font-mono text-zinc-300 max-h-96 overflow-y-auto whitespace-pre-wrap scrollbar-thin select-text">
+                          {JSON.stringify(noSelecionado()!, null, 2)}
+                        </pre>
+                      </div>
+                    }
+                  >
+                    {/* FORMULÁRIO AUTOMÁTICO BASEADO NO TIPO DE NÓ */}
+                    <div class="space-y-3.5">
+                      {/* Nó Tipo Agente */}
+                      <Show when={noSelecionado()!.tipo === "agente"}>
+                        <div class="space-y-1">
+                          <label class="text-[11px] font-medium text-zinc-300 block">
+                            Agente Especialista *
+                          </label>
+                          <select
+                            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-200 focus:border-orange-500 font-mono"
+                            value={noSelecionado()!.config?.agente || ""}
+                            onChange={(e) => atualizarConfigNo("agente", e.currentTarget.value)}
+                          >
+                            <For each={agentes()}>
+                              {(ag) => <option value={ag.id}>@{ag.id} ({ag.role || ag.categoria || "agente"})</option>}
+                            </For>
+                          </select>
+                        </div>
+
+                        <div class="space-y-1">
+                          <label class="text-[11px] font-medium text-zinc-300 block">
+                            Ordem / Instrução ao Agente *
+                          </label>
+                          <textarea
+                            rows={4}
+                            placeholder="Instrução para a IA. Aceita {{entrada}} como dado anterior..."
+                            value={noSelecionado()!.config?.ordem || ""}
+                            onInput={(e) => atualizarConfigNo("ordem", e.currentTarget.value)}
+                            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-xs text-zinc-200 font-mono focus:border-orange-500 resize-none leading-relaxed"
+                          />
+                        </div>
+                      </Show>
+
+                      {/* Nó Tipo Script */}
+                      <Show when={noSelecionado()!.tipo === "script"}>
+                        <div class="space-y-1">
+                          <label class="text-[11px] font-medium text-zinc-300 block">
+                            Caminho do Script (.js, .py, .sh)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="ex: scripts/processar-dados.sh"
+                            value={noSelecionado()!.config?.arquivo || ""}
+                            onInput={(e) => atualizarConfigNo("arquivo", e.currentTarget.value)}
+                            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-200 font-mono focus:border-orange-500"
+                          />
+                        </div>
+
+                        <div class="space-y-1">
+                          <label class="text-[11px] font-medium text-zinc-300 block">
+                            Comando Bash Alternativo
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="ex: python3 script.py {{entrada}}"
+                            value={noSelecionado()!.config?.comando || ""}
+                            onInput={(e) => atualizarConfigNo("comando", e.currentTarget.value)}
+                            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-200 font-mono focus:border-orange-500"
+                          />
+                        </div>
+                      </Show>
+
+                      {/* Nó Tipo Reunião */}
+                      <Show when={noSelecionado()!.tipo === "reuniao"}>
+                        <div class="space-y-1">
+                          <label class="text-[11px] font-medium text-zinc-300 block">
+                            Pauta da Reunião *
+                          </label>
+                          <textarea
+                            rows={3}
+                            placeholder="Tema central para a deliberação dos agentes..."
+                            value={noSelecionado()!.config?.pauta || ""}
+                            onInput={(e) => atualizarConfigNo("pauta", e.currentTarget.value)}
+                            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-200 focus:border-orange-500 resize-none"
+                          />
+                        </div>
+                      </Show>
+
+                      {/* Nó Tipo Decisão */}
+                      <Show when={noSelecionado()!.tipo === "decisao"}>
+                        <div class="space-y-1">
+                          <label class="text-[11px] font-medium text-zinc-300 block">
+                            Pergunta de Decisão *
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="ex: Os critérios de qualidade foram atendidos?"
+                            value={noSelecionado()!.config?.pergunta || ""}
+                            onInput={(e) => atualizarConfigNo("pergunta", e.currentTarget.value)}
+                            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-200 focus:border-orange-500"
+                          />
+                        </div>
+                      </Show>
+
+                      {/* Nó Tipo Task Create */}
+                      <Show when={noSelecionado()!.tipo === "task_create"}>
+                        <div class="space-y-1">
+                          <label class="text-[11px] font-medium text-zinc-300 block">
+                            Título da Tarefa no Kanban *
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="ex: Publicar artigo aprovado na fila"
+                            value={noSelecionado()!.config?.titulo || ""}
+                            onInput={(e) => atualizarConfigNo("titulo", e.currentTarget.value)}
+                            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-200 focus:border-orange-500"
+                          />
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2">
+                          <div>
+                            <label class="text-[10px] text-zinc-400 block mb-1">Coluna</label>
+                            <select
+                              class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-1.5 text-xs text-zinc-200 focus:border-orange-500"
+                              value={noSelecionado()!.config?.coluna || "backlog"}
+                              onChange={(e) => atualizarConfigNo("coluna", e.currentTarget.value)}
+                            >
+                              <option value="backlog">Backlog</option>
+                              <option value="fazer">A Fazer</option>
+                              <option value="andamento">Em Andamento</option>
+                              <option value="revisao">Revisão</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label class="text-[10px] text-zinc-400 block mb-1">Prioridade</label>
+                            <select
+                              class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-1.5 text-xs text-zinc-200 focus:border-orange-500"
+                              value={noSelecionado()!.config?.prioridade || "media"}
+                              onChange={(e) => atualizarConfigNo("prioridade", e.currentTarget.value)}
+                            >
+                              <option value="baixa">Baixa</option>
+                              <option value="media">Média</option>
+                              <option value="alta">Alta</option>
+                              <option value="urgente">Urgente</option>
+                            </select>
+                          </div>
+                        </div>
+                      </Show>
+
+                      {/* Nó Tipo Registro / Documento */}
+                      <Show when={noSelecionado()!.tipo === "registro" || noSelecionado()!.tipo === "saida"}>
+                        <div class="space-y-1">
+                          <label class="text-[11px] font-medium text-zinc-300 block">
+                            Categoria do Registro
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="ex: documentos, atas, relatorios"
+                            value={noSelecionado()!.config?.categoria || "documentos"}
+                            onInput={(e) => atualizarConfigNo("categoria", e.currentTarget.value)}
+                            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-200 focus:border-orange-500 font-mono"
+                          />
+                        </div>
+                      </Show>
+                    </div>
+                  </Show>
+                </div>
+
+                {/* Rodapé do NDV com Ações de Salvar e Excluir Node */}
+                <div class="p-3 border-t border-zinc-800 flex items-center justify-between">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    class="text-rose-400 hover:text-rose-300"
+                    onClick={() => excluirNode(noSelecionado()!.id)}
+                  >
+                    <Trash2 size={13} class="mr-1" /> Excluir Node
+                  </Button>
+
+                  <Button
+                    size="xs"
+                    variant="primary"
+                    class="bg-orange-600 hover:bg-orange-500 text-white font-bold"
+                    onClick={() => setNoSelecionado(null)}
+                  >
+                    Concluir Edição
                   </Button>
                 </div>
               </div>
             </Show>
+          </div>
+        </div>
+      </Show>
+
+      {/* ─────────────────────────────────────────────────────────────
+          MENU DE CONTEXTO ESTILO N8N (Ao clicar com botão direito)
+         ───────────────────────────────────────────────────────────── */}
+      <Show when={menuContexto().aberto}>
+        <div
+          class="fixed z-50 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl py-1.5 w-56 text-xs text-zinc-200 select-none animate-in fade-in zoom-in-95 duration-100"
+          style={{
+            left: `${Math.min(menuContexto().x, window.innerWidth - 230)}px`,
+            top: `${Math.min(menuContexto().y, window.innerHeight - 250)}px`,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Show
+            when={menuContexto().noId}
+            fallback={
+              /* Menu do Canvas Vazio */
+              <>
+                <button
+                  onClick={() => {
+                    setMenuContexto((p) => ({ ...p, aberto: false }));
+                    setModalAdicionarNode(true);
+                  }}
+                  class="w-full px-3 py-1.5 flex items-center justify-between hover:bg-orange-600 hover:text-white transition-colors text-left"
+                >
+                  <span class="flex items-center gap-2">
+                    <Plus size={14} /> Adicionar Node
+                  </span>
+                  <span class="text-[10px] opacity-60 font-mono">N</span>
+                </button>
+                <div class="my-1 border-t border-zinc-800" />
+                <button
+                  onClick={() => {
+                    setMenuContexto((p) => ({ ...p, aberto: false }));
+                    resetView();
+                  }}
+                  class="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-zinc-800 text-left"
+                >
+                  <Maximize2 size={13} /> Resetar Visualização
+                </button>
+                <button
+                  onClick={() => {
+                    setMenuContexto((p) => ({ ...p, aberto: false }));
+                    void copiarWorkflowJson(fluxoAtivo()!);
+                  }}
+                  class="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-zinc-800 text-left"
+                >
+                  <Copy size={13} /> Copiar Workflow JSON
+                </button>
+              </>
+            }
+          >
+            {/* Menu ao Clicar em um Node */}
+            <div class="px-3 py-1 text-[10px] font-mono text-zinc-500 uppercase border-b border-zinc-800 mb-1">
+              Node: {menuContexto().noId}
+            </div>
+            <button
+              onClick={() => {
+                const n = fluxoAtivo()?.nos.find((item) => item.id === menuContexto().noId);
+                if (n) setNoSelecionado(n);
+                setMenuContexto((p) => ({ ...p, aberto: false }));
+              }}
+              class="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-zinc-800 text-left"
+            >
+              <Sliders size={13} class="text-orange-400" /> Abrir Parâmetros (NDV)
+            </button>
+            <button
+              onClick={() => {
+                void duplicarNodeSelecionado(menuContexto().noId!);
+                setMenuContexto((p) => ({ ...p, aberto: false }));
+              }}
+              class="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-zinc-800 text-left"
+            >
+              <Copy size={13} /> Duplicar Node
+            </button>
+            <button
+              onClick={() => {
+                setMenuContexto((p) => ({ ...p, aberto: false }));
+                setModalAdicionarNode(true);
+              }}
+              class="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-zinc-800 text-left"
+            >
+              <Plus size={13} /> Conectar Novo Node
+            </button>
+            <div class="my-1 border-t border-zinc-800" />
+            <button
+              onClick={() => {
+                void excluirNode(menuContexto().noId!);
+                setMenuContexto((p) => ({ ...p, aberto: false }));
+              }}
+              class="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-rose-950/80 text-rose-400 text-left"
+            >
+              <Trash2 size={13} /> Excluir Node
+            </button>
+          </Show>
+        </div>
+      </Show>
+
+      {/* ─────────────────────────────────────────────────────────────
+          MODAL / DRAWER CATÁLOGO DE ADICIONAR NOVO NODE
+         ───────────────────────────────────────────────────────────── */}
+      <Show when={modalAdicionarNode()}>
+        <div class="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl">
+            <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div>
+                <h3 class="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                  <Plus size={16} class="text-orange-400" /> Adicionar Node ao Workflow
+                </h3>
+                <p class="text-[11px] text-zinc-400 mt-0.5">
+                  Escolha o bloco para adicionar ao pipeline e conectar ao fluxo
+                </p>
+              </div>
+              <IconButton size="xs" variant="ghost" onClick={() => setModalAdicionarNode(false)}>
+                <X size={16} />
+              </IconButton>
+            </div>
+
+            <div class="space-y-2">
+              <For each={TIPOS_NODE_CATALOGO}>
+                {(item) => (
+                  <div
+                    onClick={() => void adicionarNodeAoWorkflow(item.tipo)}
+                    class="p-3 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-orange-500/60 hover:bg-zinc-900 cursor-pointer transition-all flex items-start gap-3 group"
+                  >
+                    <div class={`p-2 rounded-lg bg-zinc-900 border border-zinc-800 ${item.cor} group-hover:scale-110 transition-transform`}>
+                      <item.icone size={18} />
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <div class="font-bold text-xs text-zinc-200 group-hover:text-orange-400 transition-colors">
+                        {item.rotulo}
+                      </div>
+                      <p class="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
+                        {item.desc}
+                      </p>
+                    </div>
+                    <ChevronRight size={15} class="text-zinc-600 group-hover:text-orange-400 transition-colors self-center" />
+                  </div>
+                )}
+              </For>
+            </div>
           </div>
         </div>
       </Show>
@@ -998,7 +1339,26 @@ export const FluxosView: Component = () => {
                 size="sm"
                 variant="primary"
                 class="bg-orange-600 hover:bg-orange-500 text-white font-bold"
-                onClick={salvarNovoWorkflow}
+                onClick={async () => {
+                  const id = novoFluxoId().trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+                  const nome = novoFluxoNome().trim();
+                  if (!id || !nome) return;
+                  try {
+                    await fetchApi("/flows", {
+                      method: "POST",
+                      body: JSON.stringify({
+                        id,
+                        nome,
+                        descricao: novoFluxoDesc(),
+                        nos: [{ id: "gatilho", tipo: "manual", config: {} }],
+                        arestas: [],
+                      }),
+                    });
+                    setModalNovoFluxo(false);
+                    await carregarFluxos();
+                    void abrirEditorCanvas(id);
+                  } catch {}
+                }}
               >
                 Criar Workflow
               </Button>
