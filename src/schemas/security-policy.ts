@@ -6,7 +6,9 @@ export const securityPolicySchema = z.object({
   allowlist_extra: z.array(z.string().min(1)).default([]),
   network_allowlist: z.array(z.string().min(1)).default([]),
   hitl_patterns: z.array(z.string().min(1)).default([]),
-});
+  prompt_regras: z.string().optional().default(""),
+  auto_aprovar_rotinas: z.boolean().optional().default(true),
+}).passthrough();
 
 export type SecurityPolicy = z.infer<typeof securityPolicySchema>;
 

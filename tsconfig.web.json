@@ -1,11 +1,11 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "module": "ES2020",
+    "target": "ESNext",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
     "moduleResolution": "bundler",
-    "outDir": "web-dist/app",
-    "rootDir": "src/web",
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -14,8 +14,8 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-    "types": []
+    "types": ["vite/client"]
   },
-  "include": ["src/web/**/*.ts", "src/web/**/*.js"],
-  "exclude": ["src/web/**/*.svelte.ts", "src/web/**/*.svelte", "src/web/lib/**", "src/web/stores/**", "src/web/svelte-main.ts", "src/web/App.svelte"]
+  "include": ["src/web/**/*.ts", "src/web/**/*.tsx", "src/web/**/*.js", "src/web/**/*.jsx"],
+  "exclude": ["src/web/**/*.svelte.ts", "src/web/**/*.svelte"]
 }

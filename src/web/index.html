@@ -1,14 +1,17 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="dark h-full w-full">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, interactive-widget=resizes-content, viewport-fit=cover"
+    />
     <title>opencorp</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="stylesheet" href="/tailwind.css" />
   </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="./svelte-main.ts"></script>
+  <body class="antialiased overscroll-none overflow-hidden bg-zinc-950 text-zinc-100 h-full w-full selection:bg-zinc-800">
+    <noscript>Habilite o JavaScript para usar o opencorp.</noscript>
+    <div id="root" class="flex flex-col h-full w-full overflow-hidden"></div>
+    <script type="module" src="./main.tsx"></script>
   </body>
 </html>

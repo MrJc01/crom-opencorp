@@ -1,32 +1,50 @@
 import { defineConfig } from 'vite';
-import { svelte } from '@sveltejs/vite-plugin-svelte';
+import solidPlugin from 'vite-plugin-solid';
+import tailwindcss from '@tailwindcss/vite';
+import { resolve } from 'node:path';
 
 export default defineConfig({
-  plugins: [svelte()],
-  publicDir: false,
+  root: resolve(__dirname, 'src/web'),
+  plugins: [
+    tailwindcss(),
+    solidPlugin(),
+  ],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src/web'),
+    },
+  },
   build: {
-    outDir: 'web-dist',
+    outDir: resolve(__dirname, 'web-dist'),
     emptyOutDir: false,
     rollupOptions: {
-      input: 'src/web/svelte-main.ts',
       output: {
-        entryFileNames: 'assets/svelte-app.js',
-        chunkFileNames: 'assets/svelte-[hash].js',
-        assetFileNames: 'assets/svelte-[hash][extname]',
+        entryFileNames: 'assets/app.js',
+        chunkFileNames: 'assets/chunk-[hash].js',
+        assetFileNames: 'assets/[name]-[hash][extname]',
       },
     },
-    commonjsOptions: { include: [/svelte/] },
   },
-  optimizeDeps: { include: ['svelte/store', 'svelte'] },
   server: {
+    port: 3000,
     proxy: {
-      '/api': 'http://127.0.0.1:4100',
-      '/events': 'http://127.0.0.1:4100',
+      '/workspaces': 'http://127.0.0.1:4100',
+      '/agents': 'http://127.0.0.1:4100',
+      '/tasks': 'http://127.0.0.1:4100',
+      '/schedules': 'http://127.0.0.1:4100',
+      '/flows': 'http://127.0.0.1:4100',
+      '/hooks': 'http://127.0.0.1:4100',
+      '/apps': 'http://127.0.0.1:4100',
+      '/secrets': 'http://127.0.0.1:4100',
+      '/notifications': 'http://127.0.0.1:4100',
+      '/settings': 'http://127.0.0.1:4100',
+      '/files': 'http://127.0.0.1:4100',
+      '/terminal': 'http://127.0.0.1:4100',
       '/secretario': 'http://127.0.0.1:4100',
+      '/meetings': 'http://127.0.0.1:4100',
+      '/ledger': 'http://127.0.0.1:4100',
+      '/health': 'http://127.0.0.1:4100',
+      '/events': 'http://127.0.0.1:4100',
     },
-  },
-  test: {
-    include: ['src/**/*.{test,spec}.{js,ts}', 'tests/**/*.{test,spec}.{js,ts}'],
-    environment: 'jsdom',
   },
 });

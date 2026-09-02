@@ -6,7 +6,7 @@ import { join, resolve, relative, isAbsolute } from "node:path";
 import { stat, readdir, readFile, realpath, open } from "node:fs/promises";
 import { existsSync, rmSync, statSync, readFileSync } from "node:fs";
 import { WorkspaceManager } from "../core/workspace-manager.js";
-import { writeFileAtomic } from "../utils/fs-safe.js";
+import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
 import { AgentStore } from "../core/agent-store.js";
 import { SessionManager, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
@@ -961,13 +961,14 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           enviar(res, 200, await approvals.listar(ws.path));
           return;
         }
-        const mAprov = /^\/approvals\/([^/]+)\/(approve|reject)$/.exec(rota);
+        const mAprov = /^(?:\/approvals\/([^/]+)\/(approve|reject)|\/secretario\/hitl\/([^/]+)\/(aprovar|rejeitar))$/.exec(rota);
         if (mAprov && req.method === "POST") {
           const ws = await resolverWs(url);
-          const id = decodeURIComponent(mAprov[1]!);
-          if (mAprov[2] === "approve") {
+          const id = decodeURIComponent(mAprov[1] || mAprov[3]!);
+          const acao = (mAprov[2] || mAprov[4]) === "approve" || (mAprov[2] || mAprov[4]) === "aprovar" ? "approve" : "reject";
+          if (acao === "approve") {
             const p = await approvals.aprovar(ws.path, id);
-            // retoma imediatamente sem esperar o tick (15min) — dispara o agente para a mesma ordem
+            // retoma imediatamente sem esperar o tick (15min) — dispara o agente para a mesma ordem com pularGuard
             if (p.exec_id) {
               void (async () => {
                 try {
@@ -976,14 +977,17 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   if (meta && (meta.extras as Record<string, unknown>)?.status === "hitl_pendente") {
                     const ordem = String((meta.extras as Record<string, unknown>)?.ordem ?? p.ordem ?? "");
                     const agente = String(p.agente || (meta as unknown as { criadoPor: string }).criadoPor || "wp-admin");
-                    // marca como executando e roda de novo (one-shot)
                     const sessoes = new SessionManager({ homeDir: opcoes.homeDir ?? opencorpHome() });
-                    // limpa hitl_pendente para não bloquear o retry
                     const extras = (meta.extras ?? {}) as Record<string, unknown>;
                     extras.status = "executando";
                     meta.extras = extras;
                     await registros.salvarMeta(ws.path, "execucoes", meta.id, meta);
-                    await (sessoes as unknown as { rodar: (o: unknown) => Promise<unknown> }).rodar({ agente, ordem, workspaceDir: ws.path }).catch(() => {});
+                    await (sessoes as unknown as { rodar: (o: unknown) => Promise<unknown> }).rodar({
+                      agente,
+                      ordem,
+                      workspaceDir: ws.path,
+                      pularGuard: true,
+                    }).catch(() => {});
                   }
                 } catch {}
               })();
@@ -1036,6 +1040,44 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           enviar(res, 200, entradas);
           return;
         }
+
+        if (rota === "/settings/security" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const policyFile = join(ws.path, ".opencorp", "security_policy.json");
+          let policy = {
+            level: "permissive",
+            blocklist: ["rm -rf /", "shutdown", "reboot", "curl * | bash", "git push --force"],
+            allowlist_extra: ["git", "node", "npm", "python3", "pytest", "curl", "wget"],
+            network_allowlist: ["pulso-diario.wp.crom.me", "*.crom.me", "*.wp.crom.me", "registry.npmjs.org", "github.com", "*"],
+            hitl_patterns: ["DROP TABLE", "DELETE FROM users"],
+            prompt_regras: "Permitir curl, inspeção de páginas e comandos de rotina de agentes sem requerer aprovação manual.",
+            auto_aprovar_rotinas: true,
+          };
+          if (existsSync(policyFile)) {
+            try {
+              policy = { ...policy, ...JSON.parse(readFileSync(policyFile, "utf8")) };
+            } catch {}
+          }
+          enviar(res, 200, policy);
+          return;
+        }
+
+        if (rota === "/settings/security" && req.method === "PUT") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+          const policyDir = join(ws.path, ".opencorp");
+          await mkdirRecursive(policyDir);
+          const policyFile = join(policyDir, "security_policy.json");
+          let atual: Record<string, unknown> = {};
+          if (existsSync(policyFile)) {
+            try { atual = JSON.parse(readFileSync(policyFile, "utf8")); } catch {}
+          }
+          const merged = { ...atual, ...corpo };
+          await writeFileAtomic(policyFile, `${JSON.stringify(merged, null, 2)}\n`);
+          enviar(res, 200, { ok: true, policy: merged });
+          return;
+        }
+
         const mSetting = /^\/settings\/([^/]+)$/.exec(rota);
         if (mSetting && req.method === "GET") {
           const ws = await resolverWs(url);
@@ -1048,7 +1090,6 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const corpo = (await lerCorpo(req)) as { chave?: string; valor?: unknown; scope?: string };
           const chave = String(corpo.chave ?? "").trim();
           const valorRaw = String(corpo.valor ?? "");
-          // secretary.model vazio = reset (volta ao template) — campo opcional, "" não passa no regex
           if (chave === "secretary.model" && valorRaw.trim() === "") {
             const r = await settings.reset(chave, {
               scope: corpo.scope === "workspace" ? "workspace" : "global",
@@ -2602,12 +2643,13 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
-        if (req.method === "GET" && rota !== "/events") {
+        if ((req.method === "GET" || req.method === "HEAD") && rota !== "/events") {
           // ── fallback estático: UI web (estilo opencode — servidor embute a web) ──
           const estatico = servirEstatico(rota);
           if (estatico !== null) {
             res.writeHead(200, { "content-type": estatico.tipo, "access-control-allow-origin": "*", "cache-control": "no-cache" });
-            res.end(estatico.corpo);
+            if (req.method === "HEAD") res.end();
+            else res.end(estatico.corpo);
             return;
           }
         }

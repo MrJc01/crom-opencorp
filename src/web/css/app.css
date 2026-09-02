@@ -3,8 +3,22 @@
  * + CSS legado em camada "components" (migração por contato — ver docs/PLANO-WEB-CRUD.md §0).
  */
 @import "tailwindcss";
+@import "./legacy.css" layer(components);
+@import "./secretario-chat.css";
+@import "./fixes-layout.css";
+@import "./chat-lateral-fix.css";
 @source "../";
 @source "../../../web-dist/index.html";
+
+html, body, #root {
+  height: 100% !important;
+  min-height: 100dvh !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  background-color: #09090b !important;
+}
 
 @plugin "daisyui" {
   themes: dark --default;
@@ -32,12 +46,6 @@
   --radius-box: 0.5rem;
   --radius-field: 0.375rem;
 }
-
-/* Legado em layer components: utilitários Tailwind/DaisyUI ganham daqui em diante */
-@import "./legacy.css" layer(components);
-@import "./secretario-chat.css";
-@import "./fixes-layout.css";
-@import "./chat-lateral-fix.css";
 
 /* ========= CHAT LATERAL GLOBAL (PLANO-PAINEL-V2 — Etapa 1) ========= */
 /* Botão floating (P-14/P-19): escondido na página do Secretário e com o drawer aberto */

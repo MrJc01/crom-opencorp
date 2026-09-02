@@ -1,151 +1,18 @@
 <!doctype html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-<title>opencorp</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
-<link rel="stylesheet" href="/tailwind.css"/>
-
-</head>
-<body>
-<div id="login-screen" class="login-screen min-h-screen flex items-center justify-center p-4 hidden">
-  <div class="login-card">
-    <div class="login-logo" id="login-logo"></div>
-    <h1 class="login-title">opencorp</h1>
-    <p class="login-subtitle">Digite seu token de API para continuar</p>
-    <div id="login-error" class="login-error hidden"></div>
-    <div class="login-input">
-      <input id="login-token" type="password" placeholder="Token (veja ~/.opencorp/secrets.json)" autocomplete="off"/>
-    </div>
-    <button class="login-btn" id="login-btn" onclick="fazerLogin()">Entrar</button>
-    <a href="/doc" class="login-link" target="_blank">Ver documentação da API (/doc)</a>
-  </div>
-</div>
-
-<div id="app" class="hidden">
-  <aside class="sidebar" id="sidebar">
-    <div class="p-4 border-b border-zinc-800 flex items-center gap-2">
-      <h1 class="text-xl font-bold flex items-center gap-2 flex-1 min-w-0" id="sidebar-logo"></h1>
-      <button class="sidebar-collapse" id="sidebar-collapse-btn" title="Recolher/expandir menu" onclick="toggleSidebarCollapse()"></button>
-    </div>
-    <div class="p-4 border-b border-zinc-800" id="bloco-workspace">
-      <label class="block text-xs text-zinc-500 mb-1">Workspace <span class="help-wrap"><button class="help-btn" aria-label="Ajuda: workspace" onclick="window.__ajuda(event, 'workspace')">?</button></span></label>
-      <div class="flex gap-2">
-        <select id="ws-select" class="flex-1"></select>
-        <button class="btn" onclick="novoWorkspace()" title="Novo workspace" aria-label="Novo workspace">+</button>
-      </div>
-    </div>
-    <nav class="flex-1 p-2 overflow-y-auto scrollbar-none" id="nav">
-      <button class="nav-item active" data-view="home" onclick="navegar('home')" title="Início"><span class="nav-icon" id="nav-icon-home"></span><span class="nav-label">Início</span></button>
-      <div class="nav-grupo">Operação</div>
-      <button class="nav-item" data-view="tasks" onclick="navegar('tasks')" title="Tasks"><span class="nav-icon" id="nav-icon-tasks"></span><span class="nav-label">Tasks</span></button>
-      <button class="nav-item" data-view="agentes" onclick="navegar('agentes')" title="Agentes"><span class="nav-icon" id="nav-icon-agentes"></span><span class="nav-label">Agentes</span></button>
-      <button class="nav-item" data-view="secretario" onclick="navegar('secretario')" title="Secretário"><span class="nav-icon" id="nav-icon-secretario"></span><span class="nav-label">Secretário</span></button>
-      <div class="nav-grupo">Automação</div>
-      <button class="nav-item" data-view="agenda" onclick="navegar('agenda')" title="Agenda"><span class="nav-icon" id="nav-icon-agenda"></span><span class="nav-label">Agenda</span></button>
-      <button class="nav-item" data-view="fluxos" onclick="navegar('fluxos')" title="Fluxos"><span class="nav-icon" id="nav-icon-fluxos"></span><span class="nav-label">Fluxos</span></button>
-      <button class="nav-item" data-view="hooks" onclick="navegar('hooks')" title="Hooks"><span class="nav-icon" id="nav-icon-hooks"></span><span class="nav-label">Hooks</span></button>
-      <div class="nav-grupo">Código</div>
-      <button class="nav-item" data-view="workspace" onclick="navegar('workspace')" title="Workspace"><span class="nav-icon" id="nav-icon-workspace"></span><span class="nav-label">Workspace</span></button>
-      <div class="nav-grupo">Dados</div>
-      <button class="nav-item" data-view="historico" onclick="navegar('historico')" title="Histórico"><span class="nav-icon" id="nav-icon-historico"></span><span class="nav-label">Histórico</span></button>
-      <button class="nav-item" data-view="apps" onclick="navegar('apps')" title="Apps"><span class="nav-icon" id="nav-icon-apps"></span><span class="nav-label">Apps</span></button>
-      <div class="nav-grupo">Sistema</div>
-      <button class="nav-item" data-view="notificacoes" onclick="navegar('notificacoes')" title="Notificações"><span class="nav-icon" id="nav-icon-notificacoes"></span><span class="nav-label">Notificações</span><span id="nav-badge-notificacoes" class="nav-badge hidden">0</span></button>
-      <button class="nav-item" data-view="config" onclick="navegar('config')" title="Config"><span class="nav-icon" id="nav-icon-config"></span><span class="nav-label">Config</span></button>
-    </nav>
-    <div class="sidebar-footer">
-      <div class="connection-status">
-        <span class="connection-dot disconnected" id="conn-dot"></span>
-        <span id="conn-text">desconectado</span>
-      </div>
-      <button class="btn-ghost sidebar-logout" onclick="sairParaLogin('Sessão encerrada — faça login novamente')" aria-label="Sair">Sair</button>
-      <div class="version" id="version">v0.4.0</div>
-    </div>
-  </aside>
-  <div id="sidebar-backdrop" onclick="toggleSidebar(false)"></div>
-
-  <main class="main">
-    <button class="menu-btn" id="menu-btn" aria-label="Abrir menu" onclick="toggleSidebar()">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></button>
-    <button class="ws-chip" id="ws-chip" aria-label="Trocar workspace — abre o menu" onclick="toggleSidebar(true)"></button>
-    <header class="topbar" id="topbar" aria-label="Barra superior">
-      <nav class="topbar-breadcrumb" aria-label="Breadcrumb">
-        <ol id="topbar-breadcrumb" class="flex items-center gap-1 text-xs">
-          <li><a href="#/home" class="hover:text-white transition-colors" onclick="navegar('home')">Home</a></li>
-          <li class="text-zinc-500">›</li>
-          <li id="topbar-view" class="text-zinc-100 font-medium">Início</li>
-        </ol>
-      </nav>
-      <div class="topbar-busca">
-        <div class="relative">
-          <span class="topbar-search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
-          <input id="topbar-busca" type="search" placeholder="Buscar…" aria-label="Busca global" />
-        </div>
-      </div>
-      <div class="topbar-acoes">
-        <span id="topbar-ws" class="topbar-ws-chip" title="Workspace ativo"></span>
-        <div class="topbar-avatar" title="Usuário" aria-label="Avatar do usuário">●</div>
-      </div>
-    </header>
-    <div class="max-w-6xl mx-auto p-6">
-      <div id="ws-banner" class="mb-4"></div>
-      <section id="view-home" class="view active"></section>
-      <section id="view-tasks" class="view"></section>
-      <section id="view-agentes" class="view"></section>
-      <section id="view-agenda" class="view"></section>
-      <section id="view-fluxos" class="view"></section>
-      <section id="view-hooks" class="view"></section>
-      <section id="view-workspace" class="view"></section>
-      <section id="view-apps" class="view"></section>
-      <section id="view-app-detail" class="view"></section>
-      <section id="view-historico" class="view"></section>
-      <section id="view-secretario" class="view"></section>
-      <section id="view-notificacoes" class="view"></section>
-      <section id="view-config" class="view"></section>
-    </div>
-  </main>
-
-  <div class="drawer-overlay" id="drawer-overlay" onclick="fecharDrawer()"></div>
-  <aside class="drawer" id="drawer" role="dialog" aria-label="Detalhes da task">
-    <div class="drawer-header">
-      <h2 class="drawer-title" id="drawer-title">Detalhes da task</h2>
-      <button class="drawer-close" onclick="fecharDrawer()" aria-label="Fechar"><span id="drawer-close-icon"></span></button>
-    </div>
-    <div class="drawer-content" id="drawer-content"></div>
-    <div class="chat-input-area">
-      <input id="drawer-chat-input" placeholder="Mensagem (@nome menciona agente)…" onkeydown="if(event.key==='Enter')enviarMsgDrawer()"/>
-      <button class="btn" onclick="enviarMsgDrawer()">Enviar</button>
-    </div>
-  </aside>
-
-  <button class="fab-chat" id="fab-chat" onclick="alternarChatLateral()" title="Chat do Secretário" aria-label="Abrir chat do Secretário"></button>
-
-  <div class="drawer-overlay" id="chat-drawer-overlay" onclick="fecharChatLateral()"></div>
-  <aside class="drawer drawer-chat" id="chat-drawer" role="dialog" aria-label="Chat do Secretário (lateral)">
-    <div class="drawer-header">
-      <h2 class="drawer-title truncate" id="lat-titulo">Secretário</h2>
-      <button class="drawer-close" id="btn-lat-historico" onclick="abrirHistoricoPopup()" aria-label="Histórico de conversas" title="Histórico de conversas"><span id="lat-hist-icon"></span></button>
-      <button class="drawer-close" onclick="fecharChatLateral()" aria-label="Fechar chat lateral"><span id="chat-drawer-close-icon"></span></button>
-    </div>
-    <div class="flex-1 overflow-y-auto scrollbar-thin" id="lat-mensagens"><div class="oc-feed" id="lat-feed"></div></div>
-    <div class="p-3 border-t border-zinc-800">
-      <div class="composer">
-        <div class="composer-row2">
-          <textarea id="lat-input" placeholder="Pergunte ao Secretário… (/ comandos · @ contexto · ! terminal)" rows="1" onkeydown="window.__composerTecla(event,'lateral')" oninput="window.__composerInput(this.value,'lateral')"></textarea>
-          <button class="btn composer-enviar" id="lat-enviar" onclick="window.__secretarioEnviar('lateral', true)" aria-label="Enviar mensagem"></button>
-        </div>
-        <div class="composer-row">
-          <span class="text-xs text-zinc-500 composer-dica">mesma conversa da página Secretário</span>
-        </div>
-      </div>
-    </div>
-  </aside>
-
-  <div id="toast-container" class="fixed bottom-20 right-6 z-50 flex flex-col gap-2" role="status" aria-live="polite"></div>
-</div>
-
-<script type="module" src="/app/main.js"></script>
-</body>
+<html lang="pt-BR" class="dark h-full w-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, interactive-widget=resizes-content, viewport-fit=cover"
+    />
+    <title>opencorp</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script type="module" crossorigin src="/assets/app.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-B7gW3iVh.css">
+  </head>
+  <body class="antialiased overscroll-none overflow-hidden bg-zinc-950 text-zinc-100 h-full w-full selection:bg-zinc-800">
+    <noscript>Habilite o JavaScript para usar o opencorp.</noscript>
+    <div id="root" class="flex flex-col h-full w-full overflow-hidden"></div>
+  </body>
 </html>

@@ -31,13 +31,22 @@ function primeiroExecutavel(comando: string): string {
   return (m?.[1] ?? "").toLowerCase();
 }
 
+const EXTENSOES_ARQUIVO = new Set([
+  "js", "cjs", "mjs", "ts", "mts", "cts", "json", "md", "txt", "py", "sh", "yml", "yaml",
+  "html", "css", "png", "jpg", "jpeg", "svg", "ico", "lock", "env", "log", "db", "sql", "map"
+]);
+
 export function extrairHosts(comando: string): string[] {
   const hosts = new Set<string>();
-  for (const m of comando.matchAll(/(?:https?|ssh|git):\/\/([^\/\s'"@]+(?:@[^\/\s'"]+)?)/gi)) {
+  for (const m of comando.matchAll(/(?:https?|ssh|git):\/\/([^\/\s'"@:]+(?:@[^\/\s'":]+)?)/gi)) {
     hosts.add(m[1]!.split("@").pop()!.toLowerCase());
   }
   for (const m of comando.matchAll(/[\s'"]([\w.-]+\.[a-z]{2,})(?:[\/\s:'"]|$)/gi)) {
-    hosts.add(m[1]!.toLowerCase());
+    const possivel = m[1]!.toLowerCase();
+    const ext = possivel.split(".").pop() ?? "";
+    if (!EXTENSOES_ARQUIVO.has(ext)) {
+      hosts.add(possivel);
+    }
   }
   const exec = primeiroExecutavel(comando);
   if (exec === "npm" || exec === "npx") hosts.add("registry.npmjs.org");
@@ -50,8 +59,16 @@ function verificarRede(comando: string, policy: SecurityPolicy): Avaliacao | nul
   const usaRede = REDE_EXECUTAVEIS.includes(exec) || /https?:\/\//i.test(comando);
   if (!usaRede) return null;
   if (policy.network_allowlist.length === 0) return null;
+  if (policy.network_allowlist.includes("*")) return null;
   const fora = extrairHosts(comando).filter(
-    (h) => !policy.network_allowlist.some((permitido) => h === permitido || h.endsWith(`.${permitido}`)),
+    (h) => !policy.network_allowlist.some((permitido) => {
+      if (permitido === "*") return true;
+      if (permitido.startsWith("*.")) {
+        const sufixo = permitido.slice(2);
+        return h === sufixo || h.endsWith(`.${sufixo}`);
+      }
+      return h === permitido || h.endsWith(`.${permitido}`);
+    }),
   );
   if (fora.length === 0) return null;
   return {
