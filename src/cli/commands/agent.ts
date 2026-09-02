@@ -2,12 +2,13 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import type { Command } from "commander";
 import { AgentError } from "../../core/errors.js";
-import { SessionManager } from "../../core/session-manager.js";
+import { SessionManager, tetoRunPadraoMs } from "../../core/session-manager.js";
 import { AgentStore } from "../../core/agent-store.js";
 import { SubcorpStore } from "../../core/subcorp-store.js";
 import { BudgetManager } from "../../core/budget-manager.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
 import { parseGatilho } from "../../schemas/gatilho.js";
+import { opencorpHome } from "../../utils/paths.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -231,6 +232,10 @@ export function registerAgentCommand(program: Command): void {
     .option("--file <arquivo>", "lê a ordem de um arquivo (sobrepõe o texto posicional)")
     .option("--title <titulo>", "título da sessão opencode")
     .option("--gatilho <tipo:origem>", "declara quem ativa esta execução (cron, mencao, flow...) — ledger unificado")
+    .option(
+      "--timeout-min <min>",
+      "teto de execução em minutos — watchdog mata o opencode travado (0 desativa; padrão: env OPENCORP_RUN_TIMEOUT_MIN ou 20min)",
+    )
     .description("executa uma ordem em uma sessão OpenCode dentro do workspace")
     .action(
       (
@@ -242,6 +247,7 @@ export function registerAgentCommand(program: Command): void {
           file?: string;
           title?: string;
           gatilho?: string;
+          timeoutMin?: string;
           workspace?: string;
         },
       ) =>
@@ -256,6 +262,13 @@ export function registerAgentCommand(program: Command): void {
             agenteId = alvo.agenteId;
             workspaceDir = alvo.source;
           }
+          let timeoutMs: number | undefined;
+          if (opts.timeoutMin !== undefined) {
+            const n = Number(opts.timeoutMin);
+            timeoutMs = Number.isFinite(n) && n > 0 ? Math.round(n * 60_000) : 0;
+          } else {
+            timeoutMs = await tetoRunPadraoMs(opencorpHome());
+          }
           const r = await sessoes.rodar({
             agente: agenteId,
             ordem,
@@ -264,6 +277,7 @@ export function registerAgentCommand(program: Command): void {
             file: opts.file,
             title: opts.title,
             gatilho,
+            timeoutMs,
             workspaceId: workspaceDir ? undefined : wsDe(program, opts),
             workspaceDir,
           });

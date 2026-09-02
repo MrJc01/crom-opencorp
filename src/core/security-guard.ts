@@ -61,20 +61,37 @@ function verificarRede(comando: string, policy: SecurityPolicy): Avaliacao | nul
   };
 }
 
+/** Verbos que, na ordem EM SI, caracterizam pedido de execução de comando. */
+const VERBOS_PEDIDO_EXECUCAO = /\b(execute|executar|rode|rodar|bash)\b/i;
+
+/** Pedido de execução = verbo na primeira linha útil da ordem, ou seja, a ordem
+ *  EM SI é um pedido de comando ("execute: rm -rf /x"). Palavras como
+ *  "executar"/"bash" no corpo de textos longos — pauta, transcript, memória ou
+ *  prompt de reunião entregue como mensagem de chat (bug 31/08: turno do
+ *  secretario level-1 derrubado por "executar" citado no conteúdo) — são
+ *  CONTEÚDO, não pedido. O enforcement real de "level-1 não roda bash" segue no
+ *  opencode (permission bash:deny) e na blocklist/hitl_patterns abaixo, que
+ *  varrem o texto inteiro. */
+function pedeExecucao(comando: string): boolean {
+  for (const linha of comando.split("\n")) {
+    const t = linha.trim();
+    if (t.length === 0) continue;
+    return VERBOS_PEDIDO_EXECUCAO.test(t);
+  }
+  return false;
+}
+
 export function avaliar(
   comando: string,
   policy: SecurityPolicy,
   nivelAgente: NivelAgente,
 ): Avaliacao {
-  if (nivelAgente === "level-1") {
-    const pedeExecucao = /\b(execute|executar|rode|rodar|bash)\b/i.test(comando);
-    if (pedeExecucao) {
-      return {
-        acao: "bloqueado",
-        motivo: `agente level-1 (leitura) não executa comandos — pedido: ${comando.slice(0, 120)}`,
-        padrao: "level-1",
-      };
-    }
+  if (nivelAgente === "level-1" && pedeExecucao(comando)) {
+    return {
+      acao: "bloqueado",
+      motivo: `agente level-1 (leitura) não executa comandos — pedido: ${comando.slice(0, 120)}`,
+      padrao: "level-1",
+    };
   }
   for (const padrao of policy.blocklist) {
     if (casaPadrao(padrao, comando)) {

@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, resolve, relative, isAbsolute } from "node:path";
 import { stat, readdir, readFile, realpath } from "node:fs/promises";
-import { existsSync, statSync, readFileSync } from "node:fs";
+import { existsSync, rmSync, statSync, readFileSync } from "node:fs";
 import { WorkspaceManager } from "../core/workspace-manager.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
@@ -30,7 +30,7 @@ import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError
 import { FlowError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
-import { OpencodeServerManager, SecretarioError } from "../core/opencode-server.js";
+import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, dirOpencodeHome, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc } from "../core/opencode-server.js";
 import { taskCreateSchema } from "../schemas/task.js";
 import { tipoDeNomeApp, validarPerfilApp } from "../schemas/app-perfil.js";
 
@@ -145,9 +145,12 @@ const ROUTES: DefinicaoRota[] = [
   { method: "POST", path: "/secretario/start", descricao: "Inicia o secretário (opencode serve)", corpo: false },
   { method: "POST", path: "/secretario/stop", descricao: "Para o secretário", corpo: false },
   { method: "GET", path: "/secretario/sessoes", descricao: "Lista sessões do opencode (proxy)", publico: false },
-  { method: "GET", path: "/secretario/sessoes/:id/mensagens", descricao: "Mensagens de uma sessão (proxy, normalizado [{role,content}])", publico: false },
+  { method: "GET", path: "/secretario/sessoes/:id/mensagens", descricao: "Mensagens de uma sessão (proxy, normalizado [{role,content,concluida}])", publico: false },
   { method: "POST", path: "/secretario/conversa", descricao: "Envia mensagem ao secretário (proxy create session + message)", corpo: true },
   { method: "POST", path: "/secretario/conversa/stream", descricao: "Envia mensagem ao secretário com resposta em streaming (SSE: inicio/delta/fim/erro)", corpo: true },
+  { method: "GET", path: "/provider-keys", descricao: "Lista provedores com chave de API configurada (preview mascarado)", publico: false },
+  { method: "PUT", path: "/provider-keys", descricao: "Define/atualiza a chave de API de um provedor (provider, key)", corpo: true, publico: false },
+  { method: "DELETE", path: "/provider-keys/:provider", descricao: "Remove a chave de API de um provedor", publico: false },
   { method: "GET", path: "/tasks", descricao: "Lista tasks do board" },
   { method: "POST", path: "/tasks", descricao: "Cria task", corpo: true },
   { method: "GET", path: "/tasks/colunas", descricao: "Lista colunas do board" },
@@ -165,6 +168,8 @@ const ROUTES: DefinicaoRota[] = [
   { method: "POST", path: "/schedules/:id", descricao: "Alias de /schedules/:id/run" },
   { method: "GET", path: "/schedules/:id/runs", descricao: "Histórico de execuções da rotina (job_runs)" },
   { method: "GET", path: "/secretario/sessoes/:id", descricao: "Detalhe/mensagens de uma sessão do opencode (proxy)", publico: false },
+  { method: "GET", path: "/opencode-config", descricao: "Config do opencode do opencorp (<home>/.opencorp/opencode-home/opencode.json) → { config, path }", publico: false },
+  { method: "PUT", path: "/opencode-config", descricao: "Salva a config do opencode do opencorp (valida objeto JSON, cap 64KB, preserva $schema) — vale após reiniciar o secretário", corpo: true, publico: false },
 ];
 
 export interface SessaoApi {
@@ -1887,15 +1892,18 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             }
             const data = (await resOpencode.json()) as Array<{
               info?: { role?: string; time?: { created?: number; completed?: number } };
-              parts?: Array<{ type: string; text?: string }>;
+              parts?: Array<{ type: string; text?: string; mime?: string; url?: string }>;
             }>;
             const mensagens = (Array.isArray(data) ? data : [])
               .map((m) => ({
                 role: m.info?.role ?? "",
                 content: (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim(),
                 criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
+                concluida: m.info?.role === "assistant" ? !!m.info?.time?.completed : true,
+                // imagens anexadas (data URLs) — para reexibir no histórico após F5
+                imagens: (m.parts ?? []).filter((p) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p) => p.url),
               }))
-              .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.length > 0);
+              .filter((m) => (m.role === "user" || m.role === "assistant") && (m.content.length > 0 || (m.imagens && m.imagens.length > 0)));
             void sincronizarSessaoNoCorp(porta, sessionId);
             enviar(res, 200, mensagens);
           } catch (erro) {
@@ -1933,6 +1941,167 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
             }
           }
+          return;
+        }
+
+        // ── GET/PUT /opencode-config — config do opencode do opencorp (home isolado) ──
+        // Arquivo: <opencorpHome>/.opencorp/opencode-home/opencode.json — editável pelo
+        // painel (Config → Opencode). Alterações valem após reiniciar o secretário.
+        if (rota === "/opencode-config" && req.method === "GET") {
+          const configPath = join(dirOpencodeHome(opcoes.homeDir ?? opencorpHome()), "opencode.json");
+          const bruto = await readFile(configPath, "utf8").catch((erro: NodeJS.ErrnoException) => {
+            if (erro?.code === "ENOENT") return null;
+            throw erro;
+          });
+          if (bruto === null) {
+            enviar(res, 404, { erro: "config do opencode ainda não existe (inicie o secretário)", path: configPath });
+            return;
+          }
+          try {
+            enviar(res, 200, { config: JSON.parse(bruto), path: configPath });
+          } catch {
+            enviar(res, 500, { erro: "config existente não é JSON válido", path: configPath });
+          }
+          return;
+        }
+        if (rota === "/opencode-config" && req.method === "PUT") {
+          const configPath = join(dirOpencodeHome(opcoes.homeDir ?? opencorpHome()), "opencode.json");
+          let corpo: { config?: unknown };
+          try {
+            corpo = (await lerCorpo(req, 256 * 1024)) as { config?: unknown };
+          } catch {
+            enviar(res, 400, { erro: "corpo inválido (JSON malformado ou excede o limite)" });
+            return;
+          }
+          const config = corpo?.config;
+          // zod leve: objeto simples (não array/null) — o opencode aceita campos livres
+          if (config === null || typeof config !== "object" || Array.isArray(config)) {
+            enviar(res, 400, { erro: "campo 'config' deve ser um objeto JSON" });
+            return;
+          }
+          const obj = { ...(config as Record<string, unknown>) };
+          if (typeof obj.$schema !== "string" || !obj.$schema) {
+            // preserva o $schema do arquivo em disco; sem arquivo, usa o padrão do opencode
+            const schemaAtual = await readFile(configPath, "utf8")
+              .then((t) => (JSON.parse(t) as { $schema?: unknown }).$schema)
+              .catch(() => undefined);
+            obj.$schema = typeof schemaAtual === "string" && schemaAtual ? schemaAtual : "https://opencode.ai/config.json";
+          }
+          const texto = `${JSON.stringify(obj, null, 2)}\n`;
+          if (Buffer.byteLength(texto, "utf8") > 64 * 1024) {
+            enviar(res, 400, { erro: "config excede o limite de 64KB" });
+            return;
+          }
+          try {
+            await writeFileAtomic(configPath, texto, { encoding: "utf8" });
+          } catch (erro) {
+            enviar(res, 500, { erro: `falha ao gravar config: ${erro instanceof Error ? erro.message : String(erro)}` });
+            return;
+          }
+          enviar(res, 200, { ok: true, path: configPath });
+          return;
+        }
+
+        // ── /provider-keys — chaves de API dos provedores, por escopo (global × workspace) ──
+        // Auth NUNCA volta inteira (preview mascarado). Herança: workspace ⊕ global
+        // (workspace vence por provedor). Fonte é o opencorp — nunca o opencode pessoal.
+        // motor de agentes: hoje apenas "opencode" (futuros motores terão chaves próprias)
+        const motorChaves = url.searchParams.get("motor") ?? "opencode";
+        if (motorChaves !== "opencode") {
+          enviar(res, 400, { erro: `motor desconhecido: "${motorChaves}" — hoje apenas "opencode"` });
+          return;
+        }
+        const escopoChaves = (): { home: string; ws: string | null } => ({
+          home: opcoes.homeDir ?? opencorpHome(),
+          ws: url.searchParams.get("workspace"),
+        });
+        const lerAuth = (path: string): { auth: Record<string, EntradaAuth>; existe: boolean } => {
+          try {
+            const auth = JSON.parse(readFileSync(path, "utf8")) as Record<string, EntradaAuth>;
+            return { auth, existe: Object.keys(auth).length > 0 };
+          } catch { return { auth: {}, existe: false }; }
+        };
+        const chavesDe = (auth: Record<string, EntradaAuth>): Array<{ provider: string; tipo: string; preview: string }> =>
+          Object.entries(auth)
+            .filter(([, v]) => v && typeof v === "object")
+            .map(([provider, v]) => ({
+              provider,
+              tipo: v.type ?? "api",
+              preview: typeof v.key === "string" && v.key ? mascararChave(v.key) : "—",
+            }));
+        if (rota === "/provider-keys" && req.method === "GET") {
+          const { home, ws } = escopoChaves();
+          const gPath = authOpencodePath(home);
+          const g = lerAuth(gPath);
+          const gChaves = chavesDe(g.auth);
+          let workspace: { id: string | null; existe: boolean; chaves: ReturnType<typeof chavesDe>; herdadas: ReturnType<typeof chavesDe> } = { id: null, existe: false, chaves: [], herdadas: [] };
+          if (ws) {
+            const wPath = authOverridesPathWorkspace(home, ws);
+            const w = lerAuth(wPath);
+            const wChaves = chavesDe(w.auth);
+            const herdadas = gChaves.filter((gk) => !wChaves.some((wk) => wk.provider === gk.provider));
+            workspace = { id: ws, existe: w.existe, chaves: wChaves, herdadas };
+          }
+          enviar(res, 200, { global: { existe: g.existe, chaves: gChaves, path: gPath }, workspace });
+          return;
+        }
+        if (rota === "/provider-keys" && req.method === "PUT") {
+          const corpo = (await lerCorpo(req)) as { provider?: string; key?: string; escopo?: string };
+          const provider = String(corpo.provider ?? "").trim();
+          const key = String(corpo.key ?? "").trim();
+          const { home, ws } = escopoChaves();
+          const escopo = corpo.escopo === "workspace" ? "workspace" : "global";
+          if (escopo === "workspace" && !ws) {
+            enviar(res, 400, { erro: "escopo workspace exige um workspace ativo" });
+            return;
+          }
+          if (!PROVEEDOR_RE.test(provider) || !provider) {
+            enviar(res, 400, { erro: "provider inválido — use letras/números/hífen (ex.: opencode-go, openrouter)" });
+            return;
+          }
+          if (key.length < 8) {
+            enviar(res, 400, { erro: "chave muito curta" });
+            return;
+          }
+          const authPath = escopo === "workspace"
+            ? authOverridesPathWorkspace(home, ws!)
+            : authOpencodePath(home);
+          const { auth } = lerAuth(authPath);
+          try {
+            await writeFileAtomic(authPath, `${JSON.stringify(fundirAuth(auth, provider, key), null, 2)}\n`, { encoding: "utf8" });
+          } catch (erro) {
+            enviar(res, 500, { erro: `falha ao gravar auth.json: ${erro instanceof Error ? erro.message : String(erro)}` });
+            return;
+          }
+          enviar(res, 200, { ok: true, provider, escopo, preview: mascararChave(key) });
+          return;
+        }
+        const mChaveDel = /^\/provider-keys\/([^/]+)$/.exec(rota);
+        if (mChaveDel && req.method === "DELETE") {
+          const provider = decodeURIComponent(mChaveDel[1]!).trim();
+          const { home, ws } = escopoChaves();
+          const escopo = url.searchParams.get("escopo") === "workspace" ? "workspace" : "global";
+          if (escopo === "workspace" && !ws) {
+            enviar(res, 400, { erro: "escopo workspace exige um workspace ativo" });
+            return;
+          }
+          const authPath = escopo === "workspace"
+            ? authOverridesPathWorkspace(home, ws!)
+            : authOpencodePath(home);
+          const { auth } = lerAuth(authPath);
+          if (!(provider in auth)) {
+            enviar(res, 404, { erro: `provedor "${provider}" não configurado neste escopo` });
+            return;
+          }
+          const { [provider]: _removida, ...resto } = auth;
+          try {
+            if (Object.keys(resto).length === 0) rmSync(authPath, { force: true });
+            else await writeFileAtomic(authPath, `${JSON.stringify(resto, null, 2)}\n`, { encoding: "utf8" });
+          } catch (erro) {
+            enviar(res, 500, { erro: `falha ao gravar auth.json: ${erro instanceof Error ? erro.message : String(erro)}` });
+            return;
+          }
+          enviar(res, 200, { ok: true, provider, escopo });
           return;
         }
 
@@ -2094,73 +2263,93 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             }
             sse("inicio", { sessao_id: sessaoId });
 
-            interface MsgOc {
-              info?: { id?: string; role?: string; time?: { created?: number; completed?: number } };
-              parts?: Array<{ type: string; text?: string }>;
-            }
+            // Formato opencode ≥1.18 — tipos estruturais em core/opencode-server.ts
             const baseUrlSessao = `${baseUrl}/session/${sessaoId}`;
-            const ultimaAssistant = async (): Promise<MsgOc | null> => {
-                          // opencode ≥1.18: mensagens em GET /session/:id/message
-                          const getRes = await fetch(`${baseUrlSessao}/message`, { signal: AbortSignal.timeout(5000) });
-                          if (!getRes.ok) return null;
-                          const msgs = (await getRes.json()) as MsgOc[];
-                          if (!Array.isArray(msgs)) return null;
-                          for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i]?.info?.role === "assistant") return msgs[i];
-                          return null;
-                        };
-            const textoDe = (m: MsgOc): string =>
-              (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n");
-            const contarAssistant = async (): Promise<number> => {
+            const listarMensagens = async (): Promise<MensagemOc[] | null> => {
               try {
                 const getRes = await fetch(`${baseUrlSessao}/message`, { signal: AbortSignal.timeout(5000) });
-                if (!getRes.ok) return 0;
-                const msgs = (await getRes.json()) as MsgOc[];
-                if (!Array.isArray(msgs)) return 0;
-                return msgs.filter((m) => m?.info?.role === "assistant").length;
+                if (!getRes.ok) return null;
+                const msgs = (await getRes.json()) as MensagemOc[];
+                return Array.isArray(msgs) ? msgs : null;
               } catch {
-                return 0;
+                return null; // opencode lento/instável: pula o ciclo — não derruba o stream
               }
             };
+            const textoDe = (m: MensagemOc): string =>
+              (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n");
 
             // baseline: última msg assistant pré-existente (continuação de sessão não deve re-streamar)
-            const baseline = await ultimaAssistant();
-            const baselineCount = await contarAssistant();
+            const baseMsgs = (await listarMensagens()) ?? [];
+            const baseAssistant = [...baseMsgs].reverse().find((m) => m.info?.role === "assistant");
+            const baselineId = baseAssistant?.info?.id ?? null;
 
-            // POST em voo: responde só ao concluir; a geração reflete no GET /session em tempo real
+            // POST em voo: responde só ao concluir; a geração reflete no GET /session em tempo real.
+            // Falha do POST é capturada (não engolida): quando o stream do modelo morre cedo
+            // (ex.: limite de uso), a msg assistant fica sem parts e sem completed — e o
+            // opencode pode nem responder o POST —, então o poll precisaria girar até o deadline.
+            let postErro: string | null = null;
             void fetch(`${baseUrlSessao}/message`, {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ sessionID: sessaoId, agent: agente, parts: [{ type: "text", text: mensagem }, ...imagens.map((i) => ({ type: "file", mime: i.mime ?? "image/png", url: i.url! }))] }),
               signal: AbortSignal.timeout(240_000),
-            }).catch(() => undefined);
+            }).then((r) => { if (!r.ok) postErro = `opencode /message respondeu HTTP ${r.status}`; }).catch(() => { postErro = "opencode /message falhou (conexão)"; });
 
             const inicio = Date.now();
             const deadline = 300_000;
             let enviado = "";
             let concluida = false;
+            let vazioDesde: number | null = null; // assistant novo, sem parts nem completed, há muito tempo = stream morto
             let acoesAvisadas = 0;
+            let itensAssinatura = "";
 
             while (Date.now() - inicio < deadline) {
               await sleep(700);
               // o check de desconexão do cliente é no response (write side)
               if (res.destroyed || res.writableEnded) return; // cliente abortou — opencode continua; sem persistência parcial
-              const atual = await ultimaAssistant();
-              if (!atual || (baseline?.info?.id && atual.info?.id === baseline.info.id)) continue;
-              // turno com ferramentas: novas mensagens assistant antes do texto = ações em execução
-              const totalAgora = await contarAssistant();
-              const novas = totalAgora - baselineCount;
-              if (novas > acoesAvisadas) {
-                acoesAvisadas = novas;
-                sse("acao", { acoes: novas });
+              if (postErro && !concluida) {
+                sse("erro", { erro: `falha ao enviar mensagem ao modelo (${postErro}) — ver ~/.local/share/opencode/log/opencode.log`, sessao_id: sessaoId });
+                res.end();
+                return;
+              }
+              const msgs = await listarMensagens();
+              if (!msgs) continue;
+              const atual = [...msgs].reverse().find((m) => m.info?.role === "assistant");
+              if (!atual || (baselineId && atual.info?.id === baselineId)) continue;
+              // turno com ferramentas: tools das mensagens assistant novas (o quê + status)
+              const { total: novas, itens } = extrairAcoesMensagens(msgs, baselineId);
+              const assinatura = JSON.stringify(itens);
+              if (novas > acoesAvisadas || assinatura !== itensAssinatura) {
+                acoesAvisadas = Math.max(acoesAvisadas, novas);
+                itensAssinatura = assinatura;
+                sse("acao", { acoes: novas, itens });
               }
               const texto = textoDe(atual);
               if (texto.length > enviado.length) {
+                vazioDesde = null;
                 sse("delta", { delta: texto.slice(enviado.length) });
                 enviado = texto;
               }
               if (atual.info?.time?.completed) {
                 concluida = true;
                 break;
+              }
+              // msg assistant recém-criada totalmente vazia p/ muito tempo = falha do modelo —
+              // falha rápido com erro claro em vez de girar 300s até o "timeout"
+              // Stream travado: nenhum assistant novo APÓS o baseline, ou assistant novo
+              // sem TEXTO, sem tool em curso e sem completed por N segundos.
+              // (step-start sozinho NÃO é atividade — era o falso "vivo" que deixava o
+              // chat 300s em silêncio quando o provider congelava sem responder.)
+              const temToolEmCurso = (atual.parts ?? []).some((p) => p.type === "tool");
+              if (novas === 0 || (texto.length === 0 && !temToolEmCurso && !atual.info?.time?.completed)) {
+                if (vazioDesde === null) vazioDesde = Date.now();
+                else if (Date.now() - vazioDesde > 35_000) {
+                  sse("erro", { erro: postErro ?? "modelo sem resposta (stream travado) — reenvie a mensagem", sessao_id: sessaoId });
+                  res.end();
+                  return;
+                }
+              } else {
+                vazioDesde = null;
               }
             }
 

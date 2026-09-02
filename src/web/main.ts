@@ -42,6 +42,7 @@ import { criarReuniao, encerrarReuniao, abrirSalaViva, fecharSalaViva, pararPoll
 import { executarFlow, detalhesFlow, retomarFlow, abrirFormFlow, fecharFormFlow, addPassoFlow, criarFlow, editarFlow, salvarEdicaoFlow, excluirFlow, migrarTeams, addPassoTemplate } from "./views/fluxos.js";
 import { loadAppsList, abrirApp, fecharApp, renderWidget, enviarForm } from "./views/apps.js";
 import { decidirAprovacao, promptOrdem, rodarFlowHub } from "./views/home.js";
+import { atualizarCardsHomeAcoes, homeNotifLida, homeNotifTodasLidas } from "./views/home-acoes.js";
 
 /** Configura ícones iniciais no DOM estático. Idempotente via flag de módulo. */
 let iconesConfigurados = false;
@@ -236,6 +237,12 @@ function processarEventoSSE(ev: Record<string, unknown>): void {
   if (view === 'home') {
     // Feed de atividade é incremental — re-render de home apagaria o feed
     adicionarFeedItem(ev);
+    // Cards "Ações e avisos" (P-30): SSE refresca sem esperar o tick de 8s
+    if (tipo.startsWith('sessao')) void atualizarCardsHomeAcoes();
+    if (tipo === 'notificacao.nova') {
+      incrementarBadgeNotificacoes();
+      void atualizarCardsHomeAcoes();
+    }
     return;
   }
   if (view === 'tasks' && tipo.startsWith('task.')) renderTasks();
@@ -513,6 +520,8 @@ export function exporGlobais(): void {
   g.excluirHook = excluirHook;
   g.copiarCurlHook = copiarCurlHook;
   g.rodarFlowHub = rodarFlowHub;
+  g.homeNotifLida = homeNotifLida;
+  g.homeNotifTodasLidas = homeNotifTodasLidas;
   g.renderAgendaForm = renderAgendaForm;
   g.loadAppsList = loadAppsList;
   g.abrirApp = abrirApp;

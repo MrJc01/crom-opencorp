@@ -713,6 +713,10 @@ export class MeetingManager {
         }),
       )
     ).join("\n");
+    // Contrato com o SecurityGuard: este prompt é uma MENSAGEM de chat, não um
+    // comando — o guard só bloqueia level-1 quando o verbo de execução aparece
+    // na primeira linha útil da ordem. NÃO mover pauta/transcript/instrução para
+    // a primeira linha (podem conter "execute"/"bash" como conteúdo).
     return [
       `Você está participando de uma REUNIÃO do workspace como ${agente.role} (${agente.id}).`,
       "",

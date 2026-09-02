@@ -24,6 +24,33 @@ function hojeISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * `inicio` no ledger é STRING ISO (LinhaExecucao em corp-db.ts), mas históricos/
+ * migrações podem ter número (epoch s ou ms). String ISO parseável → usa direto;
+ * número → epoch (s se < 1e12, ms caso contrário). Nunca new Date(inicio/1000)
+ * cego — era isso que imprimia datas de 1969.
+ */
+export function dataDeExecucao(inicio: string | number | null | undefined): Date | null {
+  if (typeof inicio === "number") {
+    const ms = Math.abs(inicio) >= 1e12 ? inicio : inicio * 1000;
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof inicio === "string" && inicio.trim() !== "") {
+    const t = inicio.trim();
+    if (/^\d+$/.test(t)) return dataDeExecucao(Number(t));
+    const d = new Date(t);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+export function formatarDataExecucao(inicio: string | number): string {
+  const d = dataDeExecucao(inicio);
+  if (!d) return String(inicio);
+  return d.toISOString().slice(5, 16).replace("T", " ");
+}
+
 interface Resumo {
   id: string;
   inicio: string;
@@ -93,7 +120,10 @@ async function imprimir(wsId: string | undefined, horas: number): Promise<void> 
     } catch {
       execs = [];
     }
-    const janela = execs.filter((e) => e.inicio >= limite);
+    const janela = execs.filter((e) => {
+      const d = dataDeExecucao(e.inicio);
+      return d !== null && d.getTime() >= Date.parse(limite);
+    });
     const porStatus = new Map<string, number>();
     const porAgente = new Map<string, number>();
     for (const e of janela) {
@@ -107,7 +137,7 @@ async function imprimir(wsId: string | undefined, horas: number): Promise<void> 
     console.log(`  agentes     ${agentesStr}`);
     const falhas = janela.filter((e) => e.status === "falhou").slice(0, 3);
     for (const f of falhas) {
-      console.log(`  ✗ ${f.id} ${f.agente} · ${f.inicio.slice(5, 16).replace("T", " ")}`);
+      console.log(`  ✗ ${f.id} ${f.agente} · ${formatarDataExecucao(f.inicio)}`);
     }
 
     // ── Custos hoje ──
@@ -133,7 +163,7 @@ async function imprimir(wsId: string | undefined, horas: number): Promise<void> 
           .map((j: Job) => j.proxima_exec ?? "")
           .filter(Boolean)
           .sort()[0];
-        console.log(`scheduler    ${doWs.length} job(s) ativo(s)${proximos ? ` · próxima: ${proximos.slice(5, 16).replace("T", " ")}` : ""}`);
+        console.log(`scheduler    ${doWs.length} job(s) ativo(s)${proximos ? ` · próxima: ${formatarDataExecucao(proximos)}` : ""}`);
       }
     } catch {
       // scheduler store indisponível — silencioso

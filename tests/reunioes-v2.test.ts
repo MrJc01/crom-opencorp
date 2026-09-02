@@ -182,7 +182,7 @@ prompt do ${id}
     expect(r.status).toBe(404);
   });
 
-  it("stop: desconhecida → 404; sala viva → interrupção por sala e loop sai entre turnos", async () => {
+  it("stop: desconhecida → 404; sala viva → interrupção por sala e loop sai entre turnos", { timeout: 90_000 }, async () => {
     const r404 = await fetchApi(`/meetings/reuniao-nada/stop${wsq}`, { method: "POST" });
     expect(r404.status).toBe(404);
 

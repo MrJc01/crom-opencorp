@@ -31,12 +31,11 @@ test.describe("Secretário", () => {
     // Aguarda o fake opencode subir e a view recarregar (timeout generoso 20s)
     await page.waitForTimeout(8000);
 
-    // Verifica que agora tem lista de conversas + input
-    await esperarElementoTexto(page, "Conversas");
+    // Verifica que o chat ficou pronto (coluna de conversas vira popup P-29)
     await esperarElementoTexto(page, "Nova conversa");
 
-    // Clica em "Nova conversa" (botão de ícone no header da lista)
-    await page.click('button[title="Nova conversa"]');
+    // Clica em "Nova conversa" (botão de ícone no header do chat)
+    await page.click('#secretario-chat button[title="Nova conversa"]');
 
     // Aguarda input aparecer
     const input = page.locator("#chat-input");
@@ -52,7 +51,8 @@ test.describe("Secretário", () => {
     // Verifica que a resposta aparece
     await esperarElementoTexto(page, "Resposta do assistant para: olá");
 
-    // Verifica que a conversa aparece na lista com título
-    await esperarElementoTexto(page, "olá");
+    // Verifica que a conversa aparece no histórico (popup P-29) com título
+    await page.click('#btn-hist-header');
+    await expect(page.locator('.hist-popup .sessao-item').first()).toContainText('olá');
   });
 });

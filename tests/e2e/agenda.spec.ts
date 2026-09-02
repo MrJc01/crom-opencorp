@@ -14,8 +14,9 @@ test.describe("Agenda / Rotinas", () => {
     await page.waitForURL("**/#/agenda");
     await esperarElementoTexto(page, "Agenda");
 
-    // Verifica se o job semeado aparece
-    await esperarElementoTexto(page, "job-e2e-corp");
+    // Verifica se o job semeado aparece (escopo: view agenda — o card de ações
+    // da home também lista jobs e fica oculto fora dela)
+    await expect(page.locator("#view-agenda").getByText("job-e2e-corp").first()).toBeVisible();
   });
 
   test('alternar "todas as empresas" mostra mais jobs', async ({ page }) => {

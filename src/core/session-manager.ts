@@ -18,6 +18,8 @@ import { parseSecurityPolicyTexto } from "../schemas/security-policy.js";
 import { gatilhoSchema, type Gatilho } from "../schemas/gatilho.js";
 import { mkdirRecursive } from "../utils/fs-safe.js";
 import { opencorpHome, resolvePath } from "../utils/paths.js";
+import { envOpencodeIsolado } from "./opencode-server.js";
+import { SettingsStore } from "./settings-store.js";
 
 export type StatusExecucao = "executando" | "concluido" | "falhou" | "cancelado" | "hitl_pendente";
 
@@ -35,8 +37,14 @@ export interface OpcoesRun {
   referencias?: string[];
   tipo?: string;
   execId?: string;
-  /** mata o opencode se exceder (ms) — status "falhou" com nota de timeout */
+  /** teto de execução em ms — watchdog HITL-aware mata o opencode (SIGTERM→SIGKILL) e finaliza "falhou" */
   timeoutMs?: number;
+  /** intervalo de checagem do watchdog em ms (padrão 30s) — knob de teste */
+  watchdogIntervalMs?: number;
+  /** graça SIGTERM→SIGKILL do watchdog em ms (padrão 5s) — knob de teste */
+  watchdogGracaMs?: number;
+  /** uso interno (retry de rotação de modelo): marca este run como retry de outra execução */
+  retryDe?: { de_modelo: string; de_exec: string };
   /**
    * Gatilho da execução (PLANO-UNIFICACAO): quem chamou e por quê — cron, menção, nó de flow,
    * passo de team, turno de reunião, evento ou manual. Vai para extras, ledger (corp.db) e eventos.
@@ -88,6 +96,154 @@ function gerarId(prefixo: string): string {
   const p2 = (n: number) => String(n).padStart(2, "0");
   const ts = `${agora.getFullYear()}${p2(agora.getMonth() + 1)}${p2(agora.getDate())}-${p2(agora.getHours())}${p2(agora.getMinutes())}${p2(agora.getSeconds())}`;
   return `${prefixo}-${ts}-${randomUUID().slice(0, 4)}`;
+}
+
+const PADRAO_ERRO_MODELO = /usage limit|Cannot connect to API|AI_APICallError/i;
+
+export const MODELOS_ROTACAO_PADRAO = [
+  "opencode-go/glm-5.3-flash",
+  "opencode-go/mimo-v2.5",
+  "opencode-go/minimax-m3",
+];
+
+const TETO_RUN_PADRAO_MIN = 20;
+const ENV_TETO_RUN_MIN = "OPENCORP_RUN_TIMEOUT_MIN";
+
+export async function tetoRunPadraoMs(homeDir?: string): Promise<number | undefined> {
+  const env = process.env[ENV_TETO_RUN_MIN];
+  if (env !== undefined && env.trim() !== "") {
+    const n = Number(env.trim());
+    if (Number.isFinite(n)) {
+      if (n <= 0) return undefined;
+      return Math.round(n * 60_000);
+    }
+  }
+  try {
+    const { settings } = await new SettingsStore({ homeDir }).resolve();
+    const runs = (settings as unknown as { runs?: { timeout_min?: number } }).runs;
+    if (typeof runs?.timeout_min === "number" && runs.timeout_min > 0) {
+      return Math.round(runs.timeout_min * 60_000);
+    }
+  } catch {
+    /* settings indisponível — cai no padrão */
+  }
+  return TETO_RUN_PADRAO_MIN * 60_000;
+}
+
+export function proximoModeloRotacao(lista: string[], modeloFalho: string): string | null {
+  const limpa = lista.map((m) => m.trim()).filter((m) => m.length > 0);
+  if (limpa.length === 0) return null;
+  const idx = limpa.indexOf(modeloFalho);
+  if (idx === -1) return limpa[0] !== modeloFalho ? limpa[0]! : null;
+  const proximo = limpa[(idx + 1) % limpa.length]!;
+  return proximo !== modeloFalho ? proximo : null;
+}
+
+function sufixarRetry(origem: string, modelo: string): string {
+  const sufixo = ` · retry:${modelo}`.slice(0, 200);
+  return origem.slice(0, Math.max(0, 200 - sufixo.length)) + sufixo;
+}
+
+export interface OpcoesWatchdogRun {
+  tetoMs: number;
+  pid?: number | null;
+  intervaloMs?: number;
+  gracaKillMs?: number;
+  agora?: () => number;
+  dormir?: (ms: number) => Promise<void>;
+  obterStatus?: () => Promise<string | undefined>;
+  matar?: (sinal: "SIGTERM" | "SIGKILL") => void;
+  aoEstourar?: (decorridoMs: number) => void | Promise<void>;
+}
+
+export class WatchdogRun {
+  private readonly opcoes: OpcoesWatchdogRun;
+  private readonly intervalo: number;
+  private inicioEfetivo: number;
+  private pausaDesde: number | null = null;
+  private timer: NodeJS.Timeout | null = null;
+  private disparou = false;
+  private morteEmAndamento: Promise<void> | null = null;
+
+  constructor(opcoes: OpcoesWatchdogRun) {
+    this.opcoes = opcoes;
+    this.intervalo = Math.max(1, opcoes.intervaloMs ?? 30_000);
+    this.inicioEfetivo = opcoes.agora ? opcoes.agora() : Date.now();
+  }
+
+  get estourou(): boolean {
+    return this.disparou;
+  }
+
+  /** Promise da sequência SIGTERM→espera→SIGKILL→aoEstourar (null se ainda não disparou). */
+  get quandoMorto(): Promise<void> | null {
+    return this.morteEmAndamento;
+  }
+
+  iniciar(): void {
+    if (this.timer || this.disparou) return;
+    this.timer = setInterval(() => {
+      void this.verificar().catch(() => undefined);
+    }, this.intervalo);
+    this.timer.unref?.();
+  }
+
+  parar(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  /** Um passo de verificação; @returns true se o teto estourou e a sequência de kill foi acionada. */
+  async verificar(): Promise<boolean> {
+    if (this.disparou) return false;
+    const agoraMs = this.opcoes.agora ? this.opcoes.agora() : Date.now();
+    let status: string | undefined;
+    try {
+      status = await this.opcoes.obterStatus?.();
+    } catch {
+      status = undefined;
+    }
+    if (status === "hitl_pendente") {
+      this.pausaDesde ??= agoraMs;
+      return false;
+    }
+    if (this.pausaDesde !== null) {
+      this.inicioEfetivo += agoraMs - this.pausaDesde;
+      this.pausaDesde = null;
+    }
+    if (status !== undefined && status !== "executando") {
+      this.parar();
+      return false;
+    }
+    if (this.opcoes.tetoMs <= 0 || agoraMs - this.inicioEfetivo < this.opcoes.tetoMs) return false;
+    this.disparou = true;
+    this.parar();
+    this.morteEmAndamento = this.executarMorte(agoraMs - this.inicioEfetivo);
+    await this.morteEmAndamento;
+    return true;
+  }
+
+  private async executarMorte(decorridoMs: number): Promise<void> {
+    const matar =
+      this.opcoes.matar ??
+      ((sinal: "SIGTERM" | "SIGKILL") => {
+        const pid = this.opcoes.pid;
+        if (!pid) return;
+        try {
+          process.kill(pid, sinal);
+        } catch {
+          /* processo já morreu */
+        }
+      });
+    matar("SIGTERM");
+    const graca = Math.max(0, this.opcoes.gracaKillMs ?? 5_000);
+    const dormir = this.opcoes.dormir ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    if (graca > 0) await dormir(graca);
+    matar("SIGKILL");
+    await this.opcoes.aoEstourar?.(decorridoMs);
+  }
 }
 
 export class SessionManager {
@@ -317,7 +473,7 @@ export class SessionManager {
       id,
       descricao: `Ordem: ${ordem.slice(0, 160)}`,
       criadoPor: registro.agente,
-      tags: ["sessao", ...(opcoes.tags ?? [])],
+      tags: ["sessao", ...(opcoes.tags ?? []), ...(opcoes.retryDe ? ["retry"] : [])],
       referencias: opcoes.referencias,
       eventoInicial: {
         evento: "iniciado",
@@ -334,6 +490,7 @@ export class SessionManager {
         log: logRelativo,
         ...(opcoes.tipo ? { tipo: opcoes.tipo } : {}),
         ...(opcoes.gatilho ? { gatilho: opcoes.gatilho } : {}),
+        ...(opcoes.retryDe ? { retry: opcoes.retryDe } : {}),
       },
     });
     this.registrarNoLedger(ws.path, registro, null);
@@ -373,10 +530,11 @@ export class SessionManager {
     try {
       child = execa("opencode", args, {
         cwd: ws.path,
+        // data-dir POR workspace: auth (global ⊕ overrides) + sessões da empresa isolados
+        env: envOpencodeIsolado(this.homeDir, ws.id) as Record<string, string>,
         buffer: false,
         reject: false,
         stdin: "ignore",
-        ...(opcoes.timeoutMs ? { timeout: opcoes.timeoutMs, killSignal: "SIGTERM" as const } : {}),
       });
     } catch (erro) {
       const falha = `não foi possível iniciar o opencode: ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
@@ -403,17 +561,65 @@ export class SessionManager {
         process.stdout.write(texto);
       }
     };
+
+    let mortePorTimeout = false;
+    const tetoMs = opcoes.timeoutMs ?? 0;
+    const watchdog =
+      tetoMs > 0 && child.pid
+        ? new WatchdogRun({
+            tetoMs,
+            pid: child.pid,
+            ...(opcoes.watchdogIntervalMs ? { intervaloMs: opcoes.watchdogIntervalMs } : {}),
+            ...(opcoes.watchdogGracaMs !== undefined ? { gracaKillMs: opcoes.watchdogGracaMs } : {}),
+            obterStatus: async () => {
+              try {
+                const meta = await this.registros.lerMeta(ws.path, "execucoes", id);
+                return ((meta.extras ?? {}) as Record<string, unknown>).status as string | undefined;
+              } catch {
+                return undefined;
+              }
+            },
+            aoEstourar: async (decorrido) => {
+              mortePorTimeout = true;
+              const mensagem = `timeout de ${Math.round(tetoMs / 1000)}s excedido — opencode morto (modelo travado?)`;
+              registro.status = "falhou";
+              registro.exit_code = null;
+              registro.duracao_ms = decorrido;
+              registro.fim = new Date().toISOString();
+              await this.finalizar(ws, registro, null, "falhou", null, decorrido, mensagem, captura.join(""), null);
+            },
+          })
+        : null;
+    watchdog?.iniciar();
+
+    const resolverAposTimeout = async (): Promise<ResultadoRun> => {
+      const morte = watchdog?.quandoMorto;
+      if (morte) await morte;
+      const retry = await this.tentarRetry(ws, opcoes, registro, captura.join(""));
+      if (retry) return retry;
+      return { ...registro, captura: captura.join(""), custo_usd: null };
+    };
+
     let resultado;
     try {
       await Promise.all([teeing(child.stdout), teeing(child.stderr)]);
       resultado = await child;
     } catch (erro) {
       logStream.end();
+      watchdog?.parar();
+      if (watchdog?.estourou || mortePorTimeout) {
+        return await resolverAposTimeout();
+      }
       const falha = `não foi possível executar o opencode: ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
       await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, captura.join(""), null);
       throw new SessionError(falha);
     }
+    watchdog?.parar();
     logStream.end();
+
+    if (watchdog?.estourou || mortePorTimeout) {
+      return await resolverAposTimeout();
+    }
 
     const fim = new Date();
     const duracao = fim.getTime() - inicio.getTime();
@@ -451,9 +657,7 @@ export class SessionManager {
       status,
       registro.exit_code,
       duracao,
-      res.timedOut
-        ? `timeout de ${Math.round((opcoes.timeoutMs ?? 0) / 1000)}s excedido — opencode morto (modelo travado?)`
-        : textoCaptura.slice(0, 400),
+      textoCaptura.slice(0, 400),
       textoCaptura,
       custo,
     );
@@ -505,7 +709,66 @@ export class SessionManager {
         );
       }
     }
+    if (status === "falhou") {
+      const retry = await this.tentarRetry(ws, opcoes, registro, textoCaptura);
+      if (retry) return retry;
+    }
     return { ...registro, captura: textoCaptura, custo_usd: custo };
+  }
+
+  /**
+   * Retry único de rotação de modelo: run "falhou" com erro de cota/conexão de API
+   * e ainda não é retry → respawna 1x com o próximo modelo da rotação.
+   * Nunca retry em hitl_pendente nem em cima de outro retry.
+   */
+  private async tentarRetry(
+    ws: { path: string; id: string },
+    opcoes: OpcoesRun,
+    registro: RegistroExecucao,
+    captura: string,
+  ): Promise<ResultadoRun | null> {
+    if (opcoes.retryDe) return null;
+    if (registro.status === "hitl_pendente") return null;
+    if (!PADRAO_ERRO_MODELO.test(captura)) return null;
+    const proximo = await this.proximoModeloDaRotacao(registro.modelo, ws.path);
+    if (!proximo || proximo === registro.modelo) return null;
+    const idRetry = gerarId("exec");
+    try {
+      await this.registros.anexarEvento(ws.path, "execucoes", registro.id, {
+        ts: new Date().toISOString(),
+        por: "opencorp",
+        evento: "retry_modelo",
+        resumo: `falha de modelo/API (${registro.modelo}) — 1 retry com ${proximo} → ${idRetry}`,
+      });
+    } catch {
+      /* journal best-effort */
+    }
+    return this.rodar({
+      ...opcoes,
+      model: proximo,
+      execId: idRetry,
+      retryDe: { de_modelo: registro.modelo, de_exec: registro.id },
+      gatilho: opcoes.gatilho
+        ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, proximo) }
+        : undefined,
+    });
+  }
+
+  /** Lista de rotação: settings.tests.rotation quando configurada; senão a lista padrão opencode-go. */
+  private async proximoModeloDaRotacao(modeloFalho: string, wsPath?: string): Promise<string | null> {
+    let lista = MODELOS_ROTACAO_PADRAO;
+    try {
+      const r = await new SettingsStore({ homeDir: this.homeDir, cwd: wsPath ?? this.homeDir }).resolve();
+      const configurada = [...r.origens.entries()].some(
+        ([chave, origem]) => chave.startsWith("tests.rotation") && origem !== "default",
+      );
+      if (configurada && r.settings.tests.rotation.length > 0) {
+        lista = [...r.settings.tests.rotation];
+      }
+    } catch {
+      /* settings indisponível — rotação padrão */
+    }
+    return proximoModeloRotacao(lista, modeloFalho);
   }
 
   async listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<ResumoExecucao[]> {
@@ -541,7 +804,7 @@ export class SessionManager {
         "falhou",
         null,
         registro.duracao_ms,
-        `zombie: registro "executando" sem pid há >1h — reconciliado em ${registro.fim}`,
+        `zombie: registro "executando" sem pid há >1h — processo morreu sem finalizar (reaper) — reconciliado em ${registro.fim}`,
         "",
         null,
       );
@@ -569,7 +832,7 @@ export class SessionManager {
       "falhou",
       null,
       duracao,
-      `zombie: processo (pid ${pid}) morreu sem finalizar — reconciliado em ${registro.fim}`,
+      `zombie: processo (pid ${pid}) morreu sem finalizar (reaper) — reconciliado em ${registro.fim}`,
       "",
       null,
     );

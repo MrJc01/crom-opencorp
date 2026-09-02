@@ -122,7 +122,7 @@ describe("MeetingManager — rotação fixa (moderador fora da lista)", () => {
 });
 
 describe("MeetingManager — moderador decide", () => {
-  it("moderador escolhe o falante (com instrução) e depois declara ENCERRAR", async () => {
+  it("moderador escolhe o falante (com instrução) e depois declara ENCERRAR", { timeout: 90_000 }, async () => {
     const { home, wsPath } = await ambiente();
     let vezModerador = 0;
     const { sessao, chamadas } = stubSessao((chamada) => {

@@ -31,12 +31,20 @@ function fecharDrawerSeAberto(): void {
 
 /**
  * Parseia o hash atual e retorna a view correspondente.
+ * Params de hash (ex.: #/secretario?sessao=ses_x) são ignorados aqui —
+ * cada view lê os seus via parametroHash().
  */
 export function parseHash(): string {
-  const h = window.location.hash.replace(/^#\/?/, '');
+  const h = window.location.hash.replace(/^#\/?/, '').split('?')[0] ?? '';
   if (!h) return 'home';
   if (h.startsWith('app/')) return 'app-detail';
   return h;
+}
+
+/** Valor de ?nome= no hash atual (ex.: 'sessao' em #/secretario?sessao=ses_x) */
+export function parametroHash(nome: string): string | null {
+  const q = window.location.hash.replace(/^#\/?/, '').split('?')[1] ?? '';
+  return new URLSearchParams(q).get(nome);
 }
 
 /** Inicializa listener de hashchange */

@@ -29,8 +29,48 @@ interface MensagemChat {
   role: 'user' | 'assistant';
   content: string;
   criado_em?: string;
+  /** false → assistant ainda sendo gerada no opencode (resume pós-F5 via polling) */
+  concluida?: boolean;
   /** presente → renderiza como bloco de terminal (.terminal-saida) em vez de markdown */
   terminal?: string;
+  /** ações (tools) executadas neste turno — ao vivo durante o streaming */
+  acoes?: AcaoChat[];
+  /** imagens anexadas (data URLs) — renderizadas na bolha do usuário */
+  imagens?: string[];
+}
+
+/** Ação de tool do secretário(-exec) vinda do stream (event "acao") */
+interface AcaoChat {
+  tool: string;
+  status: string;
+  resumo?: string;
+}
+
+/** Só URLs de imagem em data: — defesa contra injeção via histórico */
+function urlsDeImagem(urls: unknown): string[] {
+  if (!Array.isArray(urls)) return [];
+  return urls.filter((u): u is string => typeof u === 'string' && u.startsWith('data:image/'));
+}
+
+/** Bloco de imagens anexadas (bolha do usuário) */
+function htmlImagens(imagens?: string[]): string {
+  const urls = urlsDeImagem(imagens);
+  if (!urls.length) return '';
+  return `<div class="oc-imagens">${urls.map((u) => `<img class="oc-img-anexo" src="${u}" alt="imagem anexada">`).join('')}</div>`;
+}
+
+/** Bloco compacto de ações executadas (estilo ChatGPT: ⚙ rodando / ✓ feito) */
+function htmlAcoes(acoes?: AcaoChat[]): string {
+  if (!acoes || !acoes.length) return '';
+  return `<div class="oc-acoes">${acoes.map((a) => {
+    const ok = a.status === 'completed';
+    const falhou = a.status === 'error';
+    return `<div class="oc-acao ${ok ? 'ok' : falhou ? 'erro' : 'rodando'}">` +
+      `<span class="oc-acao-ico" aria-hidden="true">${ok ? '✓' : falhou ? '✕' : '⚙'}</span>` +
+      `<span class="oc-acao-nome">${escapeHtml(a.tool)}</span>` +
+      (a.resumo ? `<span class="oc-acao-resumo">${escapeHtml(a.resumo)}</span>` : '') +
+      `</div>`;
+  }).join('')}</div>`;
 }
 
 interface ConversaResponse {
@@ -41,6 +81,23 @@ interface ConversaResponse {
 let sessoesCache: SessaoChat[] = [];
 let sessaoAtivaId: string | null = null;
 let mensagensCache: MensagemChat[] = [];
+
+/** URL amigável: #/secretario?sessao=<id> — replaceState (sem re-render/hashchange);
+ *  F5 e "copiar link" voltam para a conversa correta. */
+function sincronizarHashSessao(): void {
+  try {
+    const alvo = sessaoAtivaId
+      ? '#/secretario?sessao=' + encodeURIComponent(sessaoAtivaId)
+      : '#/secretario';
+    if (window.location.hash !== alvo) history.replaceState(null, '', alvo);
+  } catch { /* ambiente sem history — ignora */ }
+}
+
+/** sessao= da URL atual (router precisa continuar resolvendo a view 'secretario') */
+function sessaoDaUrl(): string | null {
+  const q = window.location.hash.split('?')[1] ?? '';
+  return new URLSearchParams(q).get('sessao');
+}
 let agenteSelecionado: 'secretario' | 'secretario-exec' = 'secretario';
 let carregando = false;
 let controller: AbortController | null = null;
@@ -69,6 +126,20 @@ const SUGESTOES = [
 ];
 
 const FOLLOWUPS = ['Detalhe o 1º ponto', 'E o que faço agora?'];
+
+/** Colunas estáticas do welcome estilo ChatGPT (conversa vazia) */
+const CAPACIDADES = [
+  'Mantém o contexto da conversa atual',
+  'Consulta tasks, custos, fluxos e agenda',
+  'Entende comandos / e terminal !',
+  'Analisa imagens e arquivos anexados 📎',
+];
+
+const LIMITACOES = [
+  'Pode cometer erros sobre os dados da empresa',
+  'secretário analisa; só o secretário-exec executa ações',
+  'Vê apenas o workspace ativo no momento',
+];
 
 /** Superfície de chat: página do Secretário ou drawer lateral (Etapa 1). */
 type Alvo = 'pagina' | 'lateral';
@@ -155,6 +226,12 @@ export async function renderSecretario(aba: 'conversa' | 'reunioes' = 'conversa'
     } else {
       await carregarSessoes();
       renderChatLayout();
+      // URL amigável: #/secretario?sessao=<id> → restaura a conversa certa no F5/link
+      const daUrl = sessaoDaUrl();
+      if (daUrl && daUrl !== sessaoAtivaId && sessoesCache.some((s) => s.id === daUrl)) {
+        void (window as unknown as { __secretarioSelecionarSessao?: (id: string) => Promise<void> })
+          .__secretarioSelecionarSessao?.(daUrl);
+      }
     }
   } catch (e) {
     toast('Erro ao carregar status do secretário: ' + (e as Error).message, 'erro');
@@ -259,17 +336,6 @@ function renderChatLayout(): void {
   if (!viewEl) return;
 
   viewEl.innerHTML = `
-    <div class="page-header">
-      <div class="page-header-esq">
-        <h1 class="page-header-titulo">${icone('chat')} Secretário</h1>
-        <p class="page-header-sub">Conversa · / comandos · @ contexto · ! terminal</p>
-      </div>
-      <div class="page-header-acoes">
-        <span class="help-wrap">${ajuda('secretario')}</span>
-        ${btnHistorico('btn-ghost text-xs', 'btn-hist-header')}
-        <button class="btn-ghost text-xs md:hidden" onclick="window.__secretarioToggleConv()" aria-label="Alternar lista de conversas" title="Conversas">${icone('tasks')}</button>
-      </div>
-    </div>
     <div class="secretario-grid" id="secretario-grid">
       <!-- Coluna esquerda: lista de conversas -->
       <div class="card flex flex-col" id="secretario-lateral">
@@ -299,6 +365,8 @@ function renderChatLayout(): void {
               </select>
               ${ajuda('secretario')}
             </label>
+            <button class="btn btn-ghost text-xs" onclick="window.__secretarioNovaConversa()" title="Nova conversa" aria-label="Nova conversa">${icone('plus')}</button>
+            ${btnHistorico('btn-ghost text-xs', 'btn-hist-header')}
             <button class="btn-ghost text-xs" id="btn-chat-lateral" onclick="abrirChatLateral()" title="Abrir chat lateral (acompanha em qualquer página)" aria-label="Abrir chat lateral">${icone('chat')}</button>
           </div>
         </div>
@@ -313,7 +381,7 @@ function renderChatLayout(): void {
             <button class="btn-ghost composer-anexo" onclick="window.__secretarioAnexar()" title="Anexar imagem ou arquivo" aria-label="Anexar">📎</button>
             <input id="anexo-input" type="file" multiple accept="image/*,.txt,.md,.json,.csv,.log,.py,.js,.ts,.sh,.yaml,.yml,.html,.css" style="display:none" onchange="window.__secretarioAnexos(this.files)" />
             <textarea id="chat-input" placeholder="Pergunte qualquer coisa… (/ comandos · @ contexto · ! terminal)" rows="1" onkeydown="window.__composerTecla(event,'pagina')" oninput="window.__composerInput(this.value,'pagina')"></textarea>
-            <button class="btn composer-enviar" id="btn-enviar" onclick="window.__secretarioEnviar()" aria-label="Enviar mensagem">${icone('run')}</button>
+            <button class="btn composer-enviar" id="btn-enviar" onclick="window.__secretarioEnviar('pagina', true)" aria-label="Enviar mensagem">${icone('run')}</button>
           </div>
           <div class="composer-row">
             <span class="text-xs text-zinc-500 composer-dica">secretário analisa · secretário-exec executa · / comandos · @ contexto · ! terminal · 📎 anexa</span>
@@ -356,6 +424,7 @@ function renderChatLayout(): void {
   renderListaSessoes();
   exporHandlersChat();
   renderMensagens();
+  if (sessaoAtivaId) talvezPollResposta(sessaoAtivaId); // volta de navegação com resposta parcial em curso
   const ta = document.getElementById('chat-input') as HTMLTextAreaElement | null;
   if (ta) {
     // restaura rascunho (fonte única compartilhada com o chat lateral)
@@ -418,6 +487,9 @@ function exporHandlersChat(): void {
     if (carregando) return;
     sessaoAtivaId = null;
     mensagensCache = [];
+    acoesEmAndamento = 0;
+    pararPollResposta();
+    sincronizarHashSessao();
     limparRascunho();
     for (const a of ALVOS) {
       const inp = document.getElementById(idDe(a, 'input')) as HTMLTextAreaElement | null;
@@ -448,7 +520,7 @@ function exporHandlersChat(): void {
     if (el) el.scrollTop = el.scrollHeight;
   };
 
-  g.__secretarioEnviar = async (alvo?: Alvo) => { await enviar(alvo ?? 'pagina'); };
+  g.__secretarioEnviar = async (alvo?: Alvo, forcarStop?: boolean) => { await enviar(alvo ?? 'pagina', forcarStop === true); };
 
   g.__secretarioAnexar = () => {
     (document.getElementById('anexo-input') as HTMLInputElement)?.click();
@@ -489,10 +561,12 @@ function exporHandlersChat(): void {
   g.__secretarioSelecionarSessao = async (id: string) => {
     if (carregando) return;
     sessaoAtivaId = id;
+    sincronizarHashSessao();
     document.getElementById('secretario-grid')?.classList.remove('conv-aberta');
     await carregarMensagens(id);
     renderListaSessoes();
     renderMensagens();
+    talvezPollResposta(id); // restore pós-F5: completa resposta que ficou a meio
     const sessao = sessoesCache.find((s) => s.id === id);
     setTitulo(tituloSessao(sessao ?? { id }));
     (document.getElementById('chat-input') as HTMLTextAreaElement | null
@@ -516,13 +590,114 @@ function exporHandlersChat(): void {
   };
 }
 
-async function carregarMensagens(sessaoId: string): Promise<void> {
+async function carregarMensagens(sessaoId: string): Promise<boolean> {
   try {
     const msgs = await q<MensagemChat[]>(`/secretario/sessoes/${encodeURIComponent(sessaoId)}/mensagens`);
     mensagensCache = msgs || [];
+    return true;
   } catch {
     mensagensCache = [];
+    return false;
   }
+}
+
+// ── Resume pós-F5 (polling) ───────────────────────────────────────────
+// O streaming vive no SSE do POST /secretario/conversa/stream, que morre no
+// F5 — mas a geração CONTINUA no opencode do lado do servidor. Se o snapshot
+// carregado (restore via URL ?sessao= ou seleção de conversa) terminar numa
+// assistant com concluida === false, refazemos o fetch das mensagens a cada 2s
+// e atualizamos a última bolha até a resposta completar.
+const POLL_RESPOSTA_INTERVALO_MS = 2000;
+const POLL_RESPOSTA_CAP_MS = 15 * 60 * 1000; // cap de segurança: 15min
+const SEM_RESPOSTA_CAP_MS = 60 * 1000; // aguarda 60s por uma resposta que nem começou
+let pollRespostaTimer: ReturnType<typeof setTimeout> | null = null;
+let pollRespostaSessao: string | null = null; // sessão dona do loop ativo
+
+/** Encerra o loop de polling (se houver). */
+function pararPollResposta(): void {
+  if (pollRespostaTimer !== null) {
+    clearTimeout(pollRespostaTimer);
+    pollRespostaTimer = null;
+  }
+  pollRespostaSessao = null;
+}
+
+/** Único loop ativo por vez: assistant parcial → poll; última = user (assistant nem
+ *  começou — modelo falhou antes de qualquer texto) → aguarda e avisa em vez de "ficar parado". */
+function talvezPollResposta(sessaoId: string): void {
+  const ultima = mensagensCache[mensagensCache.length - 1];
+  if (!sessaoId || !ultima) return;
+  if (ultima.role === 'user') { talvezAvisarSemResposta(sessaoId); return; }
+  if (ultima.concluida !== false) return;
+  pararPollResposta();
+  pollRespostaSessao = sessaoId;
+  const inicio = Date.now();
+  const tick = async (): Promise<void> => {
+    // sessão/view mudou (nova conversa, outra conversa, aba reuniões…) ou cap estourou → para
+    if (pollRespostaSessao !== sessaoId || sessaoAtivaId !== sessaoId || Date.now() - inicio > POLL_RESPOSTA_CAP_MS) {
+      pararPollResposta();
+      return;
+    }
+    const antes = mensagensCache;
+    const ok = await carregarMensagens(sessaoId);
+    if (!ok) mensagensCache = antes; // falha transitória de rede — mantém o feed e tenta de novo
+    if (pollRespostaSessao !== sessaoId || sessaoAtivaId !== sessaoId) {
+      pararPollResposta();
+      return;
+    }
+    const ultima = mensagensCache[mensagensCache.length - 1];
+    if (!ultima || ultima.role !== 'assistant') {
+      pararPollResposta(); // resposta sumiu/shape inesperado — não insiste
+      return;
+    }
+    if (ultima.concluida !== false) {
+      renderMensagens(); // resposta completou — render final (follow-ups etc.)
+      pararPollResposta();
+      return;
+    }
+    if (ultima.content !== antes[antes.length - 1]?.content) {
+      atualizarUltimaBolha(); // texto cresceu — atualiza só a bolha (respeita pertoDoFundo)
+    }
+    pollRespostaTimer = setTimeout(() => { void tick(); }, POLL_RESPOSTA_INTERVALO_MS);
+  };
+  pollRespostaTimer = setTimeout(() => { void tick(); }, POLL_RESPOSTA_INTERVALO_MS);
+}
+
+/** Última mensagem é do usuário sem resposta alguma (modelo falhou antes de qualquer texto).
+ *  Espera SEM_RESPOSTA_CAP_MS por uma resposta; se não vier, mostra aviso claro no feed. */
+function talvezAvisarSemResposta(sessaoId: string): void {
+  pararPollResposta();
+  pollRespostaSessao = sessaoId;
+  const inicio = Date.now();
+  const tick = async (): Promise<void> => {
+    if (pollRespostaSessao !== sessaoId || sessaoAtivaId !== sessaoId || Date.now() - inicio > SEM_RESPOSTA_CAP_MS) {
+      mostrarAvisoSemResposta(sessaoId);
+      pararPollResposta();
+      return;
+    }
+    const antes = mensagensCache;
+    const ok = await carregarMensagens(sessaoId);
+    if (!ok) mensagensCache = antes;
+    if (pollRespostaSessao !== sessaoId || sessaoAtivaId !== sessaoId) { pararPollResposta(); return; }
+    const ultima = mensagensCache[mensagensCache.length - 1];
+    if (ultima && ultima.role === 'assistant') {
+      renderMensagens(); // resposta começou — segue no fluxo normal
+      talvezPollResposta(sessaoId);
+      return;
+    }
+    pollRespostaTimer = setTimeout(() => { void tick(); }, 3000);
+  };
+  pollRespostaTimer = setTimeout(() => { void tick(); }, 3000);
+}
+
+/** Aviso visível (não persistente) de mensagem sem resposta */
+function mostrarAvisoSemResposta(sessaoId: string): void {
+  for (const a of alvosAtivos('pagina')) {
+    const el = document.getElementById(idDe(a, 'corpo'));
+    if (!el || el.querySelector('.oc-aviso-sem-resposta')) continue;
+    el.insertAdjacentHTML('beforeend', `<div class="oc-msg oc-aviso-sem-resposta"><div class="oc-msg-corpo" style="color:var(--warn)">⚠ A última mensagem ficou sem resposta — o modelo pode ter falhado. Reenvie.</div></div>`);
+  }
+  toast('A última mensagem ficou sem resposta — reenvie', 'aviso');
 }
 
 /** Lista de sessões agrupada Hoje/Ontem/Anteriores + busca client-side */
@@ -559,15 +734,55 @@ function renderListaSessoes(): void {
     `).join('');
 }
 
+/** Welcome estilo ChatGPT (página, conversa vazia): título central + Exemplos/Capacidades/Limitações. */
+function welcomeSecretario(alvo: Alvo): string {
+  const cardExemplo = (texto: string) => `
+    <button class="secgpt-card" title="Enviar este exemplo"
+      onclick="window.__secretarioSugestao('${escapeHtml(texto).replace(/'/g, '&#39;')}', '${alvo}')">
+      <span class="secgpt-card-texto">${escapeHtml(texto)}</span>
+      <span class="secgpt-card-ico" aria-hidden="true">${icone('spark')}</span>
+    </button>
+  `;
+  const cardInfo = (texto: string) => `
+    <div class="secgpt-card secgpt-card-estatico"><span class="secgpt-card-texto">${escapeHtml(texto)}</span></div>
+  `;
+  const coluna = (titulo: string, corpo: string, estatica = false) => `
+    <div class="secgpt-coluna${estatica ? ' secgpt-coluna-estatica' : ''}">
+      <h3 class="secgpt-col-titulo">${titulo}</h3>
+      ${corpo}
+    </div>
+  `;
+  return `
+    <div class="secgpt-welcome">
+      <div class="secgpt-cabeca">
+        <div class="secgpt-logo">${icone('chat')}</div>
+        <h2 class="secgpt-titulo">Secretário</h2>
+        <p class="secgpt-sub">Como posso ajudar?</p>
+      </div>
+      <div class="secgpt-cols">
+        ${coluna('Exemplos', SUGESTOES.map(cardExemplo).join(''))}
+        ${coluna('Capacidades', CAPACIDADES.map(cardInfo).join(''), true)}
+        ${coluna('Limitações', LIMITACOES.map(cardInfo).join(''), true)}
+      </div>
+    </div>
+  `;
+}
+
 /** Feed de mensagens (estilo opencode: user = bloco sutil, assistant = md plano). */
 function renderMensagens(alvo: Alvo | 'ambos' = 'ambos'): void {
   const alvos = alvosAtivos(alvo);
+
+  // modo vazio estilo ChatGPT: classe liga welcome centralizado + composer 48rem
+  document.getElementById('secretario-chat')?.classList.toggle('secgpt-vazio', !mensagensCache.length);
+
   for (const a of alvos) {
     const el = document.getElementById(idDe(a, 'corpo'));
     if (!el) continue;
 
     if (!mensagensCache.length) {
-      el.innerHTML = `
+      el.innerHTML = a === 'pagina'
+        ? welcomeSecretario(a)
+        : `
         <div class="oc-vazio">
           <div class="oc-vazio-titulo">Pergunte qualquer coisa sobre a empresa</div>
           <div class="oc-chips">
@@ -579,10 +794,15 @@ function renderMensagens(alvo: Alvo | 'ambos' = 'ambos'): void {
       el.innerHTML = mensagensCache.map((m, i) => `
         <div class="oc-msg ${m.role === 'user' ? 'oc-user' : 'oc-assistant'}">
           <div class="oc-msg-corpo">${m.role === 'user'
-            ? `<p class="md-p">${escapeHtml(m.content).replace(/\n/g, '<br>')}</p>`
+            ? `${htmlImagens(m.imagens)}<p class="md-p">${escapeHtml(m.content).replace(/\n/g, '<br>')}</p>`
             : m.terminal !== undefined
               ? `<pre class="terminal-saida"><code>${escapeHtml(m.terminal)}</code></pre>`
-              : renderMarkdown(m.content)}</div>
+              : htmlAcoes(m.acoes) + (m.content
+                  ? renderMarkdown(m.content)
+                  : (carregando && i === mensagensCache.length - 1
+                      ? statusPensando(m.acoes)
+                      : '<span class="oc-sem-resposta">(sem resposta do modelo — reenvie)</span>'))
+          }</div>
           <button class="oc-copy" title="Copiar mensagem" aria-label="Copiar mensagem" onclick="window.__secretarioCopyMsg(${i}, this)">copy</button>
         </div>
       `).join('');
@@ -621,10 +841,33 @@ function renderMensagens(alvo: Alvo | 'ambos' = 'ambos'): void {
 }
 
 /** Texto de status quando não há conteúdo ainda (pensando / executando ações) */
-function statusPensando(): string {
+/** Cronômetro da resposta em andamento — dá prova visual de que algo está rodando */
+let decorrendoTimer: ReturnType<typeof setInterval> | null = null;
+let decorrendoInicio = 0;
+function iniciarDecorrendo(): void {
+  pararDecorrendo();
+  decorrendoInicio = Date.now();
+  decorrendoTimer = setInterval(() => {
+    const s = Math.floor((Date.now() - decorrendoInicio) / 1000);
+    const txt = ` (${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')})`;
+    document.querySelectorAll('.oc-decorrendo').forEach((el) => { el.textContent = txt; });
+  }, 1000);
+}
+function pararDecorrendo(): void {
+  if (decorrendoTimer) { clearInterval(decorrendoTimer); decorrendoTimer = null; }
+}
+
+function statusPensando(acoes?: AcaoChat[]): string {
+  const decorrendo = '<span class="oc-decorrendo"></span>';
+  if (acoes && acoes.length) {
+    const rodando = acoes.filter((a) => a.status !== 'completed' && a.status !== 'error').length;
+    return rodando > 0
+      ? `<span class="oc-pensando-texto">Trabalhando…<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span>${decorrendo}</span>`
+      : `<span class="oc-pensando-texto">Pensando<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span>${decorrendo}</span>`;
+  }
   return acoesEmAndamento > 0
-    ? `<span class="oc-pensando-texto">⚙ Executando ações (${acoesEmAndamento})<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span></span>`
-    : `<span class="oc-pensando-texto">Pensando<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span></span>`;
+    ? `<span class="oc-pensando-texto">⚙ Executando ações (${acoesEmAndamento})<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span>${decorrendo}</span>`
+    : `<span class="oc-pensando-texto">Pensando<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span>${decorrendo}</span>`;
 }
 
 /** Atualiza só a última bolha assistant (streaming — sem re-render do feed inteiro), nas duas superfícies */
@@ -637,7 +880,8 @@ function atualizarUltimaBolha(): void {
     const bolhas = el.querySelectorAll('.oc-msg.oc-assistant .oc-msg-corpo');
     const alvo = bolhas[bolhas.length - 1] as HTMLElement | undefined;
     if (!alvo) continue;
-    alvo.innerHTML = ultima.content ? renderMarkdown(ultima.content) : statusPensando();
+    alvo.innerHTML = htmlAcoes(ultima.acoes) +
+      (ultima.content ? renderMarkdown(ultima.content) : statusPensando(ultima.acoes));
     const container = document.getElementById(idDe(a, 'feed'));
     if (container && pertoDoFundo) container.scrollTop = container.scrollHeight;
   }
@@ -645,9 +889,15 @@ function atualizarUltimaBolha(): void {
 
 /** Envia mensagem — streaming SSE (delta a delta) com fallback síncrono; botão vira STOP.
  *  Pode disparar da página OU do chat lateral (mesma conversa, mesmo estado). */
-async function enviar(alvo: Alvo = 'pagina'): Promise<void> {
+async function enviar(alvo: Alvo = 'pagina', forcarStop = false): Promise<void> {
   if (carregando) {
-    // segundo clique = parar
+    // Botão = parar. Enter com texto NÃO aborta: antes isso matava a resposta
+    // em andamento sem o usuário perceber (parecia "não respondeu").
+    const taOcupada = document.getElementById(idDe(alvo, 'input')) as HTMLTextAreaElement | null;
+    if (!forcarStop && taOcupada && taOcupada.value.trim()) {
+      toast('Resposta em andamento — aguarde ou clique ⏹ para interromper', 'aviso');
+      return;
+    }
     controller?.abort();
     return;
   }
@@ -671,11 +921,13 @@ async function enviar(alvo: Alvo = 'pagina'): Promise<void> {
   }
 
   carregando = true;
+  iniciarDecorrendo();
   controller = new AbortController();
   acoesEmAndamento = 0;
+  pararPollResposta(); // envio novo assume o feed — polling de resume não pode sobrescrever o cache
   setBotaoEnviar(alvo, true);
 
-  mensagensCache.push({ role: 'user', content: texto });
+  mensagensCache.push({ role: 'user', content: texto, imagens: anexos.length ? anexos.map((a) => a.url) : undefined });
   const idxAssistant = mensagensCache.push({ role: 'assistant', content: '' }) - 1;
   // limpa AMBAS as superfícies + rascunho (fonte única)
   for (const a of ALVOS) {
@@ -737,18 +989,19 @@ async function enviar(alvo: Alvo = 'pagina'): Promise<void> {
             else if (linha.startsWith('data:')) dados += linha.slice(5).trim();
           }
           if (!dados) continue;
-          const payload = JSON.parse(dados) as { sessao_id?: string; delta?: string; resposta?: string; erro?: string; acoes?: number };
+          const payload = JSON.parse(dados) as { sessao_id?: string; delta?: string; resposta?: string; erro?: string; acoes?: number; itens?: AcaoChat[] };
           if (evento === 'inicio') {
-            if (payload.sessao_id) sessaoAtivaId = payload.sessao_id;
+            if (payload.sessao_id) { sessaoAtivaId = payload.sessao_id; sincronizarHashSessao(); }
           } else if (evento === 'acao') {
             acoesEmAndamento = payload.acoes ?? acoesEmAndamento;
+            if (payload.itens) mensagensCache[idxAssistant].acoes = payload.itens;
             atualizarUltimaBolha();
           } else if (evento === 'delta') {
             mensagensCache[idxAssistant].content += payload.delta ?? '';
             atualizarUltimaBolha();
           } else if (evento === 'fim') {
             if (payload.resposta) mensagensCache[idxAssistant].content = payload.resposta;
-            if (payload.sessao_id) sessaoAtivaId = payload.sessao_id;
+            if (payload.sessao_id) { sessaoAtivaId = payload.sessao_id; sincronizarHashSessao(); }
             fim = true;
           } else if (evento === 'erro') {
             throw new Error(payload.erro ?? 'erro no stream');
@@ -778,6 +1031,7 @@ async function enviar(alvo: Alvo = 'pagina'): Promise<void> {
   } finally {
     carregando = false;
     controller = null;
+    pararDecorrendo();
     setBotaoEnviar(alvo, false);
     renderMensagens();
   }

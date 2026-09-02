@@ -1,13 +1,15 @@
 import { spawn, type SpawnOptions } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync, appendFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { opencorpHome } from "../utils/paths.js";
 import { eventBus } from "./event-bus.js";
 import { WorkspaceManager } from "./workspace-manager.js";
+import { SettingsStore } from "./settings-store.js";
 import { OpencorpError } from "./errors.js";
-import { OpenCodeBridge } from "./opencode-bridge.js";
+import { OpenCodeBridge, gerarAgenteOpencode } from "./opencode-bridge.js";
 import { parseAgenteMd } from "../schemas/agent.js";
+import { garantirMcpToken, gravarMcpToken } from "../cli/commands/tool.js";
 
 export interface OpencodeServerInfo {
   pid: number;
@@ -56,6 +58,110 @@ async function processoVivo(pid: number): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/* ── Isolamento do opencode do opencorp (sem fork) ─────────────────────────
+ * Tudo que o opencode do opencorp usa fica DENTRO de ~/.opencorp:
+ *   .opencorp/opencode-home/   → cwd/projeto do serve (config do projeto + agentes .opencode/agent)
+ *   .opencorp/opencode-data/   → XDG_DATA_HOME (sessões, auth, db, log — isolado do usuário)
+ *   .opencorp/opencode-config/ → XDG_CONFIG_HOME (não lê a config global do usuário)
+ * O opencode respeita XDG_DATA_HOME/XDG_CONFIG_HOME (verificado empiricamente). */
+
+export function dirOpencodeHome(homeDir: string): string {
+  return join(homeDir, ".opencorp", "opencode-home");
+}
+
+export function dirOpencodeData(homeDir: string): string {
+  return join(homeDir, ".opencorp", "opencode-data");
+}
+
+/* ── Chaves de API dos provedores (auth.json do opencode do opencorp) ── */
+
+export const PROVEEDOR_RE = /^[a-z0-9_-]+$/i;
+
+export interface EntradaAuth {
+  type?: string;
+  key?: string;
+}
+
+export function authOpencodePath(homeDir: string): string {
+  return join(dirOpencodeData(homeDir), "opencode", "auth.json");
+}
+
+/** Preview seguro — a chave NUNCA volta inteira pela API */
+export function mascararChave(k: string): string {
+  const t = k.trim();
+  if (t.length <= 8) return "••••";
+  return t.slice(0, 7) + "…" + t.slice(-4);
+}
+
+/** Upsert de provider no auth.json (formato do opencode: {provider: {type, key}}) */
+export function fundirAuth(
+  auth: Record<string, EntradaAuth> | null,
+  provider: string,
+  key: string,
+): Record<string, EntradaAuth> {
+  return { ...(auth ?? {}), [provider]: { type: "api", key: key.trim() } };
+}
+
+/** auth.json do usuário → data global (bootstrap 1×; o gerenciamento normal é pelo painel) */
+function copiarAuthSeNovo(homeDir: string, dataHome: string): void {
+  const origem = join(homeDir, ".local", "share", "opencode", "auth.json");
+  const destino = join(dataHome, "opencode", "auth.json");
+  if (!existsSync(origem)) return;
+  try {
+    const novo = !existsSync(destino) || statSync(origem).mtimeMs > statSync(destino).mtimeMs;
+    if (novo) {
+      mkdirSync(dirname(destino), { recursive: true });
+      copyFileSync(origem, destino);
+    }
+  } catch { /* best effort — opencode lida com auth ausente */ }
+}
+
+/** data-dir POR WORKSPACE: `~/.opencorp/opencode-data/workspaces/<id>/` — auth e
+ *  sessões da empresa isolados das outras e do opencode pessoal do dono. */
+export function dirDadosWorkspace(homeDir: string, wsId: string): string {
+  return join(dirOpencodeData(homeDir), "workspaces", wsId);
+}
+
+/** Overrides de chaves DO workspace (arquivo que o painel edita; o auth.json
+ *  gerado nunca é editado à mão — ele é o merge global ⊕ overrides). */
+export function authOverridesPathWorkspace(homeDir: string, wsId: string): string {
+  return join(dirDadosWorkspace(homeDir, wsId), "opencode", "auth.overrides.json");
+}
+
+/** Prepara o auth.json do workspace: merge global ⊕ overrides do workspace
+ *  (workspace vence por provedor; global é o fallback). Fonte SEMPRE é o
+ *  opencorp — nunca o auth do opencode pessoal do dono. */
+export function prepararAuthWorkspace(homeDir: string, wsId: string): string {
+  const dir = join(dirDadosWorkspace(homeDir, wsId), "opencode");
+  mkdirSync(dir, { recursive: true });
+  const authPath = join(dir, "auth.json");
+  const overridesPath = authOverridesPathWorkspace(homeDir, wsId);
+  const ler = (p: string): Record<string, EntradaAuth> => {
+    try {
+      const parsed = JSON.parse(readFileSync(p, "utf8")) as Record<string, EntradaAuth>;
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch { return {}; }
+  };
+  const mesclado = { ...ler(authOpencodePath(homeDir)), ...ler(overridesPath) };
+  writeFileSync(authPath, `${JSON.stringify(mesclado, null, 2)}\n`);
+  return authPath;
+}
+
+/** Env isolado para QUALQUER processo opencode spawnado pelo opencorp.
+ *  Com wsId: data-dir do workspace (auth = global ⊕ overrides do workspace). */
+export function envOpencodeIsolado(homeDir: string, wsId?: string): NodeJS.ProcessEnv {
+  const configHome = join(homeDir, ".opencorp", "opencode-config");
+  const dataHome = wsId ? dirDadosWorkspace(homeDir, wsId) : dirOpencodeData(homeDir);
+  mkdirSync(join(dataHome, "opencode"), { recursive: true });
+  mkdirSync(join(configHome, "opencode"), { recursive: true });
+  if (wsId) {
+    prepararAuthWorkspace(homeDir, wsId);
+  } else {
+    copiarAuthSeNovo(homeDir, dataHome);
+  }
+  return { ...process.env, OPENCORP_HOME: homeDir, XDG_DATA_HOME: dataHome, XDG_CONFIG_HOME: configHome };
 }
 
 async function lerPidfile(homeDir: string): Promise<OpencodeServerInfo | null> {
@@ -144,7 +250,7 @@ function binOpencodePath(): string {
   return bin;
 }
 
-async function garantirOpencodeConfig(homeDir: string): Promise<boolean> {
+async function garantirOpencodeConfig(homeDir: string, homeOpencorp: string): Promise<boolean> {
   const configPath = join(homeDir, "opencode.json");
   if (existsSync(configPath)) return false;
 
@@ -154,6 +260,12 @@ async function garantirOpencodeConfig(homeDir: string): Promise<boolean> {
     return false;
   }
 
+  // token do MCP (fail-closed): mesma fonte usada por `opencorp mcp serve`.
+  // O filho do MCP herda OPENCORP_HOME=<homeDir> (environment abaixo), então ele
+  // valida o token contra <homeDir>/.opencorp/mcp-token — garanta o MESMO token lá.
+  const token = garantirMcpToken(homeOpencorp);
+  gravarMcpToken(homeDir, token);
+
   const config = {
     $schema: "https://opencode.ai/config.json",
     // padrão do opencorp: modelos free (não usa a config global do usuário, que pode apontar modelo pago)
@@ -162,7 +274,7 @@ async function garantirOpencodeConfig(homeDir: string): Promise<boolean> {
     mcp: {
       opencorp: {
         type: "local",
-        command: ["node", binPath, "mcp", "serve"],
+        command: ["node", binPath, "mcp", "serve", "--token", token],
         environment: { OPENCORP_HOME: homeDir },
       },
     },
@@ -174,6 +286,7 @@ async function garantirOpencodeConfig(homeDir: string): Promise<boolean> {
   return true;
 }
 
+/** Agentes do secretário: home isolado (cwd do serve) + sync por workspace via bridge */
 async function garantirAgentesSecretario(homeDir: string): Promise<AgentesConfig> {
   const manager = new WorkspaceManager({ homeDir });
   const workspaces = await manager.listar();
@@ -182,7 +295,18 @@ async function garantirAgentesSecretario(homeDir: string): Promise<AgentesConfig
   let total = 0;
   const wsNomes: string[] = [];
 
-  // sincroniza via bridge (converte frontmatter p/ formato do opencode — tools como mapa, permissões etc.)
+  // override opcional do modelo via settings (secretary.model) — default: o do template
+  let modeloOverride: string | undefined;
+  try {
+    const resolucao = await new SettingsStore({ homeDir }).resolve();
+    modeloOverride = resolucao.settings?.secretary?.model;
+  } catch { /* settings ausente/inválida → usa o do template */ }
+
+  const agentDir = join(dirOpencodeHome(homeDir), ".opencode", "agent");
+  mkdirSync(agentDir, { recursive: true });
+
+  // home isolado: .md direto em <opencode-home>/.opencode/agent/ — NUNCA em $HOME/.opencode
+  // (o symlink $HOME/.opencode era o vazamento para o opencode global do usuário)
   for (const agente of ["secretario", "secretario-exec"]) {
     const origem = join(templateDir, `${agente}.md`);
     if (!existsSync(origem)) {
@@ -190,10 +314,11 @@ async function garantirAgentesSecretario(homeDir: string): Promise<AgentesConfig
       continue;
     }
     const { frontmatter, corpo } = parseAgenteMd(readFileSync(origem, "utf8"));
-    await bridge.sincronizarAgente(homeDir, frontmatter, corpo); // <home>/.opencode/agent (cwd do opencode serve)
+    const fm = modeloOverride ? { ...frontmatter, model: modeloOverride } : frontmatter;
+    writeFileSync(join(agentDir, `${fm.id ?? agente}.md`), gerarAgenteOpencode(fm, corpo.replaceAll("{{workspace}}", "opencorp")));
     for (const ws of workspaces) {
       if (!ws.existe) continue;
-      await bridge.sincronizarAgente(ws.path, frontmatter, corpo);
+      await bridge.sincronizarAgente(ws.path, fm, corpo);
     }
     total++;
   }
@@ -212,6 +337,74 @@ export class SecretarioError extends OpencorpError {
     this.status = opts.status;
     this.name = "SecretarioError";
   }
+}
+
+/* ── Formato das mensagens do opencode (≥1.18: GET /session/:id/message) ── */
+
+export interface ParteOc {
+  type: string;
+  text?: string;
+  /** parts do tipo "tool" */
+  tool?: string;
+  state?: { status?: string; title?: string; input?: unknown };
+}
+
+export interface MensagemOc {
+  info?: { id?: string; role?: string; time?: { created?: number; completed?: number } };
+  parts?: ParteOc[];
+}
+
+/** Ação de tool do secretário(-exec) para exibição ao vivo no chat */
+export interface AcaoOpencode {
+  tool: string;
+  status: string;
+  resumo?: string;
+}
+
+/** Primeiro valor string do input da tool (titulo, pergunta, ordem…), truncado */
+function resumoDeInput(input: unknown, titulo: string | undefined, max = 64): string | undefined {
+  if (typeof titulo === "string" && titulo.trim()) return titulo.trim().slice(0, max);
+  if (input && typeof input === "object") {
+    for (const valor of Object.values(input as Record<string, unknown>)) {
+      if (typeof valor === "string" && valor.trim()) return valor.trim().slice(0, max);
+      if (Array.isArray(valor)) {
+        const s = valor.find((v) => typeof v === "string" && v.trim());
+        if (typeof s === "string") return s.trim().slice(0, max);
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Extrai as ações (tool calls) das mensagens assistant NOVAS de um turno —
+ * tudo depois da msg assistant `desdeId` (baseline da conversa). Mensagens
+ * append-only do opencode: o índice do baseline é estável entre polls.
+ */
+export function extrairAcoesMensagens(
+  mensagens: MensagemOc[],
+  desdeId: string | null | undefined,
+  limite = 12,
+): { total: number; itens: AcaoOpencode[] } {
+  const inicio = desdeId ? mensagens.findIndex((m) => m.info?.id === desdeId) : -1;
+  const novas = inicio >= 0 ? mensagens.slice(inicio + 1) : mensagens;
+  let total = 0;
+  const itens: AcaoOpencode[] = [];
+  for (const m of novas) {
+    if (m.info?.role !== "assistant") continue;
+    total++;
+    for (const p of m.parts ?? []) {
+      if (p.type !== "tool" || !p.tool) continue;
+      if (itens.length < limite) {
+        itens.push({
+          tool: p.tool,
+          status: p.state?.status ?? "pending",
+          resumo: resumoDeInput(p.state?.input, p.state?.title),
+        });
+      }
+    }
+  }
+  return { total, itens };
 }
 
 export class OpencodeServerManager {
@@ -241,13 +434,16 @@ export class OpencodeServerManager {
     const logDir = dirname(logPath);
     if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
 
-    await garantirOpencodeConfig(this.homeDir);
+    // home isolado = cwd/projeto do serve (config do projeto + agentes ficam em ~/.opencorp)
+    const opHome = dirOpencodeHome(this.homeDir);
+    mkdirSync(opHome, { recursive: true });
+    await garantirOpencodeConfig(opHome, this.homeDir);
     const agentes = await garantirAgentesSecretario(this.homeDir);
 
     const argv = ["serve", "--port", String(porta), "--hostname", "127.0.0.1"];
     const options: SpawnOptions = {
-      cwd: this.homeDir,
-      env: { ...process.env, OPENCORP_HOME: this.homeDir },
+      cwd: opHome,
+      env: envOpencodeIsolado(this.homeDir),
       detached: true,
       // stdout/stderr do filho vão para o log (antes era "ignore" — boot quebrado não deixava rastro)
       stdio: ["ignore", openSync(logPath, "a"), openSync(logPath, "a")],
@@ -326,7 +522,7 @@ export class OpencodeServerManager {
   }
 
   async configurado(): Promise<boolean> {
-    const configPath = join(this.homeDir, "opencode.json");
+    const configPath = join(dirOpencodeHome(this.homeDir), "opencode.json");
     return existsSync(configPath);
   }
 }

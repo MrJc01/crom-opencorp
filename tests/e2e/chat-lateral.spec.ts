@@ -78,7 +78,7 @@ test.describe("Chat lateral do Secretário (PLANO-PAINEL-V2 Etapa 1)", () => {
     await page.goto("/#/secretario");
     await page.waitForURL("**/#/secretario");
     await iniciarSecretario(page);
-    await page.click('button[title="Nova conversa"]');
+    await page.click('#secretario-chat button[title="Nova conversa"]');
 
     // botão no Secretário (1.3) abre o drawer
     await page.click("#btn-chat-lateral");

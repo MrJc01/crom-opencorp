@@ -31,7 +31,7 @@ test.describe("Composer inteligente — / comandos, @ contexto, ! terminal (PLAN
   });
 
   test("(a) / abre palette de comandos; Enter preenche e roda /status localmente", async ({ page }) => {
-    await page.click('button[title="Nova conversa"]');
+    await page.click('#secretario-chat button[title="Nova conversa"]');
     await page.fill("#chat-input", "/");
     await expect(page.locator(".palette-menu")).toBeVisible();
     await expect(page.locator(".palette-menu .palette-item")).toHaveCount(7);
@@ -57,7 +57,7 @@ test.describe("Composer inteligente — / comandos, @ contexto, ! terminal (PLAN
       headers: { authorization: "Bearer test-e2e", "content-type": "application/json" },
       data: { id: "e2e-atendente" },
     });
-    await page.click('button[title="Nova conversa"]');
+    await page.click('#secretario-chat button[title="Nova conversa"]');
     await page.fill("#chat-input", "@");
     await expect(page.locator(".palette-menu")).toBeVisible();
     // alvo explícito (o catálogo de agentes pode ter ids alfabeticamente anteriores)
@@ -92,7 +92,7 @@ test.describe("Composer inteligente — / comandos, @ contexto, ! terminal (PLAN
       headers: { authorization: "Bearer test-e2e", "content-type": "application/json" },
       data: { titulo: "Task backlog e2e-composer-d", coluna: "backlog" },
     });
-    await page.click('button[title="Nova conversa"]');
+    await page.click('#secretario-chat button[title="Nova conversa"]');
     await page.fill("#chat-input", "!task list");
     await page.keyboard.press("Enter");
 

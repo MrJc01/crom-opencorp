@@ -15,6 +15,7 @@ import { parsearComposer, COMANDOS_OPCORP } from "../composer-comandos.js";
 import { setRascunho } from "../rascunho.js";
 import { gatilhoComposer, paletteTecla, fecharPalette } from "../palette.js";
 import { renderMarkdown } from "../md.js";
+import { htmlCardAcoes, htmlCardNaoVistas, carregarCardAcoes, carregarCardNaoVistas } from "./home-acoes.js";
 import { resolverComandoProprio } from "./secretario.js";
 
 interface BudgetStatus {
@@ -160,6 +161,12 @@ export async function renderHome(): Promise<void> {
     <div class="zona-rotulo">Informações importantes ${ajuda('home')}</div>
     <div class="kpi-grid mb-5">${kpiCards}</div>
 
+    <div class="zona-rotulo">Ações e avisos ${ajuda('feed')}</div>
+    <div class="home-grid mb-5">
+      <section class="card" id="card-acoes">${htmlCardAcoes()}</section>
+      <section class="card" id="card-nao-vistas">${htmlCardNaoVistas()}</section>
+    </div>
+
     <div class="zona-rotulo">Comando ao Secretário ${ajuda('home-comando')}</div>
     <section class="card p-4 mb-5">
       <div class="flex items-stretch gap-2">
@@ -203,6 +210,8 @@ export async function renderHome(): Promise<void> {
   renderFeedAtividade();
   renderAprovsPendentes(pendentes);
   renderFlowsHub(flowsLista, (flows || []).length);
+  void carregarCardAcoes();
+  void carregarCardNaoVistas();
 }
 
 /** Handlers globais da barra de comando da home (palette / @ plugada no input) */

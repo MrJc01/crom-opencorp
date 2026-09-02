@@ -7,6 +7,12 @@ export const settingsSchema = z.object({
   secretary: z
     .object({
       agent: z.string().min(1).default("secretario"),
+      /** override do modelo dos agentes secretário/secretário-exec (default: o do template) */
+      model: z
+        .string()
+        .min(1)
+        .regex(/^[a-z0-9_-]+\/\S+$/i, "use o formato provider/model (ex.: opencode-go/glm-5.3-flash)")
+        .optional(),
     })
     .prefault({}),
   budget: z

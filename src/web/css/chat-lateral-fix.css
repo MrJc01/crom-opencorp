@@ -1,0 +1,25 @@
+/* Chat lateral global — correções de bug de layout.
+ * Este arquivo fica FORA de @layer (importado depois de legacy.css) e vence
+ * o estilo legado sem mexer em especificidade das páginas. */
+
+/* ── 1. Composer do drawer: campo dentro de campo ──
+ * O textarea #lat-input herdava o estilo legado de input/textarea
+ * (fundo #262626 + borda #404040 + padding) DENTRO do .composer (#1c1c1c,
+ * borda própria, radius 14) — "box dentro de box", com rolagem interna
+ * (scrollHeight 54px em 33px visíveis) e placeholder cortado. A página do
+ * Secretário resolve isso com #chat-input transparente (legacy.css); o
+ * drawer recebe o mesmo tratamento. */
+#lat-input{background:transparent;border:none;padding:.2rem .3rem;flex:1;min-height:28px;max-height:150px;resize:none;font-family:inherit;font-size:.9rem;line-height:1.5;width:100%;min-width:0;overflow:hidden}
+#lat-input:focus{outline:none;box-shadow:none;border:none}
+
+/* ── 2. Fundo rolando atrás do drawer ──
+ * Com o drawer aberto o wheel/touch sobre o overlay (que não tem scroll)
+ * propagava para o body e a página atrás se movia; e dentro do feed, ao
+ * chegar no fim, o scroll encadeava para o fundo (scroll chaining). */
+body.chat-lateral-aberto{overflow:hidden}
+#lat-mensagens{overscroll-behavior:contain}
+
+/* ── 3. Composer colado na barra do iPhone ──
+ * No mobile o rodapé do composer ignorava a safe-area e ficava sob o indicador
+ * home (footer é o div.p-3 direto no drawer). */
+#chat-drawer > div.p-3{padding-bottom:calc(.75rem + env(safe-area-inset-bottom))}

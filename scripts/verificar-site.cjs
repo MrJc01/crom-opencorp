@@ -34,16 +34,25 @@ const lerJson = (txt) => {
 };
 
 // ── posts ──
+// Censo: APENAS publicados (drafts poluem a janela dos "mais recentes") e janela
+// completa (qtd 100 = per_page 100 no wp.cjs) — correção PARECER-AUDITORIA-02 C8/C1.
 let posts = [];
-const postsBruto = lerJson(wp(["posts", JSON.stringify({ qtd: 30 })]));
+const postsBruto = lerJson(wp(["posts", JSON.stringify({ qtd: 100, status: "publish" })]));
 if (Array.isArray(postsBruto)) posts = postsBruto;
 else falhas.push("FAIL wp_posts — wp.cjs não respondeu JSON");
 
+// Rascunhos: censo separado (o censo de publicados não os inclui mais, mas o
+// C4-lixo-draft continua precisando enxergá-los).
+let rascunhos = [];
+const rascunhosBruto = lerJson(wp(["posts", JSON.stringify({ qtd: 100, status: "draft" })]));
+if (Array.isArray(rascunhosBruto)) rascunhos = rascunhosBruto.filter((p) => p.status === "draft");
+
 const publicados = posts.filter((p) => p.status === "publish");
-const rascunhos = posts.filter((p) => p.status === "draft");
 
 // C1 (determinístico): volume de conteúdo de nicho — "site no ar"/anúncios não contam
-const anuncios = publicados.filter((p) => /no ar|bem-vindo|lançamento/i.test(p.titulo));
+// Regex ANCORADO ao início do título (evita falso positivo em manchete com "no ar" no meio,
+// ex.: post 120 "…agente de IA que colocaram no ar") — correção PARECER-AUDITORIA-02 C8.
+const anuncios = publicados.filter((p) => /^(pulso diário|site|portal).*(no ar|lançamento)|^bem-vindo|^olá, mundo/i.test(p.titulo));
 const conteudo = publicados.filter((p) => !anuncios.includes(p));
 checa(conteudo.length >= 3, "C1-volume", `${conteudo.length} posts de nicho publicados (anúncios excluídos: ${anuncios.length})`);
 

@@ -30,6 +30,7 @@ export interface OpcoesScheduler {
   agora?: () => Date;
   executar?: (job: Job) => Promise<string>;
   binPath?: string;
+  reconciliar?: () => Promise<string[]>;
 }
 
 interface LinhaJob {
@@ -110,6 +111,7 @@ export class Scheduler {
   private readonly homeDir: string;
   private readonly agora: () => Date;
   private readonly executarFn: (job: Job) => Promise<string>;
+  private readonly reconciliarFn: (() => Promise<string[]>) | null;
   private db: Database.Database | null = null;
   private timer: NodeJS.Timeout | null = null;
   private keepAlive: NodeJS.Timeout | null = null;
@@ -120,6 +122,7 @@ export class Scheduler {
     this.executarFn =
       opcoes.executar ??
       (async (job) => this.executarSpawn(job));
+    this.reconciliarFn = opcoes.reconciliar ?? null;
   }
 
   private async banco(): Promise<Database.Database> {
@@ -373,8 +376,50 @@ export class Scheduler {
     }
   }
 
-  /** Um passo do loop: executa jobs vencidos e recalcula próximas execuções. */
-  async tick(): Promise<{ executados: string[]; pulados: string[] }> {
+  /**
+   * Reaper de zumbis: toda execução "executando" cujo pid não está mais vivo é
+   * marcada "falhou" (evita runs pendurados 10h+ quando o opencode morre/hanga).
+   * Percorre os workspaces do WorkspaceManager reaproveitando a reconciliação
+   * já existente no SessionManager.
+   */
+  private async reapearZombies(): Promise<string[]> {
+    if (this.reconciliarFn) {
+      try {
+        return await this.reconciliarFn();
+      } catch (erro) {
+        console.error("[scheduler] reaper de zumbis falhou:", erro instanceof Error ? erro.message : erro);
+        return [];
+      }
+    }
+    try {
+      const [{ SessionManager }, { WorkspaceManager }] = await Promise.all([
+        import("./session-manager.js"),
+        import("./workspace-manager.js"),
+      ]);
+      const sessoes = new SessionManager({ homeDir: this.homeDir });
+      const workspaces = new WorkspaceManager({ homeDir: this.homeDir, cwd: this.homeDir });
+      const reconciliados: string[] = [];
+      for (const ws of await workspaces.listar()) {
+        if (!ws.existe) continue;
+        try {
+          reconciliados.push(...(await sessoes.reconciliarZombies(ws.path)));
+        } catch {
+          /* workspace sem registries/corp.db — segue */
+        }
+      }
+      return reconciliados;
+    } catch (erro) {
+      console.error("[scheduler] reaper de zumbis falhou:", erro instanceof Error ? erro.message : erro);
+      return [];
+    }
+  }
+
+  /** Um passo do loop: reape zumbis, executa jobs vencidos e recalcula próximas execuções. */
+  async tick(): Promise<{ executados: string[]; pulados: string[]; reconciliados: string[] }> {
+    const reconciliados = await this.reapearZombies();
+    if (reconciliados.length > 0) {
+      console.log(`[scheduler] reaper: ${reconciliados.length} execução(ões) zumbi(s) marcada(s) como falhou: ${reconciliados.join(", ")}`);
+    }
     const agora = this.agora();
     const executados: string[] = [];
     const pulados: string[] = [];
@@ -421,7 +466,7 @@ export class Scheduler {
       }
       executados.push(job.id);
     }
-    return { executados, pulados };
+    return { executados, pulados, reconciliados };
   }
 
   async runNow(id: string): Promise<{ job: Job; resultado: string }> {

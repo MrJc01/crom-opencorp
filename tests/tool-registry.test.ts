@@ -115,12 +115,18 @@ describe("ToolRegistry — manifests plugáveis", () => {
 
 describe("MCP stdio", () => {
   it("tools/list e tools/call funcionam via binário", async () => {
-    const bin = join(process.cwd(), "bin", "opencorp.mjs");
-    const child = execFile(process.execPath, [bin, "mcp", "serve"], {
-      env: { ...process.env, OPENCORP_HOME: home },
-      cwd: process.cwd(),
-      timeout: 30_000,
-    });
+    // CLI rodada do FONTE via tsx (bin/opencorp.mjs exigiria dist/ atualizado)
+    const { garantirMcpToken } = await import("../src/cli/commands/tool.js");
+    const cli = join(process.cwd(), "src", "cli", "index.ts");
+    const child = execFile(
+      process.execPath,
+      ["--import", "tsx", cli, "mcp", "serve", "--token", garantirMcpToken(home)],
+      {
+        env: { ...process.env, OPENCORP_HOME: home },
+        cwd: process.cwd(),
+        timeout: 30_000,
+      },
+    );
     child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
     child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
     child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`);

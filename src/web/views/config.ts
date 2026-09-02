@@ -196,6 +196,8 @@ export async function renderConfig(): Promise<void> {
       ${ABAS.map((a) => `<button role="tab" class="btn-ghost config-aba text-xs" data-aba="${a.id}" onclick="window.__cfgAba('${a.id}')">${escapeHtml(a.label)}</button>`).join('')}
       <button role="tab" class="btn-ghost config-aba text-xs" data-aba="secrets" onclick="window.__cfgAba('secrets')">${icone('key')} Secrets</button>
       <button role="tab" class="btn-ghost config-aba text-xs" data-aba="ferramentas" onclick="window.__cfgAba('ferramentas')">${icone('apps')} Ferramentas</button>
+      <button role="tab" class="btn-ghost config-aba text-xs" data-aba="opencode" onclick="window.__cfgAba('opencode')">${icone('gear')} Opencode</button>
+      <button role="tab" class="btn-ghost config-aba text-xs" data-aba="chaves" onclick="window.__cfgAba('chaves')">${icone('key')} Chaves · opencode</button>
     </div>
     <div id="config-conteudo">${estadoCarregando()}</div>
   `;
@@ -226,6 +228,8 @@ async function carregarConteudo(): Promise<void> {
 
   if (abaAtual === 'secrets') { await carregarSecrets(); return; }
   if (abaAtual === 'ferramentas') { await carregarFerramentas(); return; }
+  if (abaAtual === 'opencode') { await carregarOpencode(); return; }
+  if (abaAtual === 'chaves') { await carregarChaves(); return; }
 
   const aba = ABAS.find((a) => a.id === abaAtual);
   if (!aba) return;
@@ -545,4 +549,154 @@ async function carregarFerramentas(): Promise<void> {
   }).join('')}
     </section>
   `;
+}
+
+// ── OPENCODE (config do opencode do opencorp) ─────────────────────────
+
+interface OpencodeConfigResp {
+  config: Record<string, unknown>;
+  path: string;
+}
+
+/** Aba Opencode: edita o <opencorpHome>/.opencorp/opencode-home/opencode.json
+ *  (model, small_model, mcp.opencorp…) como JSON livre. Alterações valem após
+ *  reiniciar o secretário — o reinício em si fica na home (Config → Ações). */
+async function carregarOpencode(): Promise<void> {
+  const el = document.getElementById('config-conteudo');
+  if (!el) return;
+
+  let resp: OpencodeConfigResp | null;
+  try {
+    resp = await api<OpencodeConfigResp>('/opencode-config');
+  } catch {
+    resp = null;
+  }
+
+  if (!resp) {
+    el.innerHTML = estadoErro('Não foi possível carregar a config do opencode.', () => { void carregarOpencode(); });
+    return;
+  }
+
+  el.innerHTML = `
+    <section class="card p-4 mb-4">
+      <h3 class="font-semibold text-sm uppercase tracking-wide text-zinc-400 flex items-center gap-1 mb-2">Opencode (do opencorp)</h3>
+      <p class="cfg-dica mb-2">Arquivo: <code>${escapeHtml(resp.path)}</code> — JSON livre (model, small_model, mcp.opencorp…). O <code>$schema</code> é preservado pelo servidor.</p>
+      <div class="cfg-linha">
+        <textarea id="cfg-opencode-json" rows="18" spellcheck="false" class="font-mono text-xs" style="line-height:1.5">${escapeHtml(JSON.stringify(resp.config, null, 2))}</textarea>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 mt-2">
+        <button class="btn" onclick="window.__cfgOpencodeSalvar()">Salvar</button>
+        <span class="cfg-dica" style="color:var(--warn)">⚠ alterações valem após reiniciar o secretário (Config → Ações → Reiniciar secretário)</span>
+      </div>
+    </section>
+  `;
+
+  (window as unknown as Record<string, unknown>).__cfgOpencodeSalvar = async () => {
+    const ta = document.getElementById('cfg-opencode-json') as HTMLTextAreaElement | null;
+    if (!ta) return;
+    let config: unknown;
+    try {
+      config = JSON.parse(ta.value);
+    } catch (e) {
+      toast('JSON inválido: ' + (e as Error).message, 'erro');
+      return;
+    }
+    if (config === null || typeof config !== 'object' || Array.isArray(config)) {
+      toast('A config deve ser um objeto JSON (ex.: { "model": "…" })', 'erro');
+      return;
+    }
+    try {
+      await api('/opencode-config', { method: 'PUT', body: JSON.stringify({ config }) });
+      toast('Config do opencode salva — reinicie o secretário para valer', 'ok');
+      await carregarOpencode(); // re-renderiza com o $schema preservado pelo servidor
+    } catch {
+      // api() já mostrou o toast de erro (JSON rejeitado/falha de escrita)
+    }
+  };
+}
+
+/* ── Chaves de API dos provedores (auth.json do opencode do opencorp) ── */
+
+interface ChaveInfo {
+  provider: string;
+  tipo: string;
+  preview: string;
+}
+
+/** Aba "Chaves de API": obedece o escopo superior (Global × Workspace).
+ *  Herança: workspace sobrepõe o global por provedor; o que não tem override
+ *  no workspace herda do global. Fonte: opencorp — nunca o opencode pessoal. */
+export async function carregarChaves(): Promise<void> {
+  const el = document.getElementById('config-conteudo');
+  if (!el) return;
+
+  interface ChaveInfo { provider: string; tipo: string; preview: string; }
+  interface RespChaves {
+    global: { existe: boolean; chaves: ChaveInfo[]; path: string };
+    workspace: { id: string | null; existe: boolean; chaves: ChaveInfo[]; herdadas: ChaveInfo[] };
+  }
+
+  let resp: RespChaves | null = null;
+  try {
+    resp = await api<RespChaves>('/provider-keys');
+  } catch { resp = null; }
+
+  if (!resp) {
+    el.innerHTML = estadoErro('Não foi possível carregar as chaves de API.', () => { void carregarChaves(); });
+    return;
+  }
+
+  const noWorkspace = escopoAtual === 'workspace' && !!resp.workspace.id;
+  const lista = noWorkspace ? resp.workspace.chaves : resp.global.chaves;
+  const herdadas = noWorkspace ? resp.workspace.herdadas : [];
+
+  const linhaChave = (c: ChaveInfo, esc: string) => `
+    <div class="approval-row">
+      <div class="min-w-0">
+        <div class="font-mono text-sm">${escapeHtml(c.provider)}</div>
+        <div class="text-xs text-zinc-500 font-mono">${escapeHtml(c.preview)} · ${escapeHtml(c.tipo)}</div>
+      </div>
+      <button class="btn btn-ghost text-xs" onclick="window.__cfgChaveRemover('${escapeHtml(c.provider)}','${esc}')" title="Remover chave">${icone('trash')} Remover</button>
+    </div>`;
+
+  el.innerHTML = `
+    <section class="card p-4 mb-4">
+      <h3 class="font-semibold text-sm uppercase tracking-wide text-zinc-400 flex items-center gap-1 mb-2">Chaves de API — motor opencode</h3>
+      <p class="cfg-dica mb-2">Estas chaves configuram o <b>opencode</b> — o motor que executa os agentes da empresa (secretário, runs, reuniões). No futuro, outros motores de agentes terão chaves próprias.</p>
+      <p class="cfg-dica mb-2">${noWorkspace
+        ? `Escopo <b>workspace</b> (${escapeHtml(resp.workspace.id ?? '')}) — valem só para os agentes da empresa e <b>sobrepõem as globais</b> por provedor.`
+        : 'Escopo <b>global</b> — fallback para todas as empresas (o workspace pode sobrescrever por provedor no escopo dele).'}</p>
+      ${lista.map((c) => linhaChave(c, noWorkspace ? 'workspace' : 'global')).join('') || '<div class="cfg-dica mb-2">Nenhuma chave configurada neste escopo.</div>'}
+      ${noWorkspace && herdadas.length ? `<div class="cfg-dica mt-2 mb-1">Herdadas do global (ativas aqui enquanto não houver override):</div>${herdadas.map((c) => `<div class="approval-row"><div class="min-w-0"><div class="font-mono text-sm">${escapeHtml(c.provider)}</div><div class="text-xs text-zinc-500 font-mono">${escapeHtml(c.preview)} (herdada)</div></div></div>`).join('')}` : ''}
+      <div class="cfg-linha mt-3">
+        <input id="cfg-chave-provider" placeholder="provedor (ex.: opencode-go, openrouter)" class="font-mono text-xs"/>
+        <input id="cfg-chave-valor" type="password" placeholder="chave de API (sk-…)" class="font-mono text-xs"/>
+        <button class="btn" onclick="window.__cfgChaveSalvar('${noWorkspace ? 'workspace' : 'global'}')">Salvar chave ${noWorkspace ? 'no workspace' : 'no global'}</button>
+      </div>
+      <div class="cfg-dica" style="color:var(--warn)">⚠ após alterar, reinicie o secretário para aplicar no chat (agentes novos já pegam no próximo run)</div>
+    </section>
+  `;
+
+  (window as unknown as Record<string, unknown>).__cfgChaveSalvar = async (esc: 'workspace' | 'global') => {
+    const provider = (document.getElementById('cfg-chave-provider') as HTMLInputElement | null)?.value.trim() ?? '';
+    const key = (document.getElementById('cfg-chave-valor') as HTMLInputElement | null)?.value.trim() ?? '';
+    if (!provider || !key) { toast('Informe o provedor e a chave', 'aviso'); return; }
+    try {
+      await api('/provider-keys', { method: 'PUT', body: JSON.stringify({ provider, key, escopo: esc }) });
+      toast(`Chave de ${provider} salva (${esc === 'workspace' ? 'workspace' : 'global'}) — reinicie o secretário para aplicar no chat`, 'ok');
+      await carregarChaves();
+    } catch (e) {
+      toast('Erro ao salvar chave: ' + (e as Error).message, 'erro');
+    }
+  };
+
+  (window as unknown as Record<string, unknown>).__cfgChaveRemover = async (provider: string, esc: string) => {
+    try {
+      await api('/provider-keys/' + encodeURIComponent(provider) + '?escopo=' + esc, { method: 'DELETE' });
+      toast(`Chave de ${provider} removida (${esc})`, 'ok');
+      await carregarChaves();
+    } catch (e) {
+      toast('Erro ao remover: ' + (e as Error).message, 'erro');
+    }
+  };
 }

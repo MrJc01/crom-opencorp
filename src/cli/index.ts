@@ -25,6 +25,7 @@ import { registerServeCommand } from "./commands/serve.js";
 import { registerWebCommand } from "./commands/web.js";
 import { registerTemplateCommand } from "./commands/template.js";
 import { registerWorkspaceCommands } from "./commands/workspace.js";
+import { registerOpenCommand } from "./commands/open.js";
 import { registerTestCommand } from "./commands/test.js";
 import { registerMonitorCommand } from "./commands/monitor.js";
 import { notImplementedAction } from "./placeholder.js";
@@ -64,6 +65,8 @@ export function buildProgram(): Command {
   registerSettingsCommand(program);
 
   registerWorkspaceCommands(program);
+
+  registerOpenCommand(program);
 
   registerAgentCommand(program);
 

@@ -120,11 +120,24 @@ const server = createServer(async (req, res) => {
     session.messages.push(userMsg);
     session.updated = Date.now();
 
-    // Resposta SÍNCRONA com role assistant — o proxy extrai texto quando info.role === "assistant"
+    // Mensagem que pede ação ("crie…") → resposta com TOOL PART (exercita o
+    // evento "acao" do stream: itens com tool/status/resumo)
     const textoUsuario = parts?.[0]?.text ?? "mensagem";
+    const pedeAcao = /^crie/i.test(textoUsuario.trim());
+    const respostaParts = pedeAcao
+      ? [
+          {
+            type: "tool",
+            tool: "opencorp_task_create",
+            callID: "call-e2e-1",
+            state: { status: "completed", title: "", input: { titulo: "Task criada pelo e2e" } },
+          },
+          { type: "text", text: `Task criada com ID: tsk-e2e-1` },
+        ]
+      : [{ type: "text", text: `Resposta do assistant para: ${textoUsuario}` }];
     const assistantMsg = {
       role: "assistant",
-      parts: [{ type: "text", text: `Resposta do assistant para: ${parts?.[0]?.text ?? "mensagem"}` }],
+      parts: respostaParts,
       time: { created: Date.now(), completed: Date.now() + 100 },
     };
     session.messages.push(assistantMsg);
