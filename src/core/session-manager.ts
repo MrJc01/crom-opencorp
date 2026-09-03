@@ -102,6 +102,9 @@ const PADRAO_ERRO_MODELO =
   /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found/i;
 
 export const MODELOS_ROTACAO_PADRAO = [
+  "openrouter/nvidia/nemotron-3-ultra-550b-a55b",
+  "openrouter/nvidia/nemotron-3.5-lightning:free",
+  "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
   "openrouter/minimax/minimax-m3:free",
   "openrouter/google/gemini-2.5-flash",
   "openrouter/deepseek/deepseek-chat",
