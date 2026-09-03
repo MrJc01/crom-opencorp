@@ -477,6 +477,28 @@ async function lerCorpo(req: IncomingMessage, maxBytes = 30 * 1024 * 1024): Prom
   return JSON.parse(texto) as unknown;
 }
 
+async function lerCorpoComTexto(req: IncomingMessage, maxBytes = 30 * 1024 * 1024): Promise<{ json: Record<string, unknown>; raw: string }> {
+  const partes: Buffer[] = [];
+  let total = 0;
+  for await (const parte of req) {
+    total += (parte as Buffer).length;
+    if (total > maxBytes) {
+      req.destroy();
+      throw new Error(`corpo excede ${maxBytes} bytes`);
+    }
+    partes.push(parte as Buffer);
+  }
+  const raw = Buffer.concat(partes).toString("utf8");
+  const texto = raw.trim();
+  if (!texto) return { json: {}, raw };
+  try {
+    const json = JSON.parse(texto) as Record<string, unknown>;
+    return { json, raw };
+  } catch {
+    return { json: { _raw: texto }, raw };
+  }
+}
+
 function gerarIdExec(): string {
   return `exec-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
@@ -1203,7 +1225,22 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           if (acao === "approve") {
             const p = await approvals.aprovar(ws.path, id);
             // retoma imediatamente sem esperar o tick (15min) — dispara o agente para a mesma ordem com pularGuard
-            if (p.exec_id) {
+            if (p.padrao?.startsWith("hook:")) {
+              void (async () => {
+                try {
+                  const sessoes = new SessionManager({ homeDir: opcoes.homeDir ?? opencorpHome() });
+                  await sessoes.rodar({
+                    agente: p.agente || "executor-padrao",
+                    ordem: p.ordem,
+                    workspaceDir: ws.path,
+                    pularGuard: true,
+                    gatilho: { tipo: "webhook", origem: p.padrao },
+                  }).catch((e) => console.error(`[approval hook] falha ao rodar ordem aprovada:`, e));
+                } catch (e) {
+                  console.error(`[approval hook] erro:`, e);
+                }
+              })();
+            } else if (p.exec_id) {
               void (async () => {
                 try {
                   const registros = new RegistryStore();
@@ -2108,6 +2145,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             alvo,
             respond: corpo.respond as "imediato" | "final" | undefined,
             dedup_seg: typeof corpo.dedup_seg === "number" ? corpo.dedup_seg : undefined,
+            token: typeof corpo.token === "string" ? corpo.token : undefined,
+            auth: corpo.auth as any,
+            exige_aprovacao: Boolean(corpo.exige_aprovacao),
+            reenvio_urls: Array.isArray(corpo.reenvio_urls) ? corpo.reenvio_urls : undefined,
           });
           enviar(res, 201, { ...h, url: `/hooks/${ws.id}/${h.id}` });
           return;
@@ -2124,7 +2165,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           enviar(res, 200, { ok: true, id: mHook[1] });
           return;
         }
-        // ── rota PÚBLICA de disparo (auth por token do hook) ──
+        // ── rota PÚBLICA de disparo (auth por token / HMAC / aberta) ──
         const mHookPublico = /^\/hooks\/([^/]+)\/([^/]+)$/.exec(rota);
         if (mHookPublico && (req.method === "POST" || req.method === "GET")) {
           const wsId = decodeURIComponent(mHookPublico[1]!);
@@ -2135,32 +2176,77 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             enviar(res, 405, { erro: `método ${req.method} não permitido (aceitos: ${h.metodos.join(", ")})` });
             return;
           }
-          const tokenRecebido = req.headers["x-opencorp-token"] ?? url.searchParams.get("token") ?? "";
-          if (tokenRecebido !== h.token) {
-            enviar(res, 401, { erro: "token do hook ausente ou inválido" });
-            return;
-          }
+
           let corpoPayload: Record<string, unknown> = {};
+          let rawBody = "";
           if (req.method === "POST") {
             try {
-              corpoPayload = ((await lerCorpo(req)) ?? {}) as Record<string, unknown>;
+              const resCorpo = await lerCorpoComTexto(req);
+              corpoPayload = resCorpo.json;
+              rawBody = resCorpo.raw;
             } catch {
               corpoPayload = {};
+              rawBody = "";
             }
           }
+
+          // Validação de Segurança (Token / HMAC-SHA256 / Aberta)
+          const tipoAuth = h.auth?.tipo ?? "token";
+          const secretEsperado = h.auth?.secret || h.token;
+
+          if (tipoAuth === "token") {
+            const authHeader = String(req.headers["authorization"] ?? "");
+            const bearerToken = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
+            const tokenRecebido = req.headers["x-opencorp-token"] ?? bearerToken ?? url.searchParams.get("token") ?? "";
+            if (tokenRecebido !== secretEsperado) {
+              enviar(res, 401, { erro: "token do hook ausente ou inválido (envie via x-opencorp-token, Authorization: Bearer, ou ?token=)" });
+              return;
+            }
+          } else if (tipoAuth === "hmac_sha256") {
+            const sigHeader = String(req.headers["x-hub-signature-256"] ?? req.headers["x-signature-sha256"] ?? "");
+            const sigRecebida = sigHeader.startsWith("sha256=") ? sigHeader.slice(7).trim() : sigHeader.trim();
+            if (!sigRecebida) {
+              enviar(res, 401, { erro: "assinatura HMAC ausente (envie cabeçalho x-hub-signature-256: sha256=...)" });
+              return;
+            }
+            const { createHmac, timingSafeEqual } = await import("node:crypto");
+            const hmac = createHmac("sha256", secretEsperado);
+            hmac.update(rawBody);
+            const sigEsperada = hmac.digest("hex");
+            try {
+              const bufEsperado = Buffer.from(sigEsperada, "hex");
+              const bufRecebido = Buffer.from(sigRecebida, "hex");
+              if (bufEsperado.length !== bufRecebido.length || !timingSafeEqual(bufEsperado, bufRecebido)) {
+                enviar(res, 401, { erro: "assinatura HMAC inválida para o secret configurado" });
+                return;
+              }
+            } catch {
+              enviar(res, 401, { erro: "formato de assinatura HMAC inválido" });
+              return;
+            }
+          } else if (tipoAuth === "nenhuma") {
+            // Acesso público livre
+          }
+
           const query: Record<string, string> = {};
           url.searchParams.forEach((v, k) => {
             if (k !== "token") query[k] = v;
           });
           const payload: PayloadHook = { corpo: corpoPayload, query };
+
           if (h.respond === "final") {
             const r = await hooks.disparar(ws.path, h, payload);
             enviar(res, 200, { ok: true, exec_id: r.exec_id, resultado: r.resultado.slice(0, 4096) });
           } else {
             void hooks
               .disparar(ws.path, h, payload)
-              .catch((e: unknown) => console.error(`[hook] disparo imediato de "${h.id}" falhou:`, e instanceof Error ? e.message : e));
-            enviar(res, 202, { ok: true, modo: "imediato" });
+              .catch((e: unknown) => console.error(`[hook] disparo de "${h.id}" falhou:`, e instanceof Error ? e.message : e));
+            enviar(res, 202, {
+              ok: true,
+              modo: "imediato",
+              status: h.exige_aprovacao ? "aguardando_aprovacao" : "iniciado",
+              mensagem: h.exige_aprovacao ? "Webhook recebido e retido para aprovação humana" : "Disparo iniciado",
+            });
           }
           return;
         }
