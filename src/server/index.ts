@@ -2517,6 +2517,24 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           }
         }
 
+        // Helper: troca o modelo da sessão no opencode serve em tempo real (hot-swap para fallback)
+        async function trocarModeloOpencode(baseUrl: string, sessaoId: string, modeloCompleto: string): Promise<boolean> {
+          try {
+            const partes = String(modeloCompleto).trim().split("/");
+            const providerID = partes[0]!;
+            const id = partes.slice(1).join("/");
+            const res = await fetch(`${baseUrl}/api/session/${encodeURIComponent(sessaoId)}/model`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ model: { id, providerID } }),
+              signal: AbortSignal.timeout(5000),
+            });
+            return res.status === 204 || res.ok;
+          } catch {
+            return false;
+          }
+        }
+
         // ── /secretario/sessoes (proxy GET /session) ──
         if (rota === "/secretario/sessoes" && req.method === "GET") {
           try {
@@ -3066,39 +3084,64 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               sessaoId = sessionData.id;
             }
 
-            // 2. Envia mensagem — o POST /message do opencode serve é SÍNCRONO: aguarda o processamento
-            //    e retorna a mensagem do assistant. O modelo vem do agente (frontmatter) ou do config (free).
-            const msgRes = await fetch(`${baseUrl}/session/${sessaoId}/message`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                sessionID: sessaoId,
-                agent: corpo.agente ?? "secretario",
-                parts: [
-                  { type: "text", text: mensagem },
-                  ...imagens.map((i) => ({ type: "file", mime: i.mime ?? "image/png", url: i.url! })),
-                ],
-              }),
-              signal: AbortSignal.timeout(240_000),
-            });
-            if (!msgRes.ok) {
-              enviar(res, 502, { erro: `falha ao enviar mensagem: ${msgRes.status}` });
-              return;
-            }
-            const msgData = (await msgRes.json()) as {
-              info?: { role?: string };
-              parts?: Array<{ type: string; text?: string }>;
-            };
+            // 2. Envia mensagem com fallback automático caso o modelo primário falhe ou dê timeout
+            const wsParaCfg = await resolverWs(url).catch(() => null);
+            const cfgResolvido = await settings.resolve(wsParaCfg ? { workspaceDir: wsParaCfg.path } : undefined).catch(() => null);
+            const candidatosConv = [
+              cfgResolvido?.settings.secretary?.model,
+              cfgResolvido?.settings.default_model,
+              ...(cfgResolvido?.settings.tests?.rotation || []),
+              "openrouter/minimax/minimax-m3:free",
+              "openrouter/nvidia/nemotron-3.5-lightning:free",
+              "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+            ].filter(Boolean) as string[];
+            const modelosFallbackConv = [...new Set(candidatosConv)];
 
-            // 3. Extrai a resposta: o POST retorna a mensagem do assistant; se vier a do user (fallback), faz poll
             let respostaTexto = "";
             const extrair = (m: { parts?: Array<{ type: string; text?: string }> }): string =>
               (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim();
-            if (msgData.info?.role === "assistant") {
-              respostaTexto = extrair(msgData);
+
+            for (let mIdx = 0; mIdx < modelosFallbackConv.length; mIdx++) {
+              const mod = modelosFallbackConv[mIdx]!;
+              if (mIdx > 0) {
+                await fetch(`${baseUrl}/session/${sessaoId}/abort`, { method: "POST" }).catch(() => {});
+                await sleep(300);
+                await trocarModeloOpencode(baseUrl, sessaoId, mod);
+                await sleep(150);
+              }
+
+              try {
+                const msgRes = await fetch(`${baseUrl}/session/${sessaoId}/message`, {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    sessionID: sessaoId,
+                    agent: corpo.agente ?? "secretario",
+                    parts: [
+                      { type: "text", text: mensagem },
+                      ...imagens.map((i) => ({ type: "file", mime: i.mime ?? "image/png", url: i.url! })),
+                    ],
+                  }),
+                  signal: AbortSignal.timeout(30_000),
+                });
+
+                if (msgRes.ok) {
+                  const msgData = (await msgRes.json()) as {
+                    info?: { role?: string };
+                    parts?: Array<{ type: string; text?: string }>;
+                  };
+                  if (msgData.info?.role === "assistant") {
+                    respostaTexto = extrair(msgData);
+                  }
+                  if (respostaTexto) break;
+                }
+              } catch {
+                // Timeout ou erro de rede: tenta o próximo da rotação
+              }
             }
+
             if (!respostaTexto) {
-              const timeoutMs = 180_000;
+              const timeoutMs = 60_000;
               const inicio = Date.now();
               while (Date.now() - inicio < timeoutMs) {
                 await sleep(2000);
@@ -3223,125 +3266,196 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             const baseAssistant = [...baseMsgs].reverse().find((m) => m.info?.role === "assistant");
             const baselineId = baseAssistant?.info?.id ?? null;
 
-            // POST em voo: responde só ao concluir; a geração reflete no GET /session em tempo real.
-            // Falha do POST é capturada (não engolida): quando o stream do modelo morre cedo
-            // (ex.: limite de uso), a msg assistant fica sem parts e sem completed — e o
-            // opencode pode nem responder o POST —, então o poll precisaria girar até o deadline.
-            let postData: MensagemOc | null = null;
-            let postConcluido = false;
-            let postErro: string | null = null;
-            void fetch(`${baseUrlSessao}/message`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ sessionID: sessaoId, agent: agente, parts: [{ type: "text", text: mensagem }, ...imagens.map((i) => ({ type: "file", mime: i.mime ?? "image/png", url: i.url! }))] }),
-              signal: AbortSignal.timeout(240_000),
-            }).then(async (r) => {
-              if (!r.ok) {
-                postErro = `opencode /message respondeu HTTP ${r.status}`;
-              } else {
-                try {
-                  postData = (await r.json()) as MensagemOc;
-                } catch {}
-              }
-              postConcluido = true;
-            }).catch(() => {
-              postErro = "opencode /message falhou (conexão)";
-              postConcluido = true;
-            });
+            // Lista de rotação/fallback de modelos para tolerância a falhas
+            const wsParaCfgStream = await resolverWs(url).catch(() => null);
+            const cfgResolvidoStream = await settings.resolve(wsParaCfgStream ? { workspaceDir: wsParaCfgStream.path } : undefined).catch(() => null);
+            const rotaModelos = [
+              cfgResolvidoStream?.settings.secretary?.model,
+              cfgResolvidoStream?.settings.default_model,
+              ...(cfgResolvidoStream?.settings.tests?.rotation || []),
+              "openrouter/minimax/minimax-m3:free",
+              "openrouter/nvidia/nemotron-3.5-lightning:free",
+              "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+            ].filter(Boolean) as string[];
+            const modelosFallback = [...new Set(rotaModelos)];
 
-            const inicio = Date.now();
-            const deadline = 300_000;
+            let modeloIdx = 0;
+            let concluida = false;
+            let postData: MensagemOc | null = null;
             let enviado = "";
             let enviadoPensamento = "";
-            let concluida = false;
-            let vazioDesde: number | null = null;
             let acoesAvisadas = 0;
             let itensAssinatura = "";
 
-            while (Date.now() - inicio < deadline) {
-              await sleep(700);
-              // o check de desconexão do cliente é no response (write side)
-              if (res.destroyed || res.writableEnded) return;
+            while (modeloIdx < modelosFallback.length && !concluida) {
+              const modeloAtual = modelosFallback[modeloIdx]!;
 
-              if (postErro && !concluida) {
-                sse("erro", { erro: `falha ao enviar mensagem ao modelo (${postErro}) — ver ~/.local/share/opencode/log/opencode.log`, sessao_id: sessaoId });
-                eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
-                res.end();
-                return;
+              if (modeloIdx > 0) {
+                // Notifica o cliente e o eventBus que estamos trocando para o modelo seguinte
+                sse("status", {
+                  tipo: "fallback_modelo",
+                  modelo: modeloAtual,
+                  aviso: `⚡ Modelo lento ou ocupado. Alternando automaticamente para ${modeloAtual}...`,
+                });
+                eventBus.emit("secretario.mensagem", {
+                  sessao_id: sessaoId,
+                  fase: "alternando_modelo",
+                  modelo: modeloAtual,
+                });
+
+                // Aborta tentativa travada no opencode
+                await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+                await sleep(350);
+
+                // Hot-swap de modelo via /api/session/:id/model
+                await trocarModeloOpencode(baseUrl, sessaoId, modeloAtual);
+                await sleep(200);
               }
 
-              const msgs = await listarMensagens();
-              if (msgs) {
-                const inicioIdx = baselineId ? msgs.findIndex((m) => m.info?.id === baselineId) : -1;
-                const novasMsgs = inicioIdx >= 0 ? msgs.slice(inicioIdx + 1) : msgs;
-                const assistentesNovas = novasMsgs.filter((m) => m.info?.role === "assistant");
+              // POST em voo: responde só ao concluir; a geração reflete no GET /session em tempo real.
+              let postConcluido = false;
+              let postErro: string | null = null;
+              void fetch(`${baseUrlSessao}/message`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  sessionID: sessaoId,
+                  agent: agente,
+                  parts: [
+                    { type: "text", text: mensagem },
+                    ...imagens.map((i) => ({ type: "file", mime: i.mime ?? "image/png", url: i.url! })),
+                  ],
+                }),
+                signal: AbortSignal.timeout(180_000),
+              }).then(async (r) => {
+                if (!r.ok) {
+                  postErro = `opencode /message respondeu HTTP ${r.status}`;
+                } else {
+                  try {
+                    postData = (await r.json()) as MensagemOc;
+                  } catch {}
+                }
+                postConcluido = true;
+              }).catch((err) => {
+                postErro = `opencode /message falhou (${err.name === "AbortError" ? "timeout" : "conexão"})`;
+                postConcluido = true;
+              });
 
-                if (assistentesNovas.length > 0) {
-                  // Passos cronológicos estruturados em tempo real (pensamento 1 -> acao 1 -> pensamento 2...)
-                  const passosEmTempoReal = extrairPassosMensagens(assistentesNovas);
-                  if (passosEmTempoReal.length > 0) {
-                    sse("passos", { passos: passosEmTempoReal });
+              const inicioTentativa = Date.now();
+              const tentativaTimeoutMs = 60_000;
+              let vazioDesde: number | null = null;
+              let tentouFallback = false;
+
+              while (Date.now() - inicioTentativa < tentativaTimeoutMs) {
+                await sleep(700);
+                // o check de desconexão do cliente é no response (write side)
+                if (res.destroyed || res.writableEnded) return;
+
+                if (postErro && !concluida) {
+                  if (modeloIdx < modelosFallback.length - 1) {
+                    console.warn(`[secretario] Modelo ${modeloAtual} falhou (${postErro}). Alternando para o próximo...`);
+                    tentouFallback = true;
+                    break;
+                  } else {
+                    sse("erro", { erro: `falha ao enviar mensagem ao modelo (${postErro}) — ver logs`, sessao_id: sessaoId });
+                    eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
+                    res.end();
+                    return;
                   }
+                }
 
-                  // Turno com ferramentas: tools das mensagens assistant novas (o quê + status)
-                  const { total: novas, itens } = extrairAcoesMensagens(msgs, baselineId);
-                  const assinatura = JSON.stringify(itens);
-                  if (novas > acoesAvisadas || assinatura !== itensAssinatura) {
-                    acoesAvisadas = Math.max(acoesAvisadas, novas);
-                    itensAssinatura = assinatura;
-                    sse("acao", { acoes: novas, itens });
-                  }
+                const msgs = await listarMensagens();
+                if (msgs) {
+                  const inicioIdx = baselineId ? msgs.findIndex((m) => m.info?.id === baselineId) : -1;
+                  const novasMsgs = inicioIdx >= 0 ? msgs.slice(inicioIdx + 1) : msgs;
+                  const assistentesNovas = novasMsgs.filter((m) => m.info?.role === "assistant");
 
-                  // Pensamento acumulado de TODAS as mensagens assistant do turno
-                  const pensamentoAcumulado = assistentesNovas
-                    .map((m) => pensamentoDe(m))
-                    .filter(Boolean)
-                    .join("\n\n---\n\n");
-                  if (pensamentoAcumulado.length > enviadoPensamento.length) {
-                    vazioDesde = null;
-                    sse("pensamento", { delta: pensamentoAcumulado.slice(enviadoPensamento.length) });
-                    enviadoPensamento = pensamentoAcumulado;
-                    eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "pensamento" });
-                  }
+                  if (assistentesNovas.length > 0) {
+                    // Passos cronológicos estruturados em tempo real (pensamento 1 -> acao 1 -> pensamento 2...)
+                    const passosEmTempoReal = extrairPassosMensagens(assistentesNovas);
+                    if (passosEmTempoReal.length > 0) {
+                      sse("passos", { passos: passosEmTempoReal });
+                    }
 
-                  // Texto acumulado de TODAS as mensagens assistant do turno
-                  const textoAcumulado = assistentesNovas
-                    .map((m) => textoDe(m))
-                    .filter(Boolean)
-                    .join("\n\n");
-                  if (textoAcumulado.length > enviado.length) {
-                    vazioDesde = null;
-                    sse("delta", { delta: textoAcumulado.slice(enviado.length) });
-                    enviado = textoAcumulado;
-                    eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "delta" });
-                  }
+                    // Turno com ferramentas: tools das mensagens assistant novas (o quê + status)
+                    const { total: novas, itens } = extrairAcoesMensagens(msgs, baselineId);
+                    const assinatura = JSON.stringify(itens);
+                    if (novas > acoesAvisadas || assinatura !== itensAssinatura) {
+                      acoesAvisadas = Math.max(acoesAvisadas, novas);
+                      itensAssinatura = assinatura;
+                      sse("acao", { acoes: novas, itens });
+                    }
 
-                  const ultAssistant = assistentesNovas[assistentesNovas.length - 1];
-                  const temToolEmCurso = (ultAssistant?.parts ?? []).some((p) => p.type === "tool" && p.state?.status !== "completed");
-                  const temAtividade = textoAcumulado.length > 0 || pensamentoAcumulado.length > 0 || temToolEmCurso;
-                  if (!temAtividade) {
-                    if (vazioDesde === null) vazioDesde = Date.now();
-                    else if (Date.now() - vazioDesde > 45_000) {
-                      sse("erro", { erro: postErro ?? "modelo sem resposta (stream travado) — reenvie a mensagem", sessao_id: sessaoId });
-                      eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
-                      res.end();
-                      return;
+                    // Pensamento acumulado de TODAS as mensagens assistant do turno
+                    const pensamentoAcumulado = assistentesNovas
+                      .map((m) => pensamentoDe(m))
+                      .filter(Boolean)
+                      .join("\n\n---\n\n");
+                    if (pensamentoAcumulado.length > enviadoPensamento.length) {
+                      vazioDesde = null;
+                      sse("pensamento", { delta: pensamentoAcumulado.slice(enviadoPensamento.length) });
+                      enviadoPensamento = pensamentoAcumulado;
+                      eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "pensamento" });
+                    }
+
+                    // Texto acumulado de TODAS as mensagens assistant do turno
+                    const textoAcumulado = assistentesNovas
+                      .map((m) => textoDe(m))
+                      .filter(Boolean)
+                      .join("\n\n");
+                    if (textoAcumulado.length > enviado.length) {
+                      vazioDesde = null;
+                      sse("delta", { delta: textoAcumulado.slice(enviado.length) });
+                      enviado = textoAcumulado;
+                      eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "delta" });
+                    }
+
+                    const ultAssistant = assistentesNovas[assistentesNovas.length - 1];
+                    const temToolEmCurso = (ultAssistant?.parts ?? []).some((p) => p.type === "tool" && p.state?.status !== "completed");
+                    const temAtividade = textoAcumulado.length > 0 || pensamentoAcumulado.length > 0 || temToolEmCurso;
+                    if (!temAtividade) {
+                      if (vazioDesde === null) vazioDesde = Date.now();
+                      else if (Date.now() - vazioDesde > 22_000) {
+                        // 22s sem atividade de tokens/pensamento/ferramenta: fallback automático!
+                        if (modeloIdx < modelosFallback.length - 1) {
+                          console.warn(`[secretario] Modelo ${modeloAtual} sem resposta por >22s. Alternando para o próximo...`);
+                          tentouFallback = true;
+                          break;
+                        }
+                      }
+                    } else {
+                      vazioDesde = null;
                     }
                   } else {
-                    vazioDesde = null;
+                    // Nenhuma mensagem assistente iniciada após 20s
+                    if (vazioDesde === null) vazioDesde = Date.now();
+                    else if (Date.now() - vazioDesde > 20_000) {
+                      if (modeloIdx < modelosFallback.length - 1) {
+                        console.warn(`[secretario] Modelo ${modeloAtual} não iniciou após 20s. Alternando para o próximo...`);
+                        tentouFallback = true;
+                        break;
+                      }
+                    }
                   }
+                }
+
+                // O turno só termina quando o POST /message síncrono do opencode completar!
+                if (postConcluido && !postErro) {
+                  concluida = true;
+                  break;
                 }
               }
 
-              // O turno só termina quando o POST /message síncrono do opencode completar!
-              if (postConcluido) {
-                concluida = true;
-                break;
+              if (concluida) break;
+              if (tentouFallback) {
+                modeloIdx++;
+                continue;
               }
+              modeloIdx++;
             }
 
             if (!concluida) {
-              sse("erro", { erro: "timeout aguardando resposta (300s)", sessao_id: sessaoId });
+              sse("erro", { erro: "Todos os modelos candidatos esgotaram timeout ou falharam. Tente novamente em instantes.", sessao_id: sessaoId });
               eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
               res.end();
               return;

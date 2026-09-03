@@ -415,7 +415,17 @@ export const SecretarioView: Component = () => {
               if (ultIdx < 0) return prev;
               const assistente = { ...prev[ultIdx] };
 
-              if (evtType === "passos" && Array.isArray(payload.passos)) {
+              if (evtType === "status" || evtType === "fallback_modelo") {
+                if (payload.aviso) {
+                  showToast(payload.aviso, "aviso");
+                  const passos = [...(assistente.passos || [])];
+                  passos.push({
+                    tipo: "texto",
+                    texto: `\n> ⚠️ *${payload.aviso}*\n\n`,
+                  });
+                  assistente.passos = passos;
+                }
+              } else if (evtType === "passos" && Array.isArray(payload.passos)) {
                 assistente.passos = payload.passos;
               } else if (evtType === "delta") {
                 const deltaTxt = payload.delta || payload.texto || "";
