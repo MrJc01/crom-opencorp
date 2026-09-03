@@ -194,8 +194,8 @@ export const FluxosView: Component = () => {
   // Salvar alterações do Workflow no backend
   const salvarAlteracoesWorkflow = async (novoFluxo: FluxoCompleto) => {
     try {
-      await fetchApi("/flows", {
-        method: "POST",
+      await fetchApi(`/flows/${encodeURIComponent(novoFluxo.id)}`, {
+        method: "PUT",
         body: JSON.stringify(novoFluxo),
       });
       setFluxoAtivo(novoFluxo);

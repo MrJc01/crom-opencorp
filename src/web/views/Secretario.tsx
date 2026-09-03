@@ -40,6 +40,11 @@ export const SecretarioView: Component = () => {
 
   const carregarSessoes = async () => {
     try {
+      const status = await fetchApi<{ rodando?: boolean }>("/secretario/status").catch(() => null);
+      if (status && !status.rodando) {
+        setSessoes([]);
+        return;
+      }
       const lista = await fetchApi<SessaoResumo[]>("/secretario/sessoes");
       setSessoes(lista || []);
       if (!sessaoAtivaId() && lista && lista.length > 0) {

@@ -178,6 +178,11 @@ export function sessaoDaUrl(): string | null {
 
 export async function carregarSessoes(): Promise<void> {
   try {
+    const st = await q<SecretarioStatus>("/secretario/status").catch(() => null);
+    if (st && !st.rodando) {
+      sessoesStore.set([]);
+      return;
+    }
     const data = await q<SessaoChat[]>("/secretario/sessoes");
     sessoesStore.set(data);
   } catch {

@@ -1180,15 +1180,32 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             nos?: Flow["nos"];
             arestas?: Flow["arestas"];
           };
+          const flowId = (corpo.id ?? "").trim();
+          const jaExiste = flowId ? existsSync(flows.caminho(ws.path, flowId)) : false;
+
+          // se o flow já existe no workspace e recebeu grafo completo, atualiza de forma idempotente (upsert)
+          if (jaExiste && Array.isArray(corpo.nos)) {
+            const atual = await flows.obter(ws.path, flowId);
+            await flows.salvar(ws.path, {
+              id: flowId,
+              nome: corpo.nome ?? atual.nome,
+              nos: corpo.nos,
+              arestas: corpo.arestas ?? [],
+            });
+            eventBus.emit("flow-salvo", { flow: flowId });
+            enviar(res, 200, await flows.obter(ws.path, flowId));
+            return;
+          }
+
           // com grafo no corpo (editor da web), valida e salva inteiro — senão cria só o gatilho
           const f = Array.isArray(corpo.nos) && corpo.nos.length > 0
             ? await flows.salvarComId(ws.path, {
-                id: corpo.id ?? "",
-                nome: corpo.nome ?? corpo.id ?? "",
+                id: flowId,
+                nome: corpo.nome ?? flowId,
                 nos: corpo.nos,
                 arestas: corpo.arestas ?? [],
               })
-            : await flows.criar(ws.path, corpo.id ?? "", corpo.nome ?? corpo.id ?? "");
+            : await flows.criar(ws.path, flowId, corpo.nome ?? flowId);
           enviar(res, 201, f);
           return;
         }

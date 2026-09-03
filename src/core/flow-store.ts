@@ -29,6 +29,7 @@ export const nosFlowSchema = z.object({
     "reuniao",
   ]),
   config: z.record(z.string(), z.unknown()).default({}),
+  pos: z.object({ x: z.number(), y: z.number() }).optional(),
 });
 
 export const flowSchema = z.object({

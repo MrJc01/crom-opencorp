@@ -647,4 +647,27 @@ describe('Fluxos & Flow Store — Drag & Drop, Conexões e Contexto Encadeado n8
     expect(flowStoreSrc).toContain('noAnterior');
     expect(flowStoreSrc).toContain('[Contexto do nó anterior');
   });
+
+  it('salvarAlteracoesWorkflow usa PUT para atualizar workflow existente', () => {
+    expect(fluxosSrc).toContain('method: "PUT"');
+    expect(fluxosSrc).toContain('`/flows/${encodeURIComponent(novoFluxo.id)}`');
+  });
+
+  it('nosFlowSchema aceita coordenadas pos opcionais para persistência de layout', () => {
+    expect(flowStoreSrc).toContain('pos: z.object({ x: z.number(), y: z.number() }).optional()');
+  });
+
+  it('servidor suporta upsert idempotente em POST /flows quando fluxo já existe', () => {
+    const serverPath = join(RAIZ, 'src/server/index.ts');
+    const serverSrc = readFileSync(serverPath, 'utf8');
+    expect(serverSrc).toContain('// se o flow já existe no workspace e recebeu grafo completo, atualiza de forma idempotente (upsert)');
+    expect(serverSrc).toContain('flows.salvar(ws.path');
+  });
+
+  it('Secretario.tsx verifica status antes de chamar /secretario/sessoes para evitar 409', () => {
+    const secPath = join(RAIZ, 'src/web/views/Secretario.tsx');
+    const secSrc = readFileSync(secPath, 'utf8');
+    expect(secSrc).toContain('/secretario/status');
+    expect(secSrc).toContain('status && !status.rodando');
+  });
 });
