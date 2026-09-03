@@ -21,6 +21,8 @@ import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
 import { fetchApi } from "../lib/context";
+import { CronBuilder } from "../components/CronBuilder";
+import { descreverCron } from "../lib/cron-helper";
 
 export const AgendaView: Component = () => {
   const [agendamentos, setAgendamentos] = createSignal<any[]>([]);
@@ -350,13 +352,16 @@ export const AgendaView: Component = () => {
                       </Show>
                     </div>
 
-                    <div class="flex items-center gap-3 text-[11px] text-zinc-500 font-mono">
-                      <div class="flex items-center gap-1">
-                        <Clock size={11} class="text-zinc-400" />
-                        <span>{cronStr}</span>
+                    <div class="flex items-center gap-3 text-xs text-zinc-400 flex-wrap">
+                      <div class="flex items-center gap-1.5 font-medium text-zinc-200 bg-zinc-950 px-2 py-1 rounded-md border border-zinc-800">
+                        <Clock size={12} class="text-emerald-400" />
+                        <span>{descreverCron(cronStr)}</span>
                       </div>
+                      <span class="font-mono text-[10px] text-zinc-500 bg-zinc-900/80 px-1.5 py-0.5 rounded border border-zinc-800/80">
+                        {cronStr}
+                      </span>
                       <Show when={job.ultima_exec}>
-                        <span>
+                        <span class="text-[11px] text-zinc-500">
                           Última:{" "}
                           {new Date(job.ultima_exec).toLocaleTimeString("pt-BR", {
                             hour: "2-digit",
@@ -410,7 +415,7 @@ export const AgendaView: Component = () => {
         <div class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50" onClick={() => setModalAberto(false)}>
           <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg w-full p-5 space-y-4 max-h-[90vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div class="flex items-center justify-between border-b border-zinc-800 pb-3 flex-shrink-0">
-              <h2 class="text-sm font-bold text-zinc-100">Novo Agendamento Periódico (Cron)</h2>
+              <h2 class="text-sm font-bold text-zinc-100">Novo Agendamento Periódico</h2>
               <IconButton size="xs" variant="ghost" onClick={() => setModalAberto(false)}>
                 <X size={16} />
               </IconButton>
@@ -428,16 +433,8 @@ export const AgendaView: Component = () => {
                 />
               </div>
 
-              <div>
-                <label class="block text-zinc-400 mb-1 font-medium">Frequência (Expressão Cron) *</label>
-                <input
-                  type="text"
-                  placeholder="0 * * * * (a cada hora), */15 * * * * (a cada 15 min)"
-                  value={novoCron()}
-                  onInput={(e) => setNovoCron(e.currentTarget.value)}
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 focus:outline-none focus:border-zinc-700 font-mono"
-                />
-              </div>
+              {/* Construtor Amigável e Avançado de Cron */}
+              <CronBuilder value={novoCron()} onChange={setNovoCron} />
 
               {/* Seletor de Tipo de Ação */}
               <div>

@@ -23,7 +23,8 @@ import {
   Zap,
 } from "lucide-solid";
 import { A, useNavigate } from "@solidjs/router";
-import { fetchApi, wsAtivo } from "../lib/context";
+import { fetchApi, wsAtivo, setWsAtivo } from "../lib/context";
+import { descreverCron } from "../lib/cron-helper";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
@@ -548,7 +549,7 @@ export const HomeView: Component = () => {
                       <span class="h-2 w-2 rounded-full bg-emerald-400 flex-shrink-0" />
                       <div class="min-w-0">
                         <div class="font-semibold text-zinc-200 font-mono truncate">{j.nome}</div>
-                        <div class="text-[10px] text-zinc-500">@{j.agente} · {j.agenda?.valor || "0 * * * *"}</div>
+                        <div class="text-[10px] text-zinc-400">@{j.agente} · {descreverCron(j.agenda?.valor || "0 * * * *")}</div>
                       </div>
                     </div>
 
