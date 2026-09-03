@@ -11,6 +11,13 @@ O **OpenCorp** é um sistema operacional distribuído para governar empresas aut
 
 ---
 
+## 🌐 Repositórios & Links
+
+* 🏛️ **Repositório Oficial (Organização):** [crom-org/opencorp](https://github.com/crom-org/opencorp) · Org: [crom-org](https://github.com/crom-org)
+* 🛠️ **Repositório de Desenvolvimento Ativo:** [MrJc01/crom-opencorp](https://github.com/MrJc01/crom-opencorp) · Mantenedor: [@MrJc01](https://github.com/MrJc01)
+
+---
+
 ## 📋 Pré-requisitos
 
 * **Node.js**: `>= 20.0.0` (recomendado Node 22+)
@@ -23,9 +30,12 @@ O **OpenCorp** é um sistema operacional distribuído para governar empresas aut
 ## 🚀 Instalação
 
 ```bash
-# 1. Clone o repositório
-git clone https://github.com/seu-usuario/crom-opencorp.git
-cd crom-opencorp
+# 1. Clone o repositório oficial (ou o repositório de desenvolvimento)
+git clone https://github.com/crom-org/opencorp.git
+cd opencorp
+
+# (Para desenvolvimento ativo):
+# git clone https://github.com/MrJc01/crom-opencorp.git && cd crom-opencorp
 
 # 2. Instale as dependências
 npm install
