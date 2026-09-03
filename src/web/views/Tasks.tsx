@@ -58,6 +58,12 @@ export const TasksView: Component = () => {
   const [novaColuna, setNovaColuna] = createSignal<Task["coluna"]>("backlog");
   const [novaPrioridade, setNovaPrioridade] = createSignal<Task["prioridade"]>("media");
   const [novoResponsavel, setNovoResponsavel] = createSignal("");
+  const [executarImediato, setExecutarImediato] = createSignal(false);
+  const [agendarTask, setAgendarTask] = createSignal(false);
+  const [tipoAgendamento, setTipoAgendamento] = createSignal<"data_unica" | "recorrente">("data_unica");
+  const [dataUnicaValor, setDataUnicaValor] = createSignal("");
+  const [recorrenteFrequencia, setRecorrenteFrequencia] = createSignal("diario");
+  const [cronCustomizado, setCronCustomizado] = createSignal("");
 
   // Drawer de Detalhes da Task Ativa
   const [taskSelecionada, setTaskSelecionada] = createSignal<Task | null>(null);
@@ -151,20 +157,39 @@ export const TasksView: Component = () => {
       return;
     }
 
+    const payload: Record<string, any> = {
+      titulo,
+      descricao: novaDescricao().trim(),
+      coluna: novaColuna(),
+      prioridade: novaPrioridade(),
+      responsavel: novoResponsavel().trim() || undefined,
+      imediato: executarImediato(),
+    };
+
+    if (agendarTask()) {
+      if (tipoAgendamento() === "data_unica") {
+        if (dataUnicaValor().trim()) payload.quando = dataUnicaValor().trim();
+      } else {
+        if (recorrenteFrequencia() === "custom") {
+          if (cronCustomizado().trim()) payload.cron = cronCustomizado().trim();
+        } else {
+          payload.repete = recorrenteFrequencia();
+        }
+      }
+    }
+
     try {
       await fetchApi("/tasks", {
         method: "POST",
-        body: JSON.stringify({
-          titulo,
-          descricao: novaDescricao().trim(),
-          coluna: novaColuna(),
-          prioridade: novaPrioridade(),
-          responsavel: novoResponsavel().trim() || undefined,
-        }),
+        body: JSON.stringify(payload),
       });
 
       setNovoTitulo("");
       setNovaDescricao("");
+      setExecutarImediato(false);
+      setAgendarTask(false);
+      setDataUnicaValor("");
+      setCronCustomizado("");
       setModalCriacaoAberto(false);
       showToast("Tarefa criada com sucesso!", "sucesso");
       void carregarTasks();
@@ -779,6 +804,112 @@ export const TasksView: Component = () => {
                     {(ag) => <option value={ag.id}>@{ag.id}</option>}
                   </For>
                 </select>
+              </div>
+
+              {/* Opção de Execução Imediata */}
+              <div class="flex items-center gap-2 p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
+                <input
+                  type="checkbox"
+                  id="checkImediato"
+                  checked={executarImediato()}
+                  onChange={(e) => setExecutarImediato(e.currentTarget.checked)}
+                  class="rounded border-zinc-700 bg-zinc-900 text-emerald-500 cursor-pointer"
+                />
+                <label for="checkImediato" class="text-xs text-zinc-300 font-medium cursor-pointer select-none">
+                  ⚡ Executar imediatamente após a criação
+                </label>
+              </div>
+
+              {/* Opção de Agendamento e Repetição */}
+              <div class="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="checkAgendar"
+                      checked={agendarTask()}
+                      onChange={(e) => setAgendarTask(e.currentTarget.checked)}
+                      class="rounded border-zinc-700 bg-zinc-900 text-amber-500 cursor-pointer"
+                    />
+                    <label for="checkAgendar" class="text-xs text-zinc-300 font-medium cursor-pointer select-none">
+                      📅 Agendar Execução / Repetição
+                    </label>
+                  </div>
+                  <span class="text-[10px] text-zinc-500 font-mono">OpenCorp Scheduler</span>
+                </div>
+
+                <Show when={agendarTask()}>
+                  <div class="pt-2 border-t border-zinc-800/80 space-y-2.5">
+                    <div class="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTipoAgendamento("data_unica")}
+                        class={`px-2 py-1.5 rounded text-xs border text-center transition-colors cursor-pointer ${
+                          tipoAgendamento() === "data_unica"
+                            ? "bg-amber-950/40 border-amber-600 text-amber-200 font-bold"
+                            : "bg-zinc-900 border-zinc-800 text-zinc-400"
+                        }`}
+                      >
+                        Data / Horário Único
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTipoAgendamento("recorrente")}
+                        class={`px-2 py-1.5 rounded text-xs border text-center transition-colors cursor-pointer ${
+                          tipoAgendamento() === "recorrente"
+                            ? "bg-amber-950/40 border-amber-600 text-amber-200 font-bold"
+                            : "bg-zinc-900 border-zinc-800 text-zinc-400"
+                        }`}
+                      >
+                        Repetir (Recorrente)
+                      </button>
+                    </div>
+
+                    <Show when={tipoAgendamento() === "data_unica"}>
+                      <div>
+                        <label class="block text-[11px] text-zinc-400 mb-1">Quando executar?</label>
+                        <input
+                          type="text"
+                          placeholder="Ex: 14:30, +30m, +2h ou amanha 09:00"
+                          value={dataUnicaValor()}
+                          onInput={(e) => setDataUnicaValor(e.currentTarget.value)}
+                          class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none"
+                        />
+                      </div>
+                    </Show>
+
+                    <Show when={tipoAgendamento() === "recorrente"}>
+                      <div>
+                        <label class="block text-[11px] text-zinc-400 mb-1">Frequência de Repetição</label>
+                        <select
+                          value={recorrenteFrequencia()}
+                          onChange={(e) => setRecorrenteFrequencia(e.currentTarget.value)}
+                          class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 text-xs focus:outline-none cursor-pointer"
+                        >
+                          <option value="diario">Diariamente (às 09:00)</option>
+                          <option value="horario">A cada 1 hora (60 min)</option>
+                          <option value="30m">A cada 30 minutos</option>
+                          <option value="15m">A cada 15 minutos</option>
+                          <option value="semanal">Semanalmente (Segunda às 09:00)</option>
+                          <option value="custom">Expressão Cron Customizada</option>
+                        </select>
+                      </div>
+
+                      <Show when={recorrenteFrequencia() === "custom"}>
+                        <div>
+                          <label class="block text-[11px] text-zinc-400 mb-1">Expressão Cron (5 campos)</label>
+                          <input
+                            type="text"
+                            placeholder="0 9 * * 1-5"
+                            value={cronCustomizado()}
+                            onInput={(e) => setCronCustomizado(e.currentTarget.value)}
+                            class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none"
+                          />
+                        </div>
+                      </Show>
+                    </Show>
+                  </div>
+                </Show>
               </div>
             </div>
 

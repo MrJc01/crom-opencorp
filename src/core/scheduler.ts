@@ -107,6 +107,137 @@ export function argsComGatilhoCron(job: { id: string; args: string[] }): string 
   return job.args[0] === "agent" && job.args[1] === "run" ? `cron:${job.id}` : "";
 }
 
+export function parseQuandoDataUnica(quando: string, agora: Date = new Date()): string {
+  const q = quando.trim();
+  const mOffset = /^\+(\d+)([mhd])$/i.exec(q);
+  if (mOffset) {
+    const qtd = parseInt(mOffset[1]!, 10);
+    const unidade = mOffset[2]!.toLowerCase();
+    const mult = unidade === "m" ? 60_000 : unidade === "h" ? 3600_000 : 86400_000;
+    return new Date(agora.getTime() + qtd * mult).toISOString();
+  }
+
+  const mHora = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(q);
+  if (mHora) {
+    const hora = parseInt(mHora[1]!, 10);
+    const min = parseInt(mHora[2]!, 10);
+    const seg = mHora[3] ? parseInt(mHora[3], 10) : 0;
+    const alvo = new Date(agora);
+    alvo.setHours(hora, min, seg, 0);
+    if (alvo.getTime() <= agora.getTime()) {
+      alvo.setDate(alvo.getDate() + 1);
+    }
+    return alvo.toISOString();
+  }
+
+  const mAmanha = /^amanh[aã]\s+(\d{1,2}):(\d{2})$/i.exec(q);
+  if (mAmanha) {
+    const hora = parseInt(mAmanha[1]!, 10);
+    const min = parseInt(mAmanha[2]!, 10);
+    const alvo = new Date(agora);
+    alvo.setDate(alvo.getDate() + 1);
+    alvo.setHours(hora, min, 0, 0);
+    return alvo.toISOString();
+  }
+
+  const d = new Date(q);
+  if (!isNaN(d.getTime())) return d.toISOString();
+  throw new SchedulerError(`formato de agendamento não reconhecido: "${quando}". Use "14:30", "+30m", "+2h", "amanha 09:00", ou ISO`);
+}
+
+export function parseAgendaTask(opts: {
+  quando?: string;
+  at?: string;
+  cron?: string;
+  agendar?: string;
+  repete?: string;
+  repetir?: string;
+  intervaloMin?: number;
+}): { agenda: Agenda; descricao: string } | null {
+  const cronExpr = (opts.cron || opts.agendar)?.trim();
+  const repeteExpr = (opts.repete || opts.repetir)?.trim().toLowerCase();
+  const quandoExpr = opts.quando || opts.at;
+
+  if (cronExpr) {
+    return {
+      agenda: { tipo: "cron", valor: cronExpr },
+      descricao: `Cron: "${cronExpr}"`,
+    };
+  }
+
+  if (opts.intervaloMin && Number(opts.intervaloMin) > 0) {
+    const min = Number(opts.intervaloMin);
+    return {
+      agenda: { tipo: "intervalo_min", valor: min },
+      descricao: `A cada ${min} min`,
+    };
+  }
+
+  if (repeteExpr) {
+    if (repeteExpr === "diario" || repeteExpr === "diária" || repeteExpr === "daily") {
+      let hora = 9;
+      let min = 0;
+      if (quandoExpr) {
+        const m = /^(\d{1,2}):(\d{2})$/.exec(quandoExpr.trim());
+        if (m) {
+          hora = parseInt(m[1]!, 10);
+          min = parseInt(m[2]!, 10);
+        }
+      }
+      return {
+        agenda: { tipo: "cron", valor: `${min} ${hora} * * *` },
+        descricao: `Diariamente às ${String(hora).padStart(2, "0")}:${String(min).padStart(2, "0")}`,
+      };
+    }
+    if (repeteExpr === "horario" || repeteExpr === "hourly") {
+      return {
+        agenda: { tipo: "intervalo_min", valor: 60 },
+        descricao: `A cada hora (60 min)`,
+      };
+    }
+    if (repeteExpr === "semanal" || repeteExpr === "weekly") {
+      return {
+        agenda: { tipo: "cron", valor: "0 9 * * 1" },
+        descricao: `Semanalmente (toda segunda às 09:00)`,
+      };
+    }
+    const mMin = /^(\d+)m$/i.exec(repeteExpr);
+    if (mMin) {
+      const val = parseInt(mMin[1]!, 10);
+      return {
+        agenda: { tipo: "intervalo_min", valor: val },
+        descricao: `A cada ${val} min`,
+      };
+    }
+    const mHora = /^(\d+)h$/i.exec(repeteExpr);
+    if (mHora) {
+      const val = parseInt(mHora[1]!, 10) * 60;
+      return {
+        agenda: { tipo: "intervalo_min", valor: val },
+        descricao: `A cada ${parseInt(mHora[1]!, 10)} hora(s)`,
+      };
+    }
+    const num = parseInt(repeteExpr, 10);
+    if (!isNaN(num) && num > 0) {
+      return {
+        agenda: { tipo: "intervalo_min", valor: num },
+        descricao: `A cada ${num} min`,
+      };
+    }
+    throw new SchedulerError(`formato de repetição inválido: "${repeteExpr}". Use "diario", "semanal", "30m", "2h" ou número de minutos`);
+  }
+
+  if (quandoExpr) {
+    const iso = parseQuandoDataUnica(quandoExpr);
+    return {
+      agenda: { tipo: "data_unica", valor: iso },
+      descricao: `Data única: ${iso.slice(0, 16).replace("T", " ")}`,
+    };
+  }
+
+  return null;
+}
+
 export class Scheduler {
   private readonly homeDir: string;
   private readonly agora: () => Date;

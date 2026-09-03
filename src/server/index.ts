@@ -19,7 +19,7 @@ import { FlowStore, type Flow, type SessaoFlow } from "../core/flow-store.js";
 import { migrarTeamsParaFlows } from "../core/flow-migrate.js";
 import { MeetingManager, gerarIdReuniao } from "../core/meeting-manager.js";
 import { TaskStore, type Task } from "../core/task-store.js";
-import { Scheduler } from "../core/scheduler.js";
+import { Scheduler, parseAgendaTask } from "../core/scheduler.js";
 import type { Agenda } from "../core/scheduler.js";
 import { HookStore, type Hook, type AlvoHook, type PayloadHook } from "../core/hook-store.js";
 import { NotificationStore, type TipoNotificacao } from "../core/notification-store.js";
@@ -1934,18 +1934,76 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             return;
           }
           const c = valido.data;
+
+          const agendaInfo = parseAgendaTask({
+            quando: typeof corpo.quando === "string" ? corpo.quando : typeof corpo.at === "string" ? corpo.at : undefined,
+            cron: typeof corpo.cron === "string" ? corpo.cron : typeof corpo.agendar === "string" ? corpo.agendar : undefined,
+            repete: typeof corpo.repete === "string" ? corpo.repete : typeof corpo.repetir === "string" ? corpo.repetir : undefined,
+            intervaloMin: typeof corpo.intervalo_min === "number" ? corpo.intervalo_min : undefined,
+          });
+
+          const labelsIniciais = [...(c.labels ?? [])];
+          if (agendaInfo) {
+            if (agendaInfo.agenda.tipo === "cron" || agendaInfo.agenda.tipo === "intervalo_min") {
+              if (!labelsIniciais.includes("recorrente")) labelsIniciais.push("recorrente");
+            } else {
+              if (!labelsIniciais.includes("agendada")) labelsIniciais.push("agendada");
+            }
+          }
+
+          const executarAgora = Boolean(corpo.executar_agora || corpo.imediato || corpo.run);
+
           const t = await tasks.criar(ws.path, {
             titulo: c.titulo,
             descricao: c.descricao,
-            coluna: c.coluna,
+            coluna: c.coluna || (executarAgora ? "fazendo" : undefined),
             prioridade: c.prioridade,
-            labels: c.labels,
+            labels: labelsIniciais.length > 0 ? labelsIniciais : undefined,
             responsavel: c.responsavel,
-            due: c.due,
+            due: c.due || (agendaInfo?.agenda.tipo === "data_unica" ? agendaInfo.agenda.valor : undefined),
             task_pai: c.task_pai,
             bloqueado_por: c.bloqueado_por,
           }, "api");
-          enviar(res, 201, t);
+
+          let jobInfo: any = undefined;
+          if (agendaInfo) {
+            try {
+              const jobNome = `task-${t.id}`;
+              const job = await scheduler.criar({
+                nome: jobNome,
+                agenda: agendaInfo.agenda,
+                args: ["task", "run", t.id],
+                workspace: ws.id,
+              });
+              jobInfo = { id: job.id, proxima_exec: job.proxima_exec, descricao: agendaInfo.descricao };
+              await tasks.mensagem(ws.path, t.id, {
+                autor: "sistema",
+                corpo: `📅 Agendamento configurado: ${agendaInfo.descricao} (Job: ${job.id}, Próxima: ${job.proxima_exec ? job.proxima_exec.slice(0, 16).replace("T", " ") : "-"})`,
+                tipo: "sistema",
+              });
+            } catch (err) {
+              console.error("[task schedule] erro ao criar job:", err);
+            }
+          }
+
+          if (executarAgora) {
+            void (async () => {
+              try {
+                const sessoes = new SessionManager({ homeDir: opcoes.homeDir ?? opencorpHome() });
+                const agente = c.responsavel ? c.responsavel.replace(/^agente:/, "").trim() : "executor-padrao";
+                await sessoes.rodar({
+                  agente,
+                  ordem: `Você é o agente "${agente}" executando a task ${t.id} no workspace "${ws.id}".\nTítulo: ${t.titulo}\n${t.descricao ? `Descrição:\n${t.descricao}` : ""}\nExecute todas as ações necessárias para resolver esta tarefa.`,
+                  workspaceDir: ws.path,
+                  gatilho: { tipo: "manual", origem: `task:${t.id}` },
+                });
+              } catch (err) {
+                console.error("[task run imediato] falhou:", err);
+              }
+            })();
+          }
+
+          enviar(res, 201, { ...t, agendamento: jobInfo, executando_agora: executarAgora });
           return;
         }
         if (rota === "/schedules" && req.method === "GET") {

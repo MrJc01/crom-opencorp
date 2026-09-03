@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { TaskStore, type Task } from "../../core/task-store.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
 import { SessionManager } from "../../core/session-manager.js";
+import { Scheduler, parseAgendaTask } from "../../core/scheduler.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -34,7 +35,7 @@ export async function executarTask(
   wsPath: string,
   wsId: string,
   taskId: string,
-  opts: { agent?: string; model?: string } = {},
+  opts: { agent?: string; model?: string; background?: boolean } = {},
 ): Promise<void> {
   const t = await store.obter(wsPath, taskId);
 
@@ -57,11 +58,9 @@ export async function executarTask(
   // 3. Registra início no chat da task
   await store.mensagem(wsPath, taskId, {
     autor: `agente:${agente}`,
-    corpo: `Iniciando execução da tarefa: "${t.titulo}"`,
+    corpo: `Iniciando execução da tarefa: "${t.titulo}"${opts.background ? " (em background)" : ""}`,
     tipo: "comentario",
   });
-
-  console.log(`[task run] executando task ${taskId} com agente "${agente}"...`);
 
   // 4. Constrói instrução detalhada com o contexto da task
   const partesOrdem = [
@@ -73,8 +72,59 @@ export async function executarTask(
   ];
   const ordem = partesOrdem.filter(Boolean).join("\n\n");
 
-  // 5. Executa via SessionManager
   const sessoes = new SessionManager();
+
+  // MODO BACKGROUND (assíncrono / não-bloqueante)
+  if (opts.background) {
+    console.log(`⚡ [task ${taskId}] execução disparada em background com agente "@${agente}"`);
+    console.log(`   Acompanhe o progresso com: oc task status ${taskId}  ou  oc task chat ${taskId}`);
+
+    void (async () => {
+      try {
+        const r = await sessoes.rodar({
+          agente,
+          ordem,
+          model: opts.model,
+          workspaceId: wsId,
+          gatilho: { tipo: "manual", origem: `task:${taskId}` },
+        });
+
+        if (r.status === "concluido") {
+          await store.mover(wsPath, taskId, "feito");
+          await store.mensagem(wsPath, taskId, {
+            autor: `agente:${agente}`,
+            corpo: `Tarefa concluída com sucesso! (sessão: ${r.id}, duração: ${((r.duracao_ms ?? 0) / 1000).toFixed(1)}s)`,
+            tipo: "comentario",
+          });
+        } else if (r.status === "hitl_pendente") {
+          await store.mensagem(wsPath, taskId, {
+            autor: "sistema",
+            corpo: `Execução pausada: requer aprovação humana (HITL) na sessão ${r.id}. Use "oc approvals list" para revisar.`,
+            tipo: "handoff",
+          });
+        } else {
+          await store.mover(wsPath, taskId, "bloqueado");
+          const preview = r.captura ? r.captura.slice(-300).trim() : `exit code ${r.exit_code}`;
+          await store.mensagem(wsPath, taskId, {
+            autor: `agente:${agente}`,
+            corpo: `Falha na execução: ${preview}\n(log: ${r.log})`,
+            tipo: "comentario",
+          });
+        }
+      } catch (err: any) {
+        await store.mover(wsPath, taskId, "bloqueado");
+        await store.mensagem(wsPath, taskId, {
+          autor: "sistema",
+          corpo: `Erro fatal ao rodar em background: ${err?.message || String(err)}`,
+          tipo: "comentario",
+        });
+      }
+    })();
+    return;
+  }
+
+  // MODO FOREGROUND (síncrono com acompanhamento no terminal)
+  console.log(`⚡ [task ${taskId}] executando agora em foreground com agente "${agente}"...`);
   const r = await sessoes.rodar({
     agente,
     ordem,
@@ -83,7 +133,6 @@ export async function executarTask(
     gatilho: { tipo: "manual", origem: `task:${taskId}` },
   });
 
-  // 6. Trata o desfecho da execução
   if (r.status === "concluido") {
     await store.mover(wsPath, taskId, "feito");
     await store.mensagem(wsPath, taskId, {
@@ -128,6 +177,7 @@ export function registerTaskCommand(program: Command): void {
 
   task
     .command("create")
+    .alias("criar")
     .requiredOption("--titulo <titulo>", "título da task")
     .option("--descricao <texto>", "descrição")
     .option("--coluna <coluna>", "coluna inicial (padrão backlog)")
@@ -137,29 +187,89 @@ export function registerTaskCommand(program: Command): void {
     .option("--due <data>", "prazo (ISO ou AAAA-MM-DD)")
     .option("--pai <task-id>", "task pai (fan-out)")
     .option("--bloqueado-por <ids>", "ids de tasks dependentes, separados por vírgula")
+    // Opções de execução imediata
     .option("--run", "executa a task imediatamente após a criação com o agente responsável")
-    .option("--model <provider/model>", "sobrepõe o modelo do agente (usado com --run)")
-    .description("cria uma task no quadro (use --run para executar agora)")
+    .option("--imediato", "alias de --run (executa a task agora)")
+    .option("--now", "alias de --run (executa a task agora)")
+    .option("--bg", "executa em background (não bloqueia o terminal)")
+    .option("--background", "alias de --bg")
+    .option("--async", "alias de --bg")
+    // Opções de agendamento e repetição
+    .option("--quando <horario>", "horário ou data para executar (ex: 14:30, +30m, +2h, amanha 09:00, ISO)")
+    .option("--at <horario>", "alias de --quando")
+    .option("--cron <expressao>", "expressão cron para agendamento recorrente (ex: '0 9 * * 1-5')")
+    .option("--agendar <expressao>", "alias de --cron")
+    .option("--repete <frequencia>", "recorrência da execução (ex: diario, semanal, 30m, 2h, 60)")
+    .option("--repetir <frequencia>", "alias de --repete")
+    .option("--intervalo-min <min>", "intervalo fixo de repetição em minutos (ex: 30, 60)")
+    .option("--model <provider/model>", "sobrepõe o modelo do agente (usado ao executar)")
+    .description("cria uma task no quadro (suporta execução imediata, em background ou agendamento pontual/recorrente)")
     .action((opts: Record<string, any>) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(opts));
+
+        const agendaInfo = parseAgendaTask({
+          quando: opts["quando"] as string | undefined,
+          at: opts["at"] as string | undefined,
+          cron: opts["cron"] as string | undefined,
+          agendar: opts["agendar"] as string | undefined,
+          repete: opts["repete"] as string | undefined,
+          repetir: opts["repetir"] as string | undefined,
+          intervaloMin: opts["intervaloMin"] ? Number(opts["intervaloMin"]) : undefined,
+        });
+
+        const labelsIniciais = (opts["labels"] as string | undefined)?.split(",").map((x) => x.trim()).filter(Boolean) ?? [];
+        if (agendaInfo) {
+          if (agendaInfo.agenda.tipo === "cron" || agendaInfo.agenda.tipo === "intervalo_min") {
+            if (!labelsIniciais.includes("recorrente")) labelsIniciais.push("recorrente");
+          } else {
+            if (!labelsIniciais.includes("agendada")) labelsIniciais.push("agendada");
+          }
+        }
+
+        const executarAgora = Boolean(opts["run"] || opts["imediato"] || opts["now"]);
+        const modoBg = Boolean(opts["bg"] || opts["background"] || opts["async"]);
+
         const t = await store.criar(ws.path, {
           titulo: opts["titulo"] as string,
           descricao: opts["descricao"] as string | undefined,
-          coluna: (opts["coluna"] as string) || (opts["run"] ? "fazendo" : undefined),
+          coluna: (opts["coluna"] as string) || (executarAgora ? "fazendo" : undefined),
           prioridade: opts["prioridade"] as "baixa" | "media" | "alta" | undefined,
-          labels: (opts["labels"] as string | undefined)?.split(",").map((x) => x.trim()).filter(Boolean),
+          labels: labelsIniciais.length > 0 ? labelsIniciais : undefined,
           responsavel: opts["responsavel"] as string | undefined,
-          due: opts["due"] as string | undefined,
+          due: (opts["due"] as string | undefined) || (agendaInfo?.agenda.tipo === "data_unica" ? agendaInfo.agenda.valor : undefined),
           task_pai: opts["pai"] as string | undefined,
           bloqueado_por: (opts["bloqueadoPor"] as string | undefined)?.split(",").map((x) => x.trim()).filter(Boolean),
         });
         console.log(`ok: ${t.id} criada em "${t.coluna}" — ${t.titulo}`);
 
-        if (opts["run"]) {
+        // Registra job no scheduler se foi configurado agendamento ou repetição
+        if (agendaInfo) {
+          const scheduler = new Scheduler();
+          const jobNome = `task-${t.id}`;
+          const job = await scheduler.criar({
+            nome: jobNome,
+            agenda: agendaInfo.agenda,
+            args: ["task", "run", t.id],
+            workspace: ws.id,
+          });
+
+          await store.mensagem(ws.path, t.id, {
+            autor: "sistema",
+            corpo: `📅 Agendamento configurado: ${agendaInfo.descricao} (Job: ${job.id}, Próxima: ${job.proxima_exec ? job.proxima_exec.slice(0, 16).replace("T", " ") : "-"})`,
+            tipo: "sistema",
+          });
+
+          const proxFmt = job.proxima_exec ? job.proxima_exec.slice(0, 16).replace("T", " ") : "-";
+          console.log(`📅 Agendamento: ${agendaInfo.descricao} (Job: ${job.id} · Próxima: ${proxFmt})`);
+        }
+
+        // Executa imediatamente se solicitado
+        if (executarAgora) {
           await executarTask(store, ws.path, ws.id, t.id, {
             agent: (opts["responsavel"] as string | undefined)?.replace(/^agente:/, ""),
             model: opts["model"] as string | undefined,
+            background: modoBg,
           });
         }
       }),
@@ -167,14 +277,23 @@ export function registerTaskCommand(program: Command): void {
 
   task
     .command("run")
+    .alias("rodar")
     .argument("<id>", "id da task para executar agora")
     .option("--agent <id>", "sobrepõe o agente executor (padrão: o responsável da task ou executor-padrao)")
     .option("--model <provider/model>", "sobrepõe o modelo do agente")
-    .description("executa uma task imediatamente usando o agente responsável")
-    .action((id: string, opts: { agent?: string; model?: string; workspace?: string }) =>
+    .option("--bg", "executa em background (não bloqueia o terminal)")
+    .option("--background", "alias de --bg")
+    .option("--async", "alias de --bg")
+    .description("executa uma task imediatamente (foreground ou background)")
+    .action((id: string, opts: { agent?: string; model?: string; bg?: boolean; background?: boolean; async?: boolean; workspace?: string }) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(opts));
-        await executarTask(store, ws.path, ws.id, id, opts);
+        const modoBg = Boolean(opts.bg || opts.background || opts.async);
+        await executarTask(store, ws.path, ws.id, id, {
+          agent: opts.agent,
+          model: opts.model,
+          background: modoBg,
+        });
       }),
     );
 
