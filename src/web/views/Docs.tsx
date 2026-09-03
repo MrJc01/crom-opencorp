@@ -111,109 +111,107 @@ export const DocsView: Component = () => {
 
   return (
     <div class="flex h-full w-full overflow-hidden bg-zinc-950 text-zinc-100">
-      {/* Sidebar de Documentação */}
-      <div
-        class={`border-r border-zinc-800/80 bg-zinc-950/60 flex flex-col flex-shrink-0 transition-all duration-200 ease-in-out ${
-          sidebarAberta() ? "w-72" : "w-0 overflow-hidden border-r-0"
-        }`}
-      >
-        {/* Cabeçalho do Docs */}
-        <div class="p-3.5 border-b border-zinc-800/80 min-w-[18rem]">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-2">
-              <div class="h-7 w-7 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                <BookOpen size={15} />
+      {/* Sidebar de Documentação com controle de visibilidade */}
+      <Show when={sidebarAberta()}>
+        <aside class="w-72 border-r border-zinc-800/80 bg-zinc-950 flex flex-col flex-shrink-0 h-full select-none z-10">
+          {/* Cabeçalho do Docs */}
+          <div class="p-3.5 border-b border-zinc-800/80">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <div class="h-7 w-7 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  <BookOpen size={15} />
+                </div>
+                <div>
+                  <h2 class="text-xs font-bold text-zinc-100">Documentação</h2>
+                  <span class="text-[10px] text-zinc-500 font-mono">Manual OpenCorp & oc</span>
+                </div>
               </div>
-              <div>
-                <h2 class="text-xs font-bold text-zinc-100">Documentação</h2>
-                <span class="text-[10px] text-zinc-500 font-mono">Manual OpenCorp & oc</span>
-              </div>
+              <button
+                type="button"
+                onClick={toggleSidebar}
+                class="!bg-transparent hover:!bg-zinc-900 p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer border border-transparent hover:border-zinc-800"
+                title="Recolher menu da documentação"
+              >
+                <PanelLeftClose size={15} />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={toggleSidebar}
-              class="!bg-transparent hover:!bg-zinc-900 p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-              title="Recolher menu da documentação"
-            >
-              <PanelLeftClose size={15} />
-            </button>
+
+            {/* Campo de Busca */}
+            <div class="relative">
+              <Search size={13} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <input
+                type="text"
+                placeholder="Buscar na documentação..."
+                value={busca()}
+                onInput={(e) => setBusca(e.currentTarget.value)}
+                class="w-full bg-zinc-900/80 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500/50"
+              />
+            </div>
           </div>
 
-          {/* Campo de Busca */}
-          <div class="relative">
-            <Search size={13} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input
-              type="text"
-              placeholder="Buscar na documentação..."
-              value={busca()}
-              onInput={(e) => setBusca(e.currentTarget.value)}
-              class="w-full bg-zinc-900/80 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500/50"
-            />
-          </div>
-        </div>
-
-        {/* Lista de Categorias e Artigos */}
-        <div class="flex-1 overflow-y-auto p-2 space-y-4 scrollbar-thin min-w-[18rem]">
-          <For each={categorias()}>
-            {([categoria, itens]) => (
-              <div class="space-y-1">
-                <div class="px-2 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider font-mono">
-                  {categoria}
-                </div>
-                <div class="space-y-0.5">
-                  <For each={itens}>
-                    {(item) => {
-                      const ativo = () => docAtivo()?.slug === item.slug;
-                      return (
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => carregarDocumento(item.slug)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              carregarDocumento(item.slug);
-                            }
-                          }}
-                          class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer text-left select-none ${
-                            ativo()
-                              ? "!bg-emerald-950/60 text-emerald-300 border border-emerald-500/50 font-medium"
-                              : "!bg-transparent text-zinc-400 hover:text-zinc-200 hover:!bg-zinc-900/80 border border-transparent"
-                          }`}
-                        >
-                          <div class="flex items-center gap-2 min-w-0">
-                            <FileText size={13} class={ativo() ? "text-emerald-400" : "text-zinc-500"} />
-                            <span class="truncate">{item.titulo}</span>
+          {/* Lista de Categorias e Artigos */}
+          <div class="flex-1 overflow-y-auto p-2 space-y-4 scrollbar-thin">
+            <For each={categorias()}>
+              {([categoria, itens]) => (
+                <div class="space-y-1">
+                  <div class="px-2 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider font-mono">
+                    {categoria}
+                  </div>
+                  <div class="space-y-0.5">
+                    <For each={itens}>
+                      {(item) => {
+                        const ativo = () => docAtivo()?.slug === item.slug;
+                        return (
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => carregarDocumento(item.slug)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                carregarDocumento(item.slug);
+                              }
+                            }}
+                            class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer text-left select-none ${
+                              ativo()
+                                ? "!bg-emerald-950/60 text-emerald-300 border border-emerald-500/50 font-medium"
+                                : "!bg-transparent text-zinc-400 hover:text-zinc-200 hover:!bg-zinc-900/80 border border-transparent"
+                            }`}
+                          >
+                            <div class="flex items-center gap-2 min-w-0">
+                              <FileText size={13} class={ativo() ? "text-emerald-400" : "text-zinc-500"} />
+                              <span class="truncate">{item.titulo}</span>
+                            </div>
+                            <Show when={ativo()}>
+                              <ChevronRight size={12} class="text-emerald-400 flex-shrink-0" />
+                            </Show>
                           </div>
-                          <Show when={ativo()}>
-                            <ChevronRight size={12} class="text-emerald-400 flex-shrink-0" />
-                          </Show>
-                        </div>
-                      );
-                    }}
-                  </For>
+                        );
+                      }}
+                    </For>
+                  </div>
                 </div>
-              </div>
-            )}
-          </For>
-        </div>
-
-        {/* Rodapé de Dica CLI */}
-        <div class="p-3 border-t border-zinc-800/80 bg-zinc-900/30 text-[11px] text-zinc-400 min-w-[18rem]">
-          <div class="flex items-center gap-1.5 font-mono text-[10px] text-emerald-400 font-bold mb-1">
-            <Terminal size={12} />
-            <span>Dica do Terminal CLI</span>
+              )}
+            </For>
           </div>
-          <p class="text-[10px] text-zinc-500 mb-1.5 leading-snug">
-            Consulte tópicos diretamente no terminal ou em scripts:
-          </p>
-          <code class="block font-mono text-[10px] bg-zinc-950 px-2 py-1 rounded border border-zinc-800 text-zinc-300 select-all">
-            ./bin/oc doc ajuda {docAtivo()?.slug || "estudo"}
-          </code>
-        </div>
-      </div>
+
+          {/* Rodapé de Dica CLI */}
+          <div class="p-3 border-t border-zinc-800/80 bg-zinc-900/30 text-[11px] text-zinc-400">
+            <div class="flex items-center gap-1.5 font-mono text-[10px] text-emerald-400 font-bold mb-1">
+              <Terminal size={12} />
+              <span>Dica do Terminal CLI</span>
+            </div>
+            <p class="text-[10px] text-zinc-500 mb-1.5 leading-snug">
+              Consulte tópicos diretamente no terminal ou em scripts:
+            </p>
+            <code class="block font-mono text-[10px] bg-zinc-950 px-2 py-1 rounded border border-zinc-800 text-zinc-300 select-all">
+              ./bin/oc doc ajuda {docAtivo()?.slug || "estudo"}
+            </code>
+          </div>
+        </aside>
+      </Show>
 
       {/* Área Principal de Conteúdo */}
-      <div class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-zinc-950">
+      <main class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-zinc-950">
         <Show
           when={docAtivo()}
           fallback={
@@ -225,16 +223,18 @@ export const DocsView: Component = () => {
           }
         >
           {/* Barra Superior do Documento */}
-          <div class="h-14 border-b border-zinc-800/80 px-4 sm:px-6 flex items-center justify-between gap-4 flex-shrink-0 bg-zinc-900/40">
-            <div class="flex items-center gap-2.5 min-w-0">
+          <header class="h-14 border-b border-zinc-800/80 px-4 sm:px-6 flex items-center justify-between gap-4 flex-shrink-0 bg-zinc-900/40 backdrop-blur-sm">
+            <div class="flex items-center gap-3 min-w-0">
+              {/* Botão de Toggle do Menu Lateral */}
               <button
                 type="button"
                 onClick={toggleSidebar}
-                class="!bg-zinc-900/80 hover:!bg-zinc-800 p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 border border-zinc-800 transition-colors cursor-pointer flex-shrink-0"
+                class="!bg-zinc-900 hover:!bg-zinc-800 p-2 rounded-lg text-zinc-400 hover:text-emerald-400 border border-zinc-800 transition-colors cursor-pointer flex items-center gap-1.5 text-xs flex-shrink-0 shadow-xs"
                 title={sidebarAberta() ? "Recolher menu da documentação" : "Expandir menu da documentação"}
               >
-                <Show when={sidebarAberta()} fallback={<PanelLeft size={16} />}>
-                  <PanelLeftClose size={16} />
+                <Show when={sidebarAberta()} fallback={<><PanelLeft size={15} class="text-emerald-400" /><span class="hidden sm:inline text-zinc-300 font-medium text-[11px]">Tópicos</span></>}>
+                  <PanelLeftClose size={15} />
+                  <span class="hidden sm:inline text-zinc-400 font-medium text-[11px]">Recolher</span>
                 </Show>
               </button>
 
@@ -261,12 +261,12 @@ export const DocsView: Component = () => {
                 {copiado() ? "Copiado!" : "Copiar MD"}
               </Button>
             </div>
-          </div>
+          </header>
 
           {/* Leitor de Markdown Formatado */}
-          <div class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-10 scrollbar-thin">
+          <div class="flex-1 overflow-y-auto p-4 sm:p-8 lg:p-12 scrollbar-thin">
             <div class="max-w-4xl mx-auto space-y-6">
-              <div class="p-3 rounded-xl bg-zinc-900/40 border border-zinc-800/80 text-xs text-zinc-400 flex items-center justify-between">
+              <div class="p-3.5 rounded-xl bg-zinc-900/40 border border-zinc-800/80 text-xs text-zinc-400 flex items-center justify-between shadow-xs">
                 <div class="flex items-center gap-2">
                   <Bookmark size={14} class="text-emerald-400" />
                   <span>Documento Oficial: <strong class="text-zinc-200 font-mono">{docAtivo()!.arquivo}</strong></span>
@@ -284,7 +284,7 @@ export const DocsView: Component = () => {
             </div>
           </div>
         </Show>
-      </div>
+      </main>
     </div>
   );
 };
