@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync, readFileSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import Database from "better-sqlite3";
 import type { Agente } from "../schemas/agent.js";
@@ -90,6 +90,121 @@ function obterTarefasAtivasResumo(wsPath: string): string[] {
     }
   } catch {}
   return [];
+}
+
+/**
+ * CTX-02: Baseado em agent.memory.reads (ou 'documentos'), busca o documento mais
+ * recentemente modificado ou criado no workspace e injeta uma prévia de entrada.
+ */
+export function obterUltimoDocumentoRelevante(wsPath: string, agente: Agente): string | null {
+  try {
+    const categorias = (agente.memory?.reads && agente.memory.reads.length > 0)
+      ? agente.memory.reads
+      : ["documentos"];
+
+    let melhorArquivo: { name: string; path: string; relPath: string; cat: string; mtime: number } | null = null;
+
+    for (const cat of categorias) {
+      const catDir = join(wsPath, ".opencorp", "registries", cat);
+      if (!existsSync(catDir)) continue;
+
+      const entries = readdirSync(catDir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (!ent.isFile() || ent.name.startsWith(".")) continue;
+        if (!ent.name.endsWith(".md") && !ent.name.endsWith(".json")) continue;
+        const fullPath = join(catDir, ent.name);
+        try {
+          const st = statSync(fullPath);
+          const deveSubstituir = !melhorArquivo ||
+            st.mtimeMs > melhorArquivo.mtime ||
+            (st.mtimeMs === melhorArquivo.mtime && ent.name.localeCompare(melhorArquivo.name) > 0);
+
+          if (deveSubstituir) {
+            melhorArquivo = {
+              name: ent.name,
+              path: fullPath,
+              relPath: `.opencorp/registries/${cat}/${ent.name}`,
+              cat,
+              mtime: st.mtimeMs,
+            };
+          }
+        } catch {}
+      }
+    }
+
+    if (!melhorArquivo) return null;
+
+    const conteudoBruto = readFileSync(melhorArquivo.path, "utf8");
+    const previa = conteudoBruto.length > 1500
+      ? conteudoBruto.slice(0, 1500) + "\n... [conteúdo truncado para contexto inicial]"
+      : conteudoBruto;
+
+    return `\n## Documento Recente Relevante (${melhorArquivo.cat})\n> Arquivo: ${melhorArquivo.relPath}\n\`\`\`markdown\n${previa.trim()}\n\`\`\``;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * CTX-03: Injeta catálogo compacto de ferramentas e scripts do workspace
+ * eliminando a necessidade de o agente rodar comandos exploratórios no turno 1.
+ */
+export function obterCatalogoFerramentasEScripts(wsPath: string): string | null {
+  const itens: string[] = [];
+
+  try {
+    const scriptsDir = join(wsPath, "scripts");
+    if (existsSync(scriptsDir)) {
+      const arquivos = readdirSync(scriptsDir, { withFileTypes: true });
+      for (const arq of arquivos) {
+        if (!arq.isFile() || arq.name.startsWith(".") || arq.name.endsWith(".db")) continue;
+        const fullPath = join(scriptsDir, arq.name);
+        let descricao = "";
+        try {
+          const trecho = readFileSync(fullPath, "utf8").slice(0, 500);
+          const linhas = trecho.split("\n");
+          for (const l of linhas) {
+            const limpa = l.trim();
+            if (limpa.startsWith("#") || limpa.startsWith("//") || limpa.startsWith("*")) {
+              const semComentario = limpa.replace(/^([#/\\*]+)\s*/, "").trim();
+              if (semComentario && !semComentario.startsWith("!") && !semComentario.startsWith("@") && semComentario.length > 5) {
+                descricao = semComentario;
+                break;
+              }
+            }
+          }
+        } catch {}
+
+        let comando = `scripts/${arq.name}`;
+        if (arq.name.endsWith(".js") || arq.name.endsWith(".cjs") || arq.name.endsWith(".mjs")) {
+          comando = `node scripts/${arq.name}`;
+        } else if (arq.name.endsWith(".py")) {
+          comando = `python3 scripts/${arq.name}`;
+        } else if (arq.name.endsWith(".sh")) {
+          comando = `bash scripts/${arq.name}`;
+        }
+        itens.push(`- \`${comando}\`${descricao ? `: ${descricao}` : ""}`);
+      }
+    }
+  } catch {}
+
+  try {
+    const caminhosDocs = [
+      join(wsPath, "FERRAMENTAS.md"),
+      join(wsPath, "docs", "FERRAMENTAS.md"),
+      join(wsPath, ".opencorp", "FERRAMENTAS.md"),
+    ];
+    for (const doc of caminhosDocs) {
+      if (existsSync(doc)) {
+        const conteudo = readFileSync(doc, "utf8").slice(0, 1000);
+        itens.push(`\n### Resumo de FERRAMENTAS.md:\n${conteudo.trim()}`);
+        break;
+      }
+    }
+  } catch {}
+
+  if (itens.length === 0) return null;
+  return `\n## Ferramentas e Scripts do Workspace\n${itens.join("\n")}`;
 }
 
 function obterContextoAdaptativo(wsPath: string, wsId: string, agente: Agente): string {
@@ -202,6 +317,19 @@ function obterContextoAdaptativo(wsPath: string, wsId: string, agente: Agente): 
   } catch {}
 
   partes.push("- Registros Corporativos: utilize sempre .opencorp/registries/ (documentos, execucoes, chats). NUNCA duplique como .opencorp/.opencorp/.");
+
+  // Ferramentas & Scripts do Workspace (CTX-03)
+  const catalogoFerramentas = obterCatalogoFerramentasEScripts(wsPath);
+  if (catalogoFerramentas) {
+    partes.push(catalogoFerramentas);
+  }
+
+  // Último Documento Relevante de Entrada (CTX-02)
+  const ultimoDoc = obterUltimoDocumentoRelevante(wsPath, agente);
+  if (ultimoDoc) {
+    partes.push(ultimoDoc);
+  }
+
   return partes.join("\n") + "\n";
 }
 

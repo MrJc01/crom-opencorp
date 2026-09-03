@@ -93,4 +93,56 @@ describe("Contexto Dinâmico Nativo (projeto.json e contexto.json)", () => {
     expect(conteudo).not.toContain("## Perfil do Negócio / Empresa (projeto.json)");
     expect(conteudo).not.toContain("## Contexto Adaptativo do Workspace (contexto.json)");
   });
+
+  it("injeta o último documento relevante baseado na memória do agente (CTX-02)", async () => {
+    const docsDir = join(tempWs, ".opencorp", "registries", "documentos");
+    mkdirSync(docsDir, { recursive: true });
+
+    // Cria documento antigo
+    writeFileSync(join(docsDir, "pauta-antiga.md"), "# Pauta Antiga\nDetalhes de ontem.");
+    // Cria documento novo
+    writeFileSync(
+      join(docsDir, "pauta-recente.md"),
+      "# Pauta Recente 2026-09-03\nDiretrizes da edição de hoje com prioridade máxima."
+    );
+
+    const pathDestino = await bridge.sincronizarAgente(tempWs, agenteTeste, "Ordem editorial.");
+    const conteudo = await readFile(pathDestino, "utf8");
+
+    expect(conteudo).toContain("## Documento Recente Relevante (documentos)");
+    expect(conteudo).toContain(".opencorp/registries/documentos/pauta-recente.md");
+    expect(conteudo).toContain("# Pauta Recente 2026-09-03");
+  });
+
+  it("injeta catálogo compacto de ferramentas e scripts do workspace (CTX-03)", async () => {
+    const scriptsDir = join(tempWs, "scripts");
+    mkdirSync(scriptsDir, { recursive: true });
+
+    // Script python com docstring/comentário
+    writeFileSync(
+      join(scriptsDir, "crawler.py"),
+      "#!/usr/bin/env python3\n# Crawler de notícias com extração de feeds RSS\nimport sys\n"
+    );
+
+    // Script bash com comentário
+    writeFileSync(
+      join(scriptsDir, "deploy.sh"),
+      "#!/usr/bin/env bash\n# Script de deploy contínuo em produção\necho 'deploying'\n"
+    );
+
+    // FERRAMENTAS.md
+    writeFileSync(
+      join(tempWs, "FERRAMENTAS.md"),
+      "# Ferramentas Oficiais\n- `wp`: CLI do WordPress\n- `db`: utilitário SQLite\n"
+    );
+
+    const pathDestino = await bridge.sincronizarAgente(tempWs, agenteTeste, "Ordem operacional.");
+    const conteudo = await readFile(pathDestino, "utf8");
+
+    expect(conteudo).toContain("## Ferramentas e Scripts do Workspace");
+    expect(conteudo).toContain("`python3 scripts/crawler.py`: Crawler de notícias com extração de feeds RSS");
+    expect(conteudo).toContain("`bash scripts/deploy.sh`: Script de deploy contínuo em produção");
+    expect(conteudo).toContain("### Resumo de FERRAMENTAS.md:");
+    expect(conteudo).toContain("# Ferramentas Oficiais");
+  });
 });
