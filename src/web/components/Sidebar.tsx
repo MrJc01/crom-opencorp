@@ -23,6 +23,19 @@ import {
 import { wsAtivo, setWsAtivo, workspaces } from "../lib/context";
 import { NovoWorkspaceModal } from "./NovoWorkspaceModal";
 
+interface NavItem {
+  href: string;
+  label: string;
+  icone: any;
+  badge?: () => number | undefined;
+  badgeTag?: string;
+}
+
+interface NavGroup {
+  titulo: string;
+  itens: NavItem[];
+}
+
 export const Sidebar: Component = () => {
   const location = useLocation();
   const [colapsado, setColapsado] = createSignal(localStorage.getItem("oc-sidebar-colapsada") === "1");
@@ -34,7 +47,7 @@ export const Sidebar: Component = () => {
     localStorage.setItem("oc-sidebar-colapsada", novo ? "1" : "0");
   };
 
-  const navGroups = [
+  const navGroups: NavGroup[] = [
     {
       titulo: "Operação",
       itens: [
@@ -49,8 +62,8 @@ export const Sidebar: Component = () => {
       titulo: "Automação",
       itens: [
         { href: "/agenda", label: "Agenda", icone: Calendar },
-        { href: "/fluxos", label: "Fluxos", icone: GitBranch },
-        { href: "/hooks", label: "Hooks", icone: Webhook },
+        { href: "/fluxos", label: "Fluxos", icone: GitBranch, badgeTag: "Alfa" },
+        { href: "/hooks", label: "Hooks", icone: Webhook, badgeTag: "Alfa" },
       ],
     },
   ];
@@ -168,17 +181,32 @@ export const Sidebar: Component = () => {
                           ? "bg-zinc-900 text-zinc-100 font-semibold border border-zinc-800/90 shadow-xs"
                           : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40"
                       } ${colapsado() ? "justify-center px-0" : ""}`}
-                      title={colapsado() ? item.label : undefined}
+                      title={colapsado() ? (item.badgeTag ? `${item.label} (${item.badgeTag})` : item.label) : undefined}
                     >
-                      <Icone
-                        size={16}
-                        class={`flex-shrink-0 ${
-                          ativo() ? "text-emerald-400" : "text-zinc-400"
-                        }`}
-                      />
+                      <div class="relative flex items-center justify-center">
+                        <Icone
+                          size={16}
+                          class={`flex-shrink-0 ${
+                            ativo() ? "text-emerald-400" : "text-zinc-400"
+                          }`}
+                        />
+                        <Show when={colapsado() && item.badgeTag}>
+                          <span
+                            class="absolute -top-1.5 -right-2 px-0.5 min-w-[11px] h-2.5 rounded-full text-[7px] font-bold font-mono bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center leading-none"
+                            title={item.badgeTag}
+                          >
+                            α
+                          </span>
+                        </Show>
+                      </div>
 
                       <Show when={!colapsado()}>
                         <span class="truncate flex-1">{item.label}</span>
+                        <Show when={item.badgeTag}>
+                          <span class="px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wider uppercase font-mono bg-amber-500/15 text-amber-400 border border-amber-500/30 leading-none">
+                            {item.badgeTag}
+                          </span>
+                        </Show>
                         <Show when={item.badge && item.badge()! > 0}>
                           <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-amber-500/20 text-amber-400 border border-amber-500/30">
                             {item.badge!()}

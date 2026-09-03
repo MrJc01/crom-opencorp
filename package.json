@@ -3,6 +3,10 @@
   "version": "0.7.0",
   "description": "Sistema Operacional de Empresas Autônomas dirigido por CLI — orquestra sessões OpenCode em workspaces governados",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seu-usuario/crom-opencorp.git"
+  },
   "type": "module",
   "main": "dist/cli/index.js",
   "bin": {

@@ -8,3 +8,11 @@ workspaces/
 test-results/
 report.*.json
 web-dist/src/
+
+# Segurança — nunca comitar segredos, chaves ou credenciais
+secrets.json
+.env
+.env.*
+auth.json
+*.pem
+*.key

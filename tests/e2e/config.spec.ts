@@ -41,7 +41,7 @@ test.describe("Config / Settings", () => {
     await expect(page.locator(".approval-row", { hasText: "openrouter" })).toBeVisible();
     await expect(page.locator(".approval-row", { hasText: "openrouter" })).toContainText("sk-or-v…Xyz9");
     await expect(page.locator(".approval-row", { hasText: "opencode-go" })).toContainText("herdada"); // herdado do global
-    await expect(page.locator(".approval-row").first()).not.toContainText("sk-0Nwoztb6Z0MUAOqxfYf66ADvaZR3uN1KIMwlxq0NkezTef8KdvF4gHQme8XRbNgw");
+    await expect(page.locator(".approval-row").first()).not.toContainText("sk-dummy-raw-secret-key-that-must-never-appear-in-ui-12345");
     // salvar nova chave no escopo workspace
     await page.fill("#cfg-chave-provider", "openrouter");
     await page.fill("#cfg-chave-valor", "sk-or-v1-test-1234567890");
