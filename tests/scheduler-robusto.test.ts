@@ -107,15 +107,15 @@ describe("Scheduler — claim atômico e job_runs", () => {
     expect(execucoes).toBe(1);
   });
 
-  it("runNow registra run sem mudar a agenda", async () => {
+  it("runNow registra run e avança o próximo ciclo", async () => {
     await scheduler.criar({ nome: "now", agenda: { tipo: "intervalo_min", valor: 60 }, args: ["task", "list"] });
     const job = (await scheduler.listar())[0]!;
-    const proximaAntes = job.proxima_exec;
     await scheduler.runNow(job.id);
     const runs = await scheduler.listarRuns(job.id);
     expect(runs.length).toBe(1);
     const depois = (await scheduler.listar())[0]!;
-    expect(depois.proxima_exec).toBe(proximaAntes);
+    expect(depois.ultima_exec).toBeDefined();
+    expect(depois.proxima_exec).not.toBeNull();
   });
 });
 

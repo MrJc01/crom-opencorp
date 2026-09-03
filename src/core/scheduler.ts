@@ -613,9 +613,34 @@ export class Scheduler {
 
   async runNow(id: string): Promise<{ job: Job; resultado: string }> {
     const job = await this.obter(id);
+    const agora = this.agora();
     const resultado = await this.executarFn(job);
     await this.registrarRun(job, { resultado: resultado + " (run-now)" });
-    (await this.banco()).prepare("UPDATE jobs SET ultima_exec = ? WHERE id = ?").run(this.agora().toISOString(), id);
+
+    let proxima: string | null = null;
+    let ativo = job.ativo ? 1 : 0;
+
+    if (job.agenda.tipo === "data_unica") {
+      // Data única já foi executada manualmente: conclui e desativa
+      proxima = null;
+      ativo = 0;
+    } else if (job.agenda.tipo === "intervalo_min") {
+      // Intervalo recomeça a contar o próximo ciclo a partir da execução adiantada
+      proxima = new Date(agora.getTime() + job.agenda.valor * 60_000).toISOString();
+    } else if (job.agenda.tipo === "cron") {
+      // Para cron: se foi adiantado antes do horário previsto, o próximo disparo
+      // avança para o ciclo subsequente, evitando execução dupla no mesmo ciclo
+      const base =
+        job.proxima_exec && new Date(job.proxima_exec).getTime() > agora.getTime()
+          ? new Date(job.proxima_exec)
+          : agora;
+      proxima = proximoCron(job.agenda.valor, base).toISOString();
+    }
+
+    (await this.banco())
+      .prepare("UPDATE jobs SET ultima_exec = ?, proxima_exec = ?, ativo = ? WHERE id = ?")
+      .run(agora.toISOString(), proxima, ativo, id);
+
     return { job: await this.obter(id), resultado };
   }
 

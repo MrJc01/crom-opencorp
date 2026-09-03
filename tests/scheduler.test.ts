@@ -152,13 +152,15 @@ describe("Scheduler — tick", () => {
     expect((await scheduler.obter(j.id)).proxima_exec).toBeNull();
   });
 
-  it("runNow executa sem mudar a agenda", async () => {
+  it("runNow executa e avança a próxima execução sem mudar a regra da agenda", async () => {
     const j = await scheduler.criar({ nome: "manual", agenda: { tipo: "intervalo_min", valor: 60 }, args: ["a"] });
-    const antes = j.proxima_exec;
     const registro = { executados: [] as string[], jobs: [] as Job[] };
     const s2 = schedulerComExec(registro);
     const { resultado } = await s2.runNow(j.id);
     expect(resultado).toBe("ok");
-    expect((await scheduler.obter(j.id)).proxima_exec).toBe(antes);
+    const atualizado = await scheduler.obter(j.id);
+    expect(atualizado.ultima_exec).toBeDefined();
+    expect(atualizado.agenda.valor).toBe(60);
+    expect(atualizado.proxima_exec).not.toBeNull();
   });
 });
