@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, resolve, relative, isAbsolute, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { stat, readdir, readFile, realpath, open } from "node:fs/promises";
+import { stat, readdir, readFile, realpath, open, mkdir, rename, rm, unlink } from "node:fs/promises";
 import { existsSync, rmSync, statSync, readFileSync } from "node:fs";
 import { WorkspaceManager } from "../core/workspace-manager.js";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
@@ -1748,7 +1748,91 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
-        // ── POST /meetings/:id/stop — encerra a sala específica (Etapa 6.2)
+        // ── POST /files — cria arquivo ou pasta no workspace ──
+        if (rota === "/files" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { path?: string; tipo?: "arquivo" | "dir"; conteudo?: string };
+          const pathParam = String(corpo.path ?? "").trim();
+          if (!pathParam) {
+            enviar(res, 400, { erro: "caminho (path) é obrigatório" });
+            return;
+          }
+          try {
+            const alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+            const tipo = corpo.tipo === "dir" ? "dir" : "arquivo";
+            if (tipo === "dir") {
+              await mkdir(alvo, { recursive: true });
+            } else {
+              await mkdir(dirname(alvo), { recursive: true });
+              await writeFileAtomic(alvo, String(corpo.conteudo ?? ""), { encoding: "utf8", createDirs: true });
+            }
+            enviar(res, 201, { ok: true, path: pathParam, tipo });
+          } catch (erro) {
+            if (erro instanceof WorkspaceError && erro.exitCode === 3) {
+              enviar(res, 403, { erro: "caminho fora do workspace (path traversal bloqueado)" });
+            } else {
+              enviar(res, 500, { erro: `erro ao criar: ${erro instanceof Error ? erro.message : String(erro)}` });
+            }
+          }
+          return;
+        }
+
+        // ── DELETE /files — remove arquivo ou pasta no workspace ──
+        if (rota === "/files" && req.method === "DELETE") {
+          const ws = await resolverWs(url);
+          const pathParam = String(url.searchParams.get("path") ?? "").trim();
+          if (!pathParam || pathParam === "." || pathParam === "/") {
+            enviar(res, 400, { erro: "caminho inválido para exclusão" });
+            return;
+          }
+          try {
+            const alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+            const info = await stat(alvo).catch(() => null);
+            if (!info) {
+              enviar(res, 404, { erro: "arquivo ou pasta não encontrado" });
+              return;
+            }
+            if (info.isDirectory()) {
+              await rm(alvo, { recursive: true, force: true });
+            } else {
+              await unlink(alvo);
+            }
+            enviar(res, 200, { ok: true, path: pathParam });
+          } catch (erro) {
+            if (erro instanceof WorkspaceError && erro.exitCode === 3) {
+              enviar(res, 403, { erro: "caminho fora do workspace (path traversal bloqueado)" });
+            } else {
+              enviar(res, 500, { erro: `erro ao excluir: ${erro instanceof Error ? erro.message : String(erro)}` });
+            }
+          }
+          return;
+        }
+
+        // ── POST /files/rename — renomeia ou move arquivo/pasta ──
+        if (rota === "/files/rename" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { antigo?: string; novo?: string };
+          const antigoParam = String(corpo.antigo ?? "").trim();
+          const novoParam = String(corpo.novo ?? "").trim();
+          if (!antigoParam || !novoParam) {
+            enviar(res, 400, { erro: "caminho antigo e novo são obrigatórios" });
+            return;
+          }
+          try {
+            const alvoAntigo = await resolverCaminhoWorkspace(ws.path, antigoParam);
+            const alvoNovo = await resolverCaminhoWorkspace(ws.path, novoParam);
+            await mkdir(dirname(alvoNovo), { recursive: true });
+            await rename(alvoAntigo, alvoNovo);
+            enviar(res, 200, { ok: true, antigo: antigoParam, novo: novoParam });
+          } catch (erro) {
+            if (erro instanceof WorkspaceError && erro.exitCode === 3) {
+              enviar(res, 403, { erro: "caminho fora do workspace (path traversal bloqueado)" });
+            } else {
+              enviar(res, 500, { erro: `erro ao renomear: ${erro instanceof Error ? erro.message : String(erro)}` });
+            }
+          }
+          return;
+        }
         const mMeetingStop = /^\/meetings\/([^/]+)\/stop$/.exec(rota);
         if (mMeetingStop && req.method === "POST") {
           const ws = await resolverWs(url);
