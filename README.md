@@ -69,6 +69,62 @@ Abra no navegador: **`http://localhost:4100`** para acessar o painel de controle
 
 ---
 
+## 📸 Demonstração da Interface (Screenshots)
+
+### 1. Painel de Operações & Rondas 24h
+> Visão geral da saúde da empresa, custos do dia, status dos agentes e feed de execuções em tempo real.
+![Painel de Operações](docs/assets/01-painel-operacoes.png)
+
+---
+
+### 2. Secretário Executivo Autônomo
+> Conversação fluida com o Secretário Executivo para obter diagnósticos, status de infraestrutura e delegar ordens.
+![Secretário Executivo](docs/assets/02-secretario-executivo.png)
+
+---
+
+### 3. Workspace & Editor com Terminal Integrado
+> Navegação direta nos arquivos da empresa, documentações, logs e terminal inline isolado.
+![Workspace e Código](docs/assets/03-workspace-codigo.png)
+
+---
+
+### 4. Quadro Kanban de Tarefas
+> Acompanhamento de entregas, tarefas bloqueadas e atribuição direta a agentes autônomos.
+![Quadro Kanban](docs/assets/04-quadro-kanban.png)
+
+---
+
+### 5. Fluxos de Trabalho & Automação Visual
+> Construtor de automações em grafo: conecte gatilhos, tomadas de decisão e agentes corporativos.
+![Fluxos de Trabalho](docs/assets/05-fluxos-trabalho.png)
+
+---
+
+### 6. Apps & Gestão Segura de Segredos
+> Gerenciamento seguro de credenciais (WordPress, VPS, GitHub, LLMs) com isolamento por workspace e proteção `chmod 600`.
+![Apps e Segredos](docs/assets/06-apps-e-segredos.png)
+
+---
+
+### 7. Histórico & Rastreabilidade de Execuções
+> Inspeção transparente de cada ordem, ferramentas chamadas (bash, curl, APIs) e tempo de resposta.
+![Histórico de Execução](docs/assets/07-historico-execucao.png)
+
+---
+
+### 8. Documentação Interna & Diagramas Mermaid
+> Renderização nativa de manuais, playbooks e diagramas de arquitetura com alternância de código.
+![Documentação Integrada](docs/assets/08-documentacao-interna.png)
+
+---
+
+### 9. Configurações de Governança & Motores LLM
+> Diagnóstico de runtimes em tempo real, alternância de escopos (Global vs. Workspace) e controle de chaves de API.
+![Configurações e Motores](docs/assets/09-configuracoes-motores.png)
+
+---
+
 ### 2. Gerenciando Workspaces (Empresas)
 
 Cada workspace representa uma organização independente com seus próprios agentes, tarefas e dados:
