@@ -1213,8 +1213,8 @@ export const FluxosView: Component = () => {
           MODAL / DRAWER CATÁLOGO DE ADICIONAR NOVO NODE
          ───────────────────────────────────────────────────────────── */}
       <Show when={modalAdicionarNode()}>
-        <div class="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl">
+        <div class="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50" onClick={() => setModalAdicionarNode(false)}>
+          <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div>
                 <h3 class="text-sm font-bold text-zinc-100 flex items-center gap-2">
@@ -1258,8 +1258,8 @@ export const FluxosView: Component = () => {
 
       {/* Modal Novo Workflow */}
       <Show when={modalNovoFluxo()}>
-        <div class="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+        <div class="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50" onClick={() => setModalNovoFluxo(false)}>
+          <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-md w-full p-5 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div class="flex items-center gap-2">
                 <Plus size={16} class="text-orange-400" />
@@ -1369,8 +1369,8 @@ export const FluxosView: Component = () => {
 
       {/* Modal Executar Workflow */}
       <Show when={modalExecutar()}>
-        <div class="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg w-full p-5 space-y-4 shadow-2xl">
+        <div class="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50" onClick={() => setModalExecutar(false)}>
+          <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg w-full p-5 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div class="flex items-center gap-2">
                 <Play size={16} class="text-orange-400 fill-current" />

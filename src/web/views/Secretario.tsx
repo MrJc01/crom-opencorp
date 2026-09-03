@@ -1,5 +1,6 @@
 import { type Component, createSignal, onMount, onCleanup, For, Show } from "solid-js";
-import { Plus, History, Bot, Sparkles, AlertCircle } from "lucide-solid";
+import { Plus, History, Bot, Sparkles, AlertCircle, Users } from "lucide-solid";
+import { useNavigate } from "@solidjs/router";
 import { SessionTurn, type ChatMensagem } from "../components/chat/SessionTurn";
 import { PromptInput, type Anexo } from "../components/chat/PromptInput";
 import { HistoricoModal, type SessaoResumo } from "../components/chat/HistoricoModal";
@@ -9,6 +10,7 @@ import { showToast } from "../ui/Toast";
 import { fetchApi, wsAtivo, headers } from "../lib/context";
 
 export const SecretarioView: Component = () => {
+  const navigate = useNavigate();
   const [sessoes, setSessoes] = createSignal<SessaoResumo[]>([]);
   const [sessaoAtivaId, setSessaoAtivaId] = createSignal<string | null>(null);
   const [mensagens, setMensagens] = createSignal<ChatMensagem[]>([]);
@@ -314,6 +316,9 @@ export const SecretarioView: Component = () => {
           </Button>
           <Button size="xs" variant="secondary" onClick={() => setHistoricoAberto(true)} title="Ver conversas anteriores">
             <History size={13} class="mr-1" /> Histórico
+          </Button>
+          <Button size="xs" variant="secondary" onClick={() => navigate("/reunioes")} title="Reuniões Multi-Agente">
+            <Users size={13} class="mr-1" /> Reuniões
           </Button>
         </div>
       </div>

@@ -40,7 +40,6 @@ export const Sidebar: Component = () => {
         { href: "/workspace", label: "Workspace", icone: FolderCode },
         { href: "/tasks", label: "Tasks", icone: CheckSquare },
         { href: "/agentes", label: "Agentes", icone: Bot },
-        { href: "/reunioes", label: "Reuniões", icone: Users },
       ],
     },
     {
