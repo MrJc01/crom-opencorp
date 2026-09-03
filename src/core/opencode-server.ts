@@ -410,6 +410,56 @@ export function extrairAcoesMensagens(
   return { total, itens };
 }
 
+export interface PassoChat {
+  tipo: "pensamento" | "acao" | "texto";
+  texto?: string;
+  ferramenta?: string;
+  resumo?: string;
+  sucesso?: boolean;
+}
+
+/**
+ * Extrai a sequência cronológica exata de passos (pensamentos, ações e textos)
+ * de uma lista de mensagens do assistente.
+ */
+export function extrairPassosMensagens(novasMsgs: MensagemOc[]): PassoChat[] {
+  const passos: PassoChat[] = [];
+  for (const m of novasMsgs) {
+    if (m.info?.role !== "assistant") continue;
+    for (const p of m.parts ?? []) {
+      if (p.type === "reasoning" || p.type === "thinking") {
+        const txt = (p.text ?? "").trim();
+        if (txt) {
+          const ult = passos[passos.length - 1];
+          if (ult && ult.tipo === "pensamento") {
+            ult.texto = `${ult.texto}\n\n${txt}`;
+          } else {
+            passos.push({ tipo: "pensamento", texto: txt });
+          }
+        }
+      } else if (p.type === "tool" && p.tool) {
+        passos.push({
+          tipo: "acao",
+          ferramenta: p.tool,
+          resumo: resumoDeInput(p.state?.input, p.state?.title),
+          sucesso: p.state?.status !== "error",
+        });
+      } else if (p.type === "text") {
+        const txt = (p.text ?? "").trim();
+        if (txt) {
+          const ult = passos[passos.length - 1];
+          if (ult && ult.tipo === "texto") {
+            ult.texto = `${ult.texto}\n\n${txt}`;
+          } else {
+            passos.push({ tipo: "texto", texto: txt });
+          }
+        }
+      }
+    }
+  }
+  return passos;
+}
+
 export class OpencodeServerManager {
   private readonly homeDir: string;
   private readonly binario: string;

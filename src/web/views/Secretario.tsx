@@ -78,10 +78,12 @@ export const SecretarioView: Component = () => {
         mensagens_count: s.summary?.files,
       }));
       setSessoes(lista);
-      const ativa = sessaoAtivaId();
+      const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+      const urlSessaoId = params?.get("sessao");
+      const ativa = urlSessaoId || sessaoAtivaId();
       if (ativa && lista.some((s) => s.id === ativa)) {
         selecionarSessao(ativa);
-      } else if (lista.length > 0 && !ativa) {
+      } else if (lista.length > 0 && !sessaoAtivaId()) {
         selecionarSessao(lista[0].id);
       }
     } catch (err) {
@@ -104,18 +106,31 @@ export const SecretarioView: Component = () => {
     let tentativasSemMudanca = 0;
     let ultimoHash = "";
 
+    if (!timerInterval) {
+      timerInterval = setInterval(() => {
+        setDecorridoSegundos((s) => s + 1);
+      }, 1000);
+    }
+
     const tick = async () => {
       if (sessaoAtivaId() !== sessaoId) {
         pararMonitoramento();
         setCarregando(false);
+        if (timerInterval) {
+          clearInterval(timerInterval);
+          timerInterval = null;
+        }
         return;
       }
       try {
         const msgs = await fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(sessaoId)}/mensagens`);
-        if (!Array.isArray(msgs)) { monitorTimeout = setTimeout(tick, 3000); return; }
+        if (!Array.isArray(msgs)) {
+          monitorTimeout = setTimeout(tick, 1000);
+          return;
+        }
 
         const ult = msgs[msgs.length - 1];
-        // Hash leve: só comprimentos + flag de conclusão para evitar comparações pesadas
+        // Hash de mudança para re-renderização
         const hash = msgs.length + ":" + (ult?.content?.length ?? 0) + ":" + (ult?.pensamento?.length ?? 0) + ":" + (ult?.acoes?.length ?? 0) + ":" + (ult?.passos?.length ?? 0) + ":" + ult?.concluida;
         if (hash !== ultimoHash) {
           ultimoHash = hash;
@@ -126,13 +141,18 @@ export const SecretarioView: Component = () => {
           tentativasSemMudanca++;
         }
 
-        if (!ult || ult.role !== "assistant" || ult.concluida !== false) {
+        // Se a última mensagem for do assistente e estiver concluída, encerra monitoramento
+        if (ult && ult.role === "assistant" && ult.concluida === true) {
           pararMonitoramento();
           setCarregando(false);
+          if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+          }
           return;
         }
 
-        if (tentativasSemMudanca > 20) { // ~60s sem atividade (20 × 3s)
+        if (tentativasSemMudanca > 240) { // ~4 minutos sem atividade
           setMensagens((prev) => {
             const u = prev[prev.length - 1];
             if (u && u.role === "assistant") {
@@ -142,15 +162,19 @@ export const SecretarioView: Component = () => {
           });
           pararMonitoramento();
           setCarregando(false);
+          if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+          }
           return;
         }
       } catch {
-        // ignora erros pontuais
+        // ignora erros pontuais de conexão
       }
-      monitorTimeout = setTimeout(tick, 3000);
+      monitorTimeout = setTimeout(tick, 1000);
     };
 
-    // Primeiro tick imediato, depois a cada 3s
+    // Primeiro tick imediato, depois a cada 1s
     tick();
   };
 
@@ -158,7 +182,7 @@ export const SecretarioView: Component = () => {
     pararMonitoramento();
     if (abortController) {
       abortController.abort();
-      setCarregando(false);
+      abortController = null;
     }
     setSessaoAtivaId(id);
     try {
@@ -168,17 +192,30 @@ export const SecretarioView: Component = () => {
       setTimeout(scrollFim, 50);
 
       const ult = lista[lista.length - 1];
-      const agora = Date.now();
-      const criadoMs = ult?.criado_em ? new Date(ult.criado_em).getTime() : 0;
-      const recente = criadoMs > 0 ? agora - criadoMs < 60_000 : false;
+      const sessaoOcupada = sessoes().find((s) => s.id === id && (s as any).executando);
+      const emAndamento = Boolean(sessaoOcupada) || (ult && (ult.concluida === false || ult.role === "user"));
 
-      if (ult && ult.role === "assistant" && ult.concluida === false && recente) {
+      if (emAndamento) {
+        setCarregando(true);
+        const criadoMs = ult?.criado_em ? new Date(ult.criado_em).getTime() : Date.now();
+        const decorridoInicial = Math.max(0, Math.floor((Date.now() - criadoMs) / 1000));
+        setDecorridoSegundos(decorridoInicial);
+
+        if (timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+          setDecorridoSegundos((s) => s + 1);
+        }, 1000);
         retomarMonitoramento(id);
       } else {
         setCarregando(false);
+        if (timerInterval) {
+          clearInterval(timerInterval);
+          timerInterval = null;
+        }
       }
     } catch {
       setMensagens([]);
+      setCarregando(false);
     }
   };
 
@@ -378,31 +415,50 @@ export const SecretarioView: Component = () => {
               if (ultIdx < 0) return prev;
               const assistente = { ...prev[ultIdx] };
 
-              if (evtType === "delta") {
-                assistente.content += payload.delta || payload.texto || "";
+              if (evtType === "passos" && Array.isArray(payload.passos)) {
+                assistente.passos = payload.passos;
+              } else if (evtType === "delta") {
+                const deltaTxt = payload.delta || payload.texto || "";
+                assistente.content += deltaTxt;
+                const passos = [...(assistente.passos || [])];
+                const ultP = passos[passos.length - 1];
+                if (ultP && ultP.tipo === "texto") {
+                  ultP.texto = (ultP.texto || "") + deltaTxt;
+                } else if (deltaTxt) {
+                  passos.push({ tipo: "texto", texto: deltaTxt });
+                }
+                assistente.passos = passos;
               } else if (evtType === "pensamento") {
-                assistente.pensamento = (assistente.pensamento || "") + (payload.delta || payload.pensamento || payload.texto || "");
+                const deltaTxt = payload.delta || payload.pensamento || payload.texto || "";
+                assistente.pensamento = (assistente.pensamento || "") + deltaTxt;
+                const passos = [...(assistente.passos || [])];
+                const ultP = passos[passos.length - 1];
+                if (ultP && ultP.tipo === "pensamento") {
+                  ultP.texto = (ultP.texto || "") + deltaTxt;
+                } else if (deltaTxt) {
+                  passos.push({ tipo: "pensamento", texto: deltaTxt });
+                }
+                assistente.passos = passos;
               } else if (evtType === "acao") {
-                // O servidor envia {acoes: N, itens: [...]} ou {ferramenta, resumo}
+                const passos = [...(assistente.passos || [])];
                 if (Array.isArray(payload.itens) && payload.itens.length > 0) {
-                  const acoes = [...(assistente.acoes || [])];
                   for (const item of payload.itens) {
-                    acoes.push({
-                      ferramenta: item.ferramenta || item.tool,
-                      resumo: item.resumo || item.summary,
+                    passos.push({
+                      tipo: "acao",
+                      ferramenta: item.ferramenta || item.tool || "ferramenta",
+                      resumo: item.resumo || item.summary || "executando...",
                       sucesso: item.sucesso !== false,
                     });
                   }
-                  assistente.acoes = acoes;
                 } else if (payload.ferramenta) {
-                  const acoes = [...(assistente.acoes || [])];
-                  acoes.push({
+                  passos.push({
+                    tipo: "acao",
                     ferramenta: payload.ferramenta,
-                    resumo: payload.resumo,
+                    resumo: payload.resumo || "executando...",
                     sucesso: payload.sucesso !== false,
                   });
-                  assistente.acoes = acoes;
                 }
+                assistente.passos = passos;
               } else if (evtType === "hitl") {
                 assistente.hitl = payload.hitl || payload;
               } else if (evtType === "fim") {
@@ -435,10 +491,23 @@ export const SecretarioView: Component = () => {
         });
       }
     } finally {
-      if (timerInterval) clearInterval(timerInterval);
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
       setCarregando(false);
       abortController = null;
       void carregarSessoes();
+      const sidFinal = sessaoAtivaId();
+      if (sidFinal) {
+        void fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(sidFinal)}/mensagens`)
+          .then((msgsFinais) => {
+            if (Array.isArray(msgsFinais) && msgsFinais.length > 0) {
+              setMensagens(msgsFinais);
+            }
+          })
+          .catch(() => null);
+      }
     }
   };
 

@@ -152,15 +152,16 @@ describe("mcp serve via CLI — fail-closed", () => {
     child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
     child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`);
     child.stdin!.end();
-    const stdout: string[] = [];
-    for await (const linha of child.stdout!) {
-      stdout.push(linha.toString());
-      if (stdout.length >= 2) break;
+    const stdoutChunks: string[] = [];
+    for await (const chunk of child.stdout!) {
+      stdoutChunks.push(chunk.toString());
+      if (stdoutChunks.join("").split("\n").filter(Boolean).length >= 2) break;
     }
     child.kill();
-    const init = JSON.parse(stdout[0]!) as { result: { serverInfo: { name: string } } };
+    const lines = stdoutChunks.join("").split("\n").filter(Boolean);
+    const init = JSON.parse(lines[0]!) as { result: { serverInfo: { name: string } } };
     expect(init.result.serverInfo.name).toBe("opencorp");
-    const lista = JSON.parse(stdout[1]!) as { result: { tools: { name: string }[] } };
+    const lista = JSON.parse(lines[1]!) as { result: { tools: { name: string }[] } };
     expect(lista.result.tools.map((t) => t.name)).toContain("task.create");
   });
 
@@ -174,13 +175,14 @@ describe("mcp serve via CLI — fail-closed", () => {
     });
     child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
     child.stdin!.end();
-    const stdout: string[] = [];
-    for await (const linha of child.stdout!) {
-      stdout.push(linha.toString());
-      if (stdout.length >= 1) break;
+    const stdoutChunks: string[] = [];
+    for await (const chunk of child.stdout!) {
+      stdoutChunks.push(chunk.toString());
+      if (stdoutChunks.join("").split("\n").filter(Boolean).length >= 1) break;
     }
     child.kill();
-    const init = JSON.parse(stdout[0]!) as { result: { serverInfo: { name: string } } };
+    const lines = stdoutChunks.join("").split("\n").filter(Boolean);
+    const init = JSON.parse(lines[0]!) as { result: { serverInfo: { name: string } } };
     expect(init.result.serverInfo.name).toBe("opencorp");
   });
 });

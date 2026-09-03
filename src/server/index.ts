@@ -30,7 +30,7 @@ import { instalarMencoes } from "../core/mention-runner.js";
 import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError, NotificationError, AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
 import { FlowError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
-import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, resumoDeInput, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc } from "../core/opencode-server.js";
+import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, resumoDeInput, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc } from "../core/opencode-server.js";
 import { taskCreateSchema } from "../schemas/task.js";
 import { tipoDeNomeApp, validarPerfilApp } from "../schemas/app-perfil.js";
 
@@ -824,8 +824,32 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           }
         } catch {}
         let secretario = false;
-        try { secretario = (await opencodeServer.status()).rodando === true; } catch {}
-        enviar(res, 200, { scheduler, secretario });
+        let secretarioExecutando: any = null;
+        try {
+          const stOpencode = await opencodeServer.status();
+          secretario = stOpencode.rodando === true;
+          if (stOpencode.rodando && stOpencode.porta) {
+            const resStatus = await fetch(`http://127.0.0.1:${stOpencode.porta}/session/status`, { signal: AbortSignal.timeout(2000) });
+            if (resStatus.ok) {
+              const mapStatus = (await resStatus.json()) as Record<string, { type?: string }>;
+              const ocupadaId = Object.keys(mapStatus).find((k) => mapStatus[k]?.type === "busy");
+              if (ocupadaId) {
+                const resSess = await fetch(`http://127.0.0.1:${stOpencode.porta}/session/${encodeURIComponent(ocupadaId)}`, { signal: AbortSignal.timeout(2000) });
+                if (resSess.ok) {
+                  const sData = (await resSess.json()) as Record<string, any>;
+                  secretarioExecutando = {
+                    id: ocupadaId,
+                    titulo: sData.title || "Conversa com Secretário em andamento",
+                    agente: sData.agent || "secretario-exec",
+                    inicio: sData.time?.updated ? new Date(sData.time.updated).toISOString() : new Date().toISOString(),
+                    status: "executando",
+                  };
+                }
+              }
+            }
+          }
+        } catch {}
+        enviar(res, 200, { scheduler, secretario, secretario_executando: secretarioExecutando });
         return;
       }
       // GET /doc — público (sem auth), retorna OpenAPI 3.0
@@ -2439,10 +2463,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
-        // Helper: obtém porta do opencode server ou inicia automaticamente se estiver parado
-        async function portaOpencodeOuErro(): Promise<number> {
+        // Helper: obtém porta do opencode server ou lança 409 se não iniciado (auto-iniciar opcional)
+        async function portaOpencodeOuErro(autoIniciar = false): Promise<number> {
           let status = await opencodeServer.status();
-          if (!status.rodando || !status.porta) {
+          if (autoIniciar && (!status.rodando || !status.porta)) {
             try {
               const res = await opencodeServer.iniciar();
               if (res.porta) return res.porta;
@@ -2498,16 +2522,28 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           try {
             const porta = await portaOpencodeOuErro();
             const opencodeUrl = `http://127.0.0.1:${porta}/session`;
-            const resOpencode = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
+            const [resOpencode, resStatus] = await Promise.all([
+              fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) }),
+              fetch(`http://127.0.0.1:${porta}/session/status`, { signal: AbortSignal.timeout(3000) }).catch(() => null),
+            ]);
             if (!resOpencode.ok) {
               enviar(res, 502, { erro: `opencode respondeu ${resOpencode.status}` });
               return;
             }
             const data = await resOpencode.json();
-            // enriquece com títulos REAIS (1ª msg do usuário) do espelho corp.db —
-            // sessões de agente/CLI chegam como "New session - <timestamp>", o que é inútil na lista
+            let statusMap: Record<string, { type?: string }> = {};
+            if (resStatus && resStatus.ok) {
+              try { statusMap = (await resStatus.json()) as Record<string, { type?: string }>; } catch {}
+            }
+            // enriquece com títulos REAIS (1ª msg do usuário) e status de execução ao vivo
             try {
               const itens = (data as Array<Record<string, unknown>>) ?? [];
+              for (const s of itens) {
+                const sid = String(s.id ?? "");
+                const isBusy = statusMap[sid]?.type === "busy";
+                s.executando = isBusy;
+                s.status = isBusy ? "executando" : "idle";
+              }
               const ids = itens.map((s) => String(s.id ?? "")).filter(Boolean);
               if (ids.length) {
                 // espelho vive no corp.db do workspace — tenta o ativo; sem ativo, usa o 1º existente
@@ -3241,6 +3277,12 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 const assistentesNovas = novasMsgs.filter((m) => m.info?.role === "assistant");
 
                 if (assistentesNovas.length > 0) {
+                  // Passos cronológicos estruturados em tempo real (pensamento 1 -> acao 1 -> pensamento 2...)
+                  const passosEmTempoReal = extrairPassosMensagens(assistentesNovas);
+                  if (passosEmTempoReal.length > 0) {
+                    sse("passos", { passos: passosEmTempoReal });
+                  }
+
                   // Turno com ferramentas: tools das mensagens assistant novas (o quê + status)
                   const { total: novas, itens } = extrairAcoesMensagens(msgs, baselineId);
                   const assinatura = JSON.stringify(itens);
@@ -3325,6 +3367,11 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             const { total: totalAcoes, itens: itensFinais } = extrairAcoesMensagens(msgsFinais, baselineId);
             if (totalAcoes > acoesAvisadas) {
               sse("acao", { acoes: totalAcoes, itens: itensFinais });
+            }
+
+            const passosFinais = extrairPassosMensagens(novasFinais);
+            if (passosFinais.length > 0) {
+              sse("passos", { passos: passosFinais });
             }
 
             const respostaFinal = enviado || (totalAcoes > 0 ? "Ação concluída." : "Processamento concluído.");

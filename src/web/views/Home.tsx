@@ -179,8 +179,17 @@ export const HomeView: Component = () => {
       setHooks(getVal(rHooks, []));
       setSessoesSecretario(getVal(sSec, []));
 
-      // Identificar se há algum agente executando agora
-      const emAndamento = dExecs.find((e: any) => e.status === "executando");
+      // Identificar se há algum agente executando agora (background run OU Secretário Executivo)
+      const secSessoes = getVal(sSec, []);
+      const secExec = secSessoes.find((s: any) => s.executando || s.status === "executando") || dStatus?.secretario_executando;
+      const emAndamento = dExecs.find((e: any) => e.status === "executando") || (secExec ? {
+        id: secExec.id,
+        agente: secExec.agent || secExec.agente || "secretario-exec",
+        inicio: secExec.time?.updated ? new Date(secExec.time.updated).toISOString() : secExec.inicio || new Date().toISOString(),
+        ordem: secExec.titulo_real || secExec.title || secExec.titulo || "Conversa com Secretário Executivo em andamento",
+        status: "executando",
+        tipo: "secretario",
+      } : null);
       setExecutandoAgora(emAndamento || null);
 
       const hoje = new Date().toISOString().slice(0, 10);
@@ -974,11 +983,11 @@ export const HomeView: Component = () => {
 
                   <div class="flex items-center gap-2">
                     <A
-                      href={`/historico?run=${encodeURIComponent(exec().id)}`}
-                      class="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs text-white font-bold transition-all shadow-md flex items-center gap-1.5 font-mono"
+                      href={exec().tipo === "secretario" ? `/secretario?sessao=${encodeURIComponent(exec().id)}` : `/historico?run=${encodeURIComponent(exec().id)}`}
+                      class="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs text-white font-bold transition-all shadow-md flex items-center gap-1.5 font-mono cursor-pointer"
                     >
                       <ExternalLink size={13} />
-                      <span>Ver Log ao Vivo</span>
+                      <span>{exec().tipo === "secretario" ? "Ver Chat Ao Vivo →" : "Ver Log ao Vivo"}</span>
                     </A>
                   </div>
                 </div>

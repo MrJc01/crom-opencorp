@@ -104,8 +104,18 @@ export const Topbar: Component = () => {
       const dTasks = getVal(tasks, []);
       const dAprovs = getVal(aprovs, []);
 
-      // 1. Executando agora ou última execução
-      const emAndamento = dExecs.find((e: any) => e.status === "executando");
+      // 1. Executando agora ou última execução (considera jobs de background e Secretário)
+      const secExec = dStatus?.secretario_executando;
+      const emAndamento =
+        dExecs.find((e: any) => e.status === "executando") ||
+        (secExec ? {
+          id: secExec.id,
+          agente: secExec.agente || "secretario-exec",
+          ordem: secExec.titulo || "Conversa com Secretário em andamento",
+          inicio: secExec.inicio || new Date().toISOString(),
+          status: "executando",
+          tipo: "secretario",
+        } : null);
       const ultima = dExecs.length > 0 ? dExecs[0] : null;
 
       // 2. Próxima rotina programada
@@ -288,10 +298,10 @@ export const Topbar: Component = () => {
                           <span>Executando Agora</span>
                         </div>
                         <A
-                          href={`/historico?run=${encodeURIComponent(exec().id)}`}
+                          href={exec().tipo === "secretario" ? `/secretario?sessao=${encodeURIComponent(exec().id)}` : `/historico?run=${encodeURIComponent(exec().id)}`}
                           class="px-2 py-0.5 rounded bg-blue-900/50 hover:bg-blue-800 text-[10px] text-blue-200 border border-blue-700/60 font-mono transition-colors"
                         >
-                          Ver Log →
+                          {exec().tipo === "secretario" ? "Ver Chat Ao Vivo →" : "Ver Log →"}
                         </A>
                       </div>
 

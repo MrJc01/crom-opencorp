@@ -65,4 +65,49 @@ describe("md.ts — chat rico", () => {
       expect(html).toContain(pedaco);
     }
   });
+
+  it("renderiza tabelas GFM com cabeçalho, alinhamento e células inline", () => {
+    const markdownTabela = `
+| Nome | Status | Detalhe |
+| :--- | :---: | ---: |
+| **Worker 1** | \`ativo\` | [Link](https://crom.me) |
+| Worker 2 | *pausado* | 100% |
+`;
+    const html = renderMarkdown(markdownTabela);
+    expect(html).toContain('class="md-table-wrap"');
+    expect(html).toContain('class="md-table"');
+    expect(html).toContain('<th style="text-align:left">Nome</th>');
+    expect(html).toContain('<th style="text-align:center">Status</th>');
+    expect(html).toContain('<th style="text-align:right">Detalhe</th>');
+    expect(html).toContain("<strong>Worker 1</strong>");
+    expect(html).toContain('<code class="md-code-inline">ativo</code>');
+    expect(html).toContain('<a href="https://crom.me"');
+    expect(html).toContain("<em>pausado</em>");
+    expect(html).toContain("100%");
+  });
+
+  it("renderiza container de fluxogramas e diagramas Mermaid", () => {
+    const mermaidCode = `\`\`\`mermaid
+graph TD
+  A[Início] --> B{Decisão}
+  B -->|Sim| C[Sucesso]
+  B -->|Não| D[Repete]
+\`\`\``;
+    const html = renderMarkdown(mermaidCode);
+    expect(html).toContain('class="md-mermaid-container"');
+    expect(html).toContain('class="md-mermaid-header"');
+    expect(html).toContain("Fluxograma / Diagrama");
+    expect(html).toContain('class="md-mermaid-svg"');
+    expect(html).toContain("graph TD");
+  });
+
+  it("detecta automaticamente diagramas Mermaid sem tag de linguagem explícita", () => {
+    const mermaidRaw = `\`\`\`
+flowchart LR
+  X --> Y
+\`\`\``;
+    const html = renderMarkdown(mermaidRaw);
+    expect(html).toContain('class="md-mermaid-container"');
+    expect(html).toContain("flowchart LR");
+  });
 });
