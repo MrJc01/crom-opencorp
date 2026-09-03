@@ -968,6 +968,30 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
     }
     return null;
   }
+
+  async listarExecucoes(
+    wsPath: string,
+    flowId: string,
+    limite = 30,
+  ): Promise<Array<{ execId: string; status: string; nos: NoExecInfo[]; contextoFinal: string; em: string; criadoEm: string; entrada?: string }>> {
+    const registros = await this.registros.listar(wsPath, "execucoes");
+    const lista = [];
+    for (const meta of [...registros].sort((a, b) => b.criado_em.localeCompare(a.criado_em))) {
+      const extras = (meta.extras ?? {}) as Record<string, unknown>;
+      if (extras.tipo !== "flow" || extras.flow !== flowId) continue;
+      lista.push({
+        execId: meta.id,
+        status: String(extras.status ?? "?"),
+        nos: (extras.nos as NoExecInfo[]) ?? [],
+        contextoFinal: String(extras.contexto_final ?? ""),
+        em: meta.atualizado_em,
+        criadoEm: meta.criado_em,
+        entrada: typeof extras.entrada === "string" ? extras.entrada : undefined,
+      });
+      if (lista.length >= limite) break;
+    }
+    return lista;
+  }
 }
 
 function porId(flow: Flow, id: string): NoFlow | undefined {

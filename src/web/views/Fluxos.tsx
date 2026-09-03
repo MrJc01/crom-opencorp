@@ -7,7 +7,7 @@ import {
   Show,
   createMemo,
 } from "solid-js";
-import { useSearchParams } from "@solidjs/router";
+import { useSearchParams, useNavigate } from "@solidjs/router";
 import {
   GitBranch,
   Play,
@@ -43,6 +43,9 @@ import {
   Code2,
   Sliders,
   CheckSquare,
+  History,
+  ChevronDown,
+  AlertCircle,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -81,6 +84,7 @@ export const TIPOS_NODE_CATALOGO = [
 
 export const FluxosView: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [fluxos, setFluxos] = createSignal<any[]>([]);
   const [agentes, setAgentes] = createSignal<any[]>([]);
   const [tasksExistentes, setTasksExistentes] = createSignal<any[]>([]);
@@ -128,6 +132,11 @@ export const FluxosView: Component = () => {
   const [entradaTexto, setEntradaTexto] = createSignal("");
   const [executando, setExecutando] = createSignal(false);
 
+  // Logs de Execuções do Workflow
+  const [logsExecucoes, setLogsExecucoes] = createSignal<any[]>([]);
+  const [logsAberto, setLogsAberto] = createSignal(false);
+  const [logSelecionado, setLogSelecionado] = createSignal<any | null>(null);
+
   const [modalNovoFluxo, setModalNovoFluxo] = createSignal(false);
   const [novoFluxoId, setNovoFluxoId] = createSignal("");
   const [novoFluxoNome, setNovoFluxoNome] = createSignal("");
@@ -156,18 +165,30 @@ export const FluxosView: Component = () => {
     try {
       const f = await fetchApi<FluxoCompleto>(`/flows/${encodeURIComponent(id)}`);
       setFluxoAtivo(f);
-      // Mantém oculto até o usuário clicar em um nó explicitamente
       setNoSelecionado(null);
       setSearchParams({ fluxo: id });
+      // Carrega logs de execuções ao abrir um fluxo
+      void carregarLogs(id);
     } catch (e: any) {
       showToast(`Erro ao carregar fluxo: ${e.message}`, "erro");
     }
   };
 
+  const carregarLogs = async (flowId: string) => {
+    try {
+      const logs = await fetchApi<any[]>(`/flows/${encodeURIComponent(flowId)}/execucoes`);
+      setLogsExecucoes(logs || []);
+      if (logs && logs.length > 0) setLogSelecionado(logs[0]);
+    } catch { setLogsExecucoes([]); }
+  };
+
   const voltarParaLista = () => {
     setFluxoAtivo(null);
     setNoSelecionado(null);
-    setSearchParams({ fluxo: undefined });
+    setLogsExecucoes([]);
+    setLogSelecionado(null);
+    setLogsAberto(false);
+    navigate("/fluxos", { replace: true });
   };
 
   createEffect(() => {
@@ -203,6 +224,7 @@ export const FluxosView: Component = () => {
       showToast("Workflow atualizado!", "sucesso");
     } catch (err: any) {
       showToast(`Erro ao salvar: ${err.message}`, "erro");
+      void carregarFluxos();
     }
   };
 
@@ -350,6 +372,11 @@ export const FluxosView: Component = () => {
       showToast(`Execução do workflow "${f.nome || f.id}" iniciada!`, "sucesso");
       setModalExecutar(false);
       setEntradaTexto("");
+      // Recarrega logs após disparo e abre o dropdown
+      setTimeout(() => {
+        void carregarLogs(f.id);
+        setLogsAberto(true);
+      }, 1500);
     } catch (err: any) {
       showToast(`Erro ao rodar: ${err.message}`, "erro");
     } finally {
@@ -397,12 +424,36 @@ export const FluxosView: Component = () => {
       return;
     }
 
+    // Prevenção de loop infinito / ciclos fechados (ex: A → B → C → A)
+    const visitados = new Set<string>();
+    const fila = [destinoId];
+    let temCiclo = false;
+    while (fila.length > 0) {
+      const atual = fila.shift()!;
+      if (atual === origemId) {
+        temCiclo = true;
+        break;
+      }
+      if (visitados.has(atual)) continue;
+      visitados.add(atual);
+      for (const a of f.arestas) {
+        if (a.de === atual) fila.push(a.para);
+      }
+    }
+
+    if (temCiclo) {
+      showToast(
+        `Não é possível ligar "${origemId}" → "${destinoId}": isso criaria um ciclo (loop infinito) no fluxo. O fluxo deve fluir adiante.`,
+        "aviso",
+      );
+      return;
+    }
+
     const novoFluxo: FluxoCompleto = {
       ...f,
       arestas: [...f.arestas, { de: origemId, para: destinoId }],
     };
     void salvarAlteracoesWorkflow(novoFluxo);
-    showToast(`Ligação criada: ${origemId} → ${destinoId}`, "sucesso");
   };
 
   const completarConexao = (destinoId: string) => {
@@ -798,15 +849,14 @@ export const FluxosView: Component = () => {
           {/* Topo / Barra de Navegação do Canvas */}
           <div class="h-14 border-b border-zinc-800 bg-zinc-900/90 px-4 flex items-center justify-between gap-4 z-20">
             <div class="flex items-center gap-3 min-w-0">
-              <Button
-                size="xs"
-                variant="ghost"
-                class="text-zinc-400 hover:text-zinc-100"
-                onClick={voltarParaLista}
+              <button
+                type="button"
+                class="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100 cursor-pointer px-2 py-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+                onClick={() => voltarParaLista()}
                 title="Voltar para lista de Workflows"
               >
-                <ArrowLeft size={14} class="mr-1" /> Workflows
-              </Button>
+                <ArrowLeft size={14} /> Workflows
+              </button>
 
               <div class="h-4 w-px bg-zinc-800" />
 
@@ -814,22 +864,15 @@ export const FluxosView: Component = () => {
                 <div class="h-7 w-7 rounded-lg bg-orange-600/20 border border-orange-500/40 flex items-center justify-center text-orange-400 flex-shrink-0">
                   <GitBranch size={15} />
                 </div>
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="font-bold text-xs text-zinc-100 truncate block">
-                      {fluxoAtivo()!.nome || fluxoAtivo()!.id}
-                    </span>
-                    <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
-                      {fluxoAtivo()!.nos?.length || 0} nodes
-                    </span>
-                  </div>
-                </div>
+                <span class="font-bold text-xs text-zinc-100 truncate">
+                  {fluxoAtivo()!.nome || fluxoAtivo()!.id}
+                </span>
               </div>
             </div>
 
             {/* Controles de Canvas e Ações */}
             <div class="flex items-center gap-2">
-              {/* Botão + Adicionar Node no Topo */}
+              {/* Botão + Adicionar Node */}
               <Button
                 size="sm"
                 variant="secondary"
@@ -839,42 +882,99 @@ export const FluxosView: Component = () => {
                 <Plus size={14} class="mr-1 text-orange-400" /> Adicionar Node
               </Button>
 
-              {/* Botão Copiar JSON */}
-              <Button
-                size="sm"
-                variant="secondary"
-                class="border-zinc-800 text-zinc-300 text-xs"
-                onClick={() => copiarWorkflowJson(fluxoAtivo()!)}
-                title="Copiar Workflow JSON"
-              >
-                <Show
-                  when={copiadoId() === fluxoAtivo()!.id}
-                  fallback={
-                    <>
-                      <Copy size={13} class="mr-1.5 text-zinc-400" /> Copiar
-                    </>
-                  }
-                >
-                  <>
-                    <Check size={13} class="mr-1.5 text-emerald-400" /> Copiado!
-                  </>
-                </Show>
-              </Button>
-
               {/* Zoom Controls */}
               <div class="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5 text-xs text-zinc-400">
-                <IconButton size="xs" variant="ghost" onClick={() => setZoom((z) => Math.max(z - 0.15, 0.4))} title="Zoom Out">
+                <IconButton size="xs" variant="ghost" onClick={() => setZoom((z) => Math.max(z - 0.15, 0.4))} title="Zoom Out (Ctrl+Scroll)">
                   <ZoomOut size={13} />
                 </IconButton>
                 <span class="px-2 font-mono text-[11px] text-zinc-300">
                   {Math.round(zoom() * 100)}%
                 </span>
-                <IconButton size="xs" variant="ghost" onClick={() => setZoom((z) => Math.min(z + 0.15, 2))} title="Zoom In">
+                <IconButton size="xs" variant="ghost" onClick={() => setZoom((z) => Math.min(z + 0.15, 2))} title="Zoom In (Ctrl+Scroll)">
                   <ZoomIn size={13} />
                 </IconButton>
                 <IconButton size="xs" variant="ghost" onClick={resetView} title="Resetar Visualização">
                   <Maximize2 size={12} />
                 </IconButton>
+              </div>
+
+              {/* Logs Dropdown */}
+              <div class="relative">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  class="border-zinc-800 text-zinc-300 text-xs"
+                  onClick={() => { void carregarLogs(fluxoAtivo()!.id); setLogsAberto(!logsAberto()); }}
+                  title="Histórico de Execuções"
+                >
+                  <History size={13} class="mr-1.5 text-zinc-400" />
+                  Logs
+                  <Show when={logsExecucoes().length > 0}>
+                    <span class="ml-1 px-1.5 py-0.5 rounded-full bg-orange-600/30 text-orange-300 text-[9px] font-bold">{logsExecucoes().length}</span>
+                  </Show>
+                  <ChevronDown size={11} class="ml-1 text-zinc-500" />
+                </Button>
+
+                <Show when={logsAberto()}>
+                  <div class="absolute right-0 top-full mt-1 w-[380px] max-h-[400px] overflow-y-auto bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 p-2 space-y-1">
+                    <div class="flex items-center justify-between px-2 py-1.5 border-b border-zinc-800 mb-1">
+                      <span class="text-[11px] font-bold text-zinc-300 flex items-center gap-1.5">
+                        <History size={12} class="text-orange-400" /> Histórico de Execuções
+                      </span>
+                      <button type="button" onClick={() => setLogsAberto(false)} class="text-zinc-500 hover:text-zinc-300 cursor-pointer">
+                        <X size={13} />
+                      </button>
+                    </div>
+                    <Show when={logsExecucoes().length === 0}>
+                      <div class="text-center text-zinc-500 text-[11px] py-4">Nenhuma execução registrada</div>
+                    </Show>
+                    <For each={logsExecucoes()}>
+                      {(log) => {
+                        const isSelected = () => logSelecionado()?.execId === log.execId;
+                        const statusCor = log.status === "concluido" ? "text-emerald-400" : log.status === "falhou" ? "text-rose-400" : "text-amber-400";
+                        const statusIcon = log.status === "concluido" ? <CheckCircle2 size={12} class="text-emerald-400" /> : log.status === "falhou" ? <AlertCircle size={12} class="text-rose-400" /> : <RefreshCw size={12} class="text-amber-400 animate-spin" />;
+                        return (
+                          <button
+                            type="button"
+                            class={`w-full text-left px-2.5 py-2 rounded-lg cursor-pointer transition-colors text-[11px] ${
+                              isSelected() ? "bg-orange-950/40 border border-orange-500/30" : "hover:bg-zinc-800/60 border border-transparent"
+                            }`}
+                            onClick={() => setLogSelecionado(log)}
+                          >
+                            <div class="flex items-center justify-between gap-2">
+                              <div class="flex items-center gap-1.5 min-w-0">
+                                {statusIcon}
+                                <span class={`font-mono font-bold ${statusCor}`}>{log.status}</span>
+                              </div>
+                              <span class="text-[9px] text-zinc-500 font-mono flex-shrink-0">
+                                {new Date(log.criadoEm || log.em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                            </div>
+                            <div class="text-[10px] text-zinc-500 font-mono truncate mt-0.5">{log.execId}</div>
+                            <Show when={log.entrada}>
+                              <div class="text-[10px] text-zinc-400 truncate mt-0.5 italic">{(log.entrada as string).slice(0, 80)}</div>
+                            </Show>
+                            {/* Nós do log */}
+                            <Show when={isSelected() && log.nos?.length > 0}>
+                              <div class="mt-1.5 pt-1.5 border-t border-zinc-800 space-y-0.5">
+                                <For each={log.nos}>
+                                  {(n: any) => (
+                                    <div class="flex items-center gap-1.5 text-[10px]">
+                                      <span class={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${n.status === "ok" ? "bg-emerald-400" : n.status === "falhou" ? "bg-rose-400" : "bg-zinc-600"}`} />
+                                      <span class="font-mono text-zinc-400">{n.id}</span>
+                                      <span class="text-zinc-600">({n.tipo})</span>
+                                      <span class={n.status === "ok" ? "text-emerald-500" : n.status === "falhou" ? "text-rose-500" : "text-zinc-600"}>{n.status}</span>
+                                    </div>
+                                  )}
+                                </For>
+                              </div>
+                            </Show>
+                          </button>
+                        );
+                      }}
+                    </For>
+                  </div>
+                </Show>
               </div>
 
               <Button
@@ -883,7 +983,7 @@ export const FluxosView: Component = () => {
                 class="bg-orange-600 hover:bg-orange-500 text-white font-bold"
                 onClick={() => setModalExecutar(true)}
               >
-                <Play size={13} class="mr-1.5 fill-current" /> Executar Workflow
+                <Play size={13} class="mr-1.5 fill-current" /> Executar
               </Button>
             </div>
           </div>
@@ -896,6 +996,13 @@ export const FluxosView: Component = () => {
             onMouseUp={onMouseUpCanvas}
             onMouseLeave={onMouseUpCanvas}
             onContextMenu={(e) => onContextMenuCanvas(e)}
+            onWheel={(e) => {
+              if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? -0.08 : 0.08;
+                setZoom((z) => Math.max(0.3, Math.min(2.5, z + delta)));
+              }
+            }}
             style={{
               "background-image": "radial-gradient(#27272a 1px, transparent 1px)",
               "background-size": `${24 * zoom()}px ${24 * zoom()}px`,

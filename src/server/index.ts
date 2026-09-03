@@ -1243,6 +1243,13 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           enviar(res, 200, { ok: true, id: flowId });
           return;
         }
+        const mFlowExecucoes = /^\/flows\/([^/]+)\/execucoes$/.exec(rota);
+        if (mFlowExecucoes && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const flowId = decodeURIComponent(mFlowExecucoes[1]!);
+          enviar(res, 200, await flows.listarExecucoes(ws.path, flowId));
+          return;
+        }
         const mFlowStatus = /^\/flows\/([^/]+)\/status$/.exec(rota);
         if (mFlowStatus && req.method === "GET") {
           const ws = await resolverWs(url);
