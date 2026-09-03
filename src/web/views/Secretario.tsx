@@ -478,7 +478,11 @@ export const SecretarioView: Component = () => {
                 }
               } else if (evtType === "erro") {
                 assistente.concluida = true;
-                assistente.content = assistente.content || `(erro: ${payload.erro || "desconhecido"})`;
+                const msgErro = payload.erro || payload.mensagem || "Erro desconhecido";
+                showToast(`Erro no Secretário: ${msgErro}`, "erro");
+                assistente.content = assistente.content
+                  ? `${assistente.content}\n\n> ⚠️ **Erro no Secretário**: ${msgErro}`
+                  : `> ⚠️ **Erro no Secretário**: ${msgErro}`;
               }
 
               return [...prev.slice(0, ultIdx), assistente];

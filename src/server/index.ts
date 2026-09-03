@@ -3377,11 +3377,17 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
 
                 if (postErro && !concluida) {
                   if (modeloIdx < modelosFallback.length - 1) {
-                    console.warn(`[secretario] Modelo ${modeloAtual} falhou (${postErro}). Alternando para o próximo...`);
+                    const proximo = modelosFallback[modeloIdx + 1];
+                    console.warn(`[secretario] Modelo ${modeloAtual} falhou (${postErro}). Alternando para ${proximo}...`);
+                    sse("status", {
+                      tipo: "fallback_modelo",
+                      modelo: proximo,
+                      aviso: `⚠️ O modelo ${modeloAtual} falhou (${postErro}). Alternando automaticamente para ${proximo}...`,
+                    });
                     tentouFallback = true;
                     break;
                   } else {
-                    sse("erro", { erro: `falha ao enviar mensagem ao modelo (${postErro}) — ver logs`, sessao_id: sessaoId });
+                    sse("erro", { erro: `Falha ao conectar com o modelo (${postErro}). Todos os modelos de contingência foram tentados sem sucesso.`, sessao_id: sessaoId });
                     eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
                     res.end();
                     return;
@@ -3442,7 +3448,13 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                       else if (Date.now() - vazioDesde > 22_000) {
                         // 22s sem atividade de tokens/pensamento/ferramenta: fallback automático!
                         if (modeloIdx < modelosFallback.length - 1) {
-                          console.warn(`[secretario] Modelo ${modeloAtual} sem resposta por >22s. Alternando para o próximo...`);
+                          const proximo = modelosFallback[modeloIdx + 1];
+                          console.warn(`[secretario] Modelo ${modeloAtual} sem resposta por >22s. Alternando para ${proximo}...`);
+                          sse("status", {
+                            tipo: "fallback_modelo",
+                            modelo: proximo,
+                            aviso: `⚠️ O modelo ${modeloAtual} não respondeu em 22s. Alternando automaticamente para ${proximo}...`,
+                          });
                           tentouFallback = true;
                           break;
                         }
@@ -3455,7 +3467,13 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                     if (vazioDesde === null) vazioDesde = Date.now();
                     else if (Date.now() - vazioDesde > 20_000) {
                       if (modeloIdx < modelosFallback.length - 1) {
-                        console.warn(`[secretario] Modelo ${modeloAtual} não iniciou após 20s. Alternando para o próximo...`);
+                        const proximo = modelosFallback[modeloIdx + 1];
+                        console.warn(`[secretario] Modelo ${modeloAtual} não iniciou após 20s. Alternando para ${proximo}...`);
+                        sse("status", {
+                          tipo: "fallback_modelo",
+                          modelo: proximo,
+                          aviso: `⚠️ O modelo ${modeloAtual} demorou mais de 20s para iniciar. Alternando automaticamente para ${proximo}...`,
+                        });
                         tentouFallback = true;
                         break;
                       }

@@ -197,10 +197,15 @@ export const HistoricoView: Component = () => {
     if (!run) return;
     setEncerrando(true);
     try {
-      await fetchApi(`/execucoes/${encodeURIComponent(run.id)}/cancelar`, {
-        method: "POST",
-      } as any);
-      showToast("Execução encerrada com sucesso", "sucesso");
+      const res = await fetchApi<{ ok?: boolean; erro?: string; mensagem?: string }>(
+        `/execucoes/${encodeURIComponent(run.id)}/cancelar`,
+        { method: "POST" } as any
+      );
+      if (res && res.ok === false) {
+        showToast(`Falha ao encerrar: ${res.erro || "Operação não concluída"}`, "erro");
+        return;
+      }
+      showToast(res?.mensagem || "Execução encerrada com sucesso", "sucesso");
       setRunSelecionado({ ...run, status: "cancelado" });
       if (liveLogInterval) {
         clearInterval(liveLogInterval);
@@ -208,7 +213,7 @@ export const HistoricoView: Component = () => {
       }
       void carregarHistorico();
     } catch (e: any) {
-      showToast(`Erro ao encerrar: ${e.message}`, "erro");
+      showToast(`Erro ao encerrar execução: ${e.message || String(e)}`, "erro");
     } finally {
       setEncerrando(false);
     }
