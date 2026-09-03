@@ -19,6 +19,7 @@ import { AppsView } from "./views/Apps";
 import { HistoricoView } from "./views/Historico";
 import { NotificacoesView } from "./views/Notificacoes";
 import { ConfigView } from "./views/Config";
+import { DocsView } from "./views/Docs";
 
 export const AppLayout: Component<{ children?: any }> = (props) => {
   onMount(() => {
@@ -56,6 +57,7 @@ export const App: Component = () => {
       <Route path="/apps" component={AppsView} />
       <Route path="/historico" component={HistoricoView} />
       <Route path="/notificacoes" component={NotificacoesView} />
+      <Route path="/docs" component={DocsView} />
       <Route path="/config" component={ConfigView} />
     </Router>
   );

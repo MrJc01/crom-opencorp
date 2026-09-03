@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Building2,
   ChevronsUpDown,
+  BookOpen,
 } from "lucide-solid";
 import { wsAtivo, setWsAtivo, workspaces, notificacoesNaoLidas } from "../lib/context";
 
@@ -56,6 +57,7 @@ export const Sidebar: Component = () => {
         { href: "/apps", label: "Apps & Secrets", icone: KeyRound },
         { href: "/historico", label: "Histórico", icone: History },
         { href: "/notificacoes", label: "Notificações", icone: Bell, badge: () => notificacoesNaoLidas() },
+        { href: "/docs", label: "Documentação", icone: BookOpen },
         { href: "/config", label: "Config", icone: Settings },
       ],
     },

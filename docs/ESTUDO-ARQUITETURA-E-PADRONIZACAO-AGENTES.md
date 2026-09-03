@@ -271,10 +271,53 @@ graph LR
 
 ---
 
-## 7. Conclusão
+## 8. Evolução Estratégica: Diretrizes Adicionadas pelo Usuário
+
+Com base no alinhamento estratégico, foram incorporadas 5 diretrizes vitais ao roadmap de evolução do OpenCorp:
+
+### 8.1. Workspaces em Qualquer Pasta do Computador (Custom Paths)
+- **Como funciona hoje:** Workspaces são criados por padrão em `~/.opencorp/workspaces/<id>`.
+- **Evolução:** Permitir apontar para **qualquer diretório do computador** (idêntico à tela inicial do OpenCode):
+  - Ao criar um workspace, o usuário pode escolher uma pasta existente (ex.: `/home/j/Projetos/meu-app` ou `/var/www/site`).
+  - O OpenCorp inicializa a pasta `.opencorp/` dentro desse diretório e registra o caminho absoluto no `workspaces.json`.
+  - Se nenhum caminho for informado, mantém o padrão conveniente em `~/.opencorp/workspaces/<id>`.
+
+### 8.2. Motores de Agentes Intercambiáveis (OpenCode, Claude Code e Runners Pluggable)
+- **Como funciona hoje:** Todos os agentes executam via binário `opencode` (`opencode run --auto --agent <id> --dir <ws>`).
+- **Evolução:** Página de configuração (`/config?tab=motores`) expondo:
+  - Status em tempo real do OpenCode (versão, binário no PATH, tempo de resposta).
+  - Configuração do executável (suporte a caminhos customizados).
+  - Watchdog ajustável (timeout por turno).
+  - **Slots de Novos Motores:** Preparação para conectar runners alternativos como **Claude Code** (`claude`), Codex ou runners CLI customizados via stdio/subshell.
+
+### 8.3. Contexto Inicial Adaptativo (Smart Priming)
+- Em vez de um texto estático, o contexto injetado no System Prompt do agente se adapta em tempo de execução:
+  - **Por Papel do Agente:** Um `@editor` recebe os últimos posts e pautas; um `@critico-site` recebe os últimos relatórios de auditoria e status de rede.
+  - **Por Gatilho (`gatilho`):** Se disparado por uma rotina cron, destaca o objetivo da ronda; se disparado por um nó de fluxo (n8n), destaca o payload `{entrada}` e o contexto dos nós anteriores; se for menção em tarefa, destaca o histórico do chat daquela tarefa.
+  - **Por Tarefas Atribuídas:** Tarefas em `fazendo` com o ID do agente são destacadas imediatamente no topo como prioridade máxima.
+
+### 8.4. Documentação Unificada como Fonte de Verdade (`oc docs`)
+- **Centralização:** Toda a documentação técnica oficial de `docs/` é servida pela API (`GET /docs` e `GET /docs/:slug`) e exibida na nova tela **Documentação** (`/docs`) no menu lateral da Web UI.
+- **Alinhamento IA × Usuário:** O agente no terminal pode rodar `oc doc ajuda [slug]` para consultar o mesmo documento Markdown que o usuário vê na tela. Ambos operam sob as mesmas instruções e padrões.
+
+### 8.5. Execução em Segundo Plano (Background Daemons)
+- **Servidor Web & API:**
+  - `opencorp serve` ➔ Inicia o servidor e Web UI na porta 4100 em segundo plano (salva PID em `~/.opencorp/api.pid`).
+  - `opencorp serve status` ➔ Mostra se a API está rodando, porta e consumo de memória.
+  - `opencorp serve stop` ➔ Encerra o daemon com segurança.
+- **Suite Completa de Daemons:**
+  - `opencorp daemon start` ➔ Inicia todos os serviços de background em conjunto: API (porta 4100), Agendador de Rondas (Scheduler) e Supervisor autônomo.
+  - `opencorp daemon status` ➔ Exibe a saúde de todos os daemons ativos.
+  - `opencorp daemon stop` ➔ Para todos os daemons de forma coordenada.
+
+---
+
+## 9. Conclusão
 
 Com esta padronização:
 1. **Os agentes tornam-se 3x mais rápidos** e consomem menos da metade dos tokens por sessão.
 2. **O problema da desorientação espacial é extinto**, pois o agente já acorda sabendo exatamente seu workspace, suas tarefas pendentes e o caminho dos arquivos.
 3. **Erros de path fantasma (`registries` vs `.opencorp/registries`) são eliminados na raiz** através de funções com caminhos canônicos garantidos.
-4. **O sistema ganha extensibilidade real**, permitindo que qualquer nova funcionalidade (novos nós de fluxo, novas reuniões, novas automações de agenda) se torne imediatamente uma função padrão acessível a qualquer agente.
+4. **O sistema ganha flexibilidade total de diretórios**, podendo gerenciar qualquer repositório existente no disco como uma empresa autônoma OpenCorp.
+5. **A plataforma fica aberta para múltiplos motores de IA** (OpenCode hoje, Claude Code e outros amanhã), mantendo governança unificada.
+

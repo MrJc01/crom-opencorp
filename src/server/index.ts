@@ -2,7 +2,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { join, resolve, relative, isAbsolute } from "node:path";
+import { join, resolve, relative, isAbsolute, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { stat, readdir, readFile, realpath, open } from "node:fs/promises";
 import { existsSync, rmSync, statSync, readFileSync } from "node:fs";
 import { WorkspaceManager } from "../core/workspace-manager.js";
@@ -37,6 +38,8 @@ import { tipoDeNomeApp, validarPerfilApp } from "../schemas/app-perfil.js";
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
 import { createRequire } from "node:module";
+
+const docsRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs");
 
 /** Definição de rotas para documentação OpenAPI e sugestões de 404 */
 interface DefinicaoRota {
@@ -904,6 +907,56 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
 
           itens.sort((a, b) => (b.quando ?? "").localeCompare(a.quando ?? ""));
           enviar(res, 200, itens.slice(0, limite));
+          return;
+        }
+
+        // ── /docs — Documentação unificada para Web UI e Agentes ──
+        if (rota === "/docs" && req.method === "GET") {
+          const itens = [
+            { slug: "estudo-padronizacao", titulo: "Estudo de Arquitetura e Padronização", arquivo: "ESTUDO-ARQUITETURA-E-PADRONIZACAO-AGENTES.md", categoria: "Guia & Padronização" },
+            { slug: "01-visao-geral", titulo: "01. Visão Geral da Plataforma", arquivo: "01-visao-geral.md", categoria: "Conceitos" },
+            { slug: "02-arquitetura", titulo: "02. Arquitetura do Sistema", arquivo: "02-arquitetura.md", categoria: "Conceitos" },
+            { slug: "03-workspaces", titulo: "03. Workspaces e Templates", arquivo: "03-workspaces-templates-subcorp.md", categoria: "Operação" },
+            { slug: "04-agentes", titulo: "04. Agentes e Papéis", arquivo: "04-agentes.md", categoria: "Operação" },
+            { slug: "05-registros", titulo: "05. Registros e Memória", arquivo: "05-registros-e-memoria.md", categoria: "Operação" },
+            { slug: "06-painel", titulo: "06. Painel e Configurações", arquivo: "06-painel-configuracoes.md", categoria: "Interface" },
+            { slug: "07-seguranca", titulo: "07. Segurança e Orçamento", arquivo: "07-seguranca-custos.md", categoria: "Governança" },
+            { slug: "08-cli", titulo: "08. Referência do CLI e oc", arquivo: "08-cli-referencia.md", categoria: "Referência" },
+            { slug: "capacidades", titulo: "Capacidades da Empresa", arquivo: "CAPACIDADES-EMPRESA.md", categoria: "Referência" },
+          ];
+          enviar(res, 200, itens);
+          return;
+        }
+        const mDoc = /^\/docs\/([^/]+)$/.exec(rota);
+        if (mDoc && req.method === "GET") {
+          const slug = decodeURIComponent(mDoc[1]!);
+          const mapaArquivos: Record<string, { titulo: string; arquivo: string; categoria: string }> = {
+            "estudo-padronizacao": { titulo: "Estudo de Arquitetura e Padronização", arquivo: "ESTUDO-ARQUITETURA-E-PADRONIZACAO-AGENTES.md", categoria: "Guia & Padronização" },
+            "01-visao-geral": { titulo: "01. Visão Geral da Plataforma", arquivo: "01-visao-geral.md", categoria: "Conceitos" },
+            "02-arquitetura": { titulo: "02. Arquitetura do Sistema", arquivo: "02-arquitetura.md", categoria: "Conceitos" },
+            "03-workspaces": { titulo: "03. Workspaces e Templates", arquivo: "03-workspaces-templates-subcorp.md", categoria: "Operação" },
+            "04-agentes": { titulo: "04. Agentes e Papéis", arquivo: "04-agentes.md", categoria: "Operação" },
+            "05-registros": { titulo: "05. Registros e Memória", arquivo: "05-registros-e-memoria.md", categoria: "Operação" },
+            "06-painel": { titulo: "06. Painel e Configurações", arquivo: "06-painel-configuracoes.md", categoria: "Interface" },
+            "07-seguranca": { titulo: "07. Segurança e Orçamento", arquivo: "07-seguranca-custos.md", categoria: "Governança" },
+            "08-cli": { titulo: "08. Referência do CLI e oc", arquivo: "08-cli-referencia.md", categoria: "Referência" },
+            "capacidades": { titulo: "Capacidades da Empresa", arquivo: "CAPACIDADES-EMPRESA.md", categoria: "Referência" },
+          };
+          const item = mapaArquivos[slug];
+          const arquivoNome = item?.arquivo || (slug.endsWith(".md") ? slug : `${slug}.md`);
+          const arquivoPath = join(docsRoot, arquivoNome);
+          if (!existsSync(arquivoPath)) {
+            enviar(res, 404, { erro: `documento "${slug}" não encontrado` });
+            return;
+          }
+          const conteudo = readFileSync(arquivoPath, "utf8");
+          enviar(res, 200, {
+            slug,
+            titulo: item?.titulo || slug,
+            categoria: item?.categoria || "Documentação",
+            arquivo: arquivoNome,
+            conteudo,
+          });
           return;
         }
 

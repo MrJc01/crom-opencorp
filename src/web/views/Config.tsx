@@ -1,17 +1,21 @@
 import { type Component, createSignal, onMount, createEffect, For, Show } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
-import { Settings, Cpu, Key, Shield, ShieldCheck, Save } from "lucide-solid";
+import { Settings, Cpu, Key, Shield, ShieldCheck, Save, Bot, Terminal, CheckCircle2 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { showToast } from "../ui/Toast";
 import { fetchApi } from "../lib/context";
 
 export const ConfigView: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const abaAtiva = () => (searchParams.tab as "modelos" | "chaves" | "seguranca" | "geral") || "seguranca";
-  const setAbaAtiva = (tab: "modelos" | "chaves" | "seguranca" | "geral") => setSearchParams({ tab });
+  const abaAtiva = () => (searchParams.tab as "modelos" | "chaves" | "seguranca" | "motores" | "geral") || "seguranca";
+  const setAbaAtiva = (tab: "modelos" | "chaves" | "seguranca" | "motores" | "geral") => setSearchParams({ tab });
 
   const [settings, setSettings] = createSignal<any>({});
   const [salvando, setSalvando] = createSignal(false);
+
+  // Estado dos Motores (OpenCode / Runners)
+  const [opencodePath, setOpencodePath] = createSignal("opencode");
+  const [opencodeTimeout, setOpencodeTimeout] = createSignal(20);
 
   // Estado da Política de Segurança
   const [nivelSeguranca, setNivelSeguranca] = createSignal<"permissive" | "standard" | "strict">("permissive");
@@ -64,6 +68,27 @@ export const ConfigView: Component = () => {
     }
   };
 
+  const salvarMotores = async () => {
+    setSalvando(true);
+    try {
+      await fetchApi("/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          runner: {
+            engine: "opencode",
+            binary_path: opencodePath().trim() || "opencode",
+            timeout_min: opencodeTimeout(),
+          },
+        }),
+      });
+      showToast("Configuração do OpenCode atualizada com sucesso!", "sucesso");
+    } catch (err: any) {
+      showToast("Erro ao salvar motor: " + err.message, "erro");
+    } finally {
+      setSalvando(false);
+    }
+  };
+
   onMount(() => {
     void carregarSettings();
   });
@@ -83,6 +108,13 @@ export const ConfigView: Component = () => {
           onClick={() => setAbaAtiva("seguranca")}
         >
           <Shield size={13} class="mr-1.5 text-emerald-400" /> Segurança & Permissões
+        </Button>
+        <Button
+          size="xs"
+          variant={abaAtiva() === "motores" ? "primary" : "ghost"}
+          onClick={() => setAbaAtiva("motores")}
+        >
+          <Bot size={13} class="mr-1.5 text-cyan-400" /> Motores & OpenCode
         </Button>
         <Button
           size="xs"
@@ -216,6 +248,135 @@ export const ConfigView: Component = () => {
             <div class="pt-2 border-t border-zinc-800 flex justify-end">
               <Button size="sm" variant="primary" loading={salvando()} onClick={salvarSeguranca}>
                 <Save size={13} class="mr-1.5" /> Salvar Política de Segurança
+              </Button>
+            </div>
+          </div>
+        </Show>
+
+        {/* ABA MOTORES DE AGENTE / OPENCODE */}
+        <Show when={abaAtiva() === "motores"}>
+          <div class="p-5 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-4">
+            <div>
+              <h2 class="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                <Bot size={16} class="text-cyan-400" />
+                Motor de Execução de Agentes (OpenCode / Runners)
+              </h2>
+              <p class="text-xs text-zinc-400 mt-0.5">
+                Configure o ambiente de runtime dos agentes autônomos e a ponte com o OpenCode.
+              </p>
+            </div>
+
+            {/* Status do Motor Atual */}
+            <div class="p-3.5 rounded-lg bg-zinc-950 border border-zinc-800 flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="h-9 w-9 rounded-lg bg-cyan-950/60 border border-cyan-800/80 flex items-center justify-center text-cyan-400 font-mono font-bold text-xs">
+                  OC
+                </div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-bold text-zinc-100">OpenCode Runtime</span>
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1">
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Conectado & Operacional
+                    </span>
+                  </div>
+                  <span class="text-[11px] text-zinc-400 font-mono">
+                    Comando: opencode run --auto --agent &lt;id&gt; --dir &lt;workspace&gt;
+                  </span>
+                </div>
+              </div>
+              <span class="text-xs font-mono text-zinc-500">v1.x</span>
+            </div>
+
+            {/* Configurações do OpenCode */}
+            <div class="space-y-3 pt-1">
+              <div>
+                <label class="block text-xs font-medium text-zinc-300 mb-1">
+                  Caminho do Binário do OpenCode
+                </label>
+                <input
+                  type="text"
+                  value={opencodePath()}
+                  onInput={(e) => setOpencodePath(e.currentTarget.value)}
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-cyan-500/50"
+                  placeholder="opencode ou caminho absoluto /usr/local/bin/opencode"
+                />
+                <span class="text-[10px] text-zinc-500 mt-0.5 block">
+                  Usado pelo SessionManager para disparar os agentes autônomos.
+                </span>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-zinc-300 mb-1">
+                    Timeout por Turno (Watchdog)
+                  </label>
+                  <div class="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={opencodeTimeout()}
+                      onInput={(e) => setOpencodeTimeout(Number(e.currentTarget.value) || 20)}
+                      min="1"
+                      max="120"
+                      class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-cyan-500/50"
+                    />
+                    <span class="text-xs text-zinc-400">min</span>
+                  </div>
+                  <span class="text-[10px] text-zinc-500 mt-0.5 block">
+                    Watchdog encerra execuções travadas automaticamente.
+                  </span>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-medium text-zinc-300 mb-1">
+                    Isolamento de Sessões
+                  </label>
+                  <div class="p-2 rounded-lg bg-zinc-950 border border-zinc-800 text-[11px] text-zinc-400 font-mono">
+                    ~/.opencorp/opencode-data/&lt;ws&gt;
+                  </div>
+                  <span class="text-[10px] text-zinc-500 mt-0.5 block">
+                    Cada workspace mantém auth e sessões isoladas.
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Suporte Futuro a Novos Motores */}
+            <div class="pt-3 border-t border-zinc-800/80 space-y-2">
+              <span class="text-[10px] font-bold text-zinc-500 uppercase tracking-wider font-mono">
+                Outros Motores (Arquitetura Pluggable)
+              </span>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div class="p-3 rounded-lg bg-zinc-950/40 border border-zinc-800/80 opacity-70">
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs font-bold text-zinc-300">Claude Code (Anthropic)</span>
+                    <span class="text-[9px] font-mono px-1 py-0.5 rounded bg-zinc-800 text-zinc-400">Em Breve</span>
+                  </div>
+                  <p class="text-[11px] text-zinc-500 leading-relaxed">
+                    Conexão direta via comando <code class="text-zinc-400">claude</code> com permissões autônomas.
+                  </p>
+                </div>
+                <div class="p-3 rounded-lg bg-zinc-950/40 border border-zinc-800/80 opacity-70">
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs font-bold text-zinc-300">Custom CLI Runner</span>
+                    <span class="text-[9px] font-mono px-1 py-0.5 rounded bg-zinc-800 text-zinc-400">Em Breve</span>
+                  </div>
+                  <p class="text-[11px] text-zinc-500 leading-relaxed">
+                    Ponte genérica para rodar qualquer LLM CLI via subprocesso stdio.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="pt-2 flex justify-end">
+              <Button
+                size="sm"
+                variant="primary"
+                class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold"
+                disabled={salvando()}
+                onClick={salvarMotores}
+              >
+                <Save size={13} class="mr-1.5" />
+                {salvando() ? "Salvando..." : "Salvar Configuração do OpenCode"}
               </Button>
             </div>
           </div>
