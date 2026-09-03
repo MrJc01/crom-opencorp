@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { RegistryError } from "./errors.js";
 import { CorpDb } from "./corp-db.js";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
+import { eventBus } from "./event-bus.js";
 
 export const CATEGORIAS_PADRAO = [
   "chats",
@@ -204,6 +205,22 @@ export class RegistryStore {
       atualizado_em: meta.atualizado_em,
       tags: meta.tags.join(","),
       conteudo: opts.conteudo ?? (opts.dados !== undefined ? JSON.stringify(opts.dados) : ""),
+    });
+    eventBus.emit("doc.criado", {
+      doc_id: meta.id,
+      categoria: meta.categoria,
+      descricao: meta.descricao,
+      criado_por: meta.criado_por,
+      ws_path: wsPath,
+      workspace: wsPath.split("/").pop() || "padrao",
+      caminho: opts.conteudo !== undefined ? join(dir, "conteudo.md") : join(dir, "dados.json"),
+    });
+    eventBus.emit("registro.criado", {
+      id: meta.id,
+      categoria: meta.categoria,
+      criado_por: meta.criado_por,
+      ws_path: wsPath,
+      workspace: wsPath.split("/").pop() || "padrao",
     });
     return meta;
   }
@@ -470,6 +487,13 @@ export class RegistryStore {
       atualizado_em: meta.atualizado_em,
       tags: meta.tags.join(","),
       conteudo: await this.lerConteudoIndexavel(wsPath, categoria, id),
+    });
+    eventBus.emit("doc.atualizado", {
+      doc_id: meta.id,
+      categoria: meta.categoria,
+      ws_path: wsPath,
+      workspace: wsPath.split("/").pop() || "padrao",
+      caminho: join(dir, "conteudo.md"),
     });
   }
 

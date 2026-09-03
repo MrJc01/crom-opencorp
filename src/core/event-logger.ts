@@ -71,6 +71,10 @@ export class EventLogger {
         return `Task ${dados.task_id || ""} movida de ${dados.de} para ${dados.para}`;
       case "task.concluida":
         return `Task ${dados.task_id || ""} concluída`;
+      case "doc.criado":
+        return `Documento criado: ${dados.categoria}/${dados.doc_id || ""} por ${dados.criado_por || ""}`;
+      case "doc.atualizado":
+        return `Documento atualizado: ${dados.categoria}/${dados.doc_id || ""}`;
       case "task.mensagem":
         return `Mensagem na task ${dados.task_id || ""} por ${dados.autor || ""}`;
       case "hook.executado":

@@ -12,7 +12,8 @@ export type AlvoHook =
   | { tipo: "task_run"; task_id: string; instrucao_adicional?: string }
   | { tipo: "agent_run"; agente: string; ordem: string }
   | { tipo: "flow_run"; flow: string; entrada?: string }
-  | { tipo: "webhook_out"; url: string; metodo?: string; corpo?: string; headers?: Record<string, string> };
+  | { tipo: "webhook_out"; url: string; metodo?: string; corpo?: string; headers?: Record<string, string> }
+  | { tipo: "pre_publish"; minimo_chars?: number; proibir_scripts?: boolean; checar_duplicidade?: boolean };
 
 export interface HookAuth {
   tipo: "token" | "hmac_sha256" | "nenhuma";
@@ -305,6 +306,26 @@ ${instrucaoAdicional}` : null,
       eventBus.emit("hook.executado", { hook: hook.id, alvo: alvo.tipo, exec: r.id });
       return { exec_id: r.id, resultado: r.captura?.trim() ?? "" };
     }
+    if (alvo.tipo === "pre_publish") {
+      const { validarPrePublicacao } = await import("./pre-publish.js");
+      const validacao = await validarPrePublicacao(wsPath, {
+        titulo: payload.corpo.titulo ? String(payload.corpo.titulo) : undefined,
+        slug: payload.corpo.slug ? String(payload.corpo.slug) : undefined,
+        conteudo: String(payload.corpo.conteudo || payload.corpo.content || ""),
+        tipo: (payload.corpo.tipo as any) || "post",
+        minimoChars: alvo.minimo_chars,
+        proibirScriptsSoltos: alvo.proibir_scripts,
+        checarDuplicidade: alvo.checar_duplicidade,
+      });
+      if (!validacao.valido) {
+        throw new HookError(`Validação pré-publicação falhou: ${validacao.erros.join("; ")}`);
+      }
+      eventBus.emit("hook.executado", { hook: hook.id, alvo: "pre_publish", valido: true });
+      return {
+        exec_id: null,
+        resultado: "Aprovado: conteúdo atende aos requisitos editoriais e de segurança.",
+      };
+    }
     // webhook_out
     const url = substituirTemplate(alvo.url, payload);
     const metodo = (alvo.metodo ?? "POST").toUpperCase();
@@ -359,10 +380,12 @@ ${instrucaoAdicional}` : null,
         ordemDescricao = `Criar task: ${substituirTemplate(hook.alvo.titulo, payload)}`;
       } else if (hook.alvo.tipo === "flow_run") {
         ordemDescricao = `Executar fluxo ${hook.alvo.flow} com entrada: ${substituirTemplate(hook.alvo.entrada ?? "", payload)}`;
-        agenteAlvo = "flow";
-      } else {
+      } else if (hook.alvo.tipo === "webhook_out") {
         ordemDescricao = `Disparar webhook out para ${hook.alvo.url}`;
         agenteAlvo = "webhook";
+      } else {
+        ordemDescricao = "Validação pré-publicação";
+        agenteAlvo = "revisor";
       }
 
       const p = await approvals.criar(wsPath, {

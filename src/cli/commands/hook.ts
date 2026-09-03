@@ -50,7 +50,15 @@ export function registerHookCommands(program: Command): void {
         corpo: opts["corpo"],
       };
     }
-    throw Object.assign(new Error(`--alvo inválido: "${tipo}" — use task_create|agent_run|flow_run|webhook_out`), {
+    if (tipo === "pre_publish") {
+      return {
+        tipo: "pre_publish",
+        minimo_chars: opts["minimo_chars"] ? Number(opts["minimo_chars"]) : undefined,
+        proibir_scripts: true,
+        checar_duplicidade: true,
+      };
+    }
+    throw Object.assign(new Error(`--alvo inválido: "${tipo}" — use task_create|agent_run|flow_run|webhook_out|pre_publish`), {
       exitCode: 1,
     });
   }
@@ -150,6 +158,66 @@ export function registerHookCommands(program: Command): void {
         const ws = await manager.resolver(wsDe(opts));
         await store.excluir(ws.path, id);
         console.log(`ok: ${id} excluído`);
+      }),
+    );
+
+  hook
+    .command("pre-publish")
+    .description(
+      "valida se um conteúdo/post pode ser publicado com segurança (anti-duplicação, anti-scripts que quebram layout)",
+    )
+    .option("--titulo <t>", "título da publicação")
+    .option("--slug <s>", "slug pretendido")
+    .option("--arquivo <path>", "caminho de arquivo markdown/html local")
+    .option("--conteudo <c>", "conteúdo literal do texto/artigo")
+    .option("--tipo <tipo>", "post | pagina | documento | comunicado", "post")
+    .option("--json", "saída em JSON estruturado")
+    .option("-w, --workspace <id>", "workspace alvo")
+    .action((opts: {
+      titulo?: string;
+      slug?: string;
+      arquivo?: string;
+      conteudo?: string;
+      tipo?: string;
+      json?: boolean;
+      workspace?: string;
+    }) =>
+      comErros(async () => {
+        const ws = await manager.resolver(wsDe(opts));
+        const { validarPrePublicacao } = await import("../../core/pre-publish.js");
+        let texto = opts.conteudo || "";
+        if (opts.arquivo && !texto) {
+          const { readFileSync } = await import("node:fs");
+          texto = readFileSync(opts.arquivo, "utf8");
+        }
+        const resultado = await validarPrePublicacao(ws.path, {
+          titulo: opts.titulo,
+          slug: opts.slug,
+          conteudo: texto,
+          tipo: (opts.tipo as any) || "post",
+        });
+
+        if (opts.json) {
+          console.log(JSON.stringify(resultado, null, 2));
+          if (!resultado.valido) process.exitCode = 1;
+          return;
+        }
+
+        if (resultado.valido) {
+          console.log("\x1b[32m✅ Conteúdo APROVADO para publicação!\x1b[0m");
+          if (resultado.avisos.length > 0) {
+            console.log("\nAvisos:");
+            for (const a of resultado.avisos) console.log(`  • ${a}`);
+          }
+        } else {
+          console.log("\x1b[31m❌ Publicação BLOQUEADA por políticas de qualidade/segurança:\x1b[0m");
+          for (const e of resultado.erros) console.log(`  • ${e}`);
+          if (resultado.avisos.length > 0) {
+            console.log("\nAvisos adicionais:");
+            for (const a of resultado.avisos) console.log(`  • ${a}`);
+          }
+          process.exitCode = 1;
+        }
       }),
     );
 
