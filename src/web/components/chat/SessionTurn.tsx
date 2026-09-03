@@ -47,12 +47,31 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
   const m = () => props.mensagem;
 
   const copiar = async () => {
+    const texto = m().content || "";
+    if (!texto) { showToast("Nada para copiar", "aviso"); return; }
+    let ok = false;
     try {
-      await navigator.clipboard.writeText(m().content);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(texto);
+        ok = true;
+      }
+    } catch { /* fallback abaixo */ }
+    if (!ok) {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = texto;
+        ta.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0";
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch { /* nada */ }
+    }
+    if (ok) {
       setCopiado(true);
       setTimeout(() => setCopiado(false), 2000);
       showToast("Copiado para a área de transferência", "info");
-    } catch {
+    } else {
       showToast("Falha ao copiar", "aviso");
     }
   };
