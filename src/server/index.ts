@@ -2466,7 +2466,12 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   resumo: resumoDeInput(p.state?.input, p.state?.title),
                   sucesso: p.state?.status !== "error",
                 }));
-                const isCompleted = !!m.info?.time?.completed && (m.info as any)?.finish !== "tool-calls";
+                const agora = Date.now();
+                const criadoEmMs = m.info?.time?.created ?? 0;
+                // Se não tiver time.completed mas foi criada há mais de 90s, considera concluída/expirada
+                const expirou = !m.info?.time?.completed && criadoEmMs > 0 && agora - criadoEmMs > 90_000;
+                const isCompleted = (!!m.info?.time?.completed || expirou) && (m.info as any)?.finish !== "tool-calls";
+                const textoFinal = content || (expirou ? "(geração anterior interrompida ou expirada)" : "");
 
                 // Se a mensagem anterior já é do assistente (mesmo turno com múltiplos passos), consolida nela
                 const ult = mensagens[mensagens.length - 1];
@@ -2474,8 +2479,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   if (pensamento) {
                     ult.pensamento = ult.pensamento ? `${ult.pensamento}\n\n---\n\n${pensamento}` : pensamento;
                   }
-                  if (content) {
-                    ult.content = ult.content ? `${ult.content}\n\n${content}` : content;
+                  if (textoFinal) {
+                    ult.content = ult.content ? `${ult.content}\n\n${textoFinal}` : textoFinal;
                   }
                   if (tools.length > 0) {
                     ult.acoes = [...(ult.acoes ?? []), ...tools];
@@ -2484,7 +2489,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 } else {
                   mensagens.push({
                     role: "assistant",
-                    content,
+                    content: textoFinal,
                     pensamento: pensamento || undefined,
                     criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
                     concluida: isCompleted,

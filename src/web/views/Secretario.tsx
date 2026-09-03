@@ -168,8 +168,14 @@ export const SecretarioView: Component = () => {
       setTimeout(scrollFim, 50);
 
       const ult = lista[lista.length - 1];
-      if (ult && ult.role === "assistant" && ult.concluida === false) {
+      const agora = Date.now();
+      const criadoMs = ult?.criado_em ? new Date(ult.criado_em).getTime() : 0;
+      const recente = criadoMs > 0 ? agora - criadoMs < 60_000 : false;
+
+      if (ult && ult.role === "assistant" && ult.concluida === false && recente) {
         retomarMonitoramento(id);
+      } else {
+        setCarregando(false);
       }
     } catch {
       setMensagens([]);
