@@ -198,6 +198,7 @@ export class AgentStore {
       budget_daily_usd?: number;
       budget_max_turns?: number;
       ativo?: boolean;
+      corpo?: string;
     },
   ): Promise<Agente> {
     const carregado = await this.carregar(wsPath, id);
@@ -219,9 +220,10 @@ export class AgentStore {
       const detalhe = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
       throw new AgentSchemaError(`spec do agente "${id}" inválido — ${detalhe}`);
     }
-    const novoMd = serializarAgenteMd(parsed.data, carregado.corpo);
+    const novoCorpo = mudancas.corpo !== undefined ? mudancas.corpo : carregado.corpo;
+    const novoMd = serializarAgenteMd(parsed.data, novoCorpo);
     await writeFileAtomic(this.caminhoExistente(wsPath, id), novoMd);
-    await this.bridge.sincronizarAgente(wsPath, parsed.data, carregado.corpo);
+    await this.bridge.sincronizarAgente(wsPath, parsed.data, novoCorpo);
     await this.registrarEvento(wsPath, {
       evento: "modificado",
       agente: id,

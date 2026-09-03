@@ -790,6 +790,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             budget_daily_usd: typeof corpo.budget_daily_usd === "number" ? corpo.budget_daily_usd : undefined,
             budget_max_turns: typeof corpo.budget_max_turns === "number" ? corpo.budget_max_turns : undefined,
             ativo: corpo.ativo as boolean | undefined,
+            corpo: typeof corpo.corpo_prompt === "string" ? corpo.corpo_prompt : (typeof corpo.corpo === "string" ? corpo.corpo : undefined),
           });
           eventBus.emit("agente.editado", { agente: id });
           enviar(res, 200, salvo);

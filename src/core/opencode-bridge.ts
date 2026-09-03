@@ -69,8 +69,12 @@ function obterContextoAdaptativo(wsPath: string, wsId: string, agente: Agente): 
         .sort()
         .reverse()
         .slice(0, 5);
+  try {
+    const teamsDir = join(wsPath, ".opencorp", "teams");
+    if (existsSync(teamsDir)) {
+      const arquivos = readdirSync(teamsDir).filter((f) => f.endsWith(".json"));
       if (arquivos.length > 0) {
-        partes.push(`- Documentos Recentes: ${arquivos.join(", ")}`);
+        partes.push(`- Grupos / Teams Multi-Agente Disponíveis: ${arquivos.map((f) => f.replace(/\.json$/, "")).join(", ")} (executáveis como agentes de grupo via oc team run <id>)`);
       }
     }
   } catch {}
