@@ -33,6 +33,7 @@ import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc } from "../core/opencode-server.js";
 import { taskCreateSchema } from "../schemas/task.js";
 import { tipoDeNomeApp, validarPerfilApp } from "../schemas/app-perfil.js";
+import { completarChatDirect, testarModeloDirect, listarProvedoresStatus } from "../core/llm-client.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
@@ -652,22 +653,48 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   // OpencodeServerManager para o secretário (injetaável para testes)
   const opencodeServer = opcoes.opencodeServer ?? new OpencodeServerManager({ homeDir: opcoes.homeDir });
 
-  function obterChaveOpenRouter(homeDir: string): string | null {
-    const caminhos = [
-      join(homeDir, ".local", "share", "opencode", "auth.json"),
-      join(homeDir, ".opencorp", "opencode-data", "opencode", "auth.json"),
-      join(homeDir, ".opencorp", "secrets.json"),
-    ];
-    for (const c of caminhos) {
-      if (existsSync(c)) {
-        try {
-          const j = JSON.parse(readFileSync(c, "utf8"));
-          if (j.openrouter?.key) return String(j.openrouter.key).trim();
-          if (j.openrouter_key) return String(j.openrouter_key).trim();
-        } catch {}
+  async function detectarOpencodeInfo(homeDir: string) {
+    let pathEncontrado: string | null = null;
+    let versao: string | null = null;
+
+    const rPath = join(homeDir, ".opencorp", "runner.json");
+    if (existsSync(rPath)) {
+      try {
+        const r = JSON.parse(readFileSync(rPath, "utf8"));
+        if (r.binary_path) pathEncontrado = String(r.binary_path).trim();
+      } catch {}
+    }
+
+    const locais = [
+      pathEncontrado,
+      "/home/j/.opencode/bin/opencode",
+      join(process.env.HOME || "", ".opencode", "bin", "opencode"),
+      "/usr/local/bin/opencode",
+      "/usr/bin/opencode",
+    ].filter(Boolean) as string[];
+
+    for (const loc of locais) {
+      if (existsSync(loc)) {
+        pathEncontrado = loc;
+        break;
       }
     }
-    return process.env.OPENROUTER_API_KEY || null;
+
+    const binParaRodar = pathEncontrado || "opencode";
+    try {
+      const { stdout } = await promisify(execFile)(binParaRodar, ["--version"], { timeout: 3000 });
+      versao = stdout.trim();
+    } catch {
+      versao = null;
+    }
+
+    return {
+      instalado: Boolean(versao || pathEncontrado),
+      path: pathEncontrado || "opencode",
+      versao: versao || "1.18.x (detectado)",
+      home_isolado: dirOpencodeHome(homeDir),
+      data_dir: dirOpencodeData(homeDir),
+    };
   }
 
   async function gerarPromptComIA(
@@ -676,63 +703,47 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
     modeloPreferido?: string,
     modelosFallback: string[] = [],
   ): Promise<{ prompt: string; modelo: string }> {
-    const chave = obterChaveOpenRouter(homeDir);
     const modelosCandidatos = [
       modeloPreferido,
       ...modelosFallback,
-      "nvidia/nemotron-3.5-lightning:free",
-      "nvidia/nemotron-3-ultra-550b-a55b:free",
-      "minimax/minimax-m3:free",
-    ]
-      .filter(Boolean)
-      .map((m) => String(m).replace(/^openrouter\//, "").trim());
+      "openrouter/google/gemini-3.8-flash",
+      "openrouter/nvidia/nemotron-3.5-lightning:free",
+      "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "openrouter/minimax/minimax-m3:free",
+    ].filter(Boolean) as string[];
 
-    if (chave) {
-      for (const mod of modelosCandidatos) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 28000);
-          const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${chave}`,
-              "Content-Type": "application/json",
+    for (const mod of modelosCandidatos) {
+      try {
+        const resp = await completarChatDirect({
+          model: mod,
+          messages: [
+            {
+              role: "system",
+              content:
+                "Você é um arquiteto especialista em Agentes Autônomos de Inteligência Artificial. " +
+                "Crie um System Prompt em formato Markdown profissional, detalhado, rico e em português para o agente solicitado. " +
+                "Estruture o prompt com as seções: # [Nome do Agente], ## Papel & Missão Principal, ## Diretrizes & Regras de Ação, ## Formato de Resposta & Comunicação, ## Restrições & Segurança. " +
+                "IMPORTANTE: Não inclua processos de pensamento (thinking). Comece a resposta imediatamente com '# System Prompt:'. Retorne apenas o markdown do prompt, sem blocos de código envolvendo tudo.",
             },
-            body: JSON.stringify({
-              model: mod,
-              messages: [
-                {
-                  role: "system",
-                  content:
-                    "Você é um arquiteto especialista em Agentes Autônomos de Inteligência Artificial. " +
-                    "Crie um System Prompt em formato Markdown profissional, detalhado, rico e em português para o agente solicitado. " +
-                    "Estruture o prompt com as seções: # [Nome do Agente], ## Papel & Missão Principal, ## Diretrizes & Regras de Ação, ## Formato de Resposta & Comunicação, ## Restrições & Segurança. " +
-                    "IMPORTANTE: Não inclua processos de pensamento (thinking). Comece a resposta imediatamente com '# System Prompt:'. Retorne apenas o markdown do prompt, sem blocos de código envolvendo tudo.",
-                },
-                {
-                  role: "user",
-                  content: `Gere o System Prompt completo para este agente: ${descricao}`,
-                },
-              ],
-              max_tokens: 1200,
-            }),
-            signal: controller.signal,
-          });
-          clearTimeout(timeoutId);
+            {
+              role: "user",
+              content: `Gere o System Prompt completo para este agente: ${descricao}`,
+            },
+          ],
+          homeDir,
+          maxTokens: 1200,
+          temperature: 0.7,
+        });
 
-          if (res.ok) {
-            const data = (await res.json()) as any;
-            let content = data.choices?.[0]?.message?.content;
-            if (typeof content === "string" && content.trim().length > 50) {
-              if (content.includes("# ")) {
-                content = content.slice(content.indexOf("# "));
-              }
-              content = content.replace(/^```markdown\s*/i, "").replace(/\s*```$/, "").trim();
-              return { prompt: content, modelo: `openrouter/${mod}` };
-            }
+        let content = resp.content;
+        if (typeof content === "string" && content.trim().length > 50) {
+          if (content.includes("# ")) {
+            content = content.slice(content.indexOf("# "));
           }
-        } catch {}
-      }
+          content = content.replace(/^```markdown\s*/i, "").replace(/\s*```$/, "").trim();
+          return { prompt: content, modelo: resp.model };
+        }
+      } catch {}
     }
 
     // Fallback estruturado caso a API externa não responda
@@ -1504,6 +1515,87 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             workspaceDir: (await resolverWs(url)).path,
           });
           enviar(res, 200, r);
+          return;
+        }
+
+        // ── /motores/status — diagnóstico do OpenCode, provedores e daemons ──
+        if ((rota === "/motores/status" || rota === "/api/motores/status") && req.method === "GET") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const ws = await resolverWs(url).catch(() => ({ id: "default", path: home }));
+          const ocInfo = await detectarOpencodeInfo(home);
+          const provedores = listarProvedoresStatus(home);
+
+          const pidSchedulerPath = join(home, ".opencorp", "scheduler.pid");
+          let schedulerVivo = false;
+          let schedulerPid: number | null = null;
+          if (existsSync(pidSchedulerPath)) {
+            try {
+              const sp = JSON.parse(readFileSync(pidSchedulerPath, "utf8"));
+              if (sp.pid) {
+                process.kill(sp.pid, 0);
+                schedulerVivo = true;
+                schedulerPid = sp.pid;
+              }
+            } catch {}
+          }
+
+          const secStatus = await opencodeServer.status().catch(() => ({ rodando: false, porta: null, pid: null }));
+
+          enviar(res, 200, {
+            ok: true,
+            opencode: {
+              ...ocInfo,
+              data_workspace: join(home, ".opencorp", "opencode-data", ws.id),
+            },
+            provedores,
+            daemons: {
+              scheduler: { ativo: schedulerVivo, pid: schedulerPid },
+              secretario: { ativo: secStatus.rodando, pid: secStatus.pid, porta: secStatus.porta },
+            },
+            harnesses_suportados: [
+              { id: "opencode", nome: "OpenCode Runtime", disponivel: ocInfo.instalado, padrao: true },
+              { id: "claude-code", nome: "Claude Code CLI", disponivel: false, em_breve: true },
+              { id: "antigravity", nome: "Google Antigravity", disponivel: false, em_breve: true },
+            ],
+          });
+          return;
+        }
+
+        // ── /llm/test — teste de conectividade de modelo/chave em 1 clique ──
+        if ((rota === "/llm/test" || rota === "/api/llm/test") && req.method === "POST") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const corpo = (await lerCorpo(req)) as { model?: string };
+          const model = String(corpo.model ?? "").trim() || "openrouter/google/gemini-3.8-flash";
+          const resTeste = await testarModeloDirect(model, home);
+          enviar(res, resTeste.ok ? 200 : 500, resTeste);
+          return;
+        }
+
+        // ── /llm/complete — inferência direta leve sem overhead de processos de agentes ──
+        if ((rota === "/llm/complete" || rota === "/api/llm/complete") && req.method === "POST") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const corpo = (await lerCorpo(req)) as {
+            model?: string;
+            messages?: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+            temperature?: number;
+            maxTokens?: number;
+          };
+          if (!corpo.model || !Array.isArray(corpo.messages)) {
+            enviar(res, 400, { erro: "campos 'model' e 'messages' são obrigatórios" });
+            return;
+          }
+          try {
+            const resp = await completarChatDirect({
+              model: corpo.model,
+              messages: corpo.messages,
+              temperature: corpo.temperature,
+              maxTokens: corpo.maxTokens,
+              homeDir: home,
+            });
+            enviar(res, 200, resp);
+          } catch (err: any) {
+            enviar(res, 500, { erro: err.message || String(err) });
+          }
           return;
         }
 
