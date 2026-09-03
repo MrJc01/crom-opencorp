@@ -2481,11 +2481,12 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           enviar(res, 200, await tasks.colunas(ws.path));
           return;
         }
-        const mTask = /^\/tasks\/([^/]+)(?:\/(chat))?$/.exec(rota);
+        const mTask = /^\/tasks\/([^/]+)(?:\/(chat|mensagens|move))?$/.exec(rota);
         if (mTask) {
           const ws = await resolverWs(url);
           const id = decodeURIComponent(mTask[1]!);
-          if (mTask[2] === "chat") {
+          const subrecurso = mTask[2];
+          if (subrecurso === "chat" || subrecurso === "mensagens") {
             if (req.method === "GET") {
               enviar(res, 200, await tasks.chat(ws.path, id));
               return;
@@ -2501,6 +2502,13 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               enviar(res, 201, m);
               return;
             }
+          } else if (subrecurso === "move" && req.method === "POST") {
+            const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+            const coluna = String(corpo.coluna ?? "fazendo");
+            const pos = typeof corpo.pos === "number" ? corpo.pos : undefined;
+            const t = await tasks.mover(ws.path, id, coluna, pos);
+            enviar(res, 200, t);
+            return;
           } else if (req.method === "GET") {
             const t = await tasks.obter(ws.path, id);
             enviar(res, 200, { ...t, bloqueada: tasks.bloqueado(ws.path, t) });

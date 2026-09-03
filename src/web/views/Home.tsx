@@ -159,21 +159,31 @@ export const HomeView: Component = () => {
   );
 
   // Falhas ignoradas (persiste em localStorage)
-  const [falhasIgnoradas, setFalhasIgnoradas] = createSignal<Set<string>>(() => {
+  const obterFalhasIgnoradas = (): Set<string> => {
     try {
+      if (typeof window === "undefined" || !window.localStorage) return new Set<string>();
       const raw = localStorage.getItem("opencorp:falhas_ignoradas");
-      return raw ? new Set(JSON.parse(raw)) : new Set();
-    } catch { return new Set(); }
-  });
+      return raw ? new Set<string>(JSON.parse(raw)) : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  };
+
+  const [falhasIgnoradas, setFalhasIgnoradas] = createSignal<Set<string>>(obterFalhasIgnoradas());
   const ignorarFalha = (id: string) => {
     setFalhasIgnoradas((prev) => {
-      const next = new Set(prev);
+      const base = prev instanceof Set ? prev : new Set<string>();
+      const next = new Set<string>(base);
       next.add(id);
       try { localStorage.setItem("opencorp:falhas_ignoradas", JSON.stringify([...next])); } catch {}
       return next;
     });
   };
-  const execucoesFalhas = () => execucoes().filter((e: any) => e.status === "falhou" && !falhasIgnoradas().has(e.id));
+  const execucoesFalhas = () => {
+    const fi = falhasIgnoradas();
+    const set = fi instanceof Set ? fi : new Set<string>();
+    return execucoes().filter((e: any) => e.status === "falhou" && !set.has(e.id));
+  };
 
   // Ref do container de abas para scroll com setas
   let abasRef: HTMLDivElement | undefined;
