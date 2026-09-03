@@ -131,12 +131,16 @@ export class CorpDb {
         exit_code INTEGER,
         erro TEXT
       );
-      try { this.db.exec("ALTER TABLE execucoes ADD COLUMN erro TEXT"); } catch {}
       CREATE INDEX IF NOT EXISTS idx_journal_registro ON journal (categoria, registro_id);
       CREATE INDEX IF NOT EXISTS idx_mensagens_sessao ON mensagens (sessao_id, criado_em);
       CREATE INDEX IF NOT EXISTS idx_execucoes_gatilho ON execucoes (gatilho_tipo, gatilho_origem);
       CREATE INDEX IF NOT EXISTS idx_execucoes_agente ON execucoes (agente, inicio);
     `);
+    try {
+      this.db.exec("ALTER TABLE execucoes ADD COLUMN erro TEXT;");
+    } catch {
+      /* coluna já existe */
+    }
   }
 
   limpar(): void {

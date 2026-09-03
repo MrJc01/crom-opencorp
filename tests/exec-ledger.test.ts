@@ -107,12 +107,15 @@ describe("corp.db ledger unificado (execucoes)", () => {
       duracao_ms: 30000,
       custo_usd: 0,
       exit_code: 1,
+      erro: "Rate limit exceeded: free-models-per-day-high-balance",
     });
 
     const todas = db.listarExecucoes();
     expect(todas).toHaveLength(2);
     expect(todas[0]!.id).toBe("exec-2"); // mais recente primeiro
+    expect(todas[0]!.erro).toBe("Rate limit exceeded: free-models-per-day-high-balance");
     expect(todas[1]!.status).toBe("concluido"); // upsert atualizou, não duplicou
+    expect(todas[1]!.erro).toBeNull();
 
     expect(db.listarExecucoes({ gatilho_tipo: "cron" }).map((e) => e.id)).toEqual(["exec-1"]);
     expect(db.listarExecucoes({ gatilho_origem: "tsk_a1" }).map((e) => e.id)).toEqual(["exec-2"]);
