@@ -159,6 +159,48 @@ function obterContextoAdaptativo(wsPath: string, wsId: string, agente: Agente): 
     }
   }
 
+  // Perfil da Empresa (projeto.json) — diretrizes centrais de qualquer empresa/workspace
+  try {
+    const projetoPath = join(wsPath, ".opencorp", "projeto.json");
+    if (existsSync(projetoPath)) {
+      const p = JSON.parse(readFileSync(projetoPath, "utf8"));
+      partes.push("\n## Perfil do Negócio / Empresa (projeto.json)");
+      if (p.empresa) partes.push(`- Empresa: ${p.empresa}`);
+      if (p.nicho) partes.push(`- Nicho: ${p.nicho}`);
+      if (p.publico) partes.push(`- Público-Alvo: ${p.publico}`);
+      if (p.tom) partes.push(`- Tom de Comunicação: ${p.tom}`);
+      if (Array.isArray(p.topicos_editoriais) && p.topicos_editoriais.length > 0) {
+        partes.push(`- Tópicos Principais: ${p.topicos_editoriais.join(", ")}`);
+      }
+      if (Array.isArray(p.tom_evitar) && p.tom_evitar.length > 0) {
+        partes.push(`- Diretrizes / Evitar: ${p.tom_evitar.join(", ")}`);
+      }
+    }
+  } catch {}
+
+  // Contexto Adaptativo Mutável (contexto.json) — aprendizados vivos do workspace
+  try {
+    const contextoPath = join(wsPath, ".opencorp", "contexto.json");
+    if (existsSync(contextoPath)) {
+      const c = JSON.parse(readFileSync(contextoPath, "utf8"));
+      partes.push("\n## Contexto Adaptativo do Workspace (contexto.json)");
+      if (c.descricao_curta) partes.push(`- Descrição: ${c.descricao_curta}`);
+      if (c.tom_de_voz) partes.push(`- Tom de Voz: ${c.tom_de_voz}`);
+      if (Array.isArray(c.regras_de_negocio) && c.regras_de_negocio.length > 0) {
+        partes.push("- Regras de Negócio Inegociáveis:");
+        for (const r of c.regras_de_negocio) partes.push(`  * ${r}`);
+      }
+      if (Array.isArray(c.notas_operacionais) && c.notas_operacionais.length > 0) {
+        partes.push("- Notas Operacionais & Aprendizados:");
+        for (const n of c.notas_operacionais) partes.push(`  * ${n}`);
+      }
+      if (c.glossario && typeof c.glossario === "object") {
+        const termos = Object.entries(c.glossario).map(([k, v]) => `${k}: ${v}`);
+        if (termos.length > 0) partes.push(`- Glossário Interno: ${termos.slice(0, 8).join(" | ")}`);
+      }
+    }
+  } catch {}
+
   partes.push("- Registros Corporativos: utilize sempre .opencorp/registries/ (documentos, execucoes, chats). NUNCA duplique como .opencorp/.opencorp/.");
   return partes.join("\n") + "\n";
 }

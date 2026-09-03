@@ -1,0 +1,84 @@
+{
+  "$schema": "https://opencorp.ai/schemas/contexto-v1.json",
+  "_instrucoes": "Este é o TEMPLATE DO SISTEMA (somente leitura para referência). Ele documenta todos os campos que o OpenCorp entende e injeta nativamente nos agentes. Para personalizar o seu workspace, edite o arquivo .opencorp/contexto.json.",
+  "versao": "1.0",
+  "campos": {
+    "nome": {
+      "tipo": "string",
+      "obrigatorio": false,
+      "descricao": "Nome fantasia, comercial ou identificador do projeto / empresa",
+      "exemplo": "Acme Automações"
+    },
+    "categoria": {
+      "tipo": "string",
+      "obrigatorio": false,
+      "descricao": "Segmento de mercado ou vertical de atuação (ex: portal_noticias, engenharia, saas, ecommerce, juridico)",
+      "exemplo": "portal_noticias"
+    },
+    "descricao_curta": {
+      "tipo": "string",
+      "obrigatorio": false,
+      "descricao": "Resumo de 1 ou 2 frases da missão, produto ou serviço do workspace",
+      "exemplo": "Portal de notícias e análises sobre automação de processos para PMEs brasileiras."
+    },
+    "publico_alvo": {
+      "tipo": "string",
+      "obrigatorio": false,
+      "descricao": "Perfil dos clientes, leitores ou usuários que consomem as entregas deste workspace",
+      "exemplo": "Gestores de operações e donos de empresas que buscam reduzir tarefas manuais."
+    },
+    "tom_de_voz": {
+      "tipo": "string",
+      "obrigatorio": false,
+      "descricao": "Diretrizes de linguagem, tom e estilo que todos os agentes devem seguir",
+      "exemplo": "Direto, profissional, focado em dados e exemplos práticos; evitar jargões desnecessários."
+    },
+    "regras_de_negocio": {
+      "tipo": "array<string>",
+      "obrigatorio": false,
+      "descricao": "Regras inegociáveis do negócio que nenhum agente deve violar",
+      "exemplo": [
+        "Nunca prometer ganhos financeiros sem embasamento técnico",
+        "Sempre citar fontes primárias com URL completa ao produzir conteúdo",
+        "Não publicar rascunhos sem ao menos uma categoria válida atribuída"
+      ]
+    },
+    "glossario": {
+      "tipo": "record<string, string>",
+      "obrigatorio": false,
+      "descricao": "Termos técnicos, jargões internos e siglas específicas do negócio",
+      "exemplo": {
+        "SOP": "Procedimento Operacional Padrão",
+        "PME": "Pequena e Média Empresa",
+        "BYOK": "Bring Your Own Key — usar credencial própria de API"
+      }
+    },
+    "canais_de_saida": {
+      "tipo": "record<string, string>",
+      "obrigatorio": false,
+      "descricao": "Endpoints e plataformas de publicação ou entrega (ex: blog, repositório, drive)",
+      "exemplo": {
+        "site_principal": "https://meusite.com/",
+        "repositorio_github": "https://github.com/org/repo"
+      }
+    },
+    "notas_operacionais": {
+      "tipo": "array<string>",
+      "obrigatorio": false,
+      "descricao": "Descobertas e aprendizados que os agentes registraram ao longo das rondas para compartilhar com outros agentes",
+      "exemplo": [
+        "A categoria 3 do site é dedicada a Casos de Sucesso e performa 40% melhor nos testes.",
+        "O endpoint de sanitização deve ser chamado sempre antes do encerramento das rondas diárias."
+      ]
+    },
+    "metadados_extras": {
+      "tipo": "record<string, any>",
+      "obrigatorio": false,
+      "descricao": "Chaves e valores adicionais customizados livremente pelo operador ou agentes para regras específicas",
+      "exemplo": {
+        "fuso_horario": "America/Sao_Paulo",
+        "idioma_padrao": "pt-BR"
+      }
+    }
+  }
+}

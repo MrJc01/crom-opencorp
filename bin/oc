@@ -33,7 +33,7 @@ if (args[0] === "doc" && args[1] === "ajuda") {
 const temWsFlag = args.includes("--workspace") || args.includes("-w");
 let extraArgs = [];
 
-function resolverWorkspace(): string | null {
+function resolverWorkspace() {
   // 1. Variável de ambiente explícita injetada pelo OpenCorp no runner
   if (process.env.OPENCORP_WORKSPACE && process.env.OPENCORP_WORKSPACE.trim()) {
     return process.env.OPENCORP_WORKSPACE.trim();
