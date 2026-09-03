@@ -1,5 +1,6 @@
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync, readFileSync } from "node:fs";
 import { join, basename } from "node:path";
+import Database from "better-sqlite3";
 import type { Agente } from "../schemas/agent.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
 
@@ -42,21 +43,86 @@ function yamlString(valor: string): string {
 const GUIDANCE_NOTIFICAR =
   "Ao finalizar uma execução relevante, chame a tool notificar com um resumo do que foi feito (titulo ≤80 chars, corpo ≤500 chars) para o painel mostrar ao usuário.";
 
+function detectarSiteWorkspace(wsPath: string, wsId: string): string | null {
+  try {
+    const configPath = join(wsPath, ".opencorp", "config.json");
+    if (existsSync(configPath)) {
+      const cfg = JSON.parse(readFileSync(configPath, "utf8"));
+      if (cfg.site_url) return String(cfg.site_url);
+      if (cfg.url) return String(cfg.url);
+    }
+  } catch {}
+
+  try {
+    const scriptsDir = join(wsPath, "scripts");
+    if (existsSync(scriptsDir)) {
+      for (const arq of readdirSync(scriptsDir)) {
+        if (arq.endsWith(".py") || arq.endsWith(".cjs") || arq.endsWith(".js") || arq.endsWith(".sh")) {
+          const conteudo = readFileSync(join(scriptsDir, arq), "utf8").slice(0, 4000);
+          const match = /https?:\/\/[a-zA-Z0-9.-]+\.(?:wp\.crom\.me|crom\.me|com\.br|com|org)[^\s"'\`)]*/.exec(conteudo);
+          if (match) {
+            try {
+              const u = new URL(match[0]);
+              return `${u.protocol}//${u.host}/`;
+            } catch {}
+          }
+        }
+      }
+    }
+  } catch {}
+
+  if (wsId && wsId !== "default" && !wsId.includes(".") && !wsId.includes("corp-teste")) {
+    return `https://${wsId}.wp.crom.me/`;
+  }
+  return null;
+}
+
+function obterTarefasAtivasResumo(wsPath: string): string[] {
+  try {
+    const dbPath = join(wsPath, ".opencorp", "tasks.db");
+    if (existsSync(dbPath)) {
+      const db = new Database(dbPath, { readonly: true });
+      const rows = db
+        .prepare("SELECT id, titulo, coluna, responsavel FROM tasks WHERE coluna != 'feito' ORDER BY pos ASC LIMIT 5")
+        .all() as Array<{ id: string; titulo: string; coluna: string; responsavel: string }>;
+      db.close();
+      return rows.map((r) => `- [${r.coluna.toUpperCase()}] ${r.id}: ${r.titulo} (responsável: @${r.responsavel || "não atribuído"})`);
+    }
+  } catch {}
+  return [];
+}
+
 function obterContextoAdaptativo(wsPath: string, wsId: string, agente: Agente): string {
   const partes: string[] = [
     "\n## Contexto Operacional Primário (OpenCorp)",
     `- Agente Ativo: ${agente.id} (${agente.role} - categoria ${agente.category})`,
     `- Workspace ID: ${wsId}`,
     `- Diretório Raiz: ${wsPath}`,
-    "- Registros: sempre utilize .opencorp/registries/ (documentos, execucoes, chats). NUNCA duplique como .opencorp/.opencorp/.",
+    "- Linha de Comando Oficial: 'opencorp' e o atalho 'oc' (ex: 'opencorp status' ou 'oc status'; 'opencorp task' ou 'oc task'). Ambos estão disponíveis no terminal.",
   ];
+
+  const siteUrl = detectarSiteWorkspace(wsPath, wsId);
+  if (siteUrl) {
+    partes.push(`- Site Principal do Workspace: ${siteUrl}`);
+    partes.push(`- WordPress REST API Base: ${siteUrl.replace(/\/+$/, "")}/wp-json/wp/v2/`);
+  }
+
+  try {
+    const sandboxDir = join(wsPath, "sandbox");
+    if (existsSync(sandboxDir)) {
+      const pastas = readdirSync(sandboxDir).filter((f) => !f.startsWith("."));
+      if (pastas.length > 0) {
+        partes.push(`- Sandbox / Testes de Layout: sandbox/ (contém: ${pastas.slice(0, 6).join(", ")})`);
+      }
+    }
+  } catch {}
 
   try {
     const scriptsDir = join(wsPath, "scripts");
     if (existsSync(scriptsDir)) {
       const scripts = readdirSync(scriptsDir).filter((f) => !f.startsWith("."));
       if (scripts.length > 0) {
-        partes.push(`- Scripts Locais: ${scripts.map((s) => `scripts/${s}`).join(", ")}`);
+        partes.push(`- Scripts Executáveis: ${scripts.map((s) => `scripts/${s}`).join(", ")}`);
       }
     }
   } catch {}
@@ -70,7 +136,7 @@ function obterContextoAdaptativo(wsPath: string, wsId: string, agente: Agente): 
         .reverse()
         .slice(0, 5);
       if (arquivos.length > 0) {
-        partes.push(`- Documentos Recentes: ${arquivos.join(", ")}`);
+        partes.push(`- Documentos e SOPs Recentes: ${arquivos.join(", ")}`);
       }
     }
   } catch {}
@@ -80,12 +146,20 @@ function obterContextoAdaptativo(wsPath: string, wsId: string, agente: Agente): 
     if (existsSync(teamsDir)) {
       const arquivos = readdirSync(teamsDir).filter((f) => f.endsWith(".json"));
       if (arquivos.length > 0) {
-        partes.push(`- Grupos / Teams Multi-Agente Disponíveis: ${arquivos.map((f) => f.replace(/\.json$/, "")).join(", ")} (executáveis como agentes de grupo via oc team run <id>)`);
+        partes.push(`- Grupos Multi-Agente: ${arquivos.map((f) => f.replace(/\.json$/, "")).join(", ")} (executáveis via opencorp team run <id>)`);
       }
     }
   } catch {}
 
-  partes.push("- Execução Direta: utilize comandos padrão ou o utilitário oc.");
+  const tarefas = obterTarefasAtivasResumo(wsPath);
+  if (tarefas.length > 0) {
+    partes.push("- Tarefas Ativas no Kanban:");
+    for (const t of tarefas) {
+      partes.push(`  ${t}`);
+    }
+  }
+
+  partes.push("- Registros Corporativos: utilize sempre .opencorp/registries/ (documentos, execucoes, chats). NUNCA duplique como .opencorp/.opencorp/.");
   return partes.join("\n") + "\n";
 }
 

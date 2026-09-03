@@ -1740,6 +1740,82 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
+        // ── POST /meetings/chat — cria reunião em modo Chat Interativo (espera mensagens do usuário) ──
+        if (rota === "/meetings/chat" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { pauta?: string; agentes?: string; model?: string };
+          const pauta = String(corpo.pauta ?? "").trim();
+          if (pauta.length === 0) {
+            enviar(res, 422, { erro: "pauta obrigatória" });
+            return;
+          }
+          try {
+            const sala = await meetings.criarSalaChat({
+              pauta,
+              agentes: corpo.agentes,
+              model: corpo.model,
+              workspaceDir: ws.path,
+              workspaceId: ws.id,
+            });
+            enviar(res, 201, { ok: true, id: sala.id, status: sala.status, participantes: sala.participantes, pauta: sala.pauta });
+          } catch (erro) {
+            enviar(res, 400, { erro: erro instanceof Error ? erro.message : String(erro) });
+          }
+          return;
+        }
+
+        // ── POST /meetings/:id/mensagem — envia mensagem do usuário e dispara respostas dos agentes ──
+        const mMeetingMsg = /^\/meetings\/([^/]+)\/mensagem$/.exec(rota);
+        if (mMeetingMsg && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const meetingId = decodeURIComponent(mMeetingMsg[1]!);
+          const corpo = (await lerCorpo(req)) as {
+            mensagem: string;
+            modo?: "sequencial" | "direcionado";
+            agente?: string;
+            responder?: boolean;
+          };
+          const texto = String(corpo.mensagem ?? "").trim();
+          if (!texto) {
+            enviar(res, 400, { erro: "mensagem obrigatória" });
+            return;
+          }
+
+          try {
+            // 1. Grava a mensagem do usuário no buffer e histórico da reunião
+            const msgUsuario = await meetings.enviarMensagemGrupo(ws.path, meetingId, "usuario", texto);
+
+            // 2. Se responder !== false, executa as respostas dos agentes chamados
+            let respostas: Array<{ agente: string; texto: string; ts: string }> = [];
+            if (corpo.responder !== false) {
+              respostas = await meetings.responderGrupo(ws.path, meetingId, {
+                modo: corpo.modo || "sequencial",
+                agente: corpo.agente,
+              });
+            }
+
+            const estadoAtual = await meetings.estadoSala(ws.path, meetingId);
+            enviar(res, 200, { ok: true, mensagemUsuario: msgUsuario, respostas, estado: estadoAtual });
+          } catch (erro) {
+            enviar(res, 400, { erro: erro instanceof Error ? erro.message : String(erro) });
+          }
+          return;
+        }
+
+        // ── POST /meetings/:id/concluir — finaliza reunião e gera ata oficial ──
+        const mMeetingConcluir = /^\/meetings\/([^/]+)\/concluir$/.exec(rota);
+        if (mMeetingConcluir && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const meetingId = decodeURIComponent(mMeetingConcluir[1]!);
+          try {
+            const resultado = await meetings.finalizarComAta(ws.path, meetingId);
+            enviar(res, 200, { ok: true, status: resultado.sala.status, ata: resultado.ata, id: meetingId });
+          } catch (erro) {
+            enviar(res, 400, { erro: erro instanceof Error ? erro.message : String(erro) });
+          }
+          return;
+        }
+
         // ── GET /files — lista diretório ou lê arquivo do workspace
         if (rota === "/files" && req.method === "GET") {
           const ws = await resolverWs(url);

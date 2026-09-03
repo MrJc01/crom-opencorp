@@ -919,5 +919,211 @@ export class MeetingManager {
     }
     console.log(`[reunião ${sala.id}] ata gerada em ${arquivoAta} (registro documentos/ata-${data}-${sala.id})`);
   }
+
+  /** Cria uma sala de reunião em modo Chat Interativo (espera mensagens do usuário) */
+  async criarSalaChat(opcoes: OpcoesIniciar): Promise<SalaInfo> {
+    let ws: { path: string; id: string };
+    if (opcoes.workspaceDir) {
+      ws = { path: opcoes.workspaceDir, id: "workspace" };
+    } else {
+      const info = await this.workspaces.resolver(opcoes.workspaceId);
+      ws = { path: info.path, id: info.id };
+    }
+    if (opcoes.pauta.trim().length === 0) {
+      throw new MeetingError('pauta vazia — informe a pauta');
+    }
+    const cfg = await this.cfgMeeting(ws.path);
+    const participantes = (opcoes.agentes ?? PARTICIPANTES_PADRAO.join(","))
+      .split(",")
+      .map((a) => a.trim().toLowerCase())
+      .filter((a) => a.length > 0);
+    if (participantes.length === 0) {
+      throw new MeetingError("lista de participantes vazia");
+    }
+
+    const moderador = cfg.moderator;
+    const modelo = opcoes.model ?? MODELO_POR_AGENTE;
+    const id = opcoes.id ?? gerarIdReuniao();
+    await this.registros.garantirCategorias(ws.path);
+
+    const sala: SalaInfo = {
+      id,
+      pauta: opcoes.pauta.trim(),
+      participantes,
+      moderator: moderador,
+      moderacao: "rotacao-fixa",
+      modelo,
+      max_turnos: cfg.max_turnos,
+      turno: 0,
+      status: "em-andamento",
+      motivo_fim: null,
+      criado_em: this.agora().toISOString(),
+      encerrada_em: null,
+      ata: null,
+    };
+
+    const transcriptInicial = [
+      `# Reunião ${sala.id}`,
+      "",
+      `Pauta: ${sala.pauta}`,
+      `Participantes: ${sala.participantes.map((p) => "@" + p).join(", ")}`,
+      `Iniciada em: ${sala.criado_em}`,
+      "",
+      "---",
+      "",
+    ].join("\n");
+
+    await this.registros.garantirRegistro(ws.path, {
+      categoria: "chats",
+      id: sala.id,
+      descricao: `Reunião em Grupo: ${sala.pauta}`,
+      criadoPor: "usuario",
+      tags: ["reuniao", ...sala.participantes.map((p) => `agente:${p}`)],
+      conteudo: transcriptInicial,
+    });
+    await this.salvarSala(ws.path, sala);
+
+    const viva: SalaViva = {
+      sala,
+      estado: {
+        id: sala.id,
+        status: "em_andamento",
+        pauta: sala.pauta,
+        participantes: sala.participantes.map((p) => ({ id: p, ativo: true })),
+        turno_atual: 0,
+        mensagens: [],
+        consenso: { pedidos: 0, total: sala.participantes.length },
+        iniciado_em: sala.criado_em,
+        encerrada_em: null,
+      },
+      interromper: false,
+      pediram: new Set(),
+      wsPath: ws.path,
+    };
+    this.vivas.set(id, viva);
+    eventBus.emit("reuniao-inicio", { reuniao_id: id, pauta: sala.pauta.slice(0, 120), participantes });
+    return sala;
+  }
+
+  /** Adiciona mensagem de usuário (ou sistema) ao chat da reunião */
+  async enviarMensagemGrupo(wsPath: string, salaId: string, autor: string, texto: string): Promise<MensagemSala> {
+    const textoLimpo = texto.trim();
+    if (!textoLimpo) throw new MeetingError("mensagem vazia");
+    const msgObj: MensagemSala = {
+      agente: autor,
+      texto: textoLimpo,
+      ts: new Date().toISOString(),
+    };
+
+    this.anexarBuffer(salaId, autor, textoLimpo);
+    await this.registros.appendConteudo(
+      wsPath,
+      "chats",
+      salaId,
+      `## ${autor === "usuario" ? "Usuário (Líder)" : autor}\n\n${textoLimpo}\n\n`,
+    );
+    return msgObj;
+  }
+
+  /** Executa respostas dos agentes: modo sequencial (todos respondem) ou direcionado (agente específico) */
+  async responderGrupo(
+    wsPath: string,
+    salaId: string,
+    opcoes: { modo: "sequencial" | "direcionado"; agente?: string; instrucao?: string },
+  ): Promise<MensagemSala[]> {
+    const viva = this.vivas.get(salaId);
+    const { sala } = await this.lerSala(wsPath, salaId);
+    const participantes = viva ? viva.sala.participantes : sala.participantes;
+    const agentesAlvo: string[] = [];
+
+    if (opcoes.modo === "direcionado" && opcoes.agente) {
+      const ag = opcoes.agente.replace(/^@/, "").trim().toLowerCase();
+      if (!participantes.includes(ag)) {
+        throw new MeetingError(`agente @${ag} não participa desta reunião`);
+      }
+      agentesAlvo.push(ag);
+    } else {
+      // Modo sequencial: todos os participantes respondem na sua vez
+      agentesAlvo.push(...participantes);
+    }
+
+    const respostas: MensagemSala[] = [];
+
+    for (const falante of agentesAlvo) {
+      let arquivo: AgenteArquivo;
+      try {
+        arquivo = await this.agentes.carregar(wsPath, falante);
+      } catch {
+        continue;
+      }
+
+      const transcript = await this.registros.obter(wsPath, "chats", salaId);
+      const instrucao = opcoes.instrucao || "Responda à última mensagem do chat trazendo sua perspectiva e especialidade para a reunião.";
+      const prompt = await this.promptParticipante(
+        wsPath,
+        arquivo,
+        sala.pauta,
+        instrucao,
+        transcript.conteudo ?? "",
+      );
+
+      try {
+        const resultado = await this.sessoes.rodar({
+          agente: falante,
+          ordem: prompt,
+          model: sala.modelo === MODELO_POR_AGENTE ? undefined : sala.modelo,
+          workspaceDir: wsPath,
+          tags: [`reuniao:${salaId}`],
+          timeoutMs: 120_000,
+          gatilho: { tipo: "turno", origem: salaId },
+        });
+
+        const falaLimpa = (resultado.captura ?? "").trim();
+        if (falaLimpa.length > 0) {
+          const msgObj: MensagemSala = {
+            agente: falante,
+            texto: falaLimpa,
+            ts: new Date().toISOString(),
+          };
+          this.anexarBuffer(salaId, falante, falaLimpa);
+          await this.registros.appendConteudo(
+            wsPath,
+            "chats",
+            salaId,
+            `## Turno ${sala.turno + 1} — @${falante}\n\n${falaLimpa}\n\n`,
+          );
+          sala.turno += 1;
+          respostas.push(msgObj);
+        }
+      } catch (err) {
+        console.error(`[reunião ${salaId}] erro no turno de @${falante}:`, err);
+      }
+    }
+
+    if (viva) {
+      viva.sala.turno = sala.turno;
+      viva.estado.turno_atual = sala.turno;
+    }
+    await this.salvarSala(wsPath, sala);
+    return respostas;
+  }
+
+  /** Finaliza a reunião e gera a Ata oficial */
+  async finalizarComAta(wsPath: string, salaId: string): Promise<{ sala: SalaInfo; ata?: string }> {
+    const { sala } = await this.lerSala(wsPath, salaId);
+    sala.status = "encerrada";
+    sala.encerrada_em = this.agora().toISOString();
+    sala.motivo_fim = "concluída pelos participantes";
+
+    const viva = this.vivas.get(salaId);
+    if (viva) {
+      viva.sala.status = "encerrada";
+      viva.estado.status = "encerrada";
+      viva.estado.encerrada_em = sala.encerrada_em;
+    }
+    await this.salvarSala(wsPath, sala);
+    await this.gerarAta({ path: wsPath, id: "workspace" }, sala);
+    return { sala, ata: sala.ata ?? undefined };
+  }
 }
 

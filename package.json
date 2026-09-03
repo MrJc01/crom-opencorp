@@ -6,7 +6,8 @@
   "type": "module",
   "main": "dist/cli/index.js",
   "bin": {
-    "opencorp": "./bin/opencorp.mjs"
+    "opencorp": "./bin/opencorp.mjs",
+    "oc": "./bin/opencorp.mjs"
   },
   "engines": {
     "node": ">=22"
