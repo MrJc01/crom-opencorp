@@ -12,7 +12,6 @@ import {
   Webhook,
   KeyRound,
   History,
-  Bell,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -21,7 +20,7 @@ import {
   BookOpen,
   Plus,
 } from "lucide-solid";
-import { wsAtivo, setWsAtivo, workspaces, notificacoesNaoLidas } from "../lib/context";
+import { wsAtivo, setWsAtivo, workspaces } from "../lib/context";
 import { NovoWorkspaceModal } from "./NovoWorkspaceModal";
 
 export const Sidebar: Component = () => {
@@ -54,16 +53,14 @@ export const Sidebar: Component = () => {
         { href: "/hooks", label: "Hooks", icone: Webhook },
       ],
     },
-    {
-      titulo: "Sistema",
-      itens: [
-        { href: "/apps", label: "Apps & Secrets", icone: KeyRound },
-        { href: "/historico", label: "Histórico", icone: History },
-        { href: "/notificacoes", label: "Notificações", icone: Bell, badge: () => notificacoesNaoLidas() },
-        { href: "/docs", label: "Documentação", icone: BookOpen },
-        { href: "/config", label: "Config", icone: Settings },
-      ],
-    },
+  ];
+
+  // Itens fixos na base da sidebar (apenas ícones: Apps&Secrets, Histórico, Documentação, Configurações)
+  const itensFixosInferiores = [
+    { href: "/apps", label: "Apps & Secrets", icone: KeyRound },
+    { href: "/historico", label: "Histórico", icone: History },
+    { href: "/docs", label: "Documentação", icone: BookOpen },
+    { href: "/config", label: "Configurações", icone: Settings },
   ];
 
   const isAtivo = (href: string) => {
@@ -197,12 +194,46 @@ export const Sidebar: Component = () => {
         </For>
       </nav>
 
-      {/* Rodapé da Sidebar */}
-      <div class="p-3 border-t border-zinc-800/80 text-[11px] text-zinc-500 flex items-center justify-between">
-        <Show when={!colapsado()}>
-          <span>opencorp platform</span>
-          <span class="font-mono text-[10px]">v0.7.0</span>
-        </Show>
+      {/* Dock Fixo Inferior — Apenas Ícones: Apps&Secrets, Histórico, Docs, Configurações */}
+      <div class="border-t border-zinc-800/80 bg-zinc-950/95 p-2 flex-shrink-0">
+        <div
+          class={
+            colapsado()
+              ? "grid grid-cols-2 gap-1.5 justify-items-center"
+              : "flex items-center justify-between px-1"
+          }
+        >
+          <For each={itensFixosInferiores}>
+            {(item) => {
+              const Icone = item.icone;
+              const ativo = () => isAtivo(item.href);
+
+              return (
+                <A
+                  href={item.href}
+                  class={`relative p-2 rounded-xl transition-all flex items-center justify-center group ${
+                    ativo()
+                      ? "bg-zinc-900 text-emerald-400 border border-zinc-750 shadow-xs"
+                      : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900/70 border border-transparent hover:border-zinc-800/80"
+                  }`}
+                  title={item.label}
+                >
+                  <Icone
+                    size={17}
+                    class={`transition-colors ${
+                      ativo() ? "text-emerald-400" : "text-zinc-400 group-hover:text-zinc-200"
+                    }`}
+                  />
+
+                  {/* Tooltip flutuante superior no hover */}
+                  <div class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-zinc-900 border border-zinc-700/80 text-[11px] text-zinc-200 font-medium rounded-md shadow-2xl whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50">
+                    {item.label}
+                  </div>
+                </A>
+              );
+            }}
+          </For>
+        </div>
       </div>
     </aside>
   );
