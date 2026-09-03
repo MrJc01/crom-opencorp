@@ -16,6 +16,14 @@ export const agentSchema = z.object({
     daily_usd: z.number().nonnegative(),
     max_turns: z.number().int().positive(),
   }),
+  /** Motor de execução preferido do agente (opencode, claude-code, antigravity, etc.) */
+  harness: z.string().optional(),
+  /** Lista de fallback de motores para este agente */
+  harness_fallback: z.array(z.string()).optional(),
+  /** Lista de fallback/rotação de modelos personalizada para este agente */
+  rotation: z.array(z.string()).optional(),
+  /** Alias para rotation */
+  model_fallback: z.array(z.string()).optional(),
   /** Etapa 5 — agentes de catálogo nascem desativados; legados sem o campo = ativos */
   ativo: z.boolean().default(true),
   memory: z

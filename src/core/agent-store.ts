@@ -50,6 +50,9 @@ export function serializarFrontmatter(ag: Agente): string {
   saida += linhaFrontmatter("category", ag.category);
   saida += linhaFrontmatter("ativo", String(ag.ativo));
   saida += linhaFrontmatter("model", ag.model);
+  if (ag.harness) saida += linhaFrontmatter("harness", ag.harness);
+  if (ag.rotation && ag.rotation.length > 0) saida += linhaFrontmatter("rotation", listaInline(ag.rotation));
+  if (ag.model_fallback && ag.model_fallback.length > 0) saida += linhaFrontmatter("model_fallback", listaInline(ag.model_fallback));
   if (ag.inherits) saida += linhaFrontmatter("inherits", ag.inherits);
   saida += linhaFrontmatter("tools", listaInline(ag.tools));
   saida += linhaFrontmatter("permissions", ag.permissions);

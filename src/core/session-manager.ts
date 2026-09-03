@@ -577,13 +577,28 @@ export class SessionManager {
 
     await this.bridge.sincronizarAgente(ws.path, ag.frontmatter, ag.corpo);
 
+    // Resolução do Harness e Modelo Efetivo:
+    let harnessEscolhido = ag.frontmatter.harness || "opencode";
+    let modeloEfetivo = modelo;
+
+    if (modeloEfetivo.startsWith("opencode/")) {
+      harnessEscolhido = "opencode";
+      modeloEfetivo = modeloEfetivo.slice("opencode/".length);
+    } else if (modeloEfetivo.startsWith("claude-code/")) {
+      harnessEscolhido = "claude-code";
+      modeloEfetivo = modeloEfetivo.slice("claude-code/".length);
+    } else if (modeloEfetivo.startsWith("antigravity/")) {
+      harnessEscolhido = "antigravity";
+      modeloEfetivo = modeloEfetivo.slice("antigravity/".length);
+    }
+
     const args = [
       "run",
       "--auto",
       "--agent",
       ag.frontmatter.id,
       "--model",
-      modelo,
+      modeloEfetivo,
       "--dir",
       ws.path,
     ];
@@ -829,7 +844,7 @@ export class SessionManager {
     if (opcoes.retryDe) return null;
     if (registro.status === "hitl_pendente") return null;
     if (!PADRAO_ERRO_MODELO.test(captura)) return null;
-    const proximo = await this.proximoModeloDaRotacao(registro.modelo, ws.path);
+    const proximo = await this.proximoModeloDaRotacao(registro.modelo, ws.path, opcoes.agente);
     if (!proximo || proximo === registro.modelo) return null;
     const idRetry = gerarId("exec");
     try {
@@ -853,8 +868,28 @@ export class SessionManager {
     });
   }
 
-  /** Lista de rotação: settings.tests.rotation quando configurada; senão a lista padrão opencode-go. */
-  private async proximoModeloDaRotacao(modeloFalho: string, wsPath?: string): Promise<string | null> {
+  /**
+   * Lista de rotação: prioriza rotação personalizada do próprio agente (rotation / model_fallback).
+   * Se o agente não definir, herda settings.tests.rotation do workspace/global.
+   */
+  private async proximoModeloDaRotacao(
+    modeloFalho: string,
+    wsPath?: string,
+    agenteId?: string,
+  ): Promise<string | null> {
+    // 1. Prioridade máxima: rotação personalizada configurada no frontmatter do próprio agente
+    if (wsPath && agenteId) {
+      try {
+        const ag = await this.agentes.carregar(wsPath, agenteId);
+        const rotAgente = ag.frontmatter.rotation || ag.frontmatter.model_fallback;
+        if (Array.isArray(rotAgente) && rotAgente.length > 0) {
+          const prox = proximoModeloRotacao(rotAgente, modeloFalho);
+          if (prox) return prox;
+        }
+      } catch {}
+    }
+
+    // 2. Fallback: rotação global configurada no workspace
     let lista = MODELOS_ROTACAO_PADRAO;
     try {
       const r = await new SettingsStore({ homeDir: this.homeDir, cwd: wsPath ?? this.homeDir }).resolve();
