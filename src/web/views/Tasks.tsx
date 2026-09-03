@@ -350,14 +350,14 @@ export const TasksView: Component = () => {
         </div>
       </div>
 
-      {/* Grid Kanban das 4 Colunas */}
-      <div class="flex-1 grid grid-cols-1 md:grid-cols-4 gap-4 min-h-0 overflow-x-auto pb-2">
+      {/* Grid Kanban das 4 Colunas (Lado a Lado Flexível) */}
+      <div class="flex-1 flex gap-4 min-h-0 overflow-x-auto pb-4 scrollbar-thin">
         <For each={colunas}>
           {(col) => {
             const itens = () => tasksFiltradas().filter((t) => t.coluna === col.id);
 
             return (
-              <div class="flex flex-col h-full bg-zinc-900/40 rounded-xl border border-zinc-800/80 p-3 min-w-[260px]">
+              <div class="flex flex-col h-full bg-zinc-900/40 rounded-xl border border-zinc-800/80 p-3.5 flex-1 min-w-[280px] max-w-[360px] flex-shrink-0 shadow-xs">
                 {/* Header da Coluna */}
                 <div class={`flex items-center justify-between pb-2.5 mb-2.5 border-b-2 ${col.cor}`}>
                   <span class="text-xs font-bold tracking-tight">{col.nome}</span>
@@ -432,6 +432,18 @@ export const TasksView: Component = () => {
                             >
                               <Play size={10} class="fill-current" />
                             </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void excluirTask(task.id);
+                              }}
+                              class="p-1 rounded bg-zinc-800/80 hover:bg-rose-950 hover:text-rose-400 text-zinc-500 transition-colors cursor-pointer border border-transparent hover:border-rose-800/60"
+                              title="Excluir tarefa"
+                            >
+                              <Trash2 size={10} />
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -455,9 +467,20 @@ export const TasksView: Component = () => {
               </span>
               <span class="text-xs text-zinc-400">Detalhes da Tarefa</span>
             </div>
-            <IconButton size="xs" variant="ghost" onClick={fecharDetalhes} title="Fechar">
-              <X size={16} />
-            </IconButton>
+            <div class="flex items-center gap-1">
+              <IconButton
+                size="xs"
+                variant="ghost"
+                class="text-zinc-500 hover:text-rose-400"
+                onClick={() => excluirTask(taskSelecionada()!.id)}
+                title="Excluir Tarefa"
+              >
+                <Trash2 size={15} />
+              </IconButton>
+              <IconButton size="xs" variant="ghost" onClick={fecharDetalhes} title="Fechar">
+                <X size={16} />
+              </IconButton>
+            </div>
           </div>
 
           {/* Conteúdo do Drawer */}
@@ -559,6 +582,15 @@ export const TasksView: Component = () => {
                     <Lock size={12} class="mr-1" /> Bloquear
                   </Button>
                 </Show>
+
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => excluirTask(taskSelecionada()!.id)}
+                  class="text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 border border-rose-900/40"
+                >
+                  <Trash2 size={12} class="mr-1" /> Excluir
+                </Button>
               </div>
             </div>
 
