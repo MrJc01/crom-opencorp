@@ -14,6 +14,11 @@ import {
   Layers,
   Sparkles,
   Bell,
+  Bot,
+  Calendar,
+  CheckSquare,
+  ArrowRight,
+  Terminal,
 } from "lucide-solid";
 import { sseConnected, wsAtivo, workspaces, fetchApi, notificacoesNaoLidas } from "../lib/context";
 
@@ -21,6 +26,34 @@ interface StatusInfo {
   scheduler?: boolean;
   secretario?: boolean;
   versao?: string;
+  executandoAgora?: {
+    id: string;
+    agente: string;
+    status: string;
+    ordem?: string;
+    inicio?: string;
+  } | null;
+  ultimaExecucao?: {
+    id: string;
+    agente: string;
+    status: string;
+    inicio?: string;
+  } | null;
+  proximaRotina?: {
+    id: string;
+    nome: string;
+    proxima_exec: string;
+    diffMin: number;
+  } | null;
+  taskDestaque?: {
+    id: string;
+    titulo: string;
+    coluna: string;
+    prioridade: string;
+    responsavel?: string;
+  } | null;
+  totalTasksAndamento?: number;
+  aprovacoesPendentes?: number;
 }
 
 export const Topbar: Component = () => {
@@ -52,14 +85,71 @@ export const Topbar: Component = () => {
 
   const carregarStatus = async () => {
     try {
-      const [st, hl] = await Promise.all([
-        fetchApi<{ scheduler: boolean; secretario: boolean }>("/status").catch(() => null),
-        fetchApi<{ ok: boolean; versao: string }>("/health").catch(() => null),
+      const [st, hl, execs, jobs, tasks, aprovs] = await Promise.allSettled([
+        fetchApi<{ scheduler: boolean; secretario: boolean }>("/status"),
+        fetchApi<{ ok: boolean; versao: string }>("/health"),
+        fetchApi<any[]>("/execucoes?limite=6"),
+        fetchApi<any[]>("/schedules"),
+        fetchApi<any[]>("/tasks"),
+        fetchApi<any[]>("/approvals"),
       ]);
+
+      const getVal = <T,>(r: PromiseSettledResult<T>, def: T): T =>
+        r.status === "fulfilled" ? r.value : def;
+
+      const dStatus = getVal(st, null);
+      const dHealth = getVal(hl, null);
+      const dExecs = getVal(execs, []);
+      const dJobs = getVal(jobs, []);
+      const dTasks = getVal(tasks, []);
+      const dAprovs = getVal(aprovs, []);
+
+      // 1. Executando agora ou última execução
+      const emAndamento = dExecs.find((e: any) => e.status === "executando");
+      const ultima = dExecs.length > 0 ? dExecs[0] : null;
+
+      // 2. Próxima rotina programada
+      const now = Date.now();
+      const rotinasFuturas = dJobs
+        .filter((j: any) => j.ativo !== false && j.proxima_exec)
+        .map((j: any) => {
+          const diffMs = new Date(j.proxima_exec).getTime() - now;
+          return {
+            id: j.id,
+            nome: j.nome,
+            proxima_exec: j.proxima_exec,
+            diffMin: Math.max(0, Math.round(diffMs / 60000)),
+          };
+        })
+        .filter((j: any) => new Date(j.proxima_exec).getTime() >= now - 15000)
+        .sort(
+          (a: any, b: any) =>
+            new Date(a.proxima_exec).getTime() - new Date(b.proxima_exec).getTime(),
+        );
+
+      // 3. Tasks em andamento ou próxima prioritária do backlog
+      const tasksAndamento = dTasks.filter(
+        (t: any) =>
+          t.coluna === "fazendo" ||
+          t.coluna === "em_andamento" ||
+          t.coluna === "in_progress",
+      );
+      const taskPrioritaria =
+        tasksAndamento.length > 0
+          ? tasksAndamento[0]
+          : dTasks.find((t: any) => t.coluna !== "feito" && t.prioridade === "alta") ||
+            (dTasks.length > 0 ? dTasks[0] : null);
+
       setStatusInfo({
-        scheduler: st?.scheduler,
-        secretario: st?.secretario,
-        versao: hl?.versao || "0.7.0",
+        scheduler: dStatus?.scheduler,
+        secretario: dStatus?.secretario,
+        versao: dHealth?.versao || "0.7.0",
+        executandoAgora: emAndamento || null,
+        ultimaExecucao: ultima || null,
+        proximaRotina: rotinasFuturas.length > 0 ? rotinasFuturas[0] : null,
+        taskDestaque: taskPrioritaria || null,
+        totalTasksAndamento: tasksAndamento.length,
+        aprovacoesPendentes: dAprovs.filter((a: any) => a.status === "pendente").length,
       });
     } catch {}
   };
@@ -83,7 +173,7 @@ export const Topbar: Component = () => {
   };
 
   return (
-    <header class="h-14 border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur-md px-6 flex items-center justify-between flex-shrink-0 z-30 select-none">
+    <header class="h-14 border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur-md px-4 sm:px-6 flex items-center justify-between flex-shrink-0 z-30 select-none">
       {/* Breadcrumb */}
       <div class="flex items-center gap-2 text-xs">
         <span class="text-zinc-500 font-medium">opencorp</span>
@@ -131,12 +221,15 @@ export const Topbar: Component = () => {
             <span class="font-medium font-mono">
               {sseConnected() ? "ao vivo" : "offline"}
             </span>
+            <Show when={statusInfo().executandoAgora}>
+              <span class="h-1.5 w-1.5 rounded-full bg-blue-400 animate-ping ml-0.5" />
+            </Show>
           </div>
 
-          {/* CARD POPOVER INFORMATIVO */}
+          {/* CARD POPOVER INFORMATIVO AO VIVO */}
           <Show when={hoverCard()}>
             <div
-              class="absolute right-0 top-full mt-2 w-84 p-4 rounded-xl bg-zinc-950 border border-zinc-800/90 shadow-2xl backdrop-blur-xl z-50 text-xs space-y-3.5 animate-in fade-in duration-150"
+              class="absolute right-0 top-full mt-2 w-96 p-4 rounded-2xl bg-zinc-950/95 border border-zinc-800/90 shadow-2xl backdrop-blur-xl z-50 text-xs space-y-3 animate-in fade-in duration-150"
               onMouseEnter={() => clearTimeout(timerHover)}
               onMouseLeave={onMouseLeaveBadge}
             >
@@ -147,78 +240,168 @@ export const Topbar: Component = () => {
                     <Activity size={13} />
                   </div>
                   <div>
-                    <h3 class="font-bold text-zinc-100 text-xs">OpenCorp Core</h3>
-                    <span class="text-[10px] text-zinc-500 font-mono">Daemon & Runtime</span>
+                    <h3 class="font-bold text-zinc-100 text-xs">OpenCorp Ao Vivo</h3>
+                    <span class="text-[10px] text-zinc-500 font-mono">
+                      Workspace: {workspaceAtual().id}
+                    </span>
                   </div>
                 </div>
-                <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-900 text-emerald-400 border border-zinc-800 font-bold">
-                  v{statusInfo().versao || "0.7.0"}
-                </span>
-              </div>
-
-              {/* Informações do Workspace Ativo */}
-              <div class="p-2.5 rounded-lg bg-zinc-900/50 border border-zinc-800/70 space-y-1.5">
-                <div class="flex items-center justify-between text-[11px]">
-                  <div class="flex items-center gap-1.5 font-semibold text-zinc-300">
-                    <FolderGit2 size={13} class="text-purple-400" />
-                    <span>Workspace Ativo</span>
-                  </div>
-                  <span class="text-[10px] font-mono text-zinc-500">
-                    {workspaces().length} cadastrado{workspaces().length === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <div class="text-xs font-bold text-zinc-100 font-mono truncate">
-                  {workspaceAtual().id}
-                </div>
-                <div
-                  class="text-[10px] text-zinc-400 font-mono truncate bg-zinc-950 px-2 py-1 rounded border border-zinc-850 select-all"
-                  title={workspaceAtual().path}
+                <Show
+                  when={statusInfo().executandoAgora}
+                  fallback={
+                    <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-900 text-zinc-400 border border-zinc-800 font-medium">
+                      v{statusInfo().versao || "0.7.0"}
+                    </span>
+                  }
                 >
-                  {workspaceAtual().path}
-                </div>
+                  <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 font-bold animate-pulse">
+                    ● AGENTE ATIVO
+                  </span>
+                </Show>
               </div>
 
-              {/* Status dos Serviços do Sistema */}
+              {/* SEÇÃO 1: O QUE ESTÁ SENDO EXECUTADO AGORA AO VIVO */}
+              <div class="space-y-1">
+                <div class="text-[10px] font-bold text-zinc-500 uppercase tracking-wider font-mono">
+                  Execução em Tempo Real
+                </div>
+
+                <Show
+                  when={statusInfo().executandoAgora}
+                  fallback={
+                    <div class="p-2.5 rounded-xl bg-zinc-900/40 border border-zinc-800/60 flex items-center justify-between">
+                      <div class="flex items-center gap-2 text-zinc-400 min-w-0">
+                        <Bot size={14} class="text-zinc-500 flex-shrink-0" />
+                        <span class="text-[11px] font-medium truncate">Nenhum agente executando agora</span>
+                      </div>
+                      <Show when={statusInfo().ultimaExecucao}>
+                        {(ult) => (
+                          <A
+                            href={`/historico?run=${encodeURIComponent(ult().id)}`}
+                            class="text-[10px] text-emerald-400 hover:underline font-mono flex-shrink-0"
+                          >
+                            Última: @{ult().agente}
+                          </A>
+                        )}
+                      </Show>
+                    </div>
+                  }
+                >
+                  {(exec) => (
+                    <div class="p-3 rounded-xl bg-blue-950/30 border border-blue-800/60 space-y-2 shadow-xs">
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-1.5 text-blue-300 font-bold text-xs font-mono">
+                          <span class="h-2 w-2 rounded-full bg-blue-400 animate-ping" />
+                          <span>Executando Agora</span>
+                        </div>
+                        <A
+                          href={`/historico?run=${encodeURIComponent(exec().id)}`}
+                          class="px-2 py-0.5 rounded bg-blue-900/50 hover:bg-blue-800 text-[10px] text-blue-200 border border-blue-700/60 font-mono transition-colors"
+                        >
+                          Ver Log →
+                        </A>
+                      </div>
+
+                      <div class="flex items-center gap-2 text-xs">
+                        <span class="font-bold text-zinc-100 font-mono">@{exec().agente}</span>
+                        <span class="text-zinc-500 font-mono text-[10px] truncate max-w-[180px]">
+                          {exec().id}
+                        </span>
+                      </div>
+
+                      <Show when={exec().ordem}>
+                        <p class="text-[11px] text-zinc-300 line-clamp-2 leading-relaxed">
+                          {exec().ordem}
+                        </p>
+                      </Show>
+                    </div>
+                  )}
+                </Show>
+              </div>
+
+              {/* SEÇÃO 2: PRÓXIMA TASK & PRÓXIMA ROTINA */}
               <div class="space-y-1.5">
                 <div class="text-[10px] font-bold text-zinc-500 uppercase tracking-wider font-mono">
-                  Serviços & Conexão
+                  Próxima Task & Agenda
                 </div>
 
-                <div class="grid grid-cols-2 gap-2 text-[11px]">
-                  {/* SSE Stream */}
-                  <div class="p-2 rounded-lg bg-zinc-900/40 border border-zinc-800/60 flex items-center justify-between">
-                    <span class="text-zinc-400">Stream SSE</span>
-                    <Show
-                      when={sseConnected()}
-                      fallback={<span class="text-rose-400 font-medium font-mono text-[10px]">offline</span>}
+                {/* Próxima Task em Andamento / Prioritária */}
+                <Show when={statusInfo().taskDestaque}>
+                  {(task) => (
+                    <A
+                      href={`/tasks?task=${encodeURIComponent(task().id)}`}
+                      class="p-2.5 rounded-xl bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800/80 hover:border-zinc-700 transition-all flex items-start gap-2.5 group"
                     >
-                      <span class="text-emerald-400 font-medium font-mono text-[10px] flex items-center gap-1">
-                        <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> conectado
+                      <CheckSquare size={14} class="text-amber-400 flex-shrink-0 mt-0.5" />
+                      <div class="min-w-0 flex-1 space-y-0.5">
+                        <div class="flex items-center justify-between gap-1 text-[11px]">
+                          <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400 capitalize">
+                            {task().coluna}
+                          </span>
+                          <Show when={task().responsavel}>
+                            <span class="text-[10px] font-mono text-zinc-400 truncate">
+                              @{task().responsavel?.replace(/^agente:/, "")}
+                            </span>
+                          </Show>
+                        </div>
+                        <div class="text-xs text-zinc-200 font-medium truncate group-hover:text-emerald-300 transition-colors">
+                          {task().titulo}
+                        </div>
+                      </div>
+                    </A>
+                  )}
+                </Show>
+
+                {/* Próxima Rotina do Scheduler */}
+                <Show when={statusInfo().proximaRotina}>
+                  {(rot) => (
+                    <A
+                      href="/agenda"
+                      class="p-2.5 rounded-xl bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800/80 hover:border-zinc-700 transition-all flex items-center justify-between group text-xs"
+                    >
+                      <div class="flex items-center gap-2 min-w-0">
+                        <Calendar size={14} class="text-purple-400 flex-shrink-0" />
+                        <div class="truncate">
+                          <span class="font-medium text-zinc-200 font-mono text-[11px] truncate group-hover:text-purple-300">
+                            {rot().nome}
+                          </span>
+                        </div>
+                      </div>
+                      <span class="text-[10px] font-mono text-emerald-400 flex-shrink-0 font-medium">
+                        {rot().diffMin === 0 ? "agora" : `em ~${rot().diffMin} min`}
                       </span>
-                    </Show>
-                  </div>
+                    </A>
+                  )}
+                </Show>
+              </div>
 
-                  {/* Servidor API */}
-                  <div class="p-2 rounded-lg bg-zinc-900/40 border border-zinc-800/60 flex items-center justify-between">
-                    <span class="text-zinc-400">API Server</span>
-                    <span class="text-emerald-400 font-medium font-mono text-[10px]">online</span>
+              {/* SEÇÃO 3: SERVIÇOS & HITL */}
+              <div class="grid grid-cols-3 gap-2 text-[10px] font-mono">
+                {/* SSE */}
+                <div class="p-2 rounded-lg bg-zinc-900/50 border border-zinc-800/60 text-center">
+                  <div class="text-zinc-500">Stream</div>
+                  <div class={sseConnected() ? "text-emerald-400 font-bold" : "text-zinc-500"}>
+                    {sseConnected() ? "ao vivo" : "off"}
                   </div>
+                </div>
 
-                  {/* Scheduler 24h */}
-                  <div class="p-2 rounded-lg bg-zinc-900/40 border border-zinc-800/60 flex items-center justify-between">
-                    <span class="text-zinc-400">Scheduler</span>
-                    <Show
-                      when={statusInfo().scheduler !== false}
-                      fallback={<span class="text-amber-400 font-medium font-mono text-[10px]">inativo</span>}
-                    >
-                      <span class="text-emerald-400 font-medium font-mono text-[10px]">ativo</span>
-                    </Show>
-                  </div>
+                {/* Scheduler */}
+                <div class="p-2 rounded-lg bg-zinc-900/50 border border-zinc-800/60 text-center">
+                  <div class="text-zinc-500">Scheduler</div>
+                  <div class="text-emerald-400 font-bold">ativo</div>
+                </div>
 
-                  {/* Secretário / OpenCode */}
-                  <div class="p-2 rounded-lg bg-zinc-900/40 border border-zinc-800/60 flex items-center justify-between">
-                    <span class="text-zinc-400">OpenCode</span>
-                    <span class="text-emerald-400 font-medium font-mono text-[10px]">pronto</span>
+                {/* HITL Aprovações */}
+                <div class="p-2 rounded-lg bg-zinc-900/50 border border-zinc-800/60 text-center">
+                  <div class="text-zinc-500">Aprovações</div>
+                  <div
+                    class={
+                      (statusInfo().aprovacoesPendentes || 0) > 0
+                        ? "text-amber-400 font-bold animate-pulse"
+                        : "text-zinc-400"
+                    }
+                  >
+                    {statusInfo().aprovacoesPendentes || 0} pend.
                   </div>
                 </div>
               </div>
