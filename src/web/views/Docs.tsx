@@ -16,7 +16,7 @@ import { fetchApi } from "../lib/context";
 import { Button } from "../ui/Button";
 import { showToast } from "../ui/Toast";
 import { renderDocMarkdown } from "../lib/doc-renderer";
-import { processarDiagramasMermaid } from "../md";
+import { processarDiagramasMermaid, garantirCopyGlobal } from "../md";
 
 interface DocItem {
   slug: string;
@@ -77,6 +77,7 @@ export const DocsView: Component = () => {
   };
 
   onMount(async () => {
+    garantirCopyGlobal();
     try {
       setCarregando(true);
       const lista = await fetchApi<DocItem[]>("/docs");

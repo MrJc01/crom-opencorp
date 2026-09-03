@@ -9,7 +9,7 @@
 import { escapeHtml } from "./format.js";
 
 /** Instala (uma vez) o global de copy dos code fences e toggle do mermaid */
-function garantirCopyGlobal(): void {
+export function garantirCopyGlobal(): void {
   if (typeof window === "undefined") return; // testes em node
   const g = window as unknown as Record<string, unknown>;
 
@@ -46,10 +46,13 @@ function garantirCopyGlobal(): void {
   }
 }
 
+garantirCopyGlobal();
+
 let mermaidIdCounter = 0;
 
 /** Processa e renderiza todos os blocos de fluxogramas e gráficos Mermaid no DOM */
 export async function processarDiagramasMermaid(container?: HTMLElement): Promise<void> {
+  garantirCopyGlobal();
   if (typeof window === "undefined" || typeof document === "undefined") return;
   const raiz = container ?? document.body;
   const elementos = raiz.querySelectorAll<HTMLElement>(".md-mermaid-container:not([data-rendered='true'])");
