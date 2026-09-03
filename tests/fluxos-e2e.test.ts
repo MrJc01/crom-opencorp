@@ -540,6 +540,19 @@ describe('Tasks.tsx — Execução de tarefas criadas', () => {
     expect(tasksSrc).toContain('Dispara agente @');
   });
 
+  it('permite aprovar e desbloquear tarefa em estado bloqueado', () => {
+    expect(tasksSrc).toContain('desbloquearEAprovarTask');
+    expect(tasksSrc).toContain('Aprovar & Desbloquear');
+    expect(tasksSrc).toContain('[DESBLOQUEIO / APROVAÇÃO]');
+  });
+
+  it('permite enviar instrução que dispara a execução imediata da tarefa', () => {
+    expect(tasksSrc).toContain('Enviar & Executar');
+    expect(tasksSrc).toContain('enviarComentario(true)');
+    expect(tasksSrc).toContain('instrucaoExtra');
+    expect(tasksSrc).toContain('[Instrução do Operador]:');
+  });
+
   it('modal de criação fecha no backdrop click', () => {
     expect(tasksSrc).toContain('onClick={() => setModalCriacaoAberto(false)}');
     expect(tasksSrc).toContain('e.stopPropagation()');
@@ -581,5 +594,57 @@ describe('Agenda.tsx — Executar tarefas existentes via agendamento', () => {
   it('modal de agendamento fecha no backdrop click', () => {
     expect(agendaSrc).toContain('onClick={() => setModalAberto(false)}');
     expect(agendaSrc).toContain('e.stopPropagation()');
+  });
+});
+
+/* ────────────────────────────────────────────────────────────
+   6. FLUXOS.TSX & FLOW-STORE — Drag & Drop, Interligação e Contexto n8n
+   ──────────────────────────────────────────────────────────── */
+describe('Fluxos & Flow Store — Drag & Drop, Conexões e Contexto Encadeado n8n', () => {
+  const fluxosPath = join(RAIZ, 'src/web/views/Fluxos.tsx');
+  const fluxosSrc = readFileSync(fluxosPath, 'utf8');
+  const flowStorePath = join(RAIZ, 'src/core/flow-store.ts');
+  const flowStoreSrc = readFileSync(flowStorePath, 'utf8');
+
+  it('painel NDV fica oculto quando nenhum nó está selecionado', () => {
+    expect(fluxosSrc).toContain('setNoSelecionado(null)');
+    expect(fluxosSrc).toContain('<Show when={noSelecionado()}>');
+  });
+
+  it('clique no canvas vazio desmarca o nó e fecha o painel NDV', () => {
+    expect(fluxosSrc).toContain('setNoSelecionado(null)');
+    expect(fluxosSrc).toContain('onMouseDownCanvas');
+  });
+
+  it('implementa Drag & Drop de nós no canvas com persistência de posição', () => {
+    expect(fluxosSrc).toContain('noArrastandoId');
+    expect(fluxosSrc).toContain('onMouseDownNode');
+    expect(fluxosSrc).toContain('cursor-move');
+    expect(fluxosSrc).toContain('no.pos?.x !== undefined');
+  });
+
+  it('implementa modo de conexão visual e interligação entre nós', () => {
+    expect(fluxosSrc).toContain('conectandoDeNoId');
+    expect(fluxosSrc).toContain('iniciarConexao');
+    expect(fluxosSrc).toContain('completarConexao');
+    expect(fluxosSrc).toContain('removerAresta');
+  });
+
+  it('exibe gerenciador de conexões de entrada e saída no NDV', () => {
+    expect(fluxosSrc).toContain('Conexões & Ligações');
+    expect(fluxosSrc).toContain('Entradas (ativado após):');
+    expect(fluxosSrc).toContain('Saídas (dispara em seguida):');
+  });
+
+  it('fornece variáveis n8n e interpolação no NDV ({{entrada}}, {{$input}}, {{json}})', () => {
+    expect(fluxosSrc).toContain('Dados Anteriores & Variáveis (n8n)');
+    expect(fluxosSrc).toContain('{{entrada}}');
+    expect(fluxosSrc).toContain('{{$input}}');
+  });
+
+  it('flow-store injeta automaticamente contexto e saída do nó anterior para o agente', () => {
+    expect(flowStoreSrc).toContain('saidasPorNo');
+    expect(flowStoreSrc).toContain('noAnterior');
+    expect(flowStoreSrc).toContain('[Contexto do nó anterior');
   });
 });

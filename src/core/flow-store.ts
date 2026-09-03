@@ -449,16 +449,43 @@ export class FlowStore {
     let status: "concluido" | "falhou" = "concluido";
     let motivo: string | null = null;
     let noFalha: string | null = null;
+    let noAnterior: NoFlow | undefined = undefined;
+    const saidasPorNo: Record<string, string> = {};
 
     try {
       while (atual) {
         const no = atual;
         if (no.tipo === "manual") {
           contexto = entrada;
+          saidasPorNo[no.id] = contexto;
           await marcarNo(no.id, "ok");
         } else if (no.tipo === "agente") {
           const config = no.config as { agente: string; ordem: string; resposta_arquivo?: string };
-          const ordemBase = config.ordem.replaceAll("{{entrada}}", contexto);
+          // Interpolação estilo n8n ($json, {{$input}}, {{$node["id"]}}, {{entrada}})
+          let ordemBase = config.ordem
+            .replaceAll("{{entrada}}", contexto)
+            .replaceAll("{{$input}}", contexto)
+            .replaceAll("{{json}}", contexto);
+
+          for (const [nid, saidaN] of Object.entries(saidasPorNo)) {
+            ordemBase = ordemBase
+              .replaceAll(`{{$node["${nid}"]}}`, saidaN)
+              .replaceAll(`{{$node['${nid}']}}`, saidaN)
+              .replaceAll(`{{no.${nid}}}`, saidaN);
+          }
+
+          // Se a ordem não referenciou explicitamente {{entrada}} e temos contexto do nó anterior,
+          // injeta o contexto do nó anterior para que o agente saiba que está encadeado
+          if (
+            contexto &&
+            contexto.trim() &&
+            !config.ordem.includes("{{entrada}}") &&
+            !config.ordem.includes("{{$input}}") &&
+            noAnterior
+          ) {
+            ordemBase = `${ordemBase}\n\n[Contexto do nó anterior (${noAnterior.id} - ${noAnterior.tipo})]:\n${contexto}`;
+          }
+
           // contrato de resposta por ARQUIVO: a resposta limpa fica no sandbox
           // (o terminal do agent run carrega transcript/ANSI — não é canal confiável)
           const arquivoResposta = config.resposta_arquivo ?? "";
@@ -818,6 +845,8 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
             throw new FlowError(`nó "${no.id}" (reuniao) falhou: ${msg(erro)}`);
           }
         }
+        saidasPorNo[no.id] = contexto;
+        noAnterior = no;
         const saidas = flow.arestas.filter((a) => a.de === no.id);
         atual = saidas.length > 0 ? porId(flow, saidas[0]!.para) : undefined;
       }

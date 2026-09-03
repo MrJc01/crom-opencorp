@@ -16,6 +16,8 @@ import {
   Filter,
   Play,
   Bot,
+  Lock,
+  Unlock,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -113,23 +115,30 @@ export const TasksView: Component = () => {
     }
   });
 
-  const enviarComentario = async () => {
+  const enviarComentario = async (executar = true) => {
     const t = taskSelecionada();
     const texto = novoComentario().trim();
     if (!t || !texto) return;
     setEnviandoComentario(true);
 
     try {
+      const tipoMsg = executar ? "instrucao" : "comentario";
       await fetchApi(`/tasks/${encodeURIComponent(t.id)}/mensagens`, {
         method: "POST",
-        body: JSON.stringify({ corpo: texto, autor: "humano", tipo: "comentario" }),
+        body: JSON.stringify({ corpo: texto, autor: "humano", tipo: tipoMsg }),
       });
       setNovoComentario("");
       const msgs = await fetchApi<MensagemTask[]>(`/tasks/${encodeURIComponent(t.id)}/mensagens`).catch(() => []);
       setMensagens(msgs || []);
-      showToast("Comentário registrado", "sucesso");
+
+      if (executar) {
+        showToast("Instrução registrada e disparada para execução!", "sucesso");
+        await executarTask(t, texto);
+      } else {
+        showToast("Comentário registrado", "info");
+      }
     } catch (err: any) {
-      showToast(`Erro ao enviar comentário: ${err.message}`, "erro");
+      showToast(`Erro ao enviar: ${err.message}`, "erro");
     } finally {
       setEnviandoComentario(false);
     }
@@ -192,19 +201,23 @@ export const TasksView: Component = () => {
     }
   };
 
-  const executarTask = async (task: Task) => {
+  const executarTask = async (task: Task, instrucaoExtra?: string) => {
     const rawResp = task.responsavel || "";
     const agenteId = rawResp.replace(/^@/, "").replace(/^agente:/, "").trim() || agentes()[0]?.id || "secretario-exec";
     setExecutandoTask(true);
     try {
-      const ordem = `Executar tarefa [${task.id}] "${task.titulo}": ${task.descricao || ""}`.trim();
+      let ordem = `Executar tarefa [${task.id}] "${task.titulo}": ${task.descricao || ""}`.trim();
+      if (instrucaoExtra && instrucaoExtra.trim()) {
+        ordem = `${ordem}\n\n[Instrução do Operador]:\n${instrucaoExtra.trim()}`;
+      }
+
       await fetchApi(`/agents/${encodeURIComponent(agenteId)}/run`, {
         method: "POST",
         body: JSON.stringify({ ordem }),
       });
 
-      // Se estiver no backlog, move automaticamente para fazendo
-      if (task.coluna === "backlog") {
+      // Se estiver no backlog ou bloqueado, move automaticamente para fazendo
+      if (task.coluna === "backlog" || task.coluna === "bloqueado") {
         await fetchApi(`/tasks/${encodeURIComponent(task.id)}/move`, {
           method: "POST",
           body: JSON.stringify({ coluna: "fazendo" }),
@@ -235,6 +248,37 @@ export const TasksView: Component = () => {
       showToast(`Erro ao executar tarefa: ${err.message}`, "erro");
     } finally {
       setExecutandoTask(false);
+    }
+  };
+
+  const desbloquearEAprovarTask = async (task: Task) => {
+    try {
+      await fetchApi(`/tasks/${encodeURIComponent(task.id)}/move`, {
+        method: "POST",
+        body: JSON.stringify({ coluna: "fazendo" }),
+      });
+
+      await fetchApi(`/tasks/${encodeURIComponent(task.id)}/mensagens`, {
+        method: "POST",
+        body: JSON.stringify({
+          corpo: "[DESBLOQUEIO / APROVAÇÃO] Tarefa aprovada e desbloqueada pelo operador.",
+          autor: "humano",
+          tipo: "aprovacao",
+        }),
+      }).catch(() => {});
+
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, coluna: "fazendo" } : t)));
+      if (taskSelecionada()?.id === task.id) {
+        setTaskSelecionada((prev) => (prev ? { ...prev, coluna: "fazendo" } : null));
+        const msgs = await fetchApi<MensagemTask[]>(`/tasks/${encodeURIComponent(task.id)}/mensagens`).catch(() => []);
+        setMensagens(msgs || []);
+      }
+
+      showToast("Tarefa aprovada e desbloqueada com sucesso!", "sucesso");
+      // Opcionalmente já dispara o agente executor
+      void executarTask({ ...task, coluna: "fazendo" });
+    } catch (err: any) {
+      showToast(`Erro ao desbloquear: ${err.message}`, "erro");
     }
   };
 
@@ -429,48 +473,93 @@ export const TasksView: Component = () => {
               </Show>
             </div>
 
-            {/* Ações Rápidas de Mover Coluna */}
-            <div class="p-3 rounded-lg bg-zinc-900/40 border border-zinc-800 space-y-2">
-              <label class="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">
-                Mover de Coluna
-              </label>
-              <div class="grid grid-cols-4 gap-1.5">
-                <For each={colunas}>
-                  {(col) => (
-                    <button
-                      onClick={() => moverTask(taskSelecionada()!.id, col.id)}
-                      class={`px-2 py-1.5 rounded text-[11px] font-medium border text-center transition-all cursor-pointer ${
-                        taskSelecionada()!.coluna === col.id
-                          ? "bg-zinc-800 text-zinc-100 border-zinc-600 font-bold"
-                          : "bg-zinc-950 text-zinc-400 border-zinc-800/80 hover:text-zinc-200"
-                      }`}
-                    >
-                      {col.nome}
-                    </button>
-                  )}
-                </For>
+            {/* BLOCO DE TAREFA BLOQUEADA (Aprovação / Desbloqueio) */}
+            <Show when={taskSelecionada()!.coluna === "bloqueado"}>
+              <div class="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/60 space-y-2.5">
+                <div class="flex items-center gap-2 text-amber-300 font-bold text-xs">
+                  <AlertCircle size={16} class="text-amber-400" />
+                  <span>Tarefa Bloqueada — Aguardando Desbloqueio</span>
+                </div>
+                <p class="text-[11px] text-zinc-300 leading-relaxed">
+                  Esta tarefa está pausada aguardando aprovação humana (HITL) ou resolução de dependência para continuar.
+                </p>
+                <div class="flex items-center gap-2 pt-1">
+                  <Button
+                    size="xs"
+                    variant="primary"
+                    onClick={() => desbloquearEAprovarTask(taskSelecionada()!)}
+                    class="flex-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold py-1.5 shadow-md"
+                  >
+                    <CheckCircle2 size={13} class="mr-1.5" /> Aprovar & Desbloquear
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    onClick={() => moverTask(taskSelecionada()!.id, "backlog")}
+                    class="text-[11px]"
+                  >
+                    Mover para Backlog
+                  </Button>
+                </div>
               </div>
-            </div>
+            </Show>
 
-            {/* Bloco de Execução com Agente */}
-            <div class="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/30 flex items-center justify-between gap-3">
-              <div class="min-w-0">
-                <span class="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
-                  <Bot size={13} class="text-emerald-400" /> Executar Tarefa
-                </span>
-                <span class="text-[11px] text-zinc-400 truncate block mt-0.5">
+            {/* Ações Rápidas de Workflow (Substitui mover coluna cego) */}
+            <div class="p-3 rounded-lg bg-zinc-900/40 border border-zinc-800 space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">
+                  Status: <span class="text-zinc-200 capitalize font-mono">{taskSelecionada()!.coluna}</span>
+                </label>
+                <span class="text-[10px] text-zinc-400 font-mono">
                   Dispara agente @{taskSelecionada()!.responsavel || agentes()[0]?.id || "secretario-exec"}
                 </span>
               </div>
-              <Button
-                size="xs"
-                variant="primary"
-                loading={executandoTask()}
-                onClick={() => executarTask(taskSelecionada()!)}
-                class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex-shrink-0"
-              >
-                <Play size={12} class="mr-1 fill-current" /> Executar
-              </Button>
+
+              <div class="flex flex-wrap gap-1.5">
+                <Show when={taskSelecionada()!.coluna !== "fazendo"}>
+                  <Button
+                    size="xs"
+                    variant="primary"
+                    loading={executandoTask()}
+                    onClick={() => executarTask(taskSelecionada()!)}
+                    class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
+                  >
+                    <Play size={12} class="mr-1 fill-current" /> Executar Tarefa
+                  </Button>
+                </Show>
+
+                <Show when={taskSelecionada()!.coluna !== "feito"}>
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    onClick={() => moverTask(taskSelecionada()!.id, "feito")}
+                    class="text-emerald-400 hover:text-emerald-300"
+                  >
+                    <CheckCircle2 size={12} class="mr-1" /> Concluir
+                  </Button>
+                </Show>
+
+                <Show when={taskSelecionada()!.coluna !== "backlog"}>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => moverTask(taskSelecionada()!.id, "backlog")}
+                  >
+                    Mover para Backlog
+                  </Button>
+                </Show>
+
+                <Show when={taskSelecionada()!.coluna !== "bloqueado"}>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => moverTask(taskSelecionada()!.id, "bloqueado")}
+                    class="text-amber-400 hover:text-amber-300"
+                  >
+                    <Lock size={12} class="mr-1" /> Bloquear
+                  </Button>
+                </Show>
+              </div>
             </div>
 
             {/* Metadados: Responsável e Prioridade */}
@@ -490,7 +579,7 @@ export const TasksView: Component = () => {
               </div>
             </div>
 
-            {/* Histórico de Comentários & Handoffs */}
+            {/* Histórico de Comentários, Ações & Handoffs */}
             <div class="space-y-3 pt-2 border-t border-zinc-800">
               <h3 class="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
                 <MessageSquare size={13} class="text-zinc-400" /> Histórico de Comentários & Handoffs
@@ -508,7 +597,24 @@ export const TasksView: Component = () => {
                   {(m) => (
                     <div class="p-2.5 rounded-lg bg-zinc-900/80 border border-zinc-800 text-xs space-y-1">
                       <div class="flex items-center justify-between text-[10px] text-zinc-500">
-                        <span class="font-semibold text-zinc-300 font-mono">@{m.autor}</span>
+                        <div class="flex items-center gap-1.5">
+                          <span class="font-semibold text-zinc-300 font-mono">@{m.autor}</span>
+                          <Show when={m.tipo === "execucao"}>
+                            <span class="px-1.5 py-0.2 rounded text-[9px] bg-emerald-950 text-emerald-400 border border-emerald-800/60 font-mono">
+                              execução
+                            </span>
+                          </Show>
+                          <Show when={m.tipo === "aprovacao"}>
+                            <span class="px-1.5 py-0.2 rounded text-[9px] bg-amber-950 text-amber-400 border border-amber-800/60 font-mono">
+                              aprovado
+                            </span>
+                          </Show>
+                          <Show when={m.tipo === "instrucao"}>
+                            <span class="px-1.5 py-0.2 rounded text-[9px] bg-blue-950 text-blue-400 border border-blue-800/60 font-mono">
+                              instrução
+                            </span>
+                          </Show>
+                        </div>
                         <span>{new Date(m.criado_em).toLocaleTimeString("pt-BR")}</span>
                       </div>
                       <p class="text-zinc-300 leading-relaxed text-[11px] whitespace-pre-wrap">{m.corpo}</p>
@@ -517,19 +623,34 @@ export const TasksView: Component = () => {
                 </For>
               </div>
 
-              {/* Adicionar Comentário */}
-              <div class="flex items-center gap-2 pt-1">
+              {/* Enviar Instrução ou Comentário (com opção de executar) */}
+              <div class="space-y-2 pt-1 border-t border-zinc-800/60">
                 <input
                   type="text"
-                  placeholder="Escreva um comentário ou instrução..."
+                  placeholder="Instrução para o agente executar na tarefa..."
                   value={novoComentario()}
                   onInput={(e) => setNovoComentario(e.currentTarget.value)}
-                  onKeyDown={(e) => e.key === "Enter" && enviarComentario()}
-                  class="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
+                  onKeyDown={(e) => e.key === "Enter" && enviarComentario(true)}
+                  class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500"
                 />
-                <Button size="xs" variant="primary" loading={enviandoComentario()} onClick={enviarComentario}>
-                  <Send size={12} class="mr-1" /> Enviar
-                </Button>
+                <div class="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => enviarComentario(false)}
+                    class="text-[11px] text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                  >
+                    Apenas comentar
+                  </button>
+                  <Button
+                    size="xs"
+                    variant="primary"
+                    loading={enviandoComentario() || executandoTask()}
+                    onClick={() => enviarComentario(true)}
+                    class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
+                  >
+                    <Send size={11} class="mr-1" /> Enviar & Executar
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

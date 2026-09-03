@@ -88,6 +88,15 @@ export const FluxosView: Component = () => {
   const [fluxoAtivo, setFluxoAtivo] = createSignal<FluxoCompleto | null>(null);
   const [noSelecionado, setNoSelecionado] = createSignal<NoGrafo | null>(null);
 
+  // Estados de Arrastar Nós (Drag & Drop de Nós no Canvas)
+  const [noArrastandoId, setNoArrastandoId] = createSignal<string | null>(null);
+  const [dragStart, setDragStart] = createSignal<{ mouseX: number; mouseY: number; nodeX: number; nodeY: number } | null>(null);
+  const [houveArrasto, setHouveArrasto] = createSignal(false);
+
+  // Estado de Criação de Conexões entre Nós (Interligar estilo n8n)
+  const [conectandoDeNoId, setConectandoDeNoId] = createSignal<string | null>(null);
+  const [novoDestinoLigacao, setNovoDestinoLigacao] = createSignal("");
+
   // Modo no NDV: formulário visual ou JSON avançado
   const [modoNdv, setModoNdv] = createSignal<"form" | "json">("form");
 
@@ -146,7 +155,8 @@ export const FluxosView: Component = () => {
     try {
       const f = await fetchApi<FluxoCompleto>(`/flows/${encodeURIComponent(id)}`);
       setFluxoAtivo(f);
-      setNoSelecionado(f.nos && f.nos.length > 0 ? f.nos[0] : null);
+      // Mantém oculto até o usuário clicar em um nó explicitamente
+      setNoSelecionado(null);
       setSearchParams({ fluxo: id });
     } catch (e: any) {
       showToast(`Erro ao carregar fluxo: ${e.message}`, "erro");
@@ -363,6 +373,47 @@ export const FluxosView: Component = () => {
   };
 
   // Layout Automático de Nós no Canvas
+  // Conexões e Ligações entre Nós
+  const iniciarConexao = (origemId: string, e?: MouseEvent) => {
+    if (e) e.stopPropagation();
+    setConectandoDeNoId(origemId);
+    showToast(`Conectando a partir de "${origemId}": clique no nó de destino`, "info");
+  };
+
+  const completarConexao = (destinoId: string) => {
+    const origem = conectandoDeNoId();
+    setConectandoDeNoId(null);
+    if (!origem || origem === destinoId) return;
+
+    const f = fluxoAtivo();
+    if (!f) return;
+
+    const jaExiste = f.arestas.some((a) => a.de === origem && a.para === destinoId);
+    if (jaExiste) {
+      showToast("Esta conexão já existe.", "aviso");
+      return;
+    }
+
+    const novoFluxo: FluxoCompleto = {
+      ...f,
+      arestas: [...f.arestas, { de: origem, para: destinoId }],
+    };
+    void salvarAlteracoesWorkflow(novoFluxo);
+    showToast(`Ligação criada: ${origem} → ${destinoId}`, "sucesso");
+  };
+
+  const removerAresta = (de: string, para: string) => {
+    const f = fluxoAtivo();
+    if (!f) return;
+    const novoFluxo: FluxoCompleto = {
+      ...f,
+      arestas: f.arestas.filter((a) => !(a.de === de && a.para === para)),
+    };
+    void salvarAlteracoesWorkflow(novoFluxo);
+    showToast(`Conexão removida: ${de} → ${para}`, "info");
+  };
+
+  // Layout dos Nós no Canvas (Usa pos customizada se existir, senão layout topológico)
   const nosPosicionados = createMemo(() => {
     const f = fluxoAtivo();
     if (!f || !f.nos) return [];
@@ -398,8 +449,10 @@ export const FluxosView: Component = () => {
       const colIdx = Number(lvlStr);
       const totalNaColuna = lista.length;
       lista.forEach((no, rowIdx) => {
-        const x = 70 + colIdx * COL_WIDTH;
-        const y = 90 + (rowIdx - (totalNaColuna - 1) / 2) * ROW_HEIGHT + 110;
+        const defaultX = 70 + colIdx * COL_WIDTH;
+        const defaultY = 90 + (rowIdx - (totalNaColuna - 1) / 2) * ROW_HEIGHT + 110;
+        const x = no.pos?.x !== undefined ? no.pos.x : defaultX;
+        const y = no.pos?.y !== undefined ? no.pos.y : defaultY;
         posicionados.push({ ...no, x, y });
       });
     });
@@ -427,8 +480,10 @@ export const FluxosView: Component = () => {
 
         const dx = Math.max(Math.abs(x2 - x1) * 0.5, 40);
         const path = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+        const midX = Math.round((x1 + x2) / 2);
+        const midY = Math.round((y1 + y2) / 2);
 
-        return { ...a, path, x1, y1, x2, y2 };
+        return { ...a, path, x1, y1, x2, y2, midX, midY };
       })
       .filter(Boolean);
   });
@@ -476,18 +531,88 @@ export const FluxosView: Component = () => {
     }
   };
 
+  // Mouse Handlers para Canvas (Pan, Drag de Nós, Desmarcar)
   const onMouseDownCanvas = (e: MouseEvent) => {
     if ((e.target as HTMLElement).closest(".canvas-node")) return;
+    if ((e.target as HTMLElement).closest(".ndv-panel")) return;
+    if ((e.target as HTMLElement).closest(".canvas-toolbar")) return;
+
+    // Clique no fundo deseleciona qualquer nó e fecha o NDV
+    setNoSelecionado(null);
+
+    // Se estava em modo de conexão, cancela
+    if (conectandoDeNoId()) {
+      setConectandoDeNoId(null);
+      showToast("Conexão cancelada", "info");
+      return;
+    }
+
     setIsPanning(true);
     setStartPan({ x: e.clientX - pan().x, y: e.clientY - pan().y });
   };
 
+  const onMouseDownNode = (e: MouseEvent, no: NoGrafo & { x: number; y: number }) => {
+    if (conectandoDeNoId()) {
+      e.stopPropagation();
+      completarConexao(no.id);
+      return;
+    }
+
+    if (e.button !== 0) return; // apenas clique esquerdo
+    e.stopPropagation();
+    setNoSelecionado(no);
+    setHouveArrasto(false);
+    setNoArrastandoId(no.id);
+    setDragStart({
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      nodeX: no.x,
+      nodeY: no.y,
+    });
+  };
+
   const onMouseMoveCanvas = (e: MouseEvent) => {
+    const arrastandoId = noArrastandoId();
+    const ds = dragStart();
+
+    // Se estiver arrastando um nó
+    if (arrastandoId && ds) {
+      const z = zoom();
+      const dx = (e.clientX - ds.mouseX) / z;
+      const dy = (e.clientY - ds.mouseY) / z;
+
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        setHouveArrasto(true);
+      }
+
+      const novoX = Math.round(ds.nodeX + dx);
+      const novoY = Math.round(ds.nodeY + dy);
+
+      setFluxoAtivo((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          nos: prev.nos.map((n) =>
+            n.id === arrastandoId ? { ...n, pos: { x: novoX, y: novoY } } : n
+          ),
+        };
+      });
+      return;
+    }
+
     if (!isPanning()) return;
     setPan({ x: e.clientX - startPan().x, y: e.clientY - startPan().y });
   };
 
   const onMouseUpCanvas = () => {
+    if (noArrastandoId()) {
+      setNoArrastandoId(null);
+      setDragStart(null);
+      if (houveArrasto()) {
+        const f = fluxoAtivo();
+        if (f) void salvarAlteracoesWorkflow(f);
+      }
+    }
     setIsPanning(false);
   };
 
@@ -749,6 +874,25 @@ export const FluxosView: Component = () => {
               "background-position": `${pan().x}px ${pan().y}px`,
             }}
           >
+            {/* Banner Flutuante de Conexão Ativa */}
+            <Show when={conectandoDeNoId()}>
+              <div class="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-orange-950/90 border border-orange-500/60 rounded-full px-4 py-1.5 shadow-2xl flex items-center gap-3 text-xs text-orange-200 backdrop-blur-md animate-pulse">
+                <span>
+                  ⚡ Conectando a partir de <strong class="font-mono text-white">{conectandoDeNoId()}</strong> — clique no nó de destino
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConectandoDeNoId(null);
+                    showToast("Conexão cancelada", "info");
+                  }}
+                  class="px-2 py-0.5 rounded-full bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 text-[11px] font-bold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </Show>
+
             {/* Camada Transformada por Zoom e Pan */}
             <div
               class="absolute inset-0 origin-top-left pointer-events-none"
@@ -756,7 +900,7 @@ export const FluxosView: Component = () => {
                 transform: `translate(${pan().x}px, ${pan().y}px) scale(${zoom()})`,
               }}
             >
-              {/* SVG para as Arestas / Conexões Curvas com Handles */}
+              {/* SVG para as Arestas / Conexões Curvas com Handles e Botão de Desconectar */}
               <svg class="absolute inset-0 overflow-visible w-full h-full pointer-events-none">
                 <defs>
                   <linearGradient id="edge-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -766,40 +910,57 @@ export const FluxosView: Component = () => {
                 </defs>
                 <For each={arestasCurvadas()}>
                   {(a: any) => (
-                    <g>
+                    <g class="group">
                       <path
                         d={a.path}
                         fill="none"
                         stroke="#000000"
-                        stroke-width="5"
-                        opacity="0.4"
+                        stroke-width="6"
+                        opacity="0.5"
                       />
                       <path
                         d={a.path}
                         fill="none"
                         stroke="url(#edge-gradient)"
                         stroke-width="2.5"
-                        class="transition-all"
+                        class="transition-all group-hover:stroke-rose-400 group-hover:stroke-[3.5]"
                       />
+                      {/* Ponto interativo para desconectar aresta */}
+                      <g
+                        transform={`translate(${a.midX}, ${a.midY})`}
+                        class="pointer-events-auto cursor-pointer group-hover:opacity-100 opacity-0 transition-opacity"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removerAresta(a.de, a.para);
+                        }}
+                      >
+                        <title>Clique para desconectar ({a.de} → {a.para})</title>
+                        <circle r="9" fill="#18181b" stroke="#f43f5e" stroke-width="1.5" />
+                        <text y="3" text-anchor="middle" fill="#f43f5e" font-size="10" font-weight="bold">✕</text>
+                      </g>
                     </g>
                   )}
                 </For>
               </svg>
 
-              {/* Nós Visuais no Canvas */}
+              {/* Nós Visuais no Canvas com Drag & Drop e Portas de Conexão */}
               <div class="relative pointer-events-auto">
                 <For each={nosPosicionados()}>
                   {(no) => {
                     const selecionado = () => noSelecionado()?.id === no.id;
                     const isTrigger = no.tipo === "manual" || no.tipo === "webhook";
+                    const isConectandoOrigem = () => conectandoDeNoId() === no.id;
+                    const isConectandoAlvo = () => conectandoDeNoId() && conectandoDeNoId() !== no.id;
 
                     return (
                       <div
-                        class={`canvas-node absolute w-[190px] h-[80px] rounded-xl border p-2.5 transition-all shadow-xl flex flex-col justify-between cursor-pointer ${
+                        class={`canvas-node absolute w-[190px] h-[80px] rounded-xl border p-2.5 transition-all shadow-xl flex flex-col justify-between cursor-move select-none ${
                           corDoNo(no.tipo)
                         } ${
                           selecionado()
                             ? "ring-2 ring-orange-500 border-orange-400 shadow-orange-500/20 scale-105 z-10"
+                            : isConectandoAlvo()
+                            ? "ring-2 ring-emerald-500/80 animate-pulse hover:border-emerald-400"
                             : "hover:border-zinc-500 hover:scale-[1.02]"
                         }`}
                         style={{
@@ -807,14 +968,26 @@ export const FluxosView: Component = () => {
                           top: `${no.y}px`,
                           background: "#18181b",
                         }}
-                        onClick={() => setNoSelecionado(no)}
+                        onMouseDown={(e) => onMouseDownNode(e, no)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (conectandoDeNoId()) {
+                            completarConexao(no.id);
+                          } else {
+                            setNoSelecionado(no);
+                          }
+                        }}
                         onContextMenu={(e) => onContextMenuCanvas(e, no.id)}
                       >
                         {/* Handle de Entrada (Esquerda) */}
                         <Show when={!isTrigger}>
                           <div
-                            class="absolute -left-2 top-[34px] w-3.5 h-3.5 rounded-full bg-zinc-900 border-2 border-orange-500 shadow-xs flex items-center justify-center hover:scale-125 transition-transform"
-                            title="Input Port"
+                            class="absolute -left-2 top-[34px] w-3.5 h-3.5 rounded-full bg-zinc-900 border-2 border-orange-500 shadow-xs flex items-center justify-center hover:scale-125 transition-transform cursor-pointer"
+                            title={conectandoDeNoId() ? "Clique para conectar aqui" : "Input Port (Entrada)"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (conectandoDeNoId()) completarConexao(no.id);
+                            }}
                           >
                             <div class="w-1 h-1 rounded-full bg-orange-400" />
                           </div>
@@ -856,8 +1029,9 @@ export const FluxosView: Component = () => {
 
                         {/* Handle de Saída (Direita) */}
                         <div
-                          class="absolute -right-2 top-[34px] w-3.5 h-3.5 rounded-full bg-zinc-900 border-2 border-blue-500 shadow-xs flex items-center justify-center hover:scale-125 transition-transform"
-                          title="Output Port"
+                          class="absolute -right-2 top-[34px] w-3.5 h-3.5 rounded-full bg-zinc-900 border-2 border-blue-500 shadow-xs flex items-center justify-center hover:scale-125 transition-transform cursor-pointer"
+                          title="Clique para ligar a outro nó (Output Port)"
+                          onClick={(e) => iniciarConexao(no.id, e)}
                         >
                           <div class="w-1 h-1 rounded-full bg-blue-400" />
                         </div>
@@ -872,7 +1046,7 @@ export const FluxosView: Component = () => {
                 NDV LATERAL (Node Details View com Formulário Automático + JSON)
                ───────────────────────────────────────────────────────────── */}
             <Show when={noSelecionado()}>
-              <div class="absolute right-4 top-4 bottom-4 w-96 bg-zinc-900/95 backdrop-blur-md border border-zinc-800 rounded-xl shadow-2xl flex flex-col z-30 transition-all">
+              <div class="ndv-panel absolute right-4 top-4 bottom-4 w-96 bg-zinc-900/95 backdrop-blur-md border border-zinc-800 rounded-xl shadow-2xl flex flex-col z-30 transition-all">
                 {/* Topo do NDV */}
                 <div class="p-3.5 border-b border-zinc-800 flex items-center justify-between">
                   <div class="flex items-center gap-2 min-w-0">
@@ -1142,6 +1316,157 @@ export const FluxosView: Component = () => {
                           />
                         </div>
                       </Show>
+                    </div>
+
+                    {/* ─────────────────────────────────────────────────────────
+                        SEÇÃO N8N: CONEXÕES DO NÓ (LIGAÇÕES DE ENTRADA & SAÍDA)
+                       ───────────────────────────────────────────────────────── */}
+                    <div class="pt-3 border-t border-zinc-800 space-y-2.5">
+                      <div class="flex items-center justify-between">
+                        <span class="text-[11px] font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                          <GitBranch size={13} class="text-orange-400" /> Conexões & Ligações
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => iniciarConexao(noSelecionado()!.id)}
+                          class="px-2 py-0.5 rounded bg-zinc-800 hover:bg-orange-600 hover:text-white text-zinc-300 text-[10px] font-medium transition-colors cursor-pointer"
+                        >
+                          + Ligar no Canvas
+                        </button>
+                      </div>
+
+                      {/* Ligações de Entrada */}
+                      <div class="space-y-1">
+                        <span class="text-[10px] text-zinc-500 font-medium block">Entradas (ativado após):</span>
+                        <div class="flex flex-wrap gap-1">
+                          <For
+                            each={(fluxoAtivo()?.arestas || []).filter((a) => a.para === noSelecionado()!.id)}
+                            fallback={<span class="text-[10px] text-zinc-600 italic">Nenhum nó anterior (gatilho inicial)</span>}
+                          >
+                            {(aresta) => (
+                              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-[10px] font-mono text-zinc-300">
+                                ← {aresta.de}
+                                <button
+                                  type="button"
+                                  onClick={() => removerAresta(aresta.de, aresta.para)}
+                                  class="text-zinc-500 hover:text-rose-400 ml-0.5 cursor-pointer font-bold"
+                                  title="Remover conexão"
+                                >
+                                  ✕
+                                </button>
+                              </span>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+
+                      {/* Ligações de Saída */}
+                      <div class="space-y-1">
+                        <span class="text-[10px] text-zinc-500 font-medium block">Saídas (dispara em seguida):</span>
+                        <div class="flex flex-wrap gap-1">
+                          <For
+                            each={(fluxoAtivo()?.arestas || []).filter((a) => a.de === noSelecionado()!.id)}
+                            fallback={<span class="text-[10px] text-zinc-600 italic">Fim da esteira (nenhum nó seguinte)</span>}
+                          >
+                            {(aresta) => (
+                              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-[10px] font-mono text-zinc-300">
+                                → {aresta.para}
+                                <button
+                                  type="button"
+                                  onClick={() => removerAresta(aresta.de, aresta.para)}
+                                  class="text-zinc-500 hover:text-rose-400 ml-0.5 cursor-pointer font-bold"
+                                  title="Remover conexão"
+                                >
+                                  ✕
+                                </button>
+                              </span>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+
+                      {/* Adicionar Ligação por Dropdown */}
+                      <div class="flex items-center gap-1.5 pt-1">
+                        <select
+                          value={novoDestinoLigacao()}
+                          onChange={(e) => setNovoDestinoLigacao(e.currentTarget.value)}
+                          class="flex-1 bg-zinc-950 border border-zinc-800 rounded p-1.5 text-[11px] text-zinc-200 focus:border-orange-500"
+                        >
+                          <option value="">Ligar este nó para...</option>
+                          <For each={(fluxoAtivo()?.nos || []).filter((n) => n.id !== noSelecionado()?.id)}>
+                            {(outro) => <option value={outro.id}>→ {outro.id} ({outro.tipo})</option>}
+                          </For>
+                        </select>
+                        <Button
+                          size="xs"
+                          variant="secondary"
+                          onClick={() => {
+                            const dest = novoDestinoLigacao();
+                            if (!dest) {
+                              showToast("Selecione um nó de destino", "aviso");
+                              return;
+                            }
+                            completarConexao(dest);
+                            setNovoDestinoLigacao("");
+                          }}
+                        >
+                          Ligar
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* ─────────────────────────────────────────────────────────
+                        SEÇÃO N8N: CONTEXTO DO NÓ ANTERIOR & VARIÁVEIS DE ENTRADA
+                       ───────────────────────────────────────────────────────── */}
+                    <div class="pt-3 border-t border-zinc-800 space-y-2">
+                      <span class="text-[11px] font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                        <Terminal size={13} class="text-cyan-400" /> Dados Anteriores & Variáveis (n8n)
+                      </span>
+                      <p class="text-[10px] text-zinc-400 leading-relaxed">
+                        O agente deste nó recebe automaticamente toda a resposta e saída do nó anterior no contexto de execução.
+                      </p>
+
+                      <div class="space-y-1">
+                        <span class="text-[10px] text-zinc-500 font-medium block">Variáveis disponíveis para interpolar na ordem:</span>
+                        <div class="flex flex-wrap gap-1 text-[10px] font-mono">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const ord = noSelecionado()?.config?.ordem || "";
+                              atualizarConfigNo("ordem", `${ord} {{entrada}}`.trim());
+                              showToast("{{entrada}} adicionado à ordem", "info");
+                            }}
+                            class="px-2 py-0.5 rounded bg-zinc-950 border border-zinc-800 hover:border-cyan-500 text-cyan-400 cursor-pointer"
+                            title="Clique para adicionar à instrução"
+                          >
+                            {`{{entrada}}`}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const ord = noSelecionado()?.config?.ordem || "";
+                              atualizarConfigNo("ordem", `${ord} {{$input}}`.trim());
+                              showToast("{{$input}} adicionado à ordem", "info");
+                            }}
+                            class="px-2 py-0.5 rounded bg-zinc-950 border border-zinc-800 hover:border-cyan-500 text-cyan-400 cursor-pointer"
+                            title="Clique para adicionar à instrução"
+                          >
+                            {`{{$input}}`}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const ord = noSelecionado()?.config?.ordem || "";
+                              atualizarConfigNo("ordem", `${ord} {{json}}`.trim());
+                              showToast("{{json}} adicionado à ordem", "info");
+                            }}
+                            class="px-2 py-0.5 rounded bg-zinc-950 border border-zinc-800 hover:border-cyan-500 text-cyan-400 cursor-pointer"
+                            title="Clique para adicionar à instrução"
+                          >
+                            {`{{json}}`}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </Show>
                 </div>
