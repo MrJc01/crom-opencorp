@@ -58,38 +58,11 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
           : "bg-transparent mr-auto max-w-full w-full"
       }`}
     >
-      {/* Cabeçalho / Ações */}
-      <div class="flex items-center justify-between gap-2 mb-1.5 select-none">
+      {/* Cabeçalho */}
+      <div class="flex items-center justify-between gap-2 mb-1 select-none">
         <span class="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
           {m().role === "user" ? "Você" : "Secretário Executivo"}
         </span>
-
-        {/* Botões de Ação */}
-        <div class="flex items-center gap-1.5">
-          <Show when={m().role === "user"}>
-            <button
-              type="button"
-              onClick={() => props.onEditarPrompt(props.indice)}
-              class="flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-800/80 hover:bg-zinc-750 text-amber-300/90 hover:text-amber-300 border border-zinc-750 text-[10px] font-mono transition-colors cursor-pointer"
-              title="Editar prompt (restaura texto no editor)"
-            >
-              <Edit3 size={11} />
-              <span>Editar</span>
-            </button>
-          </Show>
-
-          <button
-            type="button"
-            onClick={copiar}
-            class="flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-800/80 hover:bg-zinc-750 text-zinc-300 hover:text-zinc-100 border border-zinc-750 text-[10px] font-mono transition-colors cursor-pointer"
-            title="Copiar mensagem"
-          >
-            <Show when={copiado()} fallback={<Copy size={11} />}>
-              <Check size={11} class="text-emerald-400" />
-            </Show>
-            <span>{copiado() ? "Copiado!" : "Copiar"}</span>
-          </button>
-        </div>
       </div>
 
       {/* Imagens Anexadas no Prompt do Usuário */}
@@ -192,19 +165,45 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
         </div>
       </Show>
 
-      {/* Ação de Copiar Resposta do Assistente */}
-      <Show when={m().role === "assistant" && m().content && m().concluida !== false}>
-        <div class="flex items-center justify-end pt-2 mt-2 border-t border-zinc-800/40">
+      {/* Ações Discretas na Base do Balão do Usuário (Editar / Copiar) */}
+      <Show when={m().role === "user"}>
+        <div class="flex items-center justify-end gap-1 pt-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            type="button"
+            onClick={() => props.onEditarPrompt(props.indice)}
+            class="p-1 rounded-md text-zinc-500 hover:text-amber-300 hover:bg-zinc-800/80 transition-colors cursor-pointer"
+            title="Editar prompt"
+            aria-label="Editar prompt"
+          >
+            <Edit3 size={13} />
+          </button>
           <button
             type="button"
             onClick={copiar}
-            class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-emerald-400 hover:bg-zinc-900 border border-zinc-800/80 transition-colors cursor-pointer"
-            title="Copiar resposta completa"
+            class="p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80 transition-colors cursor-pointer"
+            title="Copiar prompt"
+            aria-label="Copiar prompt"
           >
-            <Show when={copiado()} fallback={<Copy size={12} />}>
-              <Check size={12} class="text-emerald-400" />
+            <Show when={copiado()} fallback={<Copy size={13} />}>
+              <Check size={13} class="text-emerald-400" />
             </Show>
-            <span>{copiado() ? "Resposta Copiada!" : "Copiar Resposta"}</span>
+          </button>
+        </div>
+      </Show>
+
+      {/* Ação Discreta de Copiar na Base da Resposta do Assistente */}
+      <Show when={m().role === "assistant" && m().content && m().concluida !== false}>
+        <div class="flex items-center justify-end pt-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            type="button"
+            onClick={copiar}
+            class="p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-850/80 transition-colors cursor-pointer"
+            title="Copiar resposta"
+            aria-label="Copiar resposta"
+          >
+            <Show when={copiado()} fallback={<Copy size={13} />}>
+              <Check size={13} class="text-emerald-400" />
+            </Show>
           </button>
         </div>
       </Show>
