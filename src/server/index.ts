@@ -2,14 +2,16 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { tmpdir } from "node:os";
 import { join, resolve, relative, isAbsolute, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stat, readdir, readFile, realpath, open, mkdir, rename, rm, unlink } from "node:fs/promises";
-import { existsSync, rmSync, statSync, readFileSync } from "node:fs";
+import { existsSync, rmSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { WorkspaceManager } from "../core/workspace-manager.js";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
 import { AgentStore } from "../core/agent-store.js";
+import { TemplateStore } from "../core/template-store.js";
 import { SessionManager, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
 import { RegistryStore } from "../core/registry-store.js";
 import { BudgetManager } from "../core/budget-manager.js";
@@ -595,6 +597,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
 } {
   const base = { homeDir: opcoes.homeDir, cwd: opcoes.cwd };
   const workspaces = new WorkspaceManager(base);
+  const templates = new TemplateStore(base);
   const agentes = new AgentStore({ templatesDir: opcoes.homeDir ? join(opcoes.homeDir, "templates") : undefined });
   const registros = new RegistryStore();
   const budget = new BudgetManager(base);
@@ -911,6 +914,51 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             await writeFileAtomic(join(criado.path, ".opencorp", "projeto.json"), `${JSON.stringify(projeto, null, 2)}\n`);
           }
           enviar(res, 201, { id: criado.id, caminho: criado.path });
+          return;
+        }
+        if (rota === "/workspaces/import-corp" && req.method === "POST") {
+          const corpo = (await lerCorpo(req)) as {
+            id?: string;
+            nome_arquivo?: string;
+            arquivo_base64: string;
+            path?: string;
+          };
+          if (!corpo.arquivo_base64 || typeof corpo.arquivo_base64 !== "string") {
+            enviar(res, 400, { erro: "arquivo_base64 obrigatório" });
+            return;
+          }
+
+          const nomeLimpo = (corpo.nome_arquivo || "workspace.corp")
+            .replace(/\.corp$/i, "")
+            .toLowerCase()
+            .replace(/[^a-z0-9-]/g, "-")
+            .replace(/-+/g, "-");
+          const idAlvo = (corpo.id ? String(corpo.id).trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-") : "") || nomeLimpo || `ws-${Date.now()}`;
+
+          const tmpPath = join(tmpdir(), `opencorp-import-${Date.now()}-${randomBytes(4).toString("hex")}.corp`);
+          try {
+            const b64Limpo = corpo.arquivo_base64.replace(/^data:[^;]+;base64,/, "");
+            writeFileSync(tmpPath, Buffer.from(b64Limpo, "base64"));
+
+            // 1. Importa como template
+            const templateId = `import-${idAlvo}-${Date.now()}`;
+            await templates.importar(tmpPath, templateId);
+
+            // 2. Cria o workspace com base nesse template importado
+            const criado = await workspaces.criar(idAlvo, { template: templateId, path: corpo.path });
+
+            enviar(res, 201, { ok: true, id: criado.id, caminho: criado.path });
+          } catch (err: any) {
+            enviar(res, 500, { erro: `Falha ao importar .corp: ${err?.message || String(err)}` });
+          } finally {
+            try {
+              if (existsSync(tmpPath)) rmSync(tmpPath, { force: true });
+            } catch {}
+          }
+          return;
+        }
+        if (rota === "/templates" && req.method === "GET") {
+          enviar(res, 200, await templates.listar());
           return;
         }
         if (rota === "/workspaces/current" && req.method === "GET") {

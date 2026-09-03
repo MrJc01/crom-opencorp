@@ -214,6 +214,25 @@ export function renderDocMarkdown(markdown: string): string {
       return renderTexto(bloco.conteudo);
     }
 
+    const langLower = (bloco.lang || "").toLowerCase().trim();
+    const ehMermaid =
+      langLower === "mermaid" ||
+      langLower === "graph" ||
+      /^\s*(graph|flowchart|sequenceDiagram|classDiagram|subgraph|stateDiagram|erDiagram|gantt|pie|gitGraph)\b/m.test(bloco.conteudo);
+
+    if (ehMermaid) {
+      return `<div class="md-mermaid-container my-6 rounded-xl border border-zinc-800 bg-[#09090b] overflow-hidden shadow-lg" data-code="${escapeHtml(bloco.conteudo)}">
+        <div class="md-mermaid-header flex items-center justify-between px-4 py-2 bg-zinc-900/90 border-b border-zinc-800 text-[11px] font-mono">
+          <span class="md-mermaid-title font-semibold text-sky-400 flex items-center gap-1.5">📊 Fluxograma / Diagrama de Arquitetura</span>
+          <button type="button" class="md-mermaid-toggle bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-300 px-2 py-0.5 rounded text-[10px] cursor-pointer" onclick="window.__mdToggleMermaid(this)">Ver Código</button>
+        </div>
+        <div class="md-mermaid-svg p-4 flex justify-center overflow-x-auto min-h-[100px] text-zinc-400">
+          <span class="text-xs text-zinc-500 font-mono animate-pulse">Renderizando diagrama...</span>
+        </div>
+        <pre class="md-mermaid-code p-4 bg-zinc-950 font-mono text-xs text-zinc-400 overflow-x-auto" style="display:none"><code>${escapeHtml(bloco.conteudo)}</code></pre>
+      </div>`;
+    }
+
     const lang = bloco.lang ? escapeHtml(bloco.lang) : "código";
     const codigoEscapado = escapeHtml(bloco.conteudo.replace(/\n$/, ""));
 

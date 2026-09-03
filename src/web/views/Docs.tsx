@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, For, Show } from "solid-js";
+import { type Component, createSignal, onMount, createEffect, For, Show } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import {
   BookOpen,
@@ -16,6 +16,7 @@ import { fetchApi } from "../lib/context";
 import { Button } from "../ui/Button";
 import { showToast } from "../ui/Toast";
 import { renderDocMarkdown } from "../lib/doc-renderer";
+import { processarDiagramasMermaid } from "../md";
 
 interface DocItem {
   slug: string;
@@ -42,6 +43,16 @@ export const DocsView: Component = () => {
   const [sidebarAberta, setSidebarAberta] = createSignal(
     localStorage.getItem("oc-docs-sidebar") !== "0"
   );
+  let articleRef: HTMLElement | undefined;
+
+  createEffect(() => {
+    const doc = docAtivo();
+    if (doc) {
+      setTimeout(() => {
+        if (articleRef) void processarDiagramasMermaid(articleRef);
+      }, 50);
+    }
+  });
 
   const toggleSidebar = () => {
     const nova = !sidebarAberta();
@@ -278,6 +289,7 @@ export const DocsView: Component = () => {
 
               {/* Renderização rica em HTML seguro do Markdown */}
               <article
+                ref={articleRef}
                 class="doc-content text-zinc-300 text-sm leading-relaxed"
                 innerHTML={renderDocMarkdown(docAtivo()!.conteudo)}
               />
