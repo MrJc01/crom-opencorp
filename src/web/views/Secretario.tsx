@@ -46,6 +46,7 @@ export const SecretarioView: Component = () => {
   const [decorridoSegundos, setDecorridoSegundos] = createSignal(0);
 
   let feedRef!: HTMLDivElement;
+  let textareaRef: HTMLTextAreaElement | undefined;
   let abortController: AbortController | null = null;
   let timerInterval: any = null;
 
@@ -244,7 +245,12 @@ export const SecretarioView: Component = () => {
 
     // Restaura texto no input
     setInputValor(m.content);
-    showToast("Prompt restaurado para edição", "info");
+    if (textareaRef) {
+      textareaRef.focus();
+      textareaRef.style.height = "auto";
+      textareaRef.style.height = `${Math.min(textareaRef.scrollHeight, 180)}px`;
+    }
+    showToast("Prompt restaurado para edição!", "sucesso");
   };
 
   const enviarMensagem = async () => {
@@ -558,6 +564,7 @@ export const SecretarioView: Component = () => {
           onRemoverAnexo={(idx) => setAnexos((prev) => prev.filter((_, i) => i !== idx))}
           agenteSelecionado={agente()}
           onMudarAgente={setAgente}
+          refTextarea={(el) => (textareaRef = el)}
         />
       </div>
 

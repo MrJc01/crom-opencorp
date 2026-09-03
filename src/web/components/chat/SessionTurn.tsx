@@ -58,38 +58,37 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
           : "bg-transparent mr-auto max-w-full w-full"
       }`}
     >
-      {/* Cabeçalho / Ações no Hover */}
+      {/* Cabeçalho / Ações */}
       <div class="flex items-center justify-between gap-2 mb-1.5 select-none">
         <span class="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
           {m().role === "user" ? "Você" : "Secretário Executivo"}
         </span>
 
-        <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+        {/* Botões de Ação */}
+        <div class="flex items-center gap-1.5">
           <Show when={m().role === "user"}>
-            <IconButton
-              size="xs"
-              variant="ghost"
+            <button
+              type="button"
               onClick={() => props.onEditarPrompt(props.indice)}
-              title="Editar prompt (restaura texto e trunca conversa)"
-              aria-label="Editar prompt"
-              class="text-zinc-400 hover:text-amber-300"
+              class="flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-800/80 hover:bg-zinc-750 text-amber-300/90 hover:text-amber-300 border border-zinc-750 text-[10px] font-mono transition-colors cursor-pointer"
+              title="Editar prompt (restaura texto no editor)"
             >
-              <Edit3 size={13} />
-            </IconButton>
+              <Edit3 size={11} />
+              <span>Editar</span>
+            </button>
           </Show>
 
-          <IconButton
-            size="xs"
-            variant="ghost"
+          <button
+            type="button"
             onClick={copiar}
+            class="flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-800/80 hover:bg-zinc-750 text-zinc-300 hover:text-zinc-100 border border-zinc-750 text-[10px] font-mono transition-colors cursor-pointer"
             title="Copiar mensagem"
-            aria-label="Copiar mensagem"
-            class="text-zinc-400 hover:text-zinc-200"
           >
-            <Show when={copiado()} fallback={<Copy size={13} />}>
-              <Check size={13} class="text-emerald-400" />
+            <Show when={copiado()} fallback={<Copy size={11} />}>
+              <Check size={11} class="text-emerald-400" />
             </Show>
-          </IconButton>
+            <span>{copiado() ? "Copiado!" : "Copiar"}</span>
+          </button>
         </div>
       </div>
 
@@ -190,6 +189,23 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
       <Show when={m().content}>
         <div class="text-sm text-zinc-100 leading-relaxed whitespace-pre-wrap font-sans break-words">
           {m().content}
+        </div>
+      </Show>
+
+      {/* Ação de Copiar Resposta do Assistente */}
+      <Show when={m().role === "assistant" && m().content && m().concluida !== false}>
+        <div class="flex items-center justify-end pt-2 mt-2 border-t border-zinc-800/40">
+          <button
+            type="button"
+            onClick={copiar}
+            class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-emerald-400 hover:bg-zinc-900 border border-zinc-800/80 transition-colors cursor-pointer"
+            title="Copiar resposta completa"
+          >
+            <Show when={copiado()} fallback={<Copy size={12} />}>
+              <Check size={12} class="text-emerald-400" />
+            </Show>
+            <span>{copiado() ? "Resposta Copiada!" : "Copiar Resposta"}</span>
+          </button>
         </div>
       </Show>
 
