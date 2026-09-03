@@ -30,7 +30,7 @@ import { instalarMencoes } from "../core/mention-runner.js";
 import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError, NotificationError, AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
 import { FlowError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
-import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, resumoDeInput, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc } from "../core/opencode-server.js";
+import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc } from "../core/opencode-server.js";
 import { taskCreateSchema } from "../schemas/task.js";
 import { tipoDeNomeApp, validarPerfilApp } from "../schemas/app-perfil.js";
 
@@ -2785,47 +2785,16 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   imagens: imagens.length > 0 ? imagens : undefined,
                 });
               } else if (role === "assistant") {
-                const parts = m.parts ?? [];
-                const pensamento = parts.filter((p: ParteOc) => p.type === "reasoning" || p.type === "thinking").map((p: ParteOc) => p.text ?? "").join("\n").trim();
-                const content = parts.filter((p: ParteOc) => p.type === "text").map((p: ParteOc) => p.text ?? "").join("\n").trim();
-                const tools = parts.filter((p: ParteOc) => p.type === "tool" && p.tool).map((p: ParteOc) => ({
-                  ferramenta: p.tool,
-                  resumo: resumoDeInput(p.state?.input, p.state?.title),
-                  sucesso: p.state?.status !== "error",
+                const passos = extrairPassosMensagens([m]);
+                const tools = passos.filter((p) => p.tipo === "acao").map((p) => ({
+                  ferramenta: p.ferramenta,
+                  resumo: p.resumo,
+                  sucesso: p.sucesso !== false,
                 }));
-
-                // Sequência cronológica exata de passos (pensamento -> bash/ação -> texto -> pensamento...)
-                const passos: Array<{ tipo: "pensamento" | "acao" | "texto"; texto?: string; ferramenta?: string; resumo?: string; sucesso?: boolean }> = [];
-                for (const p of parts) {
-                  if (p.type === "reasoning" || p.type === "thinking") {
-                    const txt = (p.text ?? "").trim();
-                    if (txt) {
-                      const ultP = passos[passos.length - 1];
-                      if (ultP && ultP.tipo === "pensamento") {
-                        ultP.texto = `${ultP.texto}\n\n${txt}`;
-                      } else {
-                        passos.push({ tipo: "pensamento", texto: txt });
-                      }
-                    }
-                  } else if (p.type === "tool" && p.tool) {
-                    passos.push({
-                      tipo: "acao",
-                      ferramenta: p.tool,
-                      resumo: resumoDeInput(p.state?.input, p.state?.title),
-                      sucesso: p.state?.status !== "error",
-                    });
-                  } else if (p.type === "text") {
-                    const txt = (p.text ?? "").trim();
-                    if (txt) {
-                      const ultP = passos[passos.length - 1];
-                      if (ultP && ultP.tipo === "texto") {
-                        ultP.texto = `${ultP.texto}\n\n${txt}`;
-                      } else {
-                        passos.push({ tipo: "texto", texto: txt });
-                      }
-                    }
-                  }
-                }
+                const pensamentosPassos = passos.filter((p) => p.tipo === "pensamento").map((p) => p.texto ?? "").filter(Boolean);
+                const pensamento = pensamentosPassos.join("\n\n---\n\n");
+                const textosPassos = passos.filter((p) => p.tipo === "texto").map((p) => p.texto ?? "").filter(Boolean);
+                const content = textosPassos.join("\n\n");
 
                 const agora = Date.now();
                 const criadoEmMs = m.info?.time?.created ?? 0;
@@ -3384,10 +3353,11 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 return null; // opencode lento/instável: pula o ciclo — não derruba o stream
               }
             };
+            const passosM = (m: MensagemOc) => extrairPassosMensagens([m]);
             const textoDe = (m: MensagemOc): string =>
-              (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n");
+              passosM(m).filter((p) => p.tipo === "texto").map((p) => p.texto ?? "").join("\n");
             const pensamentoDe = (m: MensagemOc): string =>
-              (m.parts ?? []).filter((p) => p.type === "reasoning" || p.type === "thinking").map((p) => p.text ?? "").join("\n");
+              passosM(m).filter((p) => p.tipo === "pensamento").map((p) => p.texto ?? "").join("\n\n---\n\n");
 
             // baseline: última msg assistant pré-existente (continuação de sessão não deve re-streamar)
             const baseMsgs = (await listarMensagens()) ?? [];

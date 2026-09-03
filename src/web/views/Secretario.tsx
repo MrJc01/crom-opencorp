@@ -1,5 +1,5 @@
 import { type Component, createSignal, onMount, onCleanup, For, Show } from "solid-js";
-import { Plus, History, Bot, Sparkles, AlertCircle, Users } from "lucide-solid";
+import { Plus, History, Bot, Sparkles, AlertCircle, Users, ArrowDown } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 import { SessionTurn, type ChatMensagem } from "../components/chat/SessionTurn";
 import { PromptInput, type Anexo } from "../components/chat/PromptInput";
@@ -8,6 +8,34 @@ import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
 import { fetchApi, wsAtivo, headers } from "../lib/context";
+
+function reconciliarMensagens(antigas: ChatMensagem[], novas: ChatMensagem[]): ChatMensagem[] {
+  if (!antigas || antigas.length === 0) return novas;
+  if (!novas || novas.length === 0) return [];
+
+  const resultado: ChatMensagem[] = [];
+  for (let i = 0; i < novas.length; i++) {
+    const n = novas[i];
+    const a = antigas[i];
+
+    if (
+      a &&
+      a.role === n.role &&
+      a.content === n.content &&
+      a.pensamento === n.pensamento &&
+      a.concluida === n.concluida &&
+      a.hitl?.id === n.hitl?.id &&
+      (a.passos?.length ?? 0) === (n.passos?.length ?? 0) &&
+      (a.acoes?.length ?? 0) === (n.acoes?.length ?? 0)
+    ) {
+      // Preserva a referência original da mensagem antiga: SolidJS não remonta o DOM
+      resultado.push(a);
+    } else {
+      resultado.push(n);
+    }
+  }
+  return resultado;
+}
 
 export const SecretarioView: Component = () => {
   const navigate = useNavigate();
@@ -44,11 +72,13 @@ export const SecretarioView: Component = () => {
   const [carregando, setCarregando] = createSignal(false);
   const [historicoAberto, setHistoricoAberto] = createSignal(false);
   const [decorridoSegundos, setDecorridoSegundos] = createSignal(0);
+  const [mostrarBotaoFim, setMostrarBotaoFim] = createSignal(false);
 
   let feedRef!: HTMLDivElement;
   let textareaRef: HTMLTextAreaElement | undefined;
   let abortController: AbortController | null = null;
   let timerInterval: any = null;
+  let deveAutoScroll = true;
 
   const SUGESTOES = [
     "O que aconteceu hoje?",
@@ -57,9 +87,23 @@ export const SecretarioView: Component = () => {
     "Rodar auditoria rápida do site",
   ];
 
-  const scrollFim = () => {
-    if (feedRef) {
+  const checarScrollUsuario = () => {
+    if (!feedRef) return;
+    const distDoFundo = feedRef.scrollHeight - feedRef.scrollTop - feedRef.clientHeight;
+    // Se o usuário rolou para cima (>80px do fundo), pausa o auto-scroll
+    const pertoDoFundo = distDoFundo < 80;
+    deveAutoScroll = pertoDoFundo;
+    setMostrarBotaoFim(!pertoDoFundo && carregando());
+  };
+
+  const scrollFim = (forcar = false) => {
+    if (!feedRef) return;
+    if (forcar || deveAutoScroll) {
       feedRef.scrollTop = feedRef.scrollHeight;
+      if (forcar) {
+        deveAutoScroll = true;
+        setMostrarBotaoFim(false);
+      }
     }
   };
 
@@ -135,8 +179,8 @@ export const SecretarioView: Component = () => {
         if (hash !== ultimoHash) {
           ultimoHash = hash;
           tentativasSemMudanca = 0;
-          setMensagens(msgs);
-          setTimeout(scrollFim, 30);
+          setMensagens((prev) => reconciliarMensagens(prev, msgs));
+          setTimeout(() => scrollFim(false), 30);
         } else {
           tentativasSemMudanca++;
         }
@@ -188,8 +232,8 @@ export const SecretarioView: Component = () => {
     try {
       const msgs = await fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(id)}/mensagens`);
       const lista = Array.isArray(msgs) ? msgs : [];
-      setMensagens(lista);
-      setTimeout(scrollFim, 50);
+      setMensagens((prev) => reconciliarMensagens(prev, lista));
+      setTimeout(() => scrollFim(true), 50);
 
       const ult = lista[lista.length - 1];
       const sessaoOcupada = sessoes().find((s) => s.id === id && (s as any).executando);
@@ -426,9 +470,22 @@ export const SecretarioView: Component = () => {
                   assistente.passos = passos;
                 }
               } else if (evtType === "passos" && Array.isArray(payload.passos)) {
-                assistente.passos = payload.passos;
+                const temPensamentoNosPassos = payload.passos.some((p: any) => p.tipo === "pensamento");
+                if (!temPensamentoNosPassos && assistente.pensamento) {
+                  assistente.passos = [{ tipo: "pensamento", texto: assistente.pensamento }, ...payload.passos];
+                } else {
+                  assistente.passos = payload.passos;
+                }
               } else if (evtType === "delta") {
-                const deltaTxt = payload.delta || payload.texto || "";
+                let deltaTxt = payload.delta || payload.texto || "";
+                if (deltaTxt.includes("<think>") || deltaTxt.includes("</think>")) {
+                  const thinkMatch = /<think>([\s\S]*?)(?:<\/think>|$)/i.exec(deltaTxt);
+                  if (thinkMatch) {
+                    const pTxt = thinkMatch[1] ?? "";
+                    assistente.pensamento = (assistente.pensamento || "") + pTxt;
+                    deltaTxt = deltaTxt.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "");
+                  }
+                }
                 assistente.content += deltaTxt;
                 const passos = [...(assistente.passos || [])];
                 const ultP = passos[passos.length - 1];
@@ -442,11 +499,11 @@ export const SecretarioView: Component = () => {
                 const deltaTxt = payload.delta || payload.pensamento || payload.texto || "";
                 assistente.pensamento = (assistente.pensamento || "") + deltaTxt;
                 const passos = [...(assistente.passos || [])];
-                const ultP = passos[passos.length - 1];
-                if (ultP && ultP.tipo === "pensamento") {
-                  ultP.texto = (ultP.texto || "") + deltaTxt;
+                const primeiroP = passos[0];
+                if (primeiroP && primeiroP.tipo === "pensamento") {
+                  primeiroP.texto = (primeiroP.texto || "") + deltaTxt;
                 } else if (deltaTxt) {
-                  passos.push({ tipo: "pensamento", texto: deltaTxt });
+                  passos.unshift({ tipo: "pensamento", texto: deltaTxt });
                 }
                 assistente.passos = passos;
               } else if (evtType === "acao") {
@@ -488,7 +545,7 @@ export const SecretarioView: Component = () => {
               return [...prev.slice(0, ultIdx), assistente];
             });
 
-            scrollFim();
+            scrollFim(false);
           } catch {}
 
           currentEvent = "";
@@ -517,7 +574,7 @@ export const SecretarioView: Component = () => {
         void fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(sidFinal)}/mensagens`)
           .then((msgsFinais) => {
             if (Array.isArray(msgsFinais) && msgsFinais.length > 0) {
-              setMensagens(msgsFinais);
+              setMensagens((prev) => reconciliarMensagens(prev, msgsFinais));
             }
           })
           .catch(() => null);
@@ -592,7 +649,11 @@ export const SecretarioView: Component = () => {
       </div>
 
       {/* Feed de Mensagens */}
-      <div ref={feedRef} class="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
+      <div
+        ref={feedRef}
+        onScroll={checarScrollUsuario}
+        class="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin relative"
+      >
         <div class="max-w-3xl mx-auto w-full space-y-4">
           <Show
             when={mensagens().length > 0}
@@ -638,6 +699,19 @@ export const SecretarioView: Component = () => {
             </For>
           </Show>
         </div>
+
+        {/* Botão Flutuante de Scroll para o Fim */}
+        <Show when={mostrarBotaoFim()}>
+          <button
+            type="button"
+            onClick={() => scrollFim(true)}
+            class="sticky bottom-4 ml-auto mr-4 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800/95 border border-zinc-700 text-xs text-zinc-200 shadow-xl hover:bg-zinc-700 transition-all cursor-pointer backdrop-blur-xs animate-bounce"
+            title="Rolar para a mensagem mais recente"
+          >
+            <ArrowDown size={13} class="text-emerald-400" />
+            <span class="font-medium">Mais recente</span>
+          </button>
+        </Show>
       </div>
 
       {/* Composer Fixo na Base */}

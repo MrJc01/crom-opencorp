@@ -76,17 +76,22 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
     }
   };
 
+  let turnRef: HTMLDivElement | undefined;
+
   createEffect(() => {
-    // Dispara renderização de fluxogramas/diagramas Mermaid quando passos ou texto mudam
+    // Dispara renderização de fluxogramas/diagramas Mermaid apenas no elemento deste turno
     m().content;
     m().passos;
-    setTimeout(() => {
-      void processarDiagramasMermaid();
-    }, 40);
+    if (turnRef) {
+      setTimeout(() => {
+        if (turnRef) void processarDiagramasMermaid(turnRef);
+      }, 40);
+    }
   });
 
   return (
     <div
+      ref={turnRef}
       class={`group relative flex flex-col py-3 px-4 rounded-xl transition-colors ${
         m().role === "user"
           ? "bg-zinc-900/60 border border-zinc-800/80 ml-auto max-w-[85%]"
@@ -166,42 +171,39 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
         </div>
       </Show>
 
+      {/* Pensamento Autônomo se não estiver presente nos passos */}
+      <Show when={m().pensamento && (!m().passos || !m().passos!.some((p) => p.tipo === "pensamento" && p.texto))}>
+        <For each={m().pensamento!.split("\n\n---\n\n").filter(Boolean)}>
+          {(pensamentoItem, pIdx) => (
+            <details
+              class="mb-2 rounded-xl bg-zinc-950/70 border border-zinc-800/80 overflow-hidden text-xs"
+              open={m().concluida === false}
+            >
+              <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
+                <span class="flex items-center gap-1.5">
+                  <span>💭</span>
+                  <span class={m().concluida === false ? "text-purple-300 animate-pulse font-semibold" : "text-zinc-300 font-medium"}>
+                    {m().concluida === false ? "Pensando…" : `Raciocínio (${pIdx() + 1})`}
+                  </span>
+                </span>
+                <span class="text-[10px] text-zinc-500 font-mono">
+                  {m().concluida === false ? (props.decorridoFmt || "ao vivo") : "ver detalhes"}
+                </span>
+              </summary>
+              <div
+                class="p-3 text-zinc-300 leading-relaxed font-sans border-t border-zinc-800/60 bg-zinc-950/40 max-h-64 overflow-y-auto scrollbar-thin select-text text-xs"
+                innerHTML={renderMarkdown(pensamentoItem)}
+              />
+            </details>
+          )}
+        </For>
+      </Show>
+
       {/* Exibição em Ordem Cronológica de Passos (Pensamento -> Bash/Ação -> Texto) */}
       <Show
         when={m().passos && m().passos!.length > 0}
         fallback={
           <>
-            {/* Fallback Seguro: Se não houver passos estruturados, separa cada pensamento em seu próprio collapse */}
-            <Show when={m().pensamento}>
-              <For each={m().pensamento!.split("\n\n---\n\n").filter(Boolean)}>
-                {(pensamentoItem, pIdx) => {
-                  const isUltimo = () => m().concluida === false && pIdx() === m().pensamento!.split("\n\n---\n\n").filter(Boolean).length - 1;
-                  return (
-                    <details
-                      class="mb-2 rounded-xl bg-zinc-950/70 border border-zinc-800/80 overflow-hidden text-xs"
-                      open={m().concluida === false}
-                    >
-                      <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
-                        <span class="flex items-center gap-1.5">
-                          <span>💭</span>
-                          <span class={isUltimo() ? "text-purple-300 animate-pulse font-semibold" : ""}>
-                            {isUltimo() ? "Pensando…" : `Raciocínio (${pIdx() + 1})`}
-                          </span>
-                        </span>
-                        <Show when={isUltimo() && props.decorridoFmt}>
-                          <span class="font-mono text-[10px] text-zinc-500">{props.decorridoFmt}</span>
-                        </Show>
-                      </summary>
-                      <div
-                        class="p-3 text-zinc-300 leading-relaxed font-sans border-t border-zinc-800/60 bg-zinc-950/40 max-h-60 overflow-y-auto scrollbar-thin select-text text-xs"
-                        innerHTML={renderMarkdown(pensamentoItem)}
-                      />
-                    </details>
-                  );
-                }}
-              </For>
-            </Show>
-
             {/* Fallback Legado: Ações / Ferramentas em Andamento */}
             <Show when={m().acoes && m().acoes!.length > 0}>
               <div class="space-y-1 mb-2">
@@ -235,31 +237,26 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
               <>
                 {/* Passo: Pensamento Separado */}
                 <Show when={passo.tipo === "pensamento" && passo.texto}>
-                  {(() => {
-                    const isUltimo = () => m().concluida === false && idx() === (m().passos?.length ?? 1) - 1;
-                    return (
-                      <details
-                        class="rounded-xl bg-zinc-950/70 border border-zinc-800/80 overflow-hidden text-xs my-1.5"
-                        open={isUltimo()}
-                      >
-                        <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
-                          <span class="flex items-center gap-1.5">
-                            <span>💭</span>
-                            <span class={isUltimo() ? "text-purple-300 animate-pulse font-semibold" : ""}>
-                              {isUltimo() ? "Pensando…" : `Raciocínio (${idx() + 1})`}
-                            </span>
-                          </span>
-                          <Show when={isUltimo() && props.decorridoFmt}>
-                            <span class="font-mono text-[10px] text-zinc-500">{props.decorridoFmt}</span>
-                          </Show>
-                        </summary>
-                        <div
-                          class="p-3 text-zinc-300 leading-relaxed font-sans border-t border-zinc-800/60 bg-zinc-950/40 max-h-60 overflow-y-auto scrollbar-thin select-text text-xs"
-                          innerHTML={renderMarkdown(passo.texto)}
-                        />
-                      </details>
-                    );
-                  })()}
+                  <details
+                    class="rounded-xl bg-zinc-950/70 border border-zinc-800/80 overflow-hidden text-xs my-1.5"
+                    open={m().concluida === false}
+                  >
+                    <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
+                      <span class="flex items-center gap-1.5">
+                        <span>💭</span>
+                        <span class={m().concluida === false ? "text-purple-300 animate-pulse font-semibold" : "text-zinc-300 font-medium"}>
+                          {m().concluida === false ? "Pensando…" : `Raciocínio (${idx() + 1})`}
+                        </span>
+                      </span>
+                      <span class="text-[10px] text-zinc-500 font-mono">
+                        {m().concluida === false ? (props.decorridoFmt || "ao vivo") : "ver detalhes"}
+                      </span>
+                    </summary>
+                    <div
+                      class="p-3 text-zinc-300 leading-relaxed font-sans border-t border-zinc-800/60 bg-zinc-950/40 max-h-64 overflow-y-auto scrollbar-thin select-text text-xs"
+                      innerHTML={renderMarkdown(passo.texto)}
+                    />
+                  </details>
                 </Show>
 
                 {/* Passo: Ação / Tool (Bash, Comandos, Leitura) */}

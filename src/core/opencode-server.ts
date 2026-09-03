@@ -428,7 +428,13 @@ export function extrairPassosMensagens(novasMsgs: MensagemOc[]): PassoChat[] {
     if (m.info?.role !== "assistant") continue;
     for (const p of m.parts ?? []) {
       if (p.type === "reasoning" || p.type === "thinking") {
-        const txt = (p.text ?? "").trim();
+        const txt = (
+          p.text ??
+          (p as any).thought ??
+          (p as any).metadata?.thought ??
+          (p as any).metadata?.reasoning ??
+          ""
+        ).trim();
         if (txt) {
           const ult = passos[passos.length - 1];
           if (ult && ult.tipo === "pensamento") {
@@ -445,7 +451,23 @@ export function extrairPassosMensagens(novasMsgs: MensagemOc[]): PassoChat[] {
           sucesso: p.state?.status !== "error",
         });
       } else if (p.type === "text") {
-        const txt = (p.text ?? "").trim();
+        let bruto = p.text ?? "";
+        // Detecta e extrai tags <think> ou <thought> incorporadas no texto
+        const thinkMatch = /<(?:think|thought)>([\s\S]*?)(?:<\/(?:think|thought)>|$)/i.exec(bruto);
+        if (thinkMatch) {
+          const pensamentoTxt = (thinkMatch[1] ?? "").trim();
+          if (pensamentoTxt) {
+            const ult = passos[passos.length - 1];
+            if (ult && ult.tipo === "pensamento") {
+              ult.texto = `${ult.texto}\n\n${pensamentoTxt}`;
+            } else {
+              passos.push({ tipo: "pensamento", texto: pensamentoTxt });
+            }
+          }
+          bruto = bruto.replace(/<(?:think|thought)>[\s\S]*?(?:<\/(?:think|thought)>|$)/gi, "").trim();
+        }
+
+        const txt = bruto.trim();
         if (txt) {
           const ult = passos[passos.length - 1];
           if (ult && ult.tipo === "texto") {
