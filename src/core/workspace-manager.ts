@@ -15,6 +15,8 @@ export { WorkspaceError };
 export interface RegistroWorkspace {
   id: string;
   criado_em: string;
+  /** Caminho absoluto customizado — se omitido, usa <raiz>/<id> */
+  path?: string;
 }
 
 export interface EstadoWorkspaces {
@@ -46,7 +48,7 @@ const estadoSchema = z.object({
   version: z.number().int().default(1),
   ativo: z.string().nullable().default(null),
   workspaces: z
-    .array(z.object({ id: z.string().min(1), criado_em: z.string().min(1) }))
+    .array(z.object({ id: z.string().min(1), criado_em: z.string().min(1), path: z.string().optional() }))
     .default([]),
 });
 
@@ -125,11 +127,16 @@ export class WorkspaceManager {
     };
   }
 
+  /** Resolve o caminho efetivo de um registro — usa path customizado se definido */
+  private pathDe(raiz: string, w: RegistroWorkspace): string {
+    return w.path ? resolve(expandTilde(w.path, this.homeDir)) : join(raiz, w.id);
+  }
+
   async listar(): Promise<InfoWorkspace[]> {
     const estado = await this.lerEstado();
     const raiz = await this.raiz();
     return estado.workspaces
-      .map((w) => this.infoDe(estado, w, join(raiz, w.id)))
+      .map((w) => this.infoDe(estado, w, this.pathDe(raiz, w)))
       .sort((a, b) => a.id.localeCompare(b.id));
   }
 
@@ -156,7 +163,7 @@ export class WorkspaceManager {
       );
     }
     const raiz = await this.raiz();
-    return this.infoDe(estado, registro, join(raiz, registro.id));
+    return this.infoDe(estado, registro, this.pathDe(raiz, registro));
   }
 
   async atual(): Promise<InfoWorkspace | null> {
@@ -165,10 +172,10 @@ export class WorkspaceManager {
     const registro = estado.workspaces.find((w) => w.id === estado.ativo);
     if (!registro) return null;
     const raiz = await this.raiz();
-    return this.infoDe(estado, registro, join(raiz, registro.id));
+    return this.infoDe(estado, registro, this.pathDe(raiz, registro));
   }
 
-  async criar(id: string, opts: { template?: string } = {}): Promise<InfoWorkspace> {
+  async criar(id: string, opts: { template?: string; path?: string } = {}): Promise<InfoWorkspace> {
     if (!ID_RE.test(id) || id.length > 64) {
       throw new WorkspaceError(
         `id de workspace inválido: "${id}" — use kebab-case (letras minúsculas, números e hífens; ex.: corp-principal, no máximo 64 caracteres)`,
@@ -185,24 +192,58 @@ export class WorkspaceManager {
         `workspace "${id}" já existe — veja "opencorp workspace list" (ids precisam ser únicos)`,
       );
     }
+
+    // Se opts.path foi fornecido, usa pasta customizada (qualquer dir do computador)
+    const customPath = opts.path ? resolve(expandTilde(opts.path, this.homeDir)) : undefined;
     const raiz = await this.raiz();
-    const destino = join(raiz, id);
-    if (existsSync(destino)) {
-      throw new WorkspaceError(
-        `já existe uma pasta em ${destino} — escolha outro id ou remova a pasta antes`,
-      );
+    const destino = customPath ?? join(raiz, id);
+
+    if (customPath) {
+      // Pasta customizada: cria se não existe, mas não sobrescreve conteúdo existente
+      mkdirSync(destino, { recursive: true });
+      // Se a pasta não tem .opencorp, aplica skeleton somente na estrutura .opencorp
+      const opencorpDir = join(destino, ".opencorp");
+      if (!existsSync(opencorpDir)) {
+        // Copia o skeleton para um tmp e depois move apenas a estrutura .opencorp
+        const tmp = join(raiz, `.${id}.tmp-${process.pid}-${randomUUID()}`);
+        try {
+          mkdirSync(raiz, { recursive: true });
+          cpSync(skeletonDir, tmp, { recursive: true });
+          // Move apenas o .opencorp e docs do skeleton para o destino
+          const tmpOpencorp = join(tmp, ".opencorp");
+          if (existsSync(tmpOpencorp)) {
+            cpSync(tmpOpencorp, opencorpDir, { recursive: true });
+          }
+          const tmpDocs = join(tmp, "docs");
+          const destDocs = join(destino, "docs");
+          if (existsSync(tmpDocs) && !existsSync(destDocs)) {
+            cpSync(tmpDocs, destDocs, { recursive: true });
+          }
+        } finally {
+          rmSync(tmp, { recursive: true, force: true });
+        }
+      }
+    } else {
+      // Caminho padrão: comportamento original
+      if (existsSync(destino)) {
+        throw new WorkspaceError(
+          `já existe uma pasta em ${destino} — escolha outro id ou remova a pasta antes`,
+        );
+      }
+      const tmp = join(raiz, `.${id}.tmp-${process.pid}-${randomUUID()}`);
+      try {
+        mkdirSync(raiz, { recursive: true });
+        cpSync(skeletonDir, tmp, { recursive: true });
+        renameSync(tmp, destino);
+      } catch (erro) {
+        rmSync(tmp, { recursive: true, force: true });
+        throw new WorkspaceError(`não foi possível criar o workspace "${id}": ${msg(erro)}`);
+      }
     }
-    const tmp = join(raiz, `.${id}.tmp-${process.pid}-${randomUUID()}`);
-    try {
-      mkdirSync(raiz, { recursive: true });
-      cpSync(skeletonDir, tmp, { recursive: true });
-      renameSync(tmp, destino);
-    } catch (erro) {
-      rmSync(tmp, { recursive: true, force: true });
-      throw new WorkspaceError(`não foi possível criar o workspace "${id}": ${msg(erro)}`);
-    }
+
     const criado_em = new Date().toISOString();
     const ativo = estado.ativo ?? id;
+    const registro: RegistroWorkspace = { id, criado_em, ...(customPath ? { path: customPath } : {}) };
     try {
       if (ehPacote) {
         await this.aplicarPacote(destino, templateDir);
@@ -212,10 +253,10 @@ export class WorkspaceManager {
       await this.gravarEstado({
         version: 1,
         ativo,
-        workspaces: [...estado.workspaces, { id, criado_em }],
+        workspaces: [...estado.workspaces, registro],
       });
     } catch (erro) {
-      rmSync(destino, { recursive: true, force: true });
+      if (!customPath) rmSync(destino, { recursive: true, force: true });
       throw erro;
     }
     return { id, criado_em, path: destino, ativo: ativo === id, existe: true };
@@ -271,7 +312,7 @@ export class WorkspaceManager {
       );
     }
     const raiz = await this.raiz();
-    const path = join(raiz, registro.id);
+    const path = this.pathDe(raiz, registro);
     if (!existsSync(path)) {
       throw new WorkspaceError(
         `a pasta do workspace "${id}" não foi encontrada em ${path} — ele pode ter sido movido ou apagado fora do opencorp; recrie ou remova o registro`,
@@ -327,7 +368,7 @@ export class WorkspaceManager {
     }
     const eraAtivo = estado.ativo === id;
     const raiz = await this.raiz();
-    const path = join(raiz, id);
+    const path = this.pathDe(raiz, registro);
     let removidoPasta = false;
     if (existsSync(path)) {
       try {

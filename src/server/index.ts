@@ -712,9 +712,11 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         if (rota === "/workspaces" && req.method === "POST") {
           const corpo = (await lerCorpo(req)) as {
             id?: string;
+            template?: string;
+            path?: string;
             perfil?: { empresa?: string; nicho?: string; publico?: string; tom?: string; tom_evitar?: unknown[]; topicos?: unknown[]; diferenciais?: unknown[] };
           };
-          const criado = await workspaces.criar(corpo.id ?? "");
+          const criado = await workspaces.criar(corpo.id ?? "", { template: corpo.template, path: corpo.path });
           // Perfil editorial opcional → grava .opencorp/projeto.json no workspace
           // (mesmo schema consumido pelos flows de conteúdo). Compat: sem perfil = comportamento atual.
           if (corpo.perfil && typeof corpo.perfil === "object") {
@@ -1139,8 +1141,30 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           enviar(res, 200, r);
           return;
         }
-        if (rota === "/settings" && req.method === "PUT") {
-          const corpo = (await lerCorpo(req)) as { chave?: string; valor?: unknown; scope?: string };
+        if (rota === "/settings/runner" && req.method === "GET") {
+          const rPath = join(opcoes.homeDir ?? opencorpHome(), ".opencorp", "runner.json");
+          let runner = { engine: "opencode", binary_path: "opencode", timeout_min: 20 };
+          if (existsSync(rPath)) {
+            try { runner = JSON.parse(readFileSync(rPath, "utf8")); } catch {}
+          }
+          enviar(res, 200, runner);
+          return;
+        }
+
+        if ((rota === "/settings/runner" || rota === "/settings") && req.method === "PUT") {
+          const corpo = (await lerCorpo(req)) as { chave?: string; valor?: unknown; scope?: string; runner?: unknown };
+          if (corpo.runner && typeof corpo.runner === "object") {
+            const rPath = join(opcoes.homeDir ?? opencorpHome(), ".opencorp", "runner.json");
+            await writeFileAtomic(rPath, `${JSON.stringify(corpo.runner, null, 2)}\n`);
+            enviar(res, 200, { ok: true, runner: corpo.runner });
+            return;
+          }
+          if (rota === "/settings/runner") {
+            const rPath = join(opcoes.homeDir ?? opencorpHome(), ".opencorp", "runner.json");
+            await writeFileAtomic(rPath, `${JSON.stringify(corpo, null, 2)}\n`);
+            enviar(res, 200, { ok: true, runner: corpo });
+            return;
+          }
           const chave = String(corpo.chave ?? "").trim();
           const valorRaw = String(corpo.valor ?? "");
           if (chave === "secretary.model" && valorRaw.trim() === "") {
