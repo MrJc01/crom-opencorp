@@ -22,6 +22,7 @@ import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { fetchApi } from "../lib/context";
 import { showToast } from "../ui/Toast";
+import { LogChatViewer } from "../components/chat/LogChatViewer";
 
 export interface ItemHistorico {
   id: string;
@@ -47,6 +48,7 @@ export const HistoricoView: Component = () => {
   const [runSelecionado, setRunSelecionado] = createSignal<any | null>(null);
   const [logRun, setLogRun] = createSignal<string>("");
   const [carregandoLog, setCarregandoLog] = createSignal(false);
+  const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal">("chat");
 
   let liveLogInterval: any = null;
 
@@ -59,18 +61,34 @@ export const HistoricoView: Component = () => {
     try {
       // Buscar do endpoint unificado /historico que agrupa execucoes, tasks, rotinas e conversas
       const dados = await fetchApi<ItemHistorico[]>("/historico?limite=200");
+      let listaFinal: ItemHistorico[] = [];
       if (Array.isArray(dados) && dados.length > 0) {
-        setItens(dados);
+        listaFinal = dados;
       } else {
         // Fallback para /execucoes caso /historico retorne vazio
         const execs = await fetchApi<any[]>("/execucoes?limite=100");
-        const mapeados: ItemHistorico[] = (execs || []).map((e) => ({
+        listaFinal = (execs || []).map((e) => ({
           ...e,
           tipo: "execucao",
           quando: e.inicio,
           titulo: e.ordem || e.id,
         }));
-        setItens(mapeados);
+      }
+      setItens(listaFinal);
+
+      // Se há um run aberto na URL, atualiza seus dados reais
+      const runAtual = searchParams.run as string | undefined;
+      if (runAtual) {
+        const itemReal = listaFinal.find((x) => x.id === runAtual);
+        if (itemReal) {
+          setRunSelecionado(itemReal);
+          if (itemReal.status === "executando" && !liveLogInterval) {
+            liveLogInterval = setInterval(async () => {
+              const atualizado = await buscarLog(runAtual);
+              setLogRun(atualizado);
+            }, 2500);
+          }
+        }
       }
     } catch {
       try {
@@ -105,7 +123,15 @@ export const HistoricoView: Component = () => {
 
     let r = itens().find((item) => item.id === runId);
     if (!r) {
-      r = { id: runId, tipo: "execucao", agente: "agente", status: "registrada" };
+      try {
+        const h = await fetchApi<ItemHistorico[]>("/historico?limite=50");
+        if (Array.isArray(h)) {
+          r = h.find((item) => item.id === runId);
+        }
+      } catch {}
+      if (!r) {
+        r = { id: runId, tipo: "execucao", agente: "agente", status: "registrada" };
+      }
     }
     setRunSelecionado(r);
 
@@ -113,8 +139,12 @@ export const HistoricoView: Component = () => {
     setLogRun(textoLog);
     setCarregandoLog(false);
 
+    if (liveLogInterval) {
+      clearInterval(liveLogInterval);
+      liveLogInterval = null;
+    }
+
     if (r.status === "executando") {
-      if (liveLogInterval) clearInterval(liveLogInterval);
       liveLogInterval = setInterval(async () => {
         const atualizado = await buscarLog(runId);
         setLogRun(atualizado);
@@ -398,15 +428,15 @@ export const HistoricoView: Component = () => {
 
       {/* Modal / Visualizador de Log */}
       <Show when={runSelecionado()}>
-        <div class="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-4xl w-full p-5 space-y-4 shadow-2xl max-h-[90vh] flex flex-col">
+        <div class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50">
+          <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-5xl w-full p-4 sm:p-5 space-y-4 shadow-2xl max-h-[92vh] flex flex-col">
             {/* Topo do Modal */}
-            <div class="flex items-center justify-between border-b border-zinc-800 pb-3 flex-shrink-0">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 pb-3 flex-shrink-0">
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <Terminal size={17} class="text-emerald-400" />
                   <h2 class="text-sm font-bold text-zinc-100 font-mono truncate">
-                    Log da Execução: {runSelecionado()!.id}
+                    Execução: {runSelecionado()!.id}
                   </h2>
                   <Show when={runSelecionado()!.status === "executando"}>
                     <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40 animate-pulse">
@@ -427,8 +457,37 @@ export const HistoricoView: Component = () => {
                 </div>
               </div>
 
-              <div class="flex items-center gap-1.5 flex-shrink-0">
-                <Button size="xs" variant="ghost" onClick={copiarLog} title="Copiar log">
+              {/* Controles e Alternador de Visão */}
+              <div class="flex items-center gap-2 flex-wrap">
+                {/* Switcher Chat / Terminal */}
+                <div class="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => setModoVisualizacao("chat")}
+                    class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                      modoVisualizacao() === "chat"
+                        ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    <MessageSquare size={13} class="text-blue-400" />
+                    <span>Chat ao Vivo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModoVisualizacao("terminal")}
+                    class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                      modoVisualizacao() === "terminal"
+                        ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    <Terminal size={13} class="text-emerald-400" />
+                    <span>Terminal Raw</span>
+                  </button>
+                </div>
+
+                <Button size="xs" variant="ghost" onClick={copiarLog} title="Copiar log bruto">
                   <Copy size={13} class="mr-1" /> Copiar
                 </Button>
                 <Button size="xs" variant="ghost" onClick={baixarLog} title="Baixar arquivo .log">
@@ -440,22 +499,45 @@ export const HistoricoView: Component = () => {
               </div>
             </div>
 
-            {/* Corpo do Terminal de Log */}
-            <div class="flex-1 min-h-0 flex flex-col space-y-2">
-              <div class="flex items-center justify-between text-[11px] text-zinc-400 px-1 font-mono">
-                <span>URL amigável: <code class="text-emerald-400">/historico?run={runSelecionado()!.id}</code></span>
-                <span>{logRun().split("\n").length} linhas</span>
-              </div>
+            {/* Sub-barra informativa */}
+            <div class="flex items-center justify-between text-[11px] text-zinc-400 px-1 font-mono flex-shrink-0">
+              <span>URL: <code class="text-emerald-400">/historico?run={runSelecionado()!.id}</code></span>
+              <span>{logRun().split("\n").length} linhas capturadas</span>
+            </div>
 
-              <pre class="flex-1 bg-black p-4 rounded-xl border border-zinc-800 text-[11px] font-mono text-zinc-300 overflow-y-auto whitespace-pre-wrap leading-relaxed scrollbar-thin select-text">
-                {logRun()}
-              </pre>
+            {/* Corpo: Chat ao Vivo ou Terminal Raw */}
+            <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <Show
+                when={modoVisualizacao() === "chat"}
+                fallback={
+                  <pre class="flex-1 bg-black/95 p-4 rounded-xl border border-zinc-800 text-[11px] font-mono text-zinc-300 overflow-y-auto whitespace-pre-wrap leading-relaxed scrollbar-thin select-text">
+                    {logRun()}
+                  </pre>
+                }
+              >
+                <div class="flex-1 overflow-y-auto scrollbar-thin pr-1 pb-2">
+                  <LogChatViewer
+                    log={logRun()}
+                    agente={runSelecionado()?.agente}
+                    modelo={runSelecionado()?.modelo}
+                    status={runSelecionado()?.status}
+                    quando={runSelecionado()?.quando || runSelecionado()?.inicio}
+                    gatilho={runSelecionado()?.gatilho}
+                    duracaoMs={runSelecionado()?.duracao_ms}
+                  />
+                </div>
+              </Show>
             </div>
 
             {/* Rodapé */}
-            <div class="pt-2 border-t border-zinc-800 flex justify-end flex-shrink-0">
+            <div class="pt-2 border-t border-zinc-800/80 flex justify-between items-center flex-shrink-0 text-xs text-zinc-400">
+              <span class="text-[11px] font-mono">
+                {runSelecionado()!.status === "executando"
+                  ? "● Polling de streaming ativo (2.5s)"
+                  : "✓ Sessão arquivada"}
+              </span>
               <Button size="sm" variant="secondary" onClick={fecharLog}>
-                Fechar Log
+                Fechar Visualizador
               </Button>
             </div>
           </div>

@@ -332,10 +332,19 @@ export class SessionManager {
     if (ordem.trim().length === 0) {
       throw new SessionError("ordem vazia — informe a instrução (ou use --file)");
     }
-    const modelo = opcoes.model ?? ag.frontmatter.model;
+    let modelo = opcoes.model ?? ag.frontmatter.model;
+    if (!modelo || modelo.trim() === "" || modelo === "padrao" || modelo === "default" || modelo === "sistema") {
+      try {
+        const s = await new SettingsStore({ homeDir: this.homeDir, cwd: ws.path }).resolve();
+        modelo = s.settings.default_model || "openrouter/nvidia/nemotron-3.5-lightning:free";
+      } catch {
+        modelo = "openrouter/nvidia/nemotron-3.5-lightning:free";
+      }
+    }
 
     const policy = this.carregarPolicy(ws.path);
-    if (!opcoes.pularGuard) {
+    const acessoTotalGlobal = (policy as any).global_full_access === true || policy.level === "permissive";
+    if (!opcoes.pularGuard && !acessoTotalGlobal) {
       const pre = avaliar(ordem, policy, ag.frontmatter.permissions);
       if (pre.acao === "bloqueado") {
         const idBloqueio = gerarId("exec");

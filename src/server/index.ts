@@ -27,11 +27,10 @@ import { AppStore } from "../core/app-store.js";
 import { TeamStore } from "../core/team-store.js";
 import { OrquestradorDeTeams } from "../core/team-orchestrator.js";
 import { instalarMencoes } from "../core/mention-runner.js";
-import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError, NotificationError } from "../core/errors.js";
+import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError, NotificationError, AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
 import { FlowError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
-import { AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
-import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc } from "../core/opencode-server.js";
+import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, resumoDeInput, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc } from "../core/opencode-server.js";
 import { taskCreateSchema } from "../schemas/task.js";
 import { tipoDeNomeApp, validarPerfilApp } from "../schemas/app-perfil.js";
 
@@ -622,6 +621,119 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   // OpencodeServerManager para o secretário (injetaável para testes)
   const opencodeServer = opcoes.opencodeServer ?? new OpencodeServerManager({ homeDir: opcoes.homeDir });
 
+  function obterChaveOpenRouter(homeDir: string): string | null {
+    const caminhos = [
+      join(homeDir, ".local", "share", "opencode", "auth.json"),
+      join(homeDir, ".opencorp", "opencode-data", "opencode", "auth.json"),
+      join(homeDir, ".opencorp", "secrets.json"),
+    ];
+    for (const c of caminhos) {
+      if (existsSync(c)) {
+        try {
+          const j = JSON.parse(readFileSync(c, "utf8"));
+          if (j.openrouter?.key) return String(j.openrouter.key).trim();
+          if (j.openrouter_key) return String(j.openrouter_key).trim();
+        } catch {}
+      }
+    }
+    return process.env.OPENROUTER_API_KEY || null;
+  }
+
+  async function gerarPromptComIA(
+    homeDir: string,
+    descricao: string,
+    modeloPreferido?: string,
+    modelosFallback: string[] = [],
+  ): Promise<{ prompt: string; modelo: string }> {
+    const chave = obterChaveOpenRouter(homeDir);
+    const modelosCandidatos = [
+      modeloPreferido,
+      ...modelosFallback,
+      "nvidia/nemotron-3.5-lightning:free",
+      "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "minimax/minimax-m3:free",
+    ]
+      .filter(Boolean)
+      .map((m) => String(m).replace(/^openrouter\//, "").trim());
+
+    if (chave) {
+      for (const mod of modelosCandidatos) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 28000);
+          const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${chave}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: mod,
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    "Você é um arquiteto especialista em Agentes Autônomos de Inteligência Artificial. " +
+                    "Crie um System Prompt em formato Markdown profissional, detalhado, rico e em português para o agente solicitado. " +
+                    "Estruture o prompt com as seções: # [Nome do Agente], ## Papel & Missão Principal, ## Diretrizes & Regras de Ação, ## Formato de Resposta & Comunicação, ## Restrições & Segurança. " +
+                    "IMPORTANTE: Não inclua processos de pensamento (thinking). Comece a resposta imediatamente com '# System Prompt:'. Retorne apenas o markdown do prompt, sem blocos de código envolvendo tudo.",
+                },
+                {
+                  role: "user",
+                  content: `Gere o System Prompt completo para este agente: ${descricao}`,
+                },
+              ],
+              max_tokens: 1200,
+            }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            const data = (await res.json()) as any;
+            let content = data.choices?.[0]?.message?.content;
+            if (typeof content === "string" && content.trim().length > 50) {
+              if (content.includes("# ")) {
+                content = content.slice(content.indexOf("# "));
+              }
+              content = content.replace(/^```markdown\s*/i, "").replace(/\s*```$/, "").trim();
+              return { prompt: content, modelo: `openrouter/${mod}` };
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // Fallback estruturado caso a API externa não responda
+    const promptFallback = [
+      `# System Prompt: ${descricao.split("\n")[0]?.slice(0, 60) || "Agente Especialista"}`,
+      "",
+      "## Papel & Missão Principal",
+      `Você é um agente autônomo especialista encarregado da seguinte missão: ${descricao}`,
+      "Sua função é atuar com excelência, pensamento crítico e foco em entregar resultados concretos de alto valor para o workspace.",
+      "",
+      "## Diretrizes & Regras de Ação",
+      "1. Analise o contexto completo antes de iniciar qualquer execução.",
+      "2. Execute tarefas de forma precisa, modular e documentada.",
+      "3. Siga boas práticas de engenharia de software e padrões corporativos.",
+      "4. Priorize decisões estratégicas que otimizem tempo e recursos.",
+      "5. Valide seus passos antes de concluir para garantir precisão máxima.",
+      "",
+      "## Formato de Resposta & Comunicação",
+      "- Seja direto, profissional e objetivo.",
+      "- Utilize Markdown para estruturar tópicos, passos e relatórios.",
+      "- Apresente dados em tabelas ou listas quando facilitar a compreensão.",
+      "- Justifique decisões técnicas com clareza.",
+      "",
+      "## Restrições & Segurança",
+      "- Não execute comandos destrutivos sem verificação de impacto.",
+      "- Respeite os limites operacionais e políticas de segurança do workspace.",
+      "- Em caso de ambiguidade crítica, documente as premissas adotadas.",
+    ].join("\n");
+
+    return { prompt: promptFallback, modelo: modeloPreferido || "fallback-local" };
+  }
+
   async function resolverWs(url: URL): Promise<{ id: string; path: string }> {
     const id = url.searchParams.get("workspace") ?? opcoes.workspace ?? undefined;
     return workspaces.resolver(id) as unknown as { id: string; path: string };
@@ -749,11 +861,69 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         }
         if (rota === "/agents" && req.method === "POST") {
           const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as { id?: string; from?: string; model?: string };
+          const corpo = (await lerCorpo(req)) as {
+            id?: string;
+            from?: string;
+            model?: string;
+            role?: string;
+            corpo_prompt?: string;
+            permissions?: string;
+            ativo?: boolean;
+          };
           const criado = await agentes.criar(ws.path, corpo.id ?? "", { de: corpo.from, model: corpo.model });
-          enviar(res, 201, { id: criado.frontmatter.id, modelo: criado.frontmatter.model });
+          // Se vieram campos extras (role, corpo_prompt, permissions), aplica via editar()
+          const temExtras = corpo.role || corpo.corpo_prompt || corpo.permissions || corpo.ativo !== undefined;
+          if (temExtras) {
+            const editado = await agentes.editar(ws.path, criado.frontmatter.id, {
+              role: corpo.role,
+              model: corpo.model,
+              permissions: corpo.permissions as "level-1" | "level-2" | "level-3" | undefined,
+              corpo: corpo.corpo_prompt,
+              ativo: corpo.ativo,
+            });
+            enviar(res, 201, { id: editado.id, modelo: editado.model, role: editado.role });
+          } else {
+            enviar(res, 201, { id: criado.frontmatter.id, modelo: criado.frontmatter.model });
+          }
           return;
         }
+        if (rota === "/agents/gerar-prompt" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { descricao?: string; modelo?: string };
+          const descricao = String(corpo.descricao ?? "").trim();
+          if (!descricao) {
+            enviar(res, 400, { erro: "campo 'descricao' é obrigatório para gerar o prompt" });
+            return;
+          }
+
+          const s = await settings.resolve({ workspaceDir: ws.path });
+          const modeloPref = corpo.modelo?.trim() || s.settings.default_model;
+          const fallbackList = s.settings.tests?.rotation || [];
+          const home = opcoes.homeDir ?? opencorpHome();
+
+          const resultado = await gerarPromptComIA(home, descricao, modeloPref, fallbackList);
+          enviar(res, 200, resultado);
+          return;
+        }
+
+        if (rota === "/agents/aplicar-modelo-global" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { model?: string };
+          const s = await settings.resolve({ workspaceDir: ws.path });
+          const modeloAlvo = corpo.model?.trim() || s.settings.default_model || "openrouter/nvidia/nemotron-3.5-lightning:free";
+          const lista = await agentes.listar(ws.path);
+          let alterados = 0;
+          for (const ag of lista) {
+            try {
+              await agentes.editar(ws.path, ag.id, { model: modeloAlvo });
+              alterados++;
+            } catch {}
+          }
+          eventBus.emit("agentes.atualizados", { total: alterados, modelo: modeloAlvo });
+          enviar(res, 200, { ok: true, alterados, modelo: modeloAlvo });
+          return;
+        }
+
         if (rota === "/agents/semear-catalogo" && req.method === "POST") {
           // Etapa 5 — copia os agentes do catálogo que ainda não existem (idempotente)
           const ws = await resolverWs(url);
@@ -1094,6 +1264,66 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const ws = await resolverWs(url);
           const entradas = await settings.list({ workspaceDir: ws.path });
           enviar(res, 200, entradas);
+          return;
+        }
+
+        if (rota === "/settings/modelos" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const s = await settings.resolve({ workspaceDir: ws.path });
+          const policyFile = join(ws.path, ".opencorp", "security_policy.json");
+          let secPolicy: any = {};
+          if (existsSync(policyFile)) {
+            try { secPolicy = JSON.parse(readFileSync(policyFile, "utf8")); } catch {}
+          }
+          enviar(res, 200, {
+            default_model: s.settings.default_model || "openrouter/nvidia/nemotron-3.5-lightning:free",
+            rotation: s.settings.tests?.rotation || [
+              "openrouter/nvidia/nemotron-3.5-lightning:free",
+              "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+              "openrouter/minimax/minimax-m3:free",
+            ],
+            global_full_access: secPolicy.global_full_access === true || secPolicy.level === "permissive",
+          });
+          return;
+        }
+
+        if (rota === "/settings/modelos" && req.method === "PUT") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as {
+            default_model?: string;
+            rotation?: string[];
+            global_full_access?: boolean;
+          };
+          if (corpo.default_model && corpo.default_model.trim()) {
+            await settings.set("default_model", corpo.default_model.trim(), { scope: "global" });
+          }
+          if (Array.isArray(corpo.rotation)) {
+            const limpa = corpo.rotation.map((s) => String(s).trim()).filter(Boolean);
+            const sPath = join(opcoes.homeDir ?? opencorpHome(), ".opencorp", "settings.json");
+            try {
+              let cur: any = {};
+              if (existsSync(sPath)) cur = JSON.parse(readFileSync(sPath, "utf8"));
+              cur.tests = cur.tests || {};
+              cur.tests.rotation = limpa;
+              if (corpo.default_model) cur.default_model = corpo.default_model.trim();
+              await writeFileAtomic(sPath, `${JSON.stringify(cur, null, 2)}\n`);
+            } catch {}
+          }
+          if (corpo.global_full_access !== undefined) {
+            const policyDir = join(ws.path, ".opencorp");
+            await mkdirRecursive(policyDir);
+            const policyFile = join(policyDir, "security_policy.json");
+            let atual: any = {};
+            if (existsSync(policyFile)) {
+              try { atual = JSON.parse(readFileSync(policyFile, "utf8")); } catch {}
+            }
+            atual.global_full_access = Boolean(corpo.global_full_access);
+            if (atual.global_full_access) {
+              atual.level = "permissive";
+            }
+            await writeFileAtomic(policyFile, `${JSON.stringify(atual, null, 2)}\n`);
+          }
+          enviar(res, 200, { ok: true });
           return;
         }
 
@@ -1955,9 +2185,18 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
-        // Helper: obtém porta do opencode server ou lança 409
+        // Helper: obtém porta do opencode server ou inicia automaticamente se estiver parado
         async function portaOpencodeOuErro(): Promise<number> {
-          const status = await opencodeServer.status();
+          let status = await opencodeServer.status();
+          if (!status.rodando || !status.porta) {
+            try {
+              const res = await opencodeServer.iniciar();
+              if (res.porta) return res.porta;
+              status = await opencodeServer.status();
+            } catch (err) {
+              console.error("[secretario] falha ao auto-iniciar opencode server:", err);
+            }
+          }
           if (!status.rodando || !status.porta) {
             throw new SecretarioError("secretário não iniciado — POST /secretario/start", { status: 409 });
           }
@@ -2084,27 +2323,66 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               enviar(res, resOpencode.status === 404 ? 404 : 502, { erro: resOpencode.status === 404 ? "sessão não encontrada" : `opencode respondeu ${resOpencode.status}` });
               return;
             }
-            const data = (await resOpencode.json()) as Array<{
-              info?: { role?: string; time?: { created?: number; completed?: number } };
-              parts?: Array<{ type: string; text?: string; mime?: string; url?: string }>;
-            }>;
-            const mensagens = (Array.isArray(data) ? data : [])
-              .map((m) => {
-                const pensamento = (m.parts ?? []).filter((p) => p.type === "reasoning" || p.type === "thinking").map((p) => p.text ?? "").join("\n").trim();
-                return {
-                  role: m.info?.role ?? "",
-                  content: (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim(),
-                  pensamento: pensamento || undefined,
+            const rawMsgs = ((await resOpencode.json()) as MensagemOc[]) ?? [];
+            const mensagens: Array<{
+              role: string;
+              content: string;
+              pensamento?: string;
+              criado_em?: string;
+              concluida: boolean;
+              acoes?: Array<{ ferramenta?: string; resumo?: string; sucesso?: boolean }>;
+              imagens?: string[];
+            }> = [];
+
+            for (const m of rawMsgs) {
+              const role = m.info?.role;
+              if (role === "user") {
+                const parts = m.parts ?? [];
+                const content = parts.filter((p: ParteOc) => p.type === "text").map((p: ParteOc) => p.text ?? "").join("\n").trim();
+                const imagens = parts.filter((p: any) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p: any) => p.url);
+                mensagens.push({
+                  role: "user",
+                  content,
                   criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
-                  concluida: m.info?.role === "assistant" ? !!m.info?.time?.completed : true,
-                  // imagens anexadas (data URLs) — para reexibir no histórico após F5
-                  imagens: (m.parts ?? []).filter((p) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p) => p.url),
-                };
-              })
-              // assistant em curso (concluida===false) DEVE passar mesmo vazio — é o marcador de polling;
-              // com pensamento também passa (ver pensamento em tempo real)
-              .filter((m) => (m.role === "user" || m.role === "assistant") && (m.content.length > 0 || (m as unknown as { pensamento?: string }).pensamento || (m.imagens && (m.imagens as unknown[]).length > 0) || (m.role === "assistant" && m.concluida === false)));
-            void sincronizarSessaoNoCorp(porta, sessionId);
+                  concluida: true,
+                  imagens: imagens.length > 0 ? imagens : undefined,
+                });
+              } else if (role === "assistant") {
+                const parts = m.parts ?? [];
+                const pensamento = parts.filter((p: ParteOc) => p.type === "reasoning" || p.type === "thinking").map((p: ParteOc) => p.text ?? "").join("\n").trim();
+                const content = parts.filter((p: ParteOc) => p.type === "text").map((p: ParteOc) => p.text ?? "").join("\n").trim();
+                const tools = parts.filter((p: ParteOc) => p.type === "tool" && p.tool).map((p: ParteOc) => ({
+                  ferramenta: p.tool,
+                  resumo: resumoDeInput(p.state?.input, p.state?.title),
+                  sucesso: p.state?.status !== "error",
+                }));
+                const isCompleted = !!m.info?.time?.completed && (m.info as any)?.finish !== "tool-calls";
+
+                // Se a mensagem anterior já é do assistente (mesmo turno com múltiplos passos), consolida nela
+                const ult = mensagens[mensagens.length - 1];
+                if (ult && ult.role === "assistant") {
+                  if (pensamento) {
+                    ult.pensamento = ult.pensamento ? `${ult.pensamento}\n\n---\n\n${pensamento}` : pensamento;
+                  }
+                  if (content) {
+                    ult.content = ult.content ? `${ult.content}\n\n${content}` : content;
+                  }
+                  if (tools.length > 0) {
+                    ult.acoes = [...(ult.acoes ?? []), ...tools];
+                  }
+                  ult.concluida = isCompleted;
+                } else {
+                  mensagens.push({
+                    role: "assistant",
+                    content,
+                    pensamento: pensamento || undefined,
+                    criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
+                    concluida: isCompleted,
+                    acoes: tools.length > 0 ? tools : undefined,
+                  });
+                }
+              }
+            }
             enviar(res, 200, mensagens);
           } catch (erro) {
             if (erro instanceof SecretarioError) {
@@ -2425,8 +2703,18 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             let sessaoId = corpo.sessao_id;
             const baseUrl = `http://127.0.0.1:${porta}`;
 
-            // 1. Se não há sessao_id, cria nova sessão
-            if (!sessaoId) {
+            // 1. Se há sessao_id, verifica se ela existe; senão cria nova sessão
+            let sessaoExiste = false;
+            if (sessaoId) {
+              try {
+                const checkRes = await fetch(`${baseUrl}/session/${encodeURIComponent(sessaoId)}`, {
+                  signal: AbortSignal.timeout(3000),
+                });
+                if (checkRes.ok) sessaoExiste = true;
+              } catch {}
+            }
+
+            if (!sessaoId || !sessaoExiste) {
               const createRes = await fetch(`${baseUrl}/session`, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
@@ -2526,8 +2814,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           };
           try {
             const porta = await portaOpencodeOuErro();
-            const corpo = (await lerCorpo(req)) as { mensagem: string; sessao_id?: string; agente?: string; imagens?: Array<{ nome?: string; mime?: string; url?: string }>; contexto?: string[] };
-            const mensagemBruta = corpo.mensagem?.trim();
+            const corpo = (await lerCorpo(req)) as { mensagem?: string; prompt?: string; sessao_id?: string; agente?: string; imagens?: Array<{ nome?: string; mime?: string; url?: string }>; contexto?: string[] };
+            const mensagemBruta = (corpo.mensagem ?? corpo.prompt ?? "").trim();
             const imagens = (corpo.imagens ?? []).filter((i) => i && typeof i.url === "string" && i.url.startsWith("data:image/")).slice(0, 4);
             if (!mensagemBruta && imagens.length === 0) {
               enviar(res, 400, { erro: "mensagem obrigatória" });
@@ -2547,9 +2835,20 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
 
             const baseUrl = `http://127.0.0.1:${porta}`;
             const agente = corpo.agente ?? "secretario";
-            let sessaoId = corpo.sessao_id;
+            let sessaoId = corpo.sessao_id || url.searchParams.get("sessao") || undefined;
 
-            if (!sessaoId) {
+            // Se sessaoId foi informado, verifica se ela realmente existe no opencode
+            let sessaoExiste = false;
+            if (sessaoId) {
+              try {
+                const checkRes = await fetch(`${baseUrl}/session/${encodeURIComponent(sessaoId)}`, {
+                  signal: AbortSignal.timeout(3000),
+                });
+                if (checkRes.ok) sessaoExiste = true;
+              } catch {}
+            }
+
+            if (!sessaoId || !sessaoExiste) {
               const createRes = await fetch(`${baseUrl}/session`, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
@@ -2594,92 +2893,144 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             // Falha do POST é capturada (não engolida): quando o stream do modelo morre cedo
             // (ex.: limite de uso), a msg assistant fica sem parts e sem completed — e o
             // opencode pode nem responder o POST —, então o poll precisaria girar até o deadline.
+            let postData: MensagemOc | null = null;
+            let postConcluido = false;
             let postErro: string | null = null;
             void fetch(`${baseUrlSessao}/message`, {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ sessionID: sessaoId, agent: agente, parts: [{ type: "text", text: mensagem }, ...imagens.map((i) => ({ type: "file", mime: i.mime ?? "image/png", url: i.url! }))] }),
               signal: AbortSignal.timeout(240_000),
-            }).then((r) => { if (!r.ok) postErro = `opencode /message respondeu HTTP ${r.status}`; }).catch(() => { postErro = "opencode /message falhou (conexão)"; });
+            }).then(async (r) => {
+              if (!r.ok) {
+                postErro = `opencode /message respondeu HTTP ${r.status}`;
+              } else {
+                try {
+                  postData = (await r.json()) as MensagemOc;
+                } catch {}
+              }
+              postConcluido = true;
+            }).catch(() => {
+              postErro = "opencode /message falhou (conexão)";
+              postConcluido = true;
+            });
 
             const inicio = Date.now();
             const deadline = 300_000;
             let enviado = "";
             let enviadoPensamento = "";
             let concluida = false;
-            let vazioDesde: number | null = null; // assistant novo, sem parts nem completed, há muito tempo = stream morto
+            let vazioDesde: number | null = null;
             let acoesAvisadas = 0;
             let itensAssinatura = "";
 
             while (Date.now() - inicio < deadline) {
               await sleep(700);
               // o check de desconexão do cliente é no response (write side)
-              if (res.destroyed || res.writableEnded) return; // cliente abortou — opencode continua; sem persistência parcial
+              if (res.destroyed || res.writableEnded) return;
+
               if (postErro && !concluida) {
                 sse("erro", { erro: `falha ao enviar mensagem ao modelo (${postErro}) — ver ~/.local/share/opencode/log/opencode.log`, sessao_id: sessaoId });
                 eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
                 res.end();
                 return;
               }
+
               const msgs = await listarMensagens();
-              if (!msgs) continue;
-              const atual = [...msgs].reverse().find((m) => m.info?.role === "assistant");
-              if (!atual || (baselineId && atual.info?.id === baselineId)) continue;
-              // turno com ferramentas: tools das mensagens assistant novas (o quê + status)
-              const { total: novas, itens } = extrairAcoesMensagens(msgs, baselineId);
-              const assinatura = JSON.stringify(itens);
-              if (novas > acoesAvisadas || assinatura !== itensAssinatura) {
-                acoesAvisadas = Math.max(acoesAvisadas, novas);
-                itensAssinatura = assinatura;
-                sse("acao", { acoes: novas, itens });
+              if (msgs) {
+                const inicioIdx = baselineId ? msgs.findIndex((m) => m.info?.id === baselineId) : -1;
+                const novasMsgs = inicioIdx >= 0 ? msgs.slice(inicioIdx + 1) : msgs;
+                const assistentesNovas = novasMsgs.filter((m) => m.info?.role === "assistant");
+
+                if (assistentesNovas.length > 0) {
+                  // Turno com ferramentas: tools das mensagens assistant novas (o quê + status)
+                  const { total: novas, itens } = extrairAcoesMensagens(msgs, baselineId);
+                  const assinatura = JSON.stringify(itens);
+                  if (novas > acoesAvisadas || assinatura !== itensAssinatura) {
+                    acoesAvisadas = Math.max(acoesAvisadas, novas);
+                    itensAssinatura = assinatura;
+                    sse("acao", { acoes: novas, itens });
+                  }
+
+                  // Pensamento acumulado de TODAS as mensagens assistant do turno
+                  const pensamentoAcumulado = assistentesNovas
+                    .map((m) => pensamentoDe(m))
+                    .filter(Boolean)
+                    .join("\n\n---\n\n");
+                  if (pensamentoAcumulado.length > enviadoPensamento.length) {
+                    vazioDesde = null;
+                    sse("pensamento", { delta: pensamentoAcumulado.slice(enviadoPensamento.length) });
+                    enviadoPensamento = pensamentoAcumulado;
+                    eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "pensamento" });
+                  }
+
+                  // Texto acumulado de TODAS as mensagens assistant do turno
+                  const textoAcumulado = assistentesNovas
+                    .map((m) => textoDe(m))
+                    .filter(Boolean)
+                    .join("\n\n");
+                  if (textoAcumulado.length > enviado.length) {
+                    vazioDesde = null;
+                    sse("delta", { delta: textoAcumulado.slice(enviado.length) });
+                    enviado = textoAcumulado;
+                    eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "delta" });
+                  }
+
+                  const ultAssistant = assistentesNovas[assistentesNovas.length - 1];
+                  const temToolEmCurso = (ultAssistant?.parts ?? []).some((p) => p.type === "tool" && p.state?.status !== "completed");
+                  const temAtividade = textoAcumulado.length > 0 || pensamentoAcumulado.length > 0 || temToolEmCurso;
+                  if (!temAtividade) {
+                    if (vazioDesde === null) vazioDesde = Date.now();
+                    else if (Date.now() - vazioDesde > 45_000) {
+                      sse("erro", { erro: postErro ?? "modelo sem resposta (stream travado) — reenvie a mensagem", sessao_id: sessaoId });
+                      eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
+                      res.end();
+                      return;
+                    }
+                  } else {
+                    vazioDesde = null;
+                  }
+                }
               }
-              const texto = textoDe(atual);
-              if (texto.length > enviado.length) {
-                vazioDesde = null;
-                sse("delta", { delta: texto.slice(enviado.length) });
-                enviado = texto;
-                eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "delta" });
-              }
-              const pensamento = pensamentoDe(atual);
-              if (pensamento.length > enviadoPensamento.length) {
-                vazioDesde = null;
-                sse("pensamento", { delta: pensamento.slice(enviadoPensamento.length) });
-                enviadoPensamento = pensamento;
-                eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "pensamento" });
-              }
-              if (atual.info?.time?.completed) {
+
+              // O turno só termina quando o POST /message síncrono do opencode completar!
+              if (postConcluido) {
                 concluida = true;
                 break;
               }
-              // msg assistant recém-criada totalmente vazia p/ muito tempo = falha do modelo —
-              // falha rápido com erro claro em vez de girar 300s até o "timeout"
-              // Stream travado: nenhum assistant novo APÓS o baseline, ou assistant novo
-              // sem TEXTO, sem pensamento, sem tool em curso e sem completed por N segundos.
-              // (step-start sozinho NÃO é atividade — era o falso "vivo" que deixava o
-              // chat 300s em silêncio quando o provider congelava sem responder.)
-              const temToolEmCurso = (atual.parts ?? []).some((p) => p.type === "tool");
-              const temPensamento = pensamento.length > 0;
-              if (novas === 0 || (texto.length === 0 && !temPensamento && !temToolEmCurso && !atual.info?.time?.completed)) {
-                if (vazioDesde === null) vazioDesde = Date.now();
-                else if (Date.now() - vazioDesde > 35_000) {
-                  sse("erro", { erro: postErro ?? "modelo sem resposta (stream travado) — reenvie a mensagem", sessao_id: sessaoId });
-                  eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
-                  res.end();
-                  return;
-                }
-              } else {
-                vazioDesde = null;
-              }
             }
 
-            if (!concluida || !enviado) {
-              sse("erro", { erro: concluida ? "resposta vazia" : "timeout aguardando resposta (300s)", sessao_id: sessaoId });
+            if (!concluida) {
+              sse("erro", { erro: "timeout aguardando resposta (300s)", sessao_id: sessaoId });
               eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
               res.end();
               return;
             }
 
-            sse("fim", { sessao_id: sessaoId, resposta: enviado });
+            // Leitura final definitiva para garantir 100% do texto e pensamentos
+            const msgsFinais = (await listarMensagens()) ?? [];
+            const inicioFinalIdx = baselineId ? msgsFinais.findIndex((m) => m.info?.id === baselineId) : -1;
+            const novasFinais = (inicioFinalIdx >= 0 ? msgsFinais.slice(inicioFinalIdx + 1) : msgsFinais).filter((m) => m.info?.role === "assistant");
+
+            const textoFinal = novasFinais.map((m) => textoDe(m)).filter(Boolean).join("\n\n") || (postData ? textoDe(postData) : "");
+            if (textoFinal.length > enviado.length) {
+              sse("delta", { delta: textoFinal.slice(enviado.length) });
+              enviado = textoFinal;
+            }
+
+            const pensamentoFinal = novasFinais.map((m) => pensamentoDe(m)).filter(Boolean).join("\n\n---\n\n") || (postData ? pensamentoDe(postData) : "");
+            if (pensamentoFinal.length > enviadoPensamento.length) {
+              sse("pensamento", { delta: pensamentoFinal.slice(enviadoPensamento.length) });
+              enviadoPensamento = pensamentoFinal;
+            }
+
+            const { total: totalAcoes, itens: itensFinais } = extrairAcoesMensagens(msgsFinais, baselineId);
+            if (totalAcoes > acoesAvisadas) {
+              sse("acao", { acoes: totalAcoes, itens: itensFinais });
+            }
+
+            const respostaFinal = enviado || (totalAcoes > 0 ? "Ação concluída." : "Processamento concluído.");
+            sse("fim", { sessao_id: sessaoId, resposta: respostaFinal });
             eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "fim" });
             res.end();
             void sincronizarSessaoNoCorp(porta, sessaoId);

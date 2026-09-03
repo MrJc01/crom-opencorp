@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { TaskStore, type Task } from "../../core/task-store.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { SessionManager } from "../../core/session-manager.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -28,6 +29,89 @@ function linhaTask(t: Task): string {
   return `${t.id}  ${t.coluna.padEnd(10)}${t.prioridade.padEnd(7)}${t.titulo}${labels}${resp}${due}`;
 }
 
+export async function executarTask(
+  store: TaskStore,
+  wsPath: string,
+  wsId: string,
+  taskId: string,
+  opts: { agent?: string; model?: string } = {},
+): Promise<void> {
+  const t = await store.obter(wsPath, taskId);
+
+  // 1. Resolve o agente executor
+  let agente = opts.agent;
+  if (!agente) {
+    if (t.responsavel && t.responsavel.trim() !== "" && t.responsavel !== "humano") {
+      agente = t.responsavel.replace(/^agente:/, "").trim();
+    }
+  }
+  if (!agente) {
+    agente = "executor-padrao";
+  }
+
+  // 2. Move para "fazendo"
+  if (t.coluna !== "fazendo" && t.coluna !== "em_andamento") {
+    await store.mover(wsPath, taskId, "fazendo");
+  }
+
+  // 3. Registra início no chat da task
+  await store.mensagem(wsPath, taskId, {
+    autor: `agente:${agente}`,
+    corpo: `Iniciando execução da tarefa: "${t.titulo}"`,
+    tipo: "comentario",
+  });
+
+  console.log(`[task run] executando task ${taskId} com agente "${agente}"...`);
+
+  // 4. Constrói instrução detalhada com o contexto da task
+  const partesOrdem = [
+    `Você é o agente "${agente}" executando a task ${t.id} no workspace "${wsId}".`,
+    `Título: ${t.titulo}`,
+    t.descricao ? `Descrição:\n${t.descricao}` : "",
+    t.labels.length > 0 ? `Labels: ${t.labels.join(", ")}` : "",
+    `\nObjetivo: Execute todas as ações e ferramentas necessárias para resolver completamente esta tarefa. Reporte o resultado detalhado com o que foi feito e validado.`,
+  ];
+  const ordem = partesOrdem.filter(Boolean).join("\n\n");
+
+  // 5. Executa via SessionManager
+  const sessoes = new SessionManager();
+  const r = await sessoes.rodar({
+    agente,
+    ordem,
+    model: opts.model,
+    workspaceId: wsId,
+    gatilho: { tipo: "manual", origem: `task:${taskId}` },
+  });
+
+  // 6. Trata o desfecho da execução
+  if (r.status === "concluido") {
+    await store.mover(wsPath, taskId, "feito");
+    await store.mensagem(wsPath, taskId, {
+      autor: `agente:${agente}`,
+      corpo: `Tarefa concluída com sucesso! (sessão: ${r.id}, duração: ${((r.duracao_ms ?? 0) / 1000).toFixed(1)}s)`,
+      tipo: "comentario",
+    });
+    console.log(`ok: ${taskId} concluída pelo agente "${agente}" e movida para "feito" (sessão ${r.id}, exit: 0)`);
+  } else if (r.status === "hitl_pendente") {
+    await store.mensagem(wsPath, taskId, {
+      autor: "sistema",
+      corpo: `Execução pausada: requer aprovação humana (HITL) na sessão ${r.id}. Use "oc approvals list" para revisar.`,
+      tipo: "handoff",
+    });
+    console.log(`aviso: task ${taskId} requer aprovação humana (HITL) — consulte "oc approvals list"`);
+  } else {
+    await store.mover(wsPath, taskId, "bloqueado");
+    const preview = r.captura ? r.captura.slice(-300).trim() : `exit code ${r.exit_code}`;
+    await store.mensagem(wsPath, taskId, {
+      autor: `agente:${agente}`,
+      corpo: `Falha na execução: ${preview}\n(log: ${r.log})`,
+      tipo: "comentario",
+    });
+    console.error(`erro: execução da task ${taskId} falhou (status: ${r.status}, exit: ${r.exit_code ?? 1}) — movida para "bloqueado"`);
+    process.exitCode = r.exit_code ?? 1;
+  }
+}
+
 export function registerTaskCommand(program: Command): void {
   const manager = new WorkspaceManager();
   const store = new TaskStore();
@@ -53,22 +137,44 @@ export function registerTaskCommand(program: Command): void {
     .option("--due <data>", "prazo (ISO ou AAAA-MM-DD)")
     .option("--pai <task-id>", "task pai (fan-out)")
     .option("--bloqueado-por <ids>", "ids de tasks dependentes, separados por vírgula")
-    .description("cria uma task no quadro")
-    .action((opts: Record<string, string | undefined>) =>
+    .option("--run", "executa a task imediatamente após a criação com o agente responsável")
+    .option("--model <provider/model>", "sobrepõe o modelo do agente (usado com --run)")
+    .description("cria uma task no quadro (use --run para executar agora)")
+    .action((opts: Record<string, any>) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(opts));
         const t = await store.criar(ws.path, {
           titulo: opts["titulo"] as string,
-          descricao: opts["descricao"],
-          coluna: opts["coluna"],
+          descricao: opts["descricao"] as string | undefined,
+          coluna: (opts["coluna"] as string) || (opts["run"] ? "fazendo" : undefined),
           prioridade: opts["prioridade"] as "baixa" | "media" | "alta" | undefined,
           labels: (opts["labels"] as string | undefined)?.split(",").map((x) => x.trim()).filter(Boolean),
-          responsavel: opts["responsavel"],
-          due: opts["due"],
-          task_pai: opts["pai"],
+          responsavel: opts["responsavel"] as string | undefined,
+          due: opts["due"] as string | undefined,
+          task_pai: opts["pai"] as string | undefined,
           bloqueado_por: (opts["bloqueadoPor"] as string | undefined)?.split(",").map((x) => x.trim()).filter(Boolean),
         });
         console.log(`ok: ${t.id} criada em "${t.coluna}" — ${t.titulo}`);
+
+        if (opts["run"]) {
+          await executarTask(store, ws.path, ws.id, t.id, {
+            agent: (opts["responsavel"] as string | undefined)?.replace(/^agente:/, ""),
+            model: opts["model"] as string | undefined,
+          });
+        }
+      }),
+    );
+
+  task
+    .command("run")
+    .argument("<id>", "id da task para executar agora")
+    .option("--agent <id>", "sobrepõe o agente executor (padrão: o responsável da task ou executor-padrao)")
+    .option("--model <provider/model>", "sobrepõe o modelo do agente")
+    .description("executa uma task imediatamente usando o agente responsável")
+    .action((id: string, opts: { agent?: string; model?: string; workspace?: string }) =>
+      comErros(async () => {
+        const ws = await manager.resolver(wsDe(opts));
+        await executarTask(store, ws.path, ws.id, id, opts);
       }),
     );
 
@@ -113,6 +219,109 @@ export function registerTaskCommand(program: Command): void {
             console.log(`${m.criado_em.slice(0, 16).replace("T", " ")} ${m.autor.padEnd(18)} ${m.corpo}${menciona}`);
           }
         }
+      }),
+    );
+
+  task
+    .command("status")
+    .argument("<id>", "id da task")
+    .option("--limite <n>", "quantidade de ações/mensagens recentes do chat a exibir (padrão: 5)", "5")
+    .option("--json", "saída em formato JSON estruturado")
+    .description("consulta o status operacional detalhado de uma task (estado, execuções e últimas ações no chat)")
+    .action((id: string, opts: { limite: string; json?: boolean; workspace?: string }) =>
+      comErros(async () => {
+        const ws = await manager.resolver(wsDe(opts));
+        const t = await store.obter(ws.path, id);
+        const msgs = await store.chat(ws.path, id);
+        const qtdLimite = Math.max(1, parseInt(opts.limite, 10) || 5);
+        const ultimasAcoes = msgs.slice(-qtdLimite);
+
+        const sessoes = new SessionManager();
+        let execs: any[] = [];
+        try {
+          const todasExecs = await sessoes.listarExecucoes(ws.path);
+          execs = todasExecs.filter(
+            (e) => e.gatilho?.origem === id || e.gatilho?.origem === `task:${id}`,
+          );
+        } catch {}
+
+        const ultimaExec = execs.length > 0 ? execs[0] : null;
+
+        if (opts.json) {
+          console.log(
+            JSON.stringify(
+              {
+                id: t.id,
+                titulo: t.titulo,
+                coluna: t.coluna,
+                prioridade: t.prioridade,
+                responsavel: t.responsavel || null,
+                labels: t.labels,
+                criado_em: t.criado_em,
+                atualizado_em: t.atualizado_em,
+                descricao: t.descricao,
+                ultima_execucao: ultimaExec
+                  ? {
+                      id: ultimaExec.id,
+                      agente: ultimaExec.agente,
+                      status: ultimaExec.status,
+                      inicio: ultimaExec.inicio,
+                      exit_code: ultimaExec.exit_code,
+                    }
+                  : null,
+                total_mensagens: msgs.length,
+                ultimas_acoes: ultimasAcoes.map((m) => ({
+                  autor: m.autor,
+                  tipo: m.tipo,
+                  corpo: m.corpo,
+                  menciona: m.menciona,
+                  criado_em: m.criado_em,
+                })),
+              },
+              null,
+              2,
+            ),
+          );
+          return;
+        }
+
+        console.log(`\n━━━ Task Status: ${t.id} ━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(`Título:       ${t.titulo}`);
+        console.log(`Coluna:       ${t.coluna}`);
+        console.log(`Responsável:  ${t.responsavel || "(não atribuído)"}`);
+        console.log(`Prioridade:   ${t.prioridade}`);
+        if (t.labels.length > 0) console.log(`Labels:       [${t.labels.join(", ")}]`);
+        console.log(`Criado em:    ${t.criado_em}`);
+
+        if (ultimaExec) {
+          console.log(`\n● Execução Vinculada`);
+          console.log(`  Sessão:     ${ultimaExec.id}`);
+          console.log(`  Agente:     ${ultimaExec.agente}`);
+          console.log(`  Status:     ${ultimaExec.status}`);
+          console.log(`  Início:     ${ultimaExec.inicio}`);
+          if (ultimaExec.exit_code !== undefined && ultimaExec.exit_code !== null) {
+            console.log(`  Exit code:  ${ultimaExec.exit_code}`);
+          }
+        }
+
+        if (ultimasAcoes.length > 0) {
+          console.log(`\n● Últimas Ações no Chat (${ultimasAcoes.length} de ${msgs.length} mensagens)`);
+          for (const m of ultimasAcoes) {
+            const dataStr = m.criado_em ? m.criado_em.slice(0, 16).replace("T", " ") : "";
+            const menciona = m.menciona && m.menciona.length > 0 ? ` → ${m.menciona.map((x) => "@" + x.replace(/^agente:/, "")).join(" ")}` : "";
+            console.log(`  [${dataStr}] ${m.autor}${menciona}:`);
+            // Se o corpo for multilinhas, indenta com 4 espaços
+            const corpoFormatado = m.corpo
+              .split("\n")
+              .map((linha) => `    ${linha}`)
+              .join("\n");
+            console.log(`${corpoFormatado}\n`);
+          }
+        } else {
+          console.log(`\n● Chat: nenhuma ação ou comentário registrado`);
+        }
+
+        console.log("");
       }),
     );
 

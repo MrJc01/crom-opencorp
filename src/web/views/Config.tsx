@@ -17,6 +17,13 @@ export const ConfigView: Component = () => {
   const [opencodePath, setOpencodePath] = createSignal("opencode");
   const [opencodeTimeout, setOpencodeTimeout] = createSignal(20);
 
+  // Estado dos Modelos e Fallback
+  const [modeloPrincipal, setModeloPrincipal] = createSignal("openrouter/nvidia/nemotron-3.5-lightning:free");
+  const [modeloCustomizado, setModeloCustomizado] = createSignal("");
+  const [ordemFallback, setOrdemFallback] = createSignal("openrouter/nvidia/nemotron-3.5-lightning:free\nopenrouter/nvidia/nemotron-3-ultra-550b-a55b:free\nopenrouter/minimax/minimax-m3:free");
+  const [acessoTotalGlobal, setAcessoTotalGlobal] = createSignal(false);
+  const [aplicandoEmTodos, setAplicandoEmTodos] = createSignal(false);
+
   // Estado da Política de Segurança
   const [nivelSeguranca, setNivelSeguranca] = createSignal<"permissive" | "standard" | "strict">("permissive");
   const [allowlistRede, setAllowlistRede] = createSignal("pulso-diario.wp.crom.me, *.crom.me, *.wp.crom.me, github.com, registry.npmjs.org");
@@ -30,6 +37,21 @@ export const ConfigView: Component = () => {
     } catch {}
 
     try {
+      const mod = await fetchApi<any>("/settings/modelos");
+      if (mod) {
+        if (mod.default_model) {
+          setModeloPrincipal(mod.default_model);
+        }
+        if (Array.isArray(mod.rotation)) {
+          setOrdemFallback(mod.rotation.join("\n"));
+        }
+        if (mod.global_full_access !== undefined) {
+          setAcessoTotalGlobal(Boolean(mod.global_full_access));
+        }
+      }
+    } catch {}
+
+    try {
       const sec = await fetchApi<any>("/settings/security");
       if (sec) {
         if (sec.level) setNivelSeguranca(sec.level);
@@ -38,8 +60,67 @@ export const ConfigView: Component = () => {
         }
         if (sec.prompt_regras !== undefined) setPromptRegras(sec.prompt_regras);
         if (sec.auto_aprovar_rotinas !== undefined) setAutoAprovarRotinas(sec.auto_aprovar_rotinas);
+        if (sec.global_full_access !== undefined) setAcessoTotalGlobal(Boolean(sec.global_full_access));
       }
     } catch {}
+  };
+
+  const salvarModelos = async () => {
+    setSalvando(true);
+    try {
+      const modFinal = modeloPrincipal() === "__custom__"
+        ? modeloCustomizado().trim()
+        : modeloPrincipal().trim();
+
+      if (!modFinal) {
+        showToast("Informe um modelo válido", "aviso");
+        return;
+      }
+
+      const listaFallback = ordemFallback()
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      await fetchApi("/settings/modelos", {
+        method: "PUT",
+        body: JSON.stringify({
+          default_model: modFinal,
+          rotation: listaFallback,
+          global_full_access: acessoTotalGlobal(),
+        }),
+      });
+
+      showToast("Configuração de modelos e fallback salva com sucesso!", "sucesso");
+      await carregarSettings();
+    } catch (err: any) {
+      showToast("Erro ao salvar modelos: " + err.message, "erro");
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  const aplicarModeloEmTodos = async () => {
+    const modFinal = modeloPrincipal() === "__custom__"
+      ? modeloCustomizado().trim()
+      : modeloPrincipal().trim();
+
+    if (!confirm(`Deseja definir o modelo "${modFinal}" como modelo ativo para TODOS os agentes deste workspace?`)) {
+      return;
+    }
+
+    setAplicandoEmTodos(true);
+    try {
+      const res = await fetchApi<any>("/agents/aplicar-modelo-global", {
+        method: "POST",
+        body: JSON.stringify({ model: modFinal }),
+      });
+      showToast(`${res.alterados || 0} agentes atualizados para o modelo "${modFinal}"!`, "sucesso");
+    } catch (err: any) {
+      showToast("Erro ao aplicar nos agentes: " + err.message, "erro");
+    } finally {
+      setAplicandoEmTodos(false);
+    }
   };
 
   const salvarSeguranca = async () => {
@@ -382,29 +463,162 @@ export const ConfigView: Component = () => {
           </div>
         </Show>
 
-        {/* ABA MODELOS */}
+        {/* ABA MODELOS & ROTAÇÃO */}
         <Show when={abaAtiva() === "modelos"}>
-          <div class="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-3">
-            <h2 class="text-sm font-semibold text-zinc-100">Modelos Ativos</h2>
-            <div class="space-y-2 text-xs">
+          <div class="p-5 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-5">
+            <div>
+              <h2 class="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                <Cpu size={16} class="text-purple-400" />
+                Modelo Principal & Ordem de Fallback
+              </h2>
+              <p class="text-xs text-zinc-400 mt-0.5">
+                Defina qual modelo de IA é o padrão do sistema e a ordem sequencial de fallback caso o primeiro falhe.
+              </p>
+            </div>
+
+            {/* SELEÇÃO DO MODELO PRINCIPAL */}
+            <div class="space-y-3 p-4 rounded-xl bg-zinc-950 border border-zinc-800">
               <div>
-                <label class="block text-zinc-400 mb-1">Modelo Padrão (Agentes Analíticos / Chat)</label>
-                <input
-                  type="text"
-                  disabled
-                  value="openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 font-mono text-xs opacity-80"
-                />
+                <label class="block text-xs font-semibold text-zinc-200 mb-1">
+                  Modelo Principal do Sistema (Default Global)
+                </label>
+                <div class="space-y-2">
+                  <select
+                    value={
+                      [
+                        "openrouter/nvidia/nemotron-3.5-lightning:free",
+                        "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+                        "openrouter/minimax/minimax-m3:free",
+                        "openrouter/google/gemini-2.5-flash",
+                        "openrouter/anthropic/claude-3.5-haiku",
+                        "opencode-go/glm-5.3-flash",
+                      ].includes(modeloPrincipal())
+                        ? modeloPrincipal()
+                        : "__custom__"
+                    }
+                    onChange={(e) => {
+                      const v = e.currentTarget.value;
+                      if (v === "__custom__") {
+                        if (!modeloCustomizado()) setModeloCustomizado(modeloPrincipal());
+                        setModeloPrincipal("__custom__");
+                      } else {
+                        setModeloPrincipal(v);
+                      }
+                    }}
+                    class="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-100 font-medium focus:outline-none focus:border-purple-500 cursor-pointer"
+                  >
+                    <option value="openrouter/nvidia/nemotron-3.5-lightning:free">
+                      NVIDIA Nemotron 3.5 Lightning (Gratuito / Rápido) — Recomendado
+                    </option>
+                    <option value="openrouter/nvidia/nemotron-3-ultra-550b-a55b:free">
+                      NVIDIA Nemotron 3 Ultra 550B (Gratuito / Alta Capacidade)
+                    </option>
+                    <option value="openrouter/minimax/minimax-m3:free">
+                      MiniMax M3 (Gratuito)
+                    </option>
+                    <option value="openrouter/google/gemini-2.5-flash">
+                      Google Gemini 2.5 Flash
+                    </option>
+                    <option value="openrouter/anthropic/claude-3.5-haiku">
+                      Anthropic Claude 3.5 Haiku
+                    </option>
+                    <option value="opencode-go/glm-5.3-flash">
+                      OpenCode-Go GLM 5.3 Flash
+                    </option>
+                    <option value="__custom__">
+                      Outro / Personalizado (Digitar Manualmente)
+                    </option>
+                  </select>
+
+                  <Show when={modeloPrincipal() === "__custom__"}>
+                    <input
+                      type="text"
+                      placeholder="provedor/identificador-do-modelo (ex: openrouter/meta-llama/llama-3.3-70b-instruct)"
+                      value={modeloCustomizado()}
+                      onInput={(e) => setModeloCustomizado(e.currentTarget.value)}
+                      class="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-100 font-mono focus:outline-none focus:border-purple-500"
+                    />
+                  </Show>
+                </div>
+                <span class="text-[11px] text-zinc-500 mt-1 block">
+                  Usado por agentes sem modelo específico e para geração de prompts via IA.
+                </span>
               </div>
+
+              {/* AÇÃO: APLICAR EM TODOS OS AGENTES */}
+              <div class="pt-3 border-t border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div>
+                  <span class="text-xs font-semibold text-zinc-300 block">
+                    Propagar Modelo aos Agentes
+                  </span>
+                  <span class="text-[11px] text-zinc-500">
+                    Aplica este modelo como modelo ativo em todos os agentes do workspace atual.
+                  </span>
+                </div>
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  class="border-purple-800/80 text-purple-300 hover:bg-purple-950/40 whitespace-nowrap self-start sm:self-auto"
+                  loading={aplicandoEmTodos()}
+                  onClick={aplicarModeloEmTodos}
+                >
+                  <Bot size={12} class="mr-1.5 text-purple-400" />
+                  Aplicar em Todos os Agentes
+                </Button>
+              </div>
+            </div>
+
+            {/* ORDEM DE EXECUÇÃO & FALLBACK */}
+            <div class="space-y-3 p-4 rounded-xl bg-zinc-950 border border-zinc-800">
               <div>
-                <label class="block text-zinc-400 mb-1">Modelo Rápido (Pesquisa / Curadoria)</label>
-                <input
-                  type="text"
-                  disabled
-                  value="openrouter/nvidia/nemotron-3.5-lightning:free"
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 font-mono text-xs opacity-80"
+                <label class="block text-xs font-semibold text-zinc-200 mb-1">
+                  Ordem de Execução & Fallback (Um por linha)
+                </label>
+                <textarea
+                  rows={4}
+                  value={ordemFallback()}
+                  onInput={(e) => setOrdemFallback(e.currentTarget.value)}
+                  placeholder="openrouter/nvidia/nemotron-3.5-lightning:free&#10;openrouter/nvidia/nemotron-3-ultra-550b-a55b:free&#10;openrouter/minimax/minimax-m3:free"
+                  class="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-xs text-zinc-200 font-mono focus:outline-none focus:border-purple-500 leading-relaxed scrollbar-thin"
                 />
+                <span class="text-[11px] text-zinc-500 mt-1 block leading-relaxed">
+                  Se a execução falhar (erro 429, cota esgotada, timeout ou indisponibilidade da API), o sistema tenta automaticamente o próximo modelo desta lista de rotação.
+                </span>
               </div>
+            </div>
+
+            {/* ACESSO TOTAL GLOBAL (BYPASS DE PERMISSÕES) */}
+            <div class="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
+              <div class="flex items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  id="check-acesso-total"
+                  checked={acessoTotalGlobal()}
+                  onChange={(e) => setAcessoTotalGlobal(e.currentTarget.checked)}
+                  class="rounded bg-zinc-900 border-zinc-700 text-purple-500 focus:ring-0 cursor-pointer mt-0.5"
+                />
+                <div class="space-y-0.5">
+                  <label for="check-acesso-total" class="text-xs font-semibold text-zinc-200 cursor-pointer block">
+                    Acesso Total Global (Ignorar restrições de nível dos agentes)
+                  </label>
+                  <p class="text-[11px] text-zinc-400 leading-relaxed">
+                    Quando ativado, todos os agentes executam diretamente no modo irrestrito (autônomo), sem sofrer bloqueio de level-1 ou level-2 ao executar scripts e ferramentas.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* BOTÃO SALVAR MODELOS */}
+            <div class="pt-2 border-t border-zinc-800 flex justify-end">
+              <Button
+                size="sm"
+                variant="primary"
+                class="bg-purple-600 hover:bg-purple-500 text-white font-semibold"
+                loading={salvando()}
+                onClick={salvarModelos}
+              >
+                <Save size={13} class="mr-1.5" /> Salvar Configurações de Modelos
+              </Button>
             </div>
           </div>
         </Show>

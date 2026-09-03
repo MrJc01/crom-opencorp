@@ -3,6 +3,7 @@ import { useSearchParams } from "@solidjs/router";
 import {
   Play,
   Power,
+  Copy,
   Bot,
   Search,
   RefreshCw,
@@ -23,6 +24,9 @@ import {
   RotateCcw,
   MessageSquare,
   Clock,
+  FileText,
+  Wand2,
+  Loader2,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -64,6 +68,15 @@ export interface TeamSpec {
   criado_em?: string;
 }
 
+export const MODELOS_DISPONIVEIS = [
+  { id: "openrouter/nvidia/nemotron-3.5-lightning:free", label: "NVIDIA Nemotron 3.5 Lightning (Gratuito / Rápido)" },
+  { id: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free", label: "NVIDIA Nemotron 3 Ultra 550B (Gratuito / Robusto)" },
+  { id: "openrouter/minimax/minimax-m3:free", label: "MiniMax M3 (Gratuito)" },
+  { id: "openrouter/google/gemini-2.5-flash", label: "Google Gemini 2.5 Flash" },
+  { id: "openrouter/anthropic/claude-3.5-haiku", label: "Anthropic Claude 3.5 Haiku" },
+  { id: "opencode-go/glm-5.3-flash", label: "OpenCode-Go GLM 5.3 Flash" },
+];
+
 export const AgentesView: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [agentes, setAgentes] = createSignal<Agente[]>([]);
@@ -71,6 +84,10 @@ export const AgentesView: Component = () => {
   const [filtroAba, setFiltroAba] = createSignal<"todos" | "agentes" | "grupos">("todos");
   const [busca, setBusca] = createSignal("");
   const [carregando, setCarregando] = createSignal(false);
+
+  // Modelos Globais e Acesso do Workspace
+  const [modeloPadraoGlobal, setModeloPadraoGlobal] = createSignal("openrouter/nvidia/nemotron-3.5-lightning:free");
+  const [globalFullAccess, setGlobalFullAccess] = createSignal(false);
 
   // Modal de Execução de Agente ou Grupo
   const [alvoExecucao, setAlvoExecucao] = createSignal<{ tipo: "agente" | "grupo"; item: any } | null>(null);
@@ -83,10 +100,28 @@ export const AgentesView: Component = () => {
   const [salvandoAgente, setSalvandoAgente] = createSignal(false);
   // Form de edição do Agente
   const [formAgenteRole, setFormAgenteRole] = createSignal("");
-  const [formAgenteModel, setFormAgenteModel] = createSignal("");
+  const [formAgenteModelSelect, setFormAgenteModelSelect] = createSignal("");
+  const [formAgenteModelCustom, setFormAgenteModelCustom] = createSignal("");
   const [formAgentePerm, setFormAgentePerm] = createSignal<"level-1" | "level-2" | "level-3">("level-2");
   const [formAgentePrompt, setFormAgentePrompt] = createSignal("");
   const [formAgenteAtivo, setFormAgenteAtivo] = createSignal(true);
+
+  // Modal de Criação de Novo Agente
+  const [modalCriarAgenteAberto, setModalCriarAgenteAberto] = createSignal(false);
+  const [criarAbaAtiva, setCriarAbaAtiva] = createSignal<"ia" | "manual" | "clonar">("ia");
+  const [criandoAgente, setCriandoAgente] = createSignal(false);
+  const [novoAgenteId, setNovoAgenteId] = createSignal("");
+  const [novoAgenteRole, setNovoAgenteRole] = createSignal("");
+  const [novoAgenteModelSelect, setNovoAgenteModelSelect] = createSignal("");
+  const [novoAgenteModelCustom, setNovoAgenteModelCustom] = createSignal("");
+  const [novoAgentePerm, setNovoAgentePerm] = createSignal<"level-1" | "level-2" | "level-3">("level-2");
+  const [novoAgentePromptManual, setNovoAgentePromptManual] = createSignal("");
+  // IA Assistente
+  const [iaDescricao, setIaDescricao] = createSignal("");
+  const [iaPromptGerado, setIaPromptGerado] = createSignal("");
+  const [gerandoPromptIA, setGerandoPromptIA] = createSignal(false);
+  // Clonar
+  const [clonarOrigem, setClonarOrigem] = createSignal("");
 
   // Modal de Criação / Edição de Grupo (Team)
   const [modalGrupoAberto, setModalGrupoAberto] = createSignal(false);
@@ -118,12 +153,15 @@ export const AgentesView: Component = () => {
   const carregarTudo = async () => {
     try {
       setCarregando(true);
-      const [listaAgentes, listaTeams] = await Promise.all([
+      const [listaAgentes, listaTeams, modInfo] = await Promise.all([
         fetchApi<Agente[]>("/agents").catch(() => []),
         fetchApi<TeamSpec[]>("/teams").catch(() => []),
+        fetchApi<any>("/settings/modelos").catch(() => null),
       ]);
       setAgentes(listaAgentes || []);
       setTeams(listaTeams || []);
+      if (modInfo?.default_model) setModeloPadraoGlobal(modInfo.default_model);
+      if (modInfo?.global_full_access !== undefined) setGlobalFullAccess(Boolean(modInfo.global_full_access));
 
       if (listaAgentes && listaAgentes.length > 0) {
         const primId = listaAgentes[0].id;
@@ -170,7 +208,20 @@ export const AgentesView: Component = () => {
       const completo = { ...ag, ...detalhe };
       setAgenteInspecionado(completo);
       setFormAgenteRole(completo.role || completo.description || "");
-      setFormAgenteModel(completo.model || "openrouter/nvidia/nemotron-3.5-lightning:free");
+
+      const m = completo.model || "";
+      const ehSugerido = MODELOS_DISPONIVEIS.some((item) => item.id === m);
+      if (!m || m === "padrao" || m === "default" || m === modeloPadraoGlobal()) {
+        setFormAgenteModelSelect("");
+        setFormAgenteModelCustom("");
+      } else if (ehSugerido) {
+        setFormAgenteModelSelect(m);
+        setFormAgenteModelCustom("");
+      } else {
+        setFormAgenteModelSelect("__custom__");
+        setFormAgenteModelCustom(m);
+      }
+
       setFormAgentePerm(completo.permissions || "level-2");
       setFormAgentePrompt(completo.corpo_prompt || completo.system_prompt || "");
       setFormAgenteAtivo(completo.ativo !== false);
@@ -184,12 +235,16 @@ export const AgentesView: Component = () => {
     if (!ag) return;
     setSalvandoAgente(true);
 
+    const modelFinal = formAgenteModelSelect() === "__custom__"
+      ? formAgenteModelCustom().trim()
+      : (formAgenteModelSelect().trim() || modeloPadraoGlobal());
+
     try {
       await fetchApi(`/agents/${encodeURIComponent(ag.id)}`, {
         method: "PUT",
         body: JSON.stringify({
           role: formAgenteRole().trim(),
-          model: formAgenteModel().trim(),
+          model: modelFinal,
           permissions: formAgentePerm(),
           ativo: formAgenteAtivo(),
           corpo_prompt: formAgentePrompt(),
@@ -323,6 +378,168 @@ export const AgentesView: Component = () => {
     }
   };
 
+  const resetarModalCriar = () => {
+    setNovoAgenteId("");
+    setNovoAgenteRole("");
+    setNovoAgenteModelSelect("");
+    setNovoAgenteModelCustom("");
+    setNovoAgentePerm("level-2");
+    setNovoAgentePromptManual("");
+    setIaDescricao("");
+    setIaPromptGerado("");
+    setClonarOrigem(agentes().length > 0 ? agentes()[0].id : "");
+    setCriarAbaAtiva("ia");
+  };
+
+  const abrirModalCriar = () => {
+    resetarModalCriar();
+    setModalCriarAgenteAberto(true);
+  };
+
+  const abrirModalClonar = (agenteOrigem: Agente) => {
+    resetarModalCriar();
+    setCriarAbaAtiva("clonar");
+    setClonarOrigem(agenteOrigem.id);
+    setNovoAgenteId(agenteOrigem.id + "-copia");
+    setNovoAgenteRole(agenteOrigem.role || agenteOrigem.description || "");
+
+    const m = agenteOrigem.model || "";
+    const ehSugerido = MODELOS_DISPONIVEIS.some((item) => item.id === m);
+    if (!m || m === "padrao" || m === "default" || m === modeloPadraoGlobal()) {
+      setNovoAgenteModelSelect("");
+      setNovoAgenteModelCustom("");
+    } else if (ehSugerido) {
+      setNovoAgenteModelSelect(m);
+      setNovoAgenteModelCustom("");
+    } else {
+      setNovoAgenteModelSelect("__custom__");
+      setNovoAgenteModelCustom(m);
+    }
+
+    setNovoAgentePerm(agenteOrigem.permissions || "level-2");
+    setModalCriarAgenteAberto(true);
+  };
+
+  const gerarPromptViaIA = async () => {
+    const desc = iaDescricao().trim();
+    if (!desc) {
+      showToast("Descreva o que o agente deve fazer.", "aviso");
+      return;
+    }
+    setGerandoPromptIA(true);
+    try {
+      const modelAlvo = novoAgenteModelSelect() === "__custom__"
+        ? novoAgenteModelCustom().trim()
+        : (novoAgenteModelSelect().trim() || modeloPadraoGlobal());
+
+      const res = await fetchApi<{ prompt: string; modelo: string }>("/agents/gerar-prompt", {
+        method: "POST",
+        body: JSON.stringify({
+          descricao: desc,
+          modelo: modelAlvo,
+        }),
+      });
+
+      if (res && res.prompt) {
+        setIaPromptGerado(res.prompt);
+        showToast(`System Prompt profissional gerado por IA (${res.modelo || "modelo padrão"})!`, "sucesso");
+      } else {
+        throw new Error("Resposta inválida da IA");
+      }
+    } catch (err: any) {
+      showToast("Falha na chamada da IA: " + (err.message || err) + " — usando gerador estruturado", "aviso");
+      setIaPromptGerado(gerarPromptLocal(desc));
+    } finally {
+      setGerandoPromptIA(false);
+    }
+  };
+
+  // Gerador local de prompt estruturado a partir da descrição do usuário
+  const gerarPromptLocal = (descricao: string): string => {
+    const linhas: string[] = [];
+    linhas.push(`# System Prompt: ${descricao.split("\n")[0]?.slice(0, 60) || "Agente Especialista"}\n`);
+    linhas.push(`## Papel & Missão Principal`);
+    linhas.push(`Você é um agente especialista autônomo com a seguinte missão: ${descricao}\n`);
+    linhas.push(`## Regras de Comportamento`);
+    linhas.push(`1. Sempre responda de forma clara, objetiva e profissional.`);
+    linhas.push(`2. Use linguagem técnica quando apropriado, mas mantenha acessibilidade.`);
+    linhas.push(`3. Estruture suas respostas com seções, listas e exemplos quando relevante.`);
+    linhas.push(`4. Nunca invente informações — quando não tiver certeza, informe.`);
+    linhas.push(`5. Priorize precisão sobre velocidade.\n`);
+    linhas.push(`## Formato de Resposta`);
+    linhas.push(`- Use markdown para estruturar as respostas`);
+    linhas.push(`- Inclua cabeçalhos para seções longas`);
+    linhas.push(`- Use listas numeradas para passos sequenciais`);
+    linhas.push(`- Use blocos de código quando mostrar exemplos técnicos\n`);
+    linhas.push(`## Contexto de Trabalho`);
+    linhas.push(`Você opera dentro do workspace do OpenCorp e tem acesso aos registros,`);
+    linhas.push(`documentos e ferramentas disponíveis no ambiente. Utilize-os sempre que`);
+    linhas.push(`necessário para produzir resultados de alta qualidade.\n`);
+    linhas.push(`## Restrições & Segurança`);
+    linhas.push(`- Não execute ações destrutivas sem confirmação`);
+    linhas.push(`- Respeite os limites operacionais configurados`);
+    return linhas.join("\n");
+  };
+
+  const criarNovoAgente = async () => {
+    const id = novoAgenteId().trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    if (!id) {
+      showToast("Informe o ID do agente (slug kebab-case).", "aviso");
+      return;
+    }
+
+    const aba = criarAbaAtiva();
+    let corpo_prompt = "";
+    let from: string | undefined;
+
+    if (aba === "ia") {
+      corpo_prompt = iaPromptGerado().trim();
+      if (!corpo_prompt) {
+        showToast("Gere o prompt primeiro clicando em 'Gerar System Prompt com IA'.", "aviso");
+        return;
+      }
+    } else if (aba === "manual") {
+      corpo_prompt = novoAgentePromptManual().trim();
+      if (!corpo_prompt) {
+        showToast("Escreva o System Prompt do agente.", "aviso");
+        return;
+      }
+    } else if (aba === "clonar") {
+      from = clonarOrigem();
+      if (!from) {
+        showToast("Selecione o agente de origem para clonar.", "aviso");
+        return;
+      }
+    }
+
+    const modelFinal = novoAgenteModelSelect() === "__custom__"
+      ? novoAgenteModelCustom().trim()
+      : (novoAgenteModelSelect().trim() || modeloPadraoGlobal());
+
+    setCriandoAgente(true);
+    try {
+      await fetchApi("/agents", {
+        method: "POST",
+        body: JSON.stringify({
+          id,
+          from,
+          model: modelFinal,
+          role: novoAgenteRole().trim() || undefined,
+          corpo_prompt: corpo_prompt || undefined,
+          permissions: novoAgentePerm(),
+          ativo: true,
+        }),
+      });
+      showToast(`Agente @${id} criado com sucesso!`, "sucesso");
+      setModalCriarAgenteAberto(false);
+      await carregarTudo();
+    } catch (err: any) {
+      showToast(`Erro ao criar agente: ${err.message}`, "erro");
+    } finally {
+      setCriandoAgente(false);
+    }
+  };
+
   const agentesFiltrados = () => {
     const q = busca().toLowerCase().trim();
     if (!q) return agentes();
@@ -373,6 +590,10 @@ export const AgentesView: Component = () => {
               class="bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-700 w-52 sm:w-64"
             />
           </div>
+
+          <Button size="sm" variant="primary" onClick={abrirModalCriar}>
+            <Plus size={14} class="mr-1.5" /> + Novo Agente
+          </Button>
 
           <Button size="sm" variant="secondary" onClick={() => setModalGrupoAberto(true)}>
             <Users size={14} class="mr-1.5 text-purple-400" /> + Novo Grupo
@@ -585,6 +806,16 @@ export const AgentesView: Component = () => {
                         <Eye size={12} class="mr-1" /> Inspecionar / Editar
                       </Button>
 
+                      <IconButton
+                        size="xs"
+                        variant="ghost"
+                        class="text-zinc-500 hover:text-purple-400"
+                        onClick={() => abrirModalClonar(agente)}
+                        title="Clonar este agente"
+                      >
+                        <Copy size={13} />
+                      </IconButton>
+
                       <Button
                         size="xs"
                         variant="primary"
@@ -745,16 +976,32 @@ export const AgentesView: Component = () => {
                     />
                   </div>
 
-                  <div class="grid grid-cols-2 gap-3">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label class="block text-zinc-400 font-semibold mb-1">Modelo de IA (Provider/Model) *</label>
-                      <input
-                        type="text"
-                        value={formAgenteModel()}
-                        onInput={(e) => setFormAgenteModel(e.currentTarget.value)}
-                        placeholder="openrouter/nvidia/nemotron-3.5-lightning:free"
-                        class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 font-mono focus:outline-none focus:border-emerald-500"
-                      />
+                      <label class="block text-zinc-400 font-semibold mb-1">Modelo de IA *</label>
+                      <select
+                        value={formAgenteModelSelect()}
+                        onChange={(e) => setFormAgenteModelSelect(e.currentTarget.value)}
+                        class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                      >
+                        <option value="">
+                          (Padrão do Sistema: {modeloPadraoGlobal().replace("openrouter/", "")})
+                        </option>
+                        <For each={MODELOS_DISPONIVEIS}>
+                          {(item) => <option value={item.id}>{item.label}</option>}
+                        </For>
+                        <option value="__custom__">Outro / Personalizado (Digitar Manual)</option>
+                      </select>
+
+                      <Show when={formAgenteModelSelect() === "__custom__"}>
+                        <input
+                          type="text"
+                          placeholder="provedor/modelo (ex: openrouter/google/gemini-2.5-flash)"
+                          value={formAgenteModelCustom()}
+                          onInput={(e) => setFormAgenteModelCustom(e.currentTarget.value)}
+                          class="w-full mt-2 bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-1.5 text-xs text-zinc-100 font-mono focus:outline-none focus:border-emerald-500"
+                        />
+                      </Show>
                     </div>
 
                     <div>
@@ -768,6 +1015,13 @@ export const AgentesView: Component = () => {
                         <option value="level-2">Level 2 — Execução Padrão (Bash + Edição)</option>
                         <option value="level-3">Level 3 — Acesso Total (Web + Ferramentas)</option>
                       </select>
+
+                      <Show when={globalFullAccess()}>
+                        <span class="text-[10px] text-amber-400 flex items-center gap-1 mt-1 font-medium leading-tight">
+                          <Shield size={11} class="shrink-0" />
+                          Acesso Total Global ativo nas Configurações — sem restrição.
+                        </span>
+                      </Show>
                     </div>
                   </div>
 
@@ -865,60 +1119,76 @@ export const AgentesView: Component = () => {
 
               {/* SELEÇÃO DO PADRÃO DE INTERAÇÃO */}
               <div>
-                <label class="block text-zinc-400 font-semibold mb-1.5">
+                <label class="block text-zinc-400 font-semibold mb-2">
                   Padrão de Execução / Ordem de Conversa *
                 </label>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setGrupoPadrao("pipeline")}
-                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-colors ${
+                    class={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-start min-h-[76px] ${
                       grupoPadrao() === "pipeline"
-                        ? "bg-blue-950/60 border-blue-500 text-blue-200 font-bold"
+                        ? "bg-blue-950/60 border-blue-500 text-blue-200 ring-1 ring-blue-500/50 shadow-xs"
                         : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     }`}
                   >
-                    <div class="font-bold text-xs mb-0.5">Pipeline</div>
-                    <div class="text-[10px] text-zinc-400 font-normal">Sequencial (Passo 1 ➔ Passo 2 ➔ ...)</div>
+                    <div class="font-bold text-xs mb-1 text-zinc-100 flex items-center gap-1.5">
+                      <Layers size={13} class="text-blue-400" /> Pipeline (Sequencial)
+                    </div>
+                    <div class="text-[11px] text-zinc-400 font-normal leading-snug whitespace-normal break-words">
+                      Passo 1 processa ➔ Passo 2 aprimora ➔ Conclusão em esteira
+                    </div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setGrupoPadrao("review")}
-                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-colors ${
+                    class={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-start min-h-[76px] ${
                       grupoPadrao() === "review"
-                        ? "bg-amber-950/60 border-amber-500 text-amber-200 font-bold"
+                        ? "bg-amber-950/60 border-amber-500 text-amber-200 ring-1 ring-amber-500/50 shadow-xs"
                         : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     }`}
                   >
-                    <div class="font-bold text-xs mb-0.5">Loop Review</div>
-                    <div class="text-[10px] text-zinc-400 font-normal">Executor produz ➔ Revisor aprova/devolve</div>
+                    <div class="font-bold text-xs mb-1 text-zinc-100 flex items-center gap-1.5">
+                      <RotateCcw size={13} class="text-amber-400" /> Loop de Revisão
+                    </div>
+                    <div class="text-[11px] text-zinc-400 font-normal leading-snug whitespace-normal break-words">
+                      Executor cria ➔ Revisor avalia e aprova ou devolve para ajustes
+                    </div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setGrupoPadrao("fanout")}
-                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-colors ${
+                    class={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-start min-h-[76px] ${
                       grupoPadrao() === "fanout"
-                        ? "bg-purple-950/60 border-purple-500 text-purple-200 font-bold"
+                        ? "bg-purple-950/60 border-purple-500 text-purple-200 ring-1 ring-purple-500/50 shadow-xs"
                         : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     }`}
                   >
-                    <div class="font-bold text-xs mb-0.5">Simultâneo</div>
-                    <div class="text-[10px] text-zinc-400 font-normal">Paralelo em conjunto ➔ Síntese final</div>
+                    <div class="font-bold text-xs mb-1 text-zinc-100 flex items-center gap-1.5">
+                      <Users size={13} class="text-purple-400" /> Simultâneo (Fanout)
+                    </div>
+                    <div class="text-[11px] text-zinc-400 font-normal leading-snug whitespace-normal break-words">
+                      Agentes executam ao mesmo tempo ➔ Síntese consolidada final
+                    </div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setGrupoPadrao("debate")}
-                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-colors ${
+                    class={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-start min-h-[76px] ${
                       grupoPadrao() === "debate"
-                        ? "bg-emerald-950/60 border-emerald-500 text-emerald-200 font-bold"
+                        ? "bg-emerald-950/60 border-emerald-500 text-emerald-200 ring-1 ring-emerald-500/50 shadow-xs"
                         : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     }`}
                   >
-                    <div class="font-bold text-xs mb-0.5">Debate</div>
-                    <div class="text-[10px] text-zinc-400 font-normal">Debatedores ➔ Moderador decide</div>
+                    <div class="font-bold text-xs mb-1 text-zinc-100 flex items-center gap-1.5">
+                      <MessageSquare size={13} class="text-emerald-400" /> Debate Multi-Agente
+                    </div>
+                    <div class="text-[11px] text-zinc-400 font-normal leading-snug whitespace-normal break-words">
+                      Debatedores discutem hipóteses ➔ Moderador toma a decisão
+                    </div>
                   </button>
                 </div>
               </div>
@@ -959,12 +1229,12 @@ export const AgentesView: Component = () => {
 
               {/* CONFIGURAÇÃO DOS PARTICIPANTES CONFORME O PADRÃO */}
               <Show when={grupoPadrao() === "pipeline"}>
-                <div class="space-y-2 p-3.5 rounded-xl bg-zinc-950 border border-zinc-800">
+                <div class="space-y-2.5 p-3.5 rounded-xl bg-zinc-950 border border-zinc-800">
                   <span class="text-zinc-300 font-bold block text-xs">Etapas Sequenciais do Pipeline</span>
                   <For each={passosPipeline()}>
                     {(passo, idx) => (
-                      <div class="flex items-center gap-2">
-                        <span class="text-zinc-500 font-mono text-[10px] w-5">#{idx() + 1}</span>
+                      <div class="flex flex-col sm:flex-row sm:items-center gap-2 p-2 rounded-lg bg-zinc-900/50 border border-zinc-800/80">
+                        <span class="text-zinc-500 font-mono text-[10px] w-6 shrink-0">#{idx() + 1}</span>
                         <select
                           value={passo.agente}
                           onChange={(e) => {
@@ -972,7 +1242,7 @@ export const AgentesView: Component = () => {
                             lista[idx()].agente = e.currentTarget.value;
                             setPassosPipeline(lista);
                           }}
-                          class="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 w-44 cursor-pointer"
+                          class="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 w-full sm:w-48 cursor-pointer"
                         >
                           <For each={agentes()}>
                             {(a) => <option value={a.id}>@{a.id}</option>}
@@ -987,7 +1257,7 @@ export const AgentesView: Component = () => {
                             lista[idx()].ordem = e.currentTarget.value;
                             setPassosPipeline(lista);
                           }}
-                          class="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none"
+                          class="w-full sm:flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-purple-500"
                         />
                       </div>
                     )}
@@ -1147,6 +1417,272 @@ export const AgentesView: Component = () => {
                 onClick={salvarNovoGrupo}
               >
                 <Check size={13} class="mr-1.5" /> Criar Grupo de Agentes
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      {/* MODAL DE CRIAÇÃO DE NOVO AGENTE — 3 Abas: IA Rápida / Manual / Clonar */}
+      <Show when={modalCriarAgenteAberto()}>
+        <div class="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl max-h-[90vh] flex flex-col">
+            {/* Cabeçalho */}
+            <div class="flex items-center justify-between border-b border-zinc-800 pb-3 flex-shrink-0">
+              <div class="flex items-center gap-2.5">
+                <div class="h-8 w-8 rounded-lg bg-emerald-950 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                  <Plus size={18} />
+                </div>
+                <div>
+                  <h2 class="text-sm font-bold text-zinc-100">Criar Novo Agente</h2>
+                  <span class="text-[11px] text-zinc-400">
+                    Escolha como montar o System Prompt do agente.
+                  </span>
+                </div>
+              </div>
+              <IconButton size="xs" variant="ghost" onClick={() => setModalCriarAgenteAberto(false)}>
+                <X size={16} />
+              </IconButton>
+            </div>
+
+            {/* Abas: IA Rápida | Manual | Clonar Existente */}
+            <div class="flex items-center gap-1 p-1 bg-zinc-950 border border-zinc-800 rounded-xl w-fit text-xs flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setCriarAbaAtiva("ia")}
+                class={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer font-medium flex items-center gap-1.5 ${
+                  criarAbaAtiva() === "ia"
+                    ? "!bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 shadow-xs"
+                    : "!bg-transparent text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <Wand2 size={12} />
+                <span>IA Rápida</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCriarAbaAtiva("manual")}
+                class={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer font-medium flex items-center gap-1.5 ${
+                  criarAbaAtiva() === "manual"
+                    ? "!bg-blue-950/80 text-blue-300 border border-blue-500/50 shadow-xs"
+                    : "!bg-transparent text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <FileText size={12} />
+                <span>Manual</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCriarAbaAtiva("clonar")}
+                class={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer font-medium flex items-center gap-1.5 ${
+                  criarAbaAtiva() === "clonar"
+                    ? "!bg-purple-950/80 text-purple-300 border border-purple-500/50 shadow-xs"
+                    : "!bg-transparent text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <Copy size={12} />
+                <span>Clonar Existente</span>
+              </button>
+            </div>
+
+            {/* Conteúdo scrollável */}
+            <div class="space-y-4 text-xs overflow-y-auto pr-1 scrollbar-thin flex-1">
+              {/* Campos comuns: ID, Role, Modelo, Permissão */}
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-zinc-400 font-semibold mb-1">ID do Agente (slug kebab-case) *</label>
+                  <input
+                    type="text"
+                    placeholder="ex: revisor-de-codigo"
+                    value={novoAgenteId()}
+                    onInput={(e) => setNovoAgenteId(e.currentTarget.value)}
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label class="block text-zinc-400 font-semibold mb-1">Papel / Função Resumida</label>
+                  <input
+                    type="text"
+                    placeholder="ex: Revisador de código especialista em TypeScript"
+                    value={novoAgenteRole()}
+                    onInput={(e) => setNovoAgenteRole(e.currentTarget.value)}
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-zinc-400 font-semibold mb-1">Modelo de IA *</label>
+                  <select
+                    value={novoAgenteModelSelect()}
+                    onChange={(e) => setNovoAgenteModelSelect(e.currentTarget.value)}
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    <option value="">
+                      (Padrão do Sistema: {modeloPadraoGlobal().replace("openrouter/", "")})
+                    </option>
+                    <For each={MODELOS_DISPONIVEIS}>
+                      {(item) => <option value={item.id}>{item.label}</option>}
+                    </For>
+                    <option value="__custom__">Outro / Personalizado (Digitar Manual)</option>
+                  </select>
+
+                  <Show when={novoAgenteModelSelect() === "__custom__"}>
+                    <input
+                      type="text"
+                      placeholder="provedor/modelo (ex: openrouter/google/gemini-2.5-flash)"
+                      value={novoAgenteModelCustom()}
+                      onInput={(e) => setNovoAgenteModelCustom(e.currentTarget.value)}
+                      class="w-full mt-2 bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-1.5 text-xs text-zinc-100 font-mono focus:outline-none focus:border-emerald-500"
+                    />
+                  </Show>
+                </div>
+
+                <div>
+                  <label class="block text-zinc-400 font-semibold mb-1">Nível de Permissão</label>
+                  <select
+                    value={novoAgentePerm()}
+                    onChange={(e) => setNovoAgentePerm(e.currentTarget.value as any)}
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    <option value="level-1">Level 1 — Somente Leitura</option>
+                    <option value="level-2">Level 2 — Execução Padrão</option>
+                    <option value="level-3">Level 3 — Acesso Total</option>
+                  </select>
+
+                  <Show when={globalFullAccess()}>
+                    <span class="text-[10px] text-amber-400 flex items-center gap-1 mt-1 font-medium leading-tight">
+                      <Shield size={11} class="shrink-0" />
+                      Acesso Total Global ativo nas Configurações — sem restrição.
+                    </span>
+                  </Show>
+                </div>
+              </div>
+
+              {/* ── ABA: IA RÁPIDA ── */}
+              <Show when={criarAbaAtiva() === "ia"}>
+                <div class="p-4 rounded-xl bg-emerald-950/20 border border-emerald-900/40 space-y-3">
+                  <div class="flex items-center gap-2 mb-1">
+                    <Wand2 size={14} class="text-emerald-400" />
+                    <span class="font-bold text-emerald-300 text-xs">
+                      Descreva o agente que você quer e o prompt será gerado automaticamente
+                    </span>
+                  </div>
+
+                  <div>
+                    <label class="block text-zinc-300 font-medium mb-1">
+                      Como deve ser esse agente? O que ele faz? *
+                    </label>
+                    <textarea
+                      rows={3}
+                      placeholder="Ex: quero um agente que revise pull requests, verificando bugs, boas práticas de TypeScript e sugerindo melhorias de performance..."
+                      value={iaDescricao()}
+                      onInput={(e) => setIaDescricao(e.currentTarget.value)}
+                      class="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 resize-none"
+                    />
+                  </div>
+
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    class="border-emerald-700 text-emerald-300 hover:bg-emerald-950/50"
+                    onClick={gerarPromptViaIA}
+                    loading={gerandoPromptIA()}
+                  >
+                    <Sparkles size={13} class="mr-1.5" />
+                    {gerandoPromptIA() ? "Gerando..." : "Gerar System Prompt com IA"}
+                  </Button>
+
+                  <Show when={iaPromptGerado()}>
+                    <div class="mt-2">
+                      <label class="block text-zinc-300 font-medium mb-1">
+                        System Prompt Gerado (edite à vontade antes de criar)
+                      </label>
+                      <textarea
+                        rows={10}
+                        value={iaPromptGerado()}
+                        onInput={(e) => setIaPromptGerado(e.currentTarget.value)}
+                        class="w-full bg-[#0c0e12] border border-zinc-800 rounded-xl p-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-emerald-500 leading-relaxed scrollbar-thin"
+                      />
+                    </div>
+                  </Show>
+                </div>
+              </Show>
+
+              {/* ── ABA: MANUAL ── */}
+              <Show when={criarAbaAtiva() === "manual"}>
+                <div class="p-4 rounded-xl bg-blue-950/20 border border-blue-900/40 space-y-3">
+                  <div class="flex items-center gap-2 mb-1">
+                    <FileText size={14} class="text-blue-400" />
+                    <span class="font-bold text-blue-300 text-xs">
+                      Escreva o System Prompt completo manualmente
+                    </span>
+                  </div>
+
+                  <textarea
+                    rows={12}
+                    placeholder={"# Agente Especialista\n\n## Papel Principal\nVocê é um...\n\n## Regras de Comportamento\n1. Sempre...\n2. Nunca...\n\n## Formato de Resposta\n- Use markdown..."}
+                    value={novoAgentePromptManual()}
+                    onInput={(e) => setNovoAgentePromptManual(e.currentTarget.value)}
+                    class="w-full bg-[#0c0e12] border border-zinc-800 rounded-xl p-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-blue-500 leading-relaxed scrollbar-thin"
+                  />
+                </div>
+              </Show>
+
+              {/* ── ABA: CLONAR ── */}
+              <Show when={criarAbaAtiva() === "clonar"}>
+                <div class="p-4 rounded-xl bg-purple-950/20 border border-purple-900/40 space-y-3">
+                  <div class="flex items-center gap-2 mb-1">
+                    <Copy size={14} class="text-purple-400" />
+                    <span class="font-bold text-purple-300 text-xs">
+                      Use um agente existente como base — o novo agente herdará o prompt completo
+                    </span>
+                  </div>
+
+                  <div>
+                    <label class="block text-zinc-300 font-medium mb-1">
+                      Agente de Origem *
+                    </label>
+                    <select
+                      value={clonarOrigem()}
+                      onChange={(e) => setClonarOrigem(e.currentTarget.value)}
+                      class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-purple-500 cursor-pointer"
+                    >
+                      <For each={agentes()}>
+                        {(a) => (
+                          <option value={a.id}>
+                            @{a.id} — {a.role || a.description || "Agente"}
+                          </option>
+                        )}
+                      </For>
+                    </select>
+                  </div>
+
+                  <div class="flex items-center gap-2 text-[11px] text-zinc-400 bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-800">
+                    <ArrowRight size={12} class="text-purple-400 flex-shrink-0" />
+                    <span>
+                      O novo agente <strong class="text-zinc-200">@{novoAgenteId() || "novo-id"}</strong> será
+                      criado como cópia de <strong class="text-purple-300">@{clonarOrigem()}</strong> com
+                      o mesmo System Prompt, modelo e configurações. Você poderá editá-lo depois.
+                    </span>
+                  </div>
+                </div>
+              </Show>
+            </div>
+
+            {/* Rodapé com ações */}
+            <div class="pt-3 border-t border-zinc-800 flex justify-end gap-2 flex-shrink-0">
+              <Button size="sm" variant="secondary" onClick={() => setModalCriarAgenteAberto(false)}>
+                Cancelar
+              </Button>
+              <Button
+                size="sm"
+                variant="primary"
+                loading={criandoAgente()}
+                onClick={criarNovoAgente}
+              >
+                <Check size={13} class="mr-1.5" /> Criar Agente
               </Button>
             </div>
           </div>

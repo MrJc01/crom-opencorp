@@ -69,6 +69,12 @@ function obterContextoAdaptativo(wsPath: string, wsId: string, agente: Agente): 
         .sort()
         .reverse()
         .slice(0, 5);
+      if (arquivos.length > 0) {
+        partes.push(`- Documentos Recentes: ${arquivos.join(", ")}`);
+      }
+    }
+  } catch {}
+
   try {
     const teamsDir = join(wsPath, ".opencorp", "teams");
     if (existsSync(teamsDir)) {

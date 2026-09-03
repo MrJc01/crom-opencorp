@@ -365,7 +365,7 @@ export interface AcaoOpencode {
 }
 
 /** Primeiro valor string do input da tool (titulo, pergunta, ordem…), truncado */
-function resumoDeInput(input: unknown, titulo: string | undefined, max = 64): string | undefined {
+export function resumoDeInput(input: unknown, titulo: string | undefined, max = 64): string | undefined {
   if (typeof titulo === "string" && titulo.trim()) return titulo.trim().slice(0, max);
   if (input && typeof input === "object") {
     for (const valor of Object.values(input as Record<string, unknown>)) {
