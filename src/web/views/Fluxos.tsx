@@ -83,6 +83,8 @@ export const FluxosView: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [fluxos, setFluxos] = createSignal<any[]>([]);
   const [agentes, setAgentes] = createSignal<any[]>([]);
+  const [tasksExistentes, setTasksExistentes] = createSignal<any[]>([]);
+  const [buscaTask, setBuscaTask] = createSignal("");
   const [fluxoAtivo, setFluxoAtivo] = createSignal<FluxoCompleto | null>(null);
   const [noSelecionado, setNoSelecionado] = createSignal<NoGrafo | null>(null);
 
@@ -124,12 +126,14 @@ export const FluxosView: Component = () => {
 
   const carregarFluxos = async () => {
     try {
-      const [lista, listaAgentes] = await Promise.all([
+      const [lista, listaAgentes, listaTasks] = await Promise.all([
         fetchApi<any[]>("/flows").catch(() => []),
         fetchApi<any[]>("/agents").catch(() => []),
+        fetchApi<any[]>("/tasks").catch(() => []),
       ]);
       setFluxos(lista || []);
       setAgentes(listaAgentes || []);
+      setTasksExistentes(listaTasks || []);
 
       const urlId = searchParams.fluxo as string;
       if (urlId) {
@@ -1064,6 +1068,62 @@ export const FluxosView: Component = () => {
                               <option value="urgente">Urgente</option>
                             </select>
                           </div>
+                        </div>
+
+                        {/* Selecionar Task Existente */}
+                        <div class="space-y-1.5 pt-2 border-t border-zinc-800 mt-2">
+                          <label class="text-[11px] font-medium text-zinc-300 block">
+                            ou Executar Task Existente (pesquisar por nome)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Pesquisar tarefa existente pelo título ou descrição..."
+                            value={buscaTask()}
+                            onInput={(e) => setBuscaTask(e.currentTarget.value)}
+                            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-200 focus:border-orange-500 font-mono"
+                          />
+                          <Show when={buscaTask().trim().length >= 2}>
+                            <div class="max-h-32 overflow-y-auto space-y-1 scrollbar-thin">
+                              <For
+                                each={tasksExistentes().filter((t) => {
+                                  const q = buscaTask().toLowerCase();
+                                  return (
+                                    (t.titulo && t.titulo.toLowerCase().includes(q)) ||
+                                    (t.descricao && t.descricao.toLowerCase().includes(q)) ||
+                                    (t.id && t.id.toLowerCase().includes(q))
+                                  );
+                                }).slice(0, 8)}
+                                fallback={
+                                  <div class="text-[10px] text-zinc-500 py-2 text-center">Nenhuma task encontrada.</div>
+                                }
+                              >
+                                {(t) => (
+                                  <div
+                                    onClick={() => {
+                                      atualizarConfigNo("titulo", t.titulo || t.id);
+                                      atualizarConfigNo("task_id", t.id);
+                                      atualizarConfigNo("coluna", t.coluna || "backlog");
+                                      atualizarConfigNo("prioridade", t.prioridade || "media");
+                                      setBuscaTask("");
+                                      showToast(`Task "${t.titulo || t.id}" selecionada!`, "sucesso");
+                                    }}
+                                    class="px-2.5 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 hover:border-orange-500/60 cursor-pointer text-xs flex items-center justify-between gap-2 transition-colors"
+                                  >
+                                    <div class="min-w-0">
+                                      <span class="font-medium text-zinc-200 truncate block">{t.titulo || t.id}</span>
+                                      <span class="text-[10px] text-zinc-500 truncate block">{t.descricao || `coluna: ${t.coluna}`}</span>
+                                    </div>
+                                    <span class={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
+                                      t.coluna === "feito" ? "bg-emerald-950/50 text-emerald-400" :
+                                      t.coluna === "fazendo" ? "bg-blue-950/50 text-blue-400" :
+                                      t.coluna === "bloqueado" ? "bg-amber-950/50 text-amber-400" :
+                                      "bg-zinc-900 text-zinc-400"
+                                    }`}>{t.coluna}</span>
+                                  </div>
+                                )}
+                              </For>
+                            </div>
+                          </Show>
                         </div>
                       </Show>
 

@@ -209,6 +209,38 @@ describe('Fluxos.tsx — Canvas Visual estilo n8n', () => {
     });
   });
 
+  // ── Executar Task Existente (pesquisa por nome/descrição) ──
+  describe('Executar Task Existente no NDV', () => {
+    it('carrega tasks existentes ao inicializar', () => {
+      expect(tsxSrc).toContain('tasksExistentes');
+      expect(tsxSrc).toContain('setTasksExistentes');
+      expect(tsxSrc).toContain('fetchApi<any[]>("/tasks")');
+    });
+
+    it('tem campo de busca de task por título/descrição', () => {
+      expect(tsxSrc).toContain('buscaTask');
+      expect(tsxSrc).toContain('Pesquisar tarefa existente');
+    });
+
+    it('filtra tasks por título, descrição e id', () => {
+      expect(tsxSrc).toContain('t.titulo.toLowerCase().includes(q)');
+      expect(tsxSrc).toContain('t.descricao');
+      expect(tsxSrc).toContain('t.id');
+    });
+
+    it('ao selecionar, preenche titulo e task_id no config', () => {
+      expect(tsxSrc).toContain('atualizarConfigNo("task_id"');
+      expect(tsxSrc).toContain('Task "');
+      expect(tsxSrc).toContain('selecionada');
+    });
+
+    it('mostra badge de coluna de cada task (feito/fazendo/bloqueado/backlog)', () => {
+      expect(tsxSrc).toContain('bg-emerald-950/50');
+      expect(tsxSrc).toContain('bg-blue-950/50');
+      expect(tsxSrc).toContain('bg-amber-950/50');
+    });
+  });
+
   // ── Modais & Fechar ──
   describe('Modais — fechar corretamente', () => {
     it('modal Adicionar Node fecha por backdrop click', () => {
