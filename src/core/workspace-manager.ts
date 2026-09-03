@@ -143,11 +143,15 @@ export class WorkspaceManager {
   async resolver(id?: string): Promise<InfoWorkspace> {
     const estado = await this.lerEstado();
     let registro: RegistroWorkspace | undefined;
-    if (id !== undefined && id.length > 0) {
-      registro = estado.workspaces.find((w) => w.id === id);
+    const idAlvo = (id !== undefined && id.length > 0)
+      ? id
+      : (process.env.OPENCORP_WORKSPACE && process.env.OPENCORP_WORKSPACE.trim() ? process.env.OPENCORP_WORKSPACE.trim() : undefined);
+
+    if (idAlvo !== undefined && idAlvo.length > 0) {
+      registro = estado.workspaces.find((w) => w.id === idAlvo);
       if (!registro) {
         throw new WorkspaceError(
-          `workspace "${id}" não encontrado — veja "opencorp workspace list" ou crie com "opencorp workspace create ${id}"`,
+          `workspace "${idAlvo}" não encontrado — veja "opencorp workspace list" ou crie com "opencorp workspace create ${idAlvo}"`,
         );
       }
     } else if (estado.ativo) {
@@ -168,8 +172,11 @@ export class WorkspaceManager {
 
   async atual(): Promise<InfoWorkspace | null> {
     const estado = await this.lerEstado();
-    if (!estado.ativo) return null;
-    const registro = estado.workspaces.find((w) => w.id === estado.ativo);
+    const idAtivo = (process.env.OPENCORP_WORKSPACE && process.env.OPENCORP_WORKSPACE.trim())
+      ? process.env.OPENCORP_WORKSPACE.trim()
+      : estado.ativo;
+    if (!idAtivo) return null;
+    const registro = estado.workspaces.find((w) => w.id === idAtivo);
     if (!registro) return null;
     const raiz = await this.raiz();
     return this.infoDe(estado, registro, this.pathDe(raiz, registro));
