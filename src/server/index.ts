@@ -1027,6 +1027,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             budget_max_turns: typeof corpo.budget_max_turns === "number" ? corpo.budget_max_turns : undefined,
             ativo: corpo.ativo as boolean | undefined,
             corpo: typeof corpo.corpo_prompt === "string" ? corpo.corpo_prompt : (typeof corpo.corpo === "string" ? corpo.corpo : undefined),
+            harness: typeof corpo.harness === "string" ? corpo.harness.trim() : undefined,
+            harness_fallback: Array.isArray(corpo.harness_fallback) ? (corpo.harness_fallback as unknown[]).map(String).filter(Boolean) : undefined,
+            rotation: Array.isArray(corpo.rotation) ? (corpo.rotation as unknown[]).map(String).filter(Boolean) : undefined,
+            model_fallback: Array.isArray(corpo.model_fallback) ? (corpo.model_fallback as unknown[]).map(String).filter(Boolean) : undefined,
           });
           eventBus.emit("agente.editado", { agente: id });
           enviar(res, 200, salvo);

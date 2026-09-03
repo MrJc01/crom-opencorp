@@ -581,7 +581,7 @@ export class SessionManager {
     let harnessEscolhido = ag.frontmatter.harness || "opencode";
     let modeloEfetivo = modelo;
 
-    if (modeloEfetivo.startsWith("opencode/")) {
+    if (modeloEfetivo.startsWith("opencode/") && modeloEfetivo.indexOf("/", "opencode/".length) !== -1) {
       harnessEscolhido = "opencode";
       modeloEfetivo = modeloEfetivo.slice("opencode/".length);
     } else if (modeloEfetivo.startsWith("claude-code/")) {

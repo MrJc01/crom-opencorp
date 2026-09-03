@@ -19,6 +19,7 @@ import {
   Play,
   Activity,
   Layers,
+  Unplug,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { showToast } from "../ui/Toast";
@@ -182,6 +183,22 @@ export const ConfigView: Component = () => {
       await carregarStatusMotores();
     } catch (err: any) {
       showToast("Erro ao remover: " + err.message, "erro");
+    }
+  };
+
+  const desconectarProvedor = async (provider: string) => {
+    if (!confirm(`Desconectar o provedor "${provider}"? A chave de API será removida e o provedor ficará inativo.`)) return;
+    try {
+      // Tenta remover no escopo global primeiro, depois workspace
+      await fetchApi(`/provider-keys/${encodeURIComponent(provider)}?escopo=global`, { method: "DELETE" }).catch(() => {});
+      if (wsAtivo()) {
+        await fetchApi(`/provider-keys/${encodeURIComponent(provider)}?escopo=workspace`, { method: "DELETE" }).catch(() => {});
+      }
+      showToast(`Provedor "${provider}" desconectado com sucesso`, "sucesso");
+      await carregarStatusMotores();
+      await carregarChaves();
+    } catch (err: any) {
+      showToast(`Erro ao desconectar provedor: ${err.message}`, "erro");
     }
   };
 
@@ -520,6 +537,14 @@ export const ConfigView: Component = () => {
                               onClick={() => testarConexaoModelo(prov.modelosSugeridos?.[0] || prov.id)}
                             >
                               <Play size={11} class="mr-1 fill-current text-cyan-400" /> Testar
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              class="text-rose-400 hover:text-rose-300 hover:bg-rose-950/40"
+                              onClick={() => desconectarProvedor(prov.id)}
+                            >
+                              <Unplug size={11} class="mr-1" /> Desconectar
                             </Button>
                           </Show>
 

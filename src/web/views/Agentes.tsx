@@ -45,6 +45,10 @@ export interface Agente {
   tools?: string[];
   permissions?: "level-1" | "level-2" | "level-3";
   category?: string;
+  harness?: string;
+  harness_fallback?: string[];
+  rotation?: string[];
+  model_fallback?: string[];
 }
 
 export interface TeamPasso {
@@ -69,6 +73,7 @@ export interface TeamSpec {
 }
 
 export const MODELOS_DISPONIVEIS = [
+  { id: "openrouter/google/gemini-3.8-flash", label: "⚡ Google Gemini 3.8 Flash (BYOK Custo $0) — Recomendado" },
   { id: "openrouter/nvidia/nemotron-3.5-lightning:free", label: "NVIDIA Nemotron 3.5 Lightning (Gratuito / Rápido)" },
   { id: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free", label: "NVIDIA Nemotron 3 Ultra 550B (Gratuito / Robusto)" },
   { id: "openrouter/minimax/minimax-m3:free", label: "MiniMax M3 (Gratuito)" },
@@ -102,6 +107,8 @@ export const AgentesView: Component = () => {
   const [formAgenteRole, setFormAgenteRole] = createSignal("");
   const [formAgenteModelSelect, setFormAgenteModelSelect] = createSignal("");
   const [formAgenteModelCustom, setFormAgenteModelCustom] = createSignal("");
+  const [formAgenteHarness, setFormAgenteHarness] = createSignal("");
+  const [formAgenteRotation, setFormAgenteRotation] = createSignal("");
   const [formAgentePerm, setFormAgentePerm] = createSignal<"level-1" | "level-2" | "level-3">("level-2");
   const [formAgentePrompt, setFormAgentePrompt] = createSignal("");
   const [formAgenteAtivo, setFormAgenteAtivo] = createSignal(true);
@@ -225,6 +232,9 @@ export const AgentesView: Component = () => {
       setFormAgentePerm(completo.permissions || "level-2");
       setFormAgentePrompt(completo.corpo_prompt || completo.system_prompt || "");
       setFormAgenteAtivo(completo.ativo !== false);
+      setFormAgenteHarness(completo.harness || "");
+      const rot = completo.rotation || completo.model_fallback || [];
+      setFormAgenteRotation(Array.isArray(rot) ? rot.join("\n") : "");
     } catch (err: any) {
       showToast("Erro ao carregar detalhes do agente: " + err.message, "erro");
     }
@@ -239,6 +249,11 @@ export const AgentesView: Component = () => {
       ? formAgenteModelCustom().trim()
       : (formAgenteModelSelect().trim() || modeloPadraoGlobal());
 
+    const rotLista = formAgenteRotation()
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
     try {
       await fetchApi(`/agents/${encodeURIComponent(ag.id)}`, {
         method: "PUT",
@@ -248,6 +263,8 @@ export const AgentesView: Component = () => {
           permissions: formAgentePerm(),
           ativo: formAgenteAtivo(),
           corpo_prompt: formAgentePrompt(),
+          harness: formAgenteHarness().trim() || undefined,
+          rotation: rotLista.length > 0 ? rotLista : undefined,
         }),
       });
 
@@ -967,24 +984,47 @@ export const AgentesView: Component = () => {
                       </pre>
                     </div>
 
-                    <div class="grid grid-cols-3 gap-3">
-                      <div class="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      <div class="bg-zinc-950 p-2.5 rounded-xl border border-zinc-800">
                         <span class="text-zinc-500 block text-[10px] uppercase font-bold mb-0.5">Modelo LLM</span>
-                        <span class="font-mono text-emerald-400 font-semibold truncate block">
-                          {agenteInspecionado()!.model || "openrouter/nvidia/nemotron-3.5-lightning:free"}
+                        <span class="font-mono text-emerald-400 font-semibold text-xs truncate block">
+                          {agenteInspecionado()!.model || "Padrão do Sistema"}
                         </span>
                       </div>
-                      <div class="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                        <span class="text-zinc-500 block text-[10px] uppercase font-bold mb-0.5">Permissões</span>
-                        <span class="font-mono text-zinc-200 font-semibold">{agenteInspecionado()!.permissions || "level-2"}</span>
+                      <div class="bg-zinc-950 p-2.5 rounded-xl border border-zinc-800">
+                        <span class="text-zinc-500 block text-[10px] uppercase font-bold mb-0.5">Motor / Harness</span>
+                        <span class="font-mono text-cyan-400 font-semibold text-xs truncate block">
+                          {agenteInspecionado()!.harness || "opencode (Padrão)"}
+                        </span>
                       </div>
-                      <div class="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                      <div class="bg-zinc-950 p-2.5 rounded-xl border border-zinc-800">
+                        <span class="text-zinc-500 block text-[10px] uppercase font-bold mb-0.5">Permissões</span>
+                        <span class="font-mono text-zinc-200 font-semibold text-xs">{agenteInspecionado()!.permissions || "level-2"}</span>
+                      </div>
+                      <div class="bg-zinc-950 p-2.5 rounded-xl border border-zinc-800">
                         <span class="text-zinc-500 block text-[10px] uppercase font-bold mb-0.5">Status</span>
-                        <span class="font-semibold text-emerald-400">
-                          {agenteInspecionado()!.ativo !== false ? "Ativo" : "Desativado"}
+                        <span class={`font-semibold text-xs ${agenteInspecionado()!.ativo !== false ? "text-emerald-400" : "text-zinc-500"}`}>
+                          {agenteInspecionado()!.ativo !== false ? "🟢 Ativo" : "⚪ Desativado"}
                         </span>
                       </div>
                     </div>
+
+                    <Show when={agenteInspecionado()!.rotation && agenteInspecionado()!.rotation!.length > 0}>
+                      <div class="bg-zinc-950 p-3 rounded-xl border border-zinc-800 space-y-1">
+                        <span class="text-zinc-500 block text-[10px] uppercase font-bold">
+                          Rotação & Fallback Customizado deste Agente:
+                        </span>
+                        <div class="flex flex-wrap gap-1.5 pt-0.5">
+                          <For each={agenteInspecionado()!.rotation!}>
+                            {(rotMod) => (
+                              <span class="px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-[11px] font-mono text-purple-300">
+                                {rotMod}
+                              </span>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
                   </div>
                 }
               >
@@ -1002,7 +1042,21 @@ export const AgentesView: Component = () => {
 
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label class="block text-zinc-400 font-semibold mb-1">Modelo de IA *</label>
+                      <div class="flex items-center justify-between mb-1">
+                        <label class="block text-zinc-400 font-semibold">Modelo de IA *</label>
+                        <Show when={formAgenteModelSelect() || formAgenteModelCustom()}>
+                          <button
+                            type="button"
+                            class="text-[10px] text-cyan-400 hover:underline"
+                            onClick={() => {
+                              setFormAgenteModelSelect("");
+                              setFormAgenteModelCustom("");
+                            }}
+                          >
+                            Usar Padrão Global
+                          </button>
+                        </Show>
+                      </div>
                       <select
                         value={formAgenteModelSelect()}
                         onChange={(e) => setFormAgenteModelSelect(e.currentTarget.value)}
@@ -1046,6 +1100,55 @@ export const AgentesView: Component = () => {
                           Acesso Total Global ativo nas Configurações — sem restrição.
                         </span>
                       </Show>
+                    </div>
+                  </div>
+
+                  {/* SEÇÃO AVANÇADA: MOTOR (HARNESS) & ROTAÇÃO PRÓPRIA */}
+                  <div class="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-3">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                        <Cpu size={13} class="text-cyan-400" />
+                        Motor de Execução (Harness) & Rotação deste Agente
+                      </span>
+                      <button
+                        type="button"
+                        class="text-[10px] text-zinc-400 hover:text-zinc-200"
+                        onClick={() => {
+                          setFormAgenteHarness("");
+                          setFormAgenteRotation("");
+                        }}
+                      >
+                        Limpar Overrides
+                      </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label class="block text-[11px] font-medium text-zinc-400 mb-1">Motor / Runner</label>
+                        <select
+                          value={formAgenteHarness()}
+                          onChange={(e) => setFormAgenteHarness(e.currentTarget.value)}
+                          class="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-cyan-500"
+                        >
+                          <option value="">(Padrão do Sistema: OpenCode)</option>
+                          <option value="opencode">OpenCode Runtime</option>
+                          <option value="claude-code">Claude Code CLI (Em breve)</option>
+                          <option value="antigravity">Google Antigravity (Em breve)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label class="block text-[11px] font-medium text-zinc-400 mb-1">
+                          Rotação Customizada (1 por linha)
+                        </label>
+                        <textarea
+                          rows={2}
+                          placeholder="Deixe vazio para herdar a rotação do workspace"
+                          value={formAgenteRotation()}
+                          onInput={(e) => setFormAgenteRotation(e.currentTarget.value)}
+                          class="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-[11px] font-mono text-zinc-200 focus:outline-none focus:border-purple-500 leading-tight scrollbar-thin"
+                        />
+                      </div>
                     </div>
                   </div>
 

@@ -202,6 +202,10 @@ export class AgentStore {
       budget_max_turns?: number;
       ativo?: boolean;
       corpo?: string;
+      harness?: string;
+      harness_fallback?: string[];
+      rotation?: string[];
+      model_fallback?: string[];
     },
   ): Promise<Agente> {
     const carregado = await this.carregar(wsPath, id);
@@ -212,6 +216,10 @@ export class AgentStore {
       permissions: mudancas.permissions ?? carregado.frontmatter.permissions,
       tools: mudancas.tools && mudancas.tools.length ? mudancas.tools : carregado.frontmatter.tools,
       ativo: mudancas.ativo ?? carregado.frontmatter.ativo,
+      harness: mudancas.harness !== undefined ? (mudancas.harness || undefined) : carregado.frontmatter.harness,
+      harness_fallback: mudancas.harness_fallback !== undefined ? mudancas.harness_fallback : carregado.frontmatter.harness_fallback,
+      rotation: mudancas.rotation !== undefined ? mudancas.rotation : carregado.frontmatter.rotation,
+      model_fallback: mudancas.model_fallback !== undefined ? mudancas.model_fallback : carregado.frontmatter.model_fallback,
       budget: {
         ...carregado.frontmatter.budget,
         daily_usd: mudancas.budget_daily_usd ?? carregado.frontmatter.budget.daily_usd,
