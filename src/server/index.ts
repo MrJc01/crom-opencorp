@@ -34,7 +34,7 @@ import { FlowError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc } from "../core/opencode-server.js";
 import { taskCreateSchema } from "../schemas/task.js";
-import { tipoDeNomeApp, validarPerfilApp } from "../schemas/app-perfil.js";
+import { SecretsStore, type SecretOrigem } from "../core/secrets-store.js";
 import { completarChatDirect, testarModeloDirect, listarProvedoresStatus } from "../core/llm-client.js";
 
 const require = createRequire(import.meta.url);
@@ -603,6 +603,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   const budget = new BudgetManager(base);
   const approvals = new ApprovalsStore();
   const settings = new SettingsStore(base);
+  const secretsStore = new SecretsStore(opcoes.homeDir ?? opencorpHome());
   const flows = new FlowStore({ ...base, sessoes: opcoes.sessoes as unknown as SessaoFlow | undefined });
   const meetings = new MeetingManager({ ...base, sessoes: opcoes.sessoes as never });
   const tasks = new TaskStore();
@@ -1651,62 +1652,79 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
-        // ── secrets (NUNCA retornam valores — só nomes/máscara/tipo de app) ────
-        const secretsPath = join(opcoes.homeDir ?? opencorpHome(), ".opencorp", "secrets.json");
+        // ── secrets (NUNCA retornam valores — só nomes/máscara/tipo de app/origem) ────
         if (rota === "/secrets" && req.method === "GET") {
-          let nomes: string[] = [];
+          let wsPath: string | undefined;
           try {
-            const bruto = JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, unknown>;
-            nomes = Object.keys(bruto).sort();
+            const ws = await resolverWs(url);
+            wsPath = ws?.path;
           } catch {}
-          enviar(res, 200, nomes.map((nome) => ({ nome, definido: true, tipo_app: tipoDeNomeApp(nome) })));
+          const escopo = url.searchParams.get("escopo") as SecretOrigem | null;
+          const itens = (escopo === "workspace" || escopo === "global")
+            ? secretsStore.listarEscopo(escopo, wsPath)
+            : secretsStore.listarMerge(wsPath);
+          enviar(res, 200, itens);
           return;
         }
         if (rota === "/secrets" && req.method === "POST") {
-          const corpo = (await lerCorpo(req)) as { nome?: string; valor?: string };
+          const corpo = (await lerCorpo(req)) as { nome?: string; valor?: string; escopo?: SecretOrigem };
           if (!corpo.nome || typeof corpo.valor !== "string") {
             enviar(res, 400, { erro: "nome e valor obrigatórios" });
             return;
           }
-          const erroPerfil = validarPerfilApp(corpo.nome, corpo.valor);
+          let wsPath: string | undefined;
+          try {
+            const ws = await resolverWs(url);
+            wsPath = ws?.path;
+          } catch {}
+          const escopo: SecretOrigem = (corpo.escopo === "workspace" || corpo.escopo === "global")
+            ? corpo.escopo
+            : ((url.searchParams.get("escopo") as SecretOrigem) || (wsPath ? "workspace" : "global"));
+          const erroPerfil = await secretsStore.definir(corpo.nome, corpo.valor, escopo, wsPath);
           if (erroPerfil) {
             enviar(res, 422, { erro: erroPerfil });
             return;
           }
-          let atual: Record<string, unknown> = {};
-          try { atual = JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, unknown>; } catch {}
-          atual[corpo.nome] = corpo.valor;
-          await writeFileAtomic(secretsPath, `${JSON.stringify(atual, null, 2)}\n`, { mode: 0o600 });
-          enviar(res, 201, { ok: true, nome: corpo.nome });
+          enviar(res, 201, { ok: true, nome: corpo.nome, escopo });
           return;
         }
         const mSecret = /^\/secrets\/([^/]+)$/.exec(rota);
         if (mSecret && req.method === "PUT") {
-          const corpo = (await lerCorpo(req)) as { valor?: string };
+          const corpo = (await lerCorpo(req)) as { valor?: string; escopo?: SecretOrigem };
           if (typeof corpo.valor !== "string" || corpo.valor.length === 0) {
             enviar(res, 400, { erro: "valor obrigatório" });
             return;
           }
           const nomeSecret = decodeURIComponent(mSecret[1]!);
-          // Perfis de app (app:<tipo>:<id>): valor DEVE ser JSON válido contra o schema do tipo
-          const erroPerfil = validarPerfilApp(nomeSecret, corpo.valor);
+          let wsPath: string | undefined;
+          try {
+            const ws = await resolverWs(url);
+            wsPath = ws?.path;
+          } catch {}
+          const escopo: SecretOrigem = (corpo.escopo === "workspace" || corpo.escopo === "global")
+            ? corpo.escopo
+            : ((url.searchParams.get("escopo") as SecretOrigem) || (wsPath ? "workspace" : "global"));
+          const erroPerfil = await secretsStore.definir(nomeSecret, corpo.valor, escopo, wsPath);
           if (erroPerfil) {
             enviar(res, 422, { erro: erroPerfil });
             return;
           }
-          let atual: Record<string, unknown> = {};
-          try { atual = JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, unknown>; } catch {}
-          atual[nomeSecret] = corpo.valor;
-          await writeFileAtomic(secretsPath, `${JSON.stringify(atual, null, 2)}\n`, { mode: 0o600 });
-          enviar(res, 200, { ok: true });
+          enviar(res, 200, { ok: true, escopo });
           return;
         }
         if (mSecret && req.method === "DELETE") {
-          let atual: Record<string, unknown> = {};
-          try { atual = JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, unknown>; } catch {}
-          delete atual[decodeURIComponent(mSecret[1]!)];
-          await writeFileAtomic(secretsPath, `${JSON.stringify(atual, null, 2)}\n`, { mode: 0o600 });
-          enviar(res, 200, { ok: true });
+          const nomeSecret = decodeURIComponent(mSecret[1]!);
+          let wsPath: string | undefined;
+          try {
+            const ws = await resolverWs(url);
+            wsPath = ws?.path;
+          } catch {}
+          const escopoQuery = url.searchParams.get("escopo") as SecretOrigem | null;
+          const escopo: SecretOrigem = (escopoQuery === "workspace" || escopoQuery === "global")
+            ? escopoQuery
+            : (wsPath ? "workspace" : "global");
+          await secretsStore.remover(nomeSecret, escopo, wsPath);
+          enviar(res, 200, { ok: true, escopo });
           return;
         }
 

@@ -23,7 +23,7 @@ import {
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
-import { fetchApi } from "../lib/context";
+import { fetchApi, wsAtivo } from "../lib/context";
 
 export interface SecretTemplate {
   id: "wordpress" | "vps" | "github" | "llm" | "mercadopago" | "custom";
@@ -368,6 +368,8 @@ export const AppsView: Component = () => {
   const [valoresForm, setValoresForm] = createSignal<Record<string, string>>({});
   const [salvando, setSalvando] = createSignal(false);
   const [mostrarSenha, setMostrarSenha] = createSignal<Record<string, boolean>>({});
+  const [filtroEscopo, setFiltroEscopo] = createSignal<"todos" | "workspace" | "global">("todos");
+  const [escopoSalvar, setEscopoSalvar] = createSignal<"workspace" | "global">("workspace");
 
   // Modal de Detalhes / Regras de Uso de Segredo Existente
   const [detalhesSecret, setDetalhesSecret] = createSignal<any | null>(null);
@@ -375,6 +377,13 @@ export const AppsView: Component = () => {
   const templateAtual = createMemo(
     () => TEMPLATES_SECRETS.find((t) => t.id === templateSelecionadoId()) || TEMPLATES_SECRETS[0],
   );
+
+  const secretsFiltrados = createMemo(() => {
+    const f = filtroEscopo();
+    const lista = secrets();
+    if (f === "todos") return lista;
+    return lista.filter((s: any) => (s.origem || "global") === f);
+  });
 
   const mudarTemplate = (id: string) => {
     setTemplateSelecionadoId(id);
@@ -486,11 +495,11 @@ export const AppsView: Component = () => {
     try {
       await fetchApi(`/secrets/${encodeURIComponent(nome)}`, {
         method: "PUT",
-        body: JSON.stringify({ valor: valorFinal }),
+        body: JSON.stringify({ valor: valorFinal, escopo: escopoSalvar() }),
       });
 
       setModalNovo(false);
-      showToast(`Segredo "${nome}" salvo com sucesso!`, "sucesso");
+      showToast(`Segredo "${nome}" salvo com sucesso (${escopoSalvar() === "workspace" ? "Workspace" : "Global"})!`, "sucesso");
       void carregarSecrets();
     } catch (err: any) {
       showToast(`Erro ao salvar: ${err.message}`, "erro");
@@ -499,12 +508,14 @@ export const AppsView: Component = () => {
     }
   };
 
-  const excluirSecret = async (nome: string) => {
-    if (!confirm(`Tem certeza que deseja remover o segredo "${nome}"? Esta ação é irreversível.`)) {
+  const excluirSecret = async (nome: string, origem?: string) => {
+    const escopoDesc = origem === "workspace" ? "do workspace" : "global";
+    if (!confirm(`Tem certeza que deseja remover o segredo "${nome}" (${escopoDesc})? Esta ação é irreversível.`)) {
       return;
     }
     try {
-      await fetchApi(`/secrets/${encodeURIComponent(nome)}`, { method: "DELETE" });
+      const query = origem ? `?escopo=${origem}` : "";
+      await fetchApi(`/secrets/${encodeURIComponent(nome)}${query}`, { method: "DELETE" });
       setSecrets((prev) =>
         prev.filter((s) => (typeof s === "string" ? s !== nome : s.nome !== nome)),
       );
@@ -614,19 +625,62 @@ export const AppsView: Component = () => {
 
         {/* Tabela de Segredos Armazenados */}
         <div>
-          <div class="flex items-center justify-between mb-3">
-            <h2 class="text-xs font-bold uppercase tracking-wider text-zinc-400 font-mono">
-              Credenciais & Variáveis Armazenadas ({secrets().length})
-            </h2>
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+            <div class="flex items-center gap-2">
+              <h2 class="text-xs font-bold uppercase tracking-wider text-zinc-400 font-mono">
+                Credenciais & Variáveis ({secretsFiltrados().length})
+              </h2>
+              <Show when={wsAtivo()}>
+                <span class="text-[10px] text-zinc-500 font-mono bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
+                  ws: {wsAtivo()}
+                </span>
+              </Show>
+            </div>
+            {/* Filtros de Escopo */}
+            <div class="flex items-center gap-1 bg-zinc-900/80 p-1 rounded-lg border border-zinc-800 text-xs">
+              <button
+                type="button"
+                onClick={() => setFiltroEscopo("todos")}
+                class={`px-2.5 py-1 rounded text-[11px] font-medium transition-all cursor-pointer ${
+                  filtroEscopo() === "todos"
+                    ? "bg-zinc-800 text-zinc-100 font-semibold shadow-xs"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                Todos (Merge)
+              </button>
+              <button
+                type="button"
+                onClick={() => setFiltroEscopo("workspace")}
+                class={`px-2.5 py-1 rounded text-[11px] font-medium transition-all flex items-center gap-1 cursor-pointer ${
+                  filtroEscopo() === "workspace"
+                    ? "bg-amber-950/60 text-amber-300 border border-amber-800/60 font-semibold shadow-xs"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <span>🔒 Workspace</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFiltroEscopo("global")}
+                class={`px-2.5 py-1 rounded text-[11px] font-medium transition-all flex items-center gap-1 cursor-pointer ${
+                  filtroEscopo() === "global"
+                    ? "bg-blue-950/60 text-blue-300 border border-blue-800/60 font-semibold shadow-xs"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <span>🌐 Global</span>
+              </button>
+            </div>
           </div>
 
           <div class="rounded-xl border border-zinc-800 bg-zinc-900/40 overflow-hidden shadow-xs">
             <For
-              each={secrets()}
+              each={secretsFiltrados()}
               fallback={
                 <div class="p-10 text-center text-xs text-zinc-500 space-y-2">
                   <Lock size={20} class="mx-auto text-zinc-600 mb-1" />
-                  <p>Nenhuma credencial ou segredo cadastrado ainda.</p>
+                  <p>Nenhuma credencial ou segredo cadastrado para este filtro.</p>
                   <Button size="xs" variant="secondary" onClick={() => abrirModalNovo()}>
                     Adicionar Primeiro Segredo
                   </Button>
@@ -637,6 +691,7 @@ export const AppsView: Component = () => {
                 const nome = typeof s === "string" ? s : s.nome || s.name;
                 const tmpl = identificarTipoNome(nome);
                 const Icone = tmpl.icone;
+                const origem = typeof s === "object" && s.origem ? s.origem : "global";
 
                 return (
                   <div class="p-4 border-b border-zinc-800/60 last:border-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-zinc-900/60 transition-colors">
@@ -652,6 +707,15 @@ export const AppsView: Component = () => {
                           <span class="text-[10px] font-mono px-2 py-0.2 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/60">
                             {tmpl.rotulo}
                           </span>
+                          <span
+                            class={`text-[10px] font-mono px-2 py-0.2 rounded border ${
+                              origem === "workspace"
+                                ? "bg-amber-950/40 text-amber-300 border-amber-800/60"
+                                : "bg-blue-950/40 text-blue-300 border-blue-800/60"
+                            }`}
+                          >
+                            {origem === "workspace" ? "🔒 Workspace" : "🌐 Global"}
+                          </span>
                         </div>
                         <div class="font-mono text-[10px] text-zinc-500 mt-0.5 flex items-center gap-1.5">
                           <span>••••••••••••••••••••</span>
@@ -665,7 +729,7 @@ export const AppsView: Component = () => {
                       <Button
                         size="xs"
                         variant="ghost"
-                        onClick={() => setDetalhesSecret({ nome, tmpl })}
+                        onClick={() => setDetalhesSecret({ nome, tmpl, origem })}
                         title="Ver regras de uso e permissões desta credencial"
                       >
                         <Info size={13} class="mr-1 text-blue-400" /> Regras de Uso
@@ -674,7 +738,7 @@ export const AppsView: Component = () => {
                         size="xs"
                         variant="ghost"
                         class="text-zinc-500 hover:text-rose-400"
-                        onClick={() => excluirSecret(nome)}
+                        onClick={() => excluirSecret(nome, origem)}
                         title="Excluir segredo permanentemente"
                       >
                         <Trash2 size={13} />
@@ -779,6 +843,53 @@ export const AppsView: Component = () => {
 
               {/* Formulário dos Campos do Template */}
               <div class="space-y-3 pt-1">
+                {/* Seletor de Escopo de Armazenamento */}
+                <div class="p-3 rounded-xl bg-zinc-950/70 border border-zinc-800/80 space-y-2">
+                  <div class="flex items-center justify-between">
+                    <label class="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <Lock size={13} class="text-emerald-400" />
+                      <span>Onde Armazenar este Segredo:</span>
+                    </label>
+                    <span class="text-[10px] text-zinc-500">
+                      Isolamento por workspace ou compartilhado
+                    </span>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEscopoSalvar("workspace")}
+                      class={`p-2.5 rounded-lg border text-left flex flex-col gap-0.5 transition-all cursor-pointer ${
+                        escopoSalvar() === "workspace"
+                          ? "bg-amber-950/30 border-amber-600/60 text-amber-200 ring-1 ring-amber-500/40"
+                          : "bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                      }`}
+                    >
+                      <span class="text-xs font-bold flex items-center gap-1">
+                        🔒 Workspace Atual
+                      </span>
+                      <span class="text-[10px] opacity-80 leading-tight">
+                        {wsAtivo() ? `Isolado em ${wsAtivo()}` : "Isolado no workspace ativo"}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEscopoSalvar("global")}
+                      class={`p-2.5 rounded-lg border text-left flex flex-col gap-0.5 transition-all cursor-pointer ${
+                        escopoSalvar() === "global"
+                          ? "bg-blue-950/30 border-blue-600/60 text-blue-200 ring-1 ring-blue-500/40"
+                          : "bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                      }`}
+                    >
+                      <span class="text-xs font-bold flex items-center gap-1">
+                        🌐 Global (Todos)
+                      </span>
+                      <span class="text-[10px] opacity-80 leading-tight">
+                        Disponível para todos os workspaces
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
                 <div class="font-semibold text-zinc-200 font-mono text-[11px] uppercase tracking-wider">
                   Preenchimento dos Parâmetros:
                 </div>
@@ -877,7 +988,7 @@ export const AppsView: Component = () => {
             {/* Rodapé com Ações */}
             <div class="pt-3 border-t border-zinc-800 flex items-center justify-between flex-shrink-0">
               <span class="text-[11px] text-zinc-500 font-mono">
-                Gravado em ~/.opencorp/secrets.json
+                Gravado (chmod 600) em {escopoSalvar() === "workspace" ? "<workspace>/.opencorp/secrets.json" : "~/.opencorp/secrets.json"}
               </span>
               <div class="flex items-center gap-2">
                 <Button size="sm" variant="secondary" onClick={() => setModalNovo(false)}>
@@ -903,9 +1014,20 @@ export const AppsView: Component = () => {
                   <h2 class="text-sm font-bold text-zinc-100 truncate">
                     {detalhesSecret()!.nome}
                   </h2>
-                  <span class="text-[11px] text-zinc-400 font-mono">
-                    Tipo: {detalhesSecret()!.tmpl.rotulo}
-                  </span>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] text-zinc-400 font-mono">
+                      Tipo: {detalhesSecret()!.tmpl.rotulo}
+                    </span>
+                    <span
+                      class={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${
+                        detalhesSecret()!.origem === "workspace"
+                          ? "bg-amber-950/40 text-amber-300 border-amber-800/60"
+                          : "bg-blue-950/40 text-blue-300 border-blue-800/60"
+                      }`}
+                    >
+                      {detalhesSecret()!.origem === "workspace" ? "🔒 Workspace" : "🌐 Global"}
+                    </span>
+                  </div>
                 </div>
               </div>
               <IconButton size="xs" variant="ghost" onClick={() => setDetalhesSecret(null)}>

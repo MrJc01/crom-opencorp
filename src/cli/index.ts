@@ -35,6 +35,7 @@ import { registerSecretarioCommand } from "./commands/secretario.js";
 import { registerSaudeCommand } from "./commands/saude.js";
 import { registerRelatorioCommand } from "./commands/relatorio.js";
 import { registerLogsCommand } from "./commands/logs.js";
+import { registerSecretsCommand } from "./commands/secrets.js";
 import { notImplementedAction } from "./placeholder.js";
 import { instalarTriggers, pendentesTriggers } from "../core/trigger-runner.js";
 import { instalarMencoes, pendentesMencoes } from "../core/mention-runner.js";
@@ -102,6 +103,7 @@ export function buildProgram(): Command {
   registerSaudeCommand(program);
   registerRelatorioCommand(program);
   registerLogsCommand(program);
+  registerSecretsCommand(program);
 
   registerFlowCommand(program);
 
