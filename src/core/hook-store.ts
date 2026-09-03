@@ -8,15 +8,24 @@ import { eventBus } from "./event-bus.js";
 import type { Gatilho } from "../schemas/gatilho.js";
 
 export type AlvoHook =
-  | { tipo: "task_create"; titulo: string; responsavel?: string }
+  | { tipo: "task_create"; titulo: string; descricao?: string; coluna?: string; prioridade?: string; responsavel?: string }
+  | { tipo: "task_run"; task_id: string; instrucao_adicional?: string }
   | { tipo: "agent_run"; agente: string; ordem: string }
-  | { tipo: "flow_run"; flow: string; entrada: string }
+  | { tipo: "flow_run"; flow: string; entrada?: string }
   | { tipo: "webhook_out"; url: string; metodo?: string; corpo?: string; headers?: Record<string, string> };
+
+export interface HookAuth {
+  tipo: "token" | "hmac_sha256" | "nenhuma";
+  secret?: string;
+}
 
 export interface Hook {
   id: string;
   nome: string;
   token: string;
+  auth?: HookAuth;
+  exige_aprovacao?: boolean;
+  reenvio_urls?: string[];
   metodos: string[];
   respond: "imediato" | "final";
   dedup_seg: number;
@@ -57,18 +66,34 @@ function msg(erro: unknown): string {
 export function substituirTemplate(texto: string, payload: PayloadHook): string {
   const get = (caminho: string): string => {
     if (caminho === "payload") return JSON.stringify(payload.corpo);
-    let no: unknown = payload.corpo;
-    for (const parte of caminho.split(".")) {
+    if (caminho === "query") return JSON.stringify(payload.query);
+
+    let partes = caminho.split(".");
+    let raiz: unknown = payload.corpo;
+
+    if (partes[0] === "payload") {
+      partes = partes.slice(1);
+    } else if (partes[0] === "query") {
+      raiz = payload.query;
+      partes = partes.slice(1);
+    }
+
+    if (partes.length === 0) {
+      return typeof raiz === "object" ? JSON.stringify(raiz) : String(raiz ?? "");
+    }
+
+    let no: unknown = raiz;
+    for (const parte of partes) {
       if (no && typeof no === "object" && parte in (no as Record<string, unknown>)) {
         no = (no as Record<string, unknown>)[parte];
       } else {
-        const q = payload.query[caminho];
+        const q = payload.query[caminho] ?? payload.query[parte];
         return q ?? "";
       }
     }
-    return no === undefined || no === null ? "" : String(no);
+    return no === undefined || no === null ? "" : typeof no === "object" ? JSON.stringify(no) : String(no);
   };
-  return texto.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, caminho: string) => get(caminho));
+  return texto.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_, caminho: string) => get(caminho));
 }
 
 export class HookStore {
@@ -97,6 +122,11 @@ export class HookStore {
           throw new HookError('alvo task_create precisa de --titulo (aceita {{campo}})');
         }
         break;
+      case "task_run":
+        if (!alvo.task_id) {
+          throw new HookError("alvo task_run precisa de --task-id");
+        }
+        break;
       case "agent_run":
         if (!alvo.agente) throw new HookError("alvo agent_run precisa de --agente");
         if (!alvo.ordem) throw new HookError("alvo agent_run precisa de --ordem (aceita {{campo}})");
@@ -115,15 +145,29 @@ export class HookStore {
   async criar(
     wsPath: string,
     workspace: string,
-    dados: { nome: string; alvo: AlvoHook; respond?: "imediato" | "final"; dedup_seg?: number; metodos?: string[] },
+    dados: {
+      nome: string;
+      alvo: AlvoHook;
+      respond?: "imediato" | "final";
+      dedup_seg?: number;
+      metodos?: string[];
+      token?: string;
+      auth?: HookAuth;
+      exige_aprovacao?: boolean;
+      reenvio_urls?: string[];
+    },
   ): Promise<Hook> {
     if (dados.nome.trim().length === 0) throw new HookError('nome obrigatório: hook create --nome "..."');
     this.validarAlvo(dados.alvo);
     mkdirRecursive(this.dir(wsPath));
+    const token = dados.token || `hk_${randomBytes(16).toString("hex")}`;
     const hook: Hook = {
       id: `hook-${randomBytes(4).toString("hex")}`,
       nome: dados.nome.trim(),
-      token: `hk_${randomBytes(16).toString("hex")}`,
+      token,
+      auth: dados.auth ?? { tipo: "token", secret: token },
+      exige_aprovacao: dados.exige_aprovacao ?? false,
+      reenvio_urls: dados.reenvio_urls ?? [],
       metodos: dados.metodos ?? ["POST"],
       respond: dados.respond ?? "imediato",
       dedup_seg: dados.dedup_seg ?? 60,
@@ -184,25 +228,72 @@ export class HookStore {
     this.ultimosHashes.set(chave, { hash, em: agoraMs });
   }
 
+  /** Reenvia automaticamente para outras URLs em cascata se configurado (fan-out / relay) */
+  private dispararReenvios(hook: Hook, payload: PayloadHook): void {
+    if (!hook.reenvio_urls || hook.reenvio_urls.length === 0) return;
+    for (const url of hook.reenvio_urls) {
+      const u = url.trim();
+      if (!u.startsWith("http://") && !u.startsWith("https://")) continue;
+      fetch(u, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-opencorp-hook-id": hook.id },
+        body: JSON.stringify(payload.corpo),
+      }).catch((err) => {
+        console.error(`[hook ${hook.id}] falha ao reenviar para ${u}:`, err instanceof Error ? err.message : err);
+      });
+    }
+  }
+
   /** Executa o alvo do hook. NÃO aplica dedup nem auth — quem chama decide. */
   async executar(wsPath: string, hook: Hook, payload: PayloadHook): Promise<{ exec_id: string | null; resultado: string }> {
     const alvo = hook.alvo;
     if (alvo.tipo === "task_create") {
       const titulo = substituirTemplate(alvo.titulo, payload);
+      const descricao = alvo.descricao ? substituirTemplate(alvo.descricao, payload) : undefined;
       const t = await new TaskStore().criar(wsPath, {
         titulo,
+        descricao,
+        coluna: (alvo as any).coluna ?? "backlog",
+        prioridade: (alvo as any).prioridade ?? "media",
         responsavel: alvo.responsavel ? substituirTemplate(alvo.responsavel, payload) : undefined,
       }, `hook:${hook.id}`);
       eventBus.emit("hook.executado", { hook: hook.id, alvo: alvo.tipo, task: t.id });
       return { exec_id: t.id, resultado: `task ${t.id} criada: ${titulo}` };
     }
+    if (alvo.tipo === "task_run") {
+      const taskStore = new TaskStore();
+      const task = await taskStore.obter(wsPath, alvo.task_id);
+      if (!task) throw new HookError(`task "${alvo.task_id}" não encontrada`);
+      const instrucaoAdicional = alvo.instrucao_adicional
+        ? substituirTemplate(alvo.instrucao_adicional, payload)
+        : "";
+      const ordemFinal = [
+        `Executar task ${task.id}: ${task.titulo}`,
+        task.descricao ? `Descrição:
+${task.descricao}` : null,
+        instrucaoAdicional ? `Instrução do Webhook:
+${instrucaoAdicional}` : null,
+        `Contexto do Gatilho Webhook (${hook.nome}):`,
+        `- Payload: ${JSON.stringify(payload.corpo)}`,
+        `- Query: ${JSON.stringify(payload.query)}`,
+      ].filter(Boolean).join("\n\n");
+
+      const agente = (task.responsavel ?? "executor-padrao").replace(/^agente:/, "");
+      if (!this.executores.agentRun) throw new HookError("execução de agente não disponível neste contexto (use o servidor)");
+      const r = await this.executores.agentRun(agente, ordemFinal, wsPath, {
+        tipo: "webhook",
+        origem: `hook:${hook.id}:task:${task.id}`,
+      });
+      eventBus.emit("hook.executado", { hook: hook.id, alvo: alvo.tipo, task: task.id, exec: r.id });
+      return { exec_id: r.id, resultado: r.captura?.trim() ?? "" };
+    }
     if (alvo.tipo === "agent_run") {
       if (!this.executores.agentRun) throw new HookError("execução de agente não disponível neste contexto (use o servidor)");
       const ordem = substituirTemplate(alvo.ordem, payload);
-      // hook/trigger = ativação por EVENTO (ledger unificado, PLANO-UNIFICACAO)
+      // Gatilho enriquecido com tipo "webhook" e contexto
       const r = await this.executores.agentRun(alvo.agente, ordem, wsPath, {
-        tipo: "evento",
-        origem: hook.id,
+        tipo: "webhook",
+        origem: `hook:${hook.id}`,
       });
       eventBus.emit("hook.executado", { hook: hook.id, alvo: alvo.tipo, exec: r.id });
       return { exec_id: r.id, resultado: r.captura?.trim() ?? "" };
@@ -239,7 +330,7 @@ export class HookStore {
     throw new HookError(`webhook_out falhou após 3 tentativas: ${msg(ultimoErro)}`);
   }
 
-  /** Disparo completo: dedup + execução (auth é responsabilidade da rota pública). */
+  /** Disparo completo: dedup + auth + HITL check + execução + forwarding */
   async disparar(wsPath: string, hook: Hook, payload: PayloadHook): Promise<{ exec_id: string | null; resultado: string }> {
     if (!hook.ativo) {
       const inativo = new HookError(`hook "${hook.id}" está inativo`);
@@ -248,6 +339,51 @@ export class HookStore {
     }
     this.aplicarDedup(wsPath, hook.id, payload, hook.dedup_seg);
     eventBus.emit("hook.disparo", { hook: hook.id, workspace: hook.workspace });
+
+    // Dispara reenvios externos se houver
+    this.dispararReenvios(hook, payload);
+
+    // Trava de Aprovação Humana Obrigatória (HITL)
+    if (hook.exige_aprovacao) {
+      const { ApprovalsStore } = await import("./approvals-store.js");
+      const approvals = new ApprovalsStore();
+
+      let ordemDescricao = "";
+      let agenteAlvo = "executor-padrao";
+      if (hook.alvo.tipo === "agent_run") {
+        ordemDescricao = substituirTemplate(hook.alvo.ordem, payload);
+        agenteAlvo = hook.alvo.agente;
+      } else if (hook.alvo.tipo === "task_run") {
+        ordemDescricao = `Executar task ${hook.alvo.task_id} via webhook com payload: ${JSON.stringify(payload.corpo)}`;
+      } else if (hook.alvo.tipo === "task_create") {
+        ordemDescricao = `Criar task: ${substituirTemplate(hook.alvo.titulo, payload)}`;
+      } else if (hook.alvo.tipo === "flow_run") {
+        ordemDescricao = `Executar fluxo ${hook.alvo.flow} com entrada: ${substituirTemplate(hook.alvo.entrada ?? "", payload)}`;
+        agenteAlvo = "flow";
+      } else {
+        ordemDescricao = `Disparar webhook out para ${hook.alvo.url}`;
+        agenteAlvo = "webhook";
+      }
+
+      const p = await approvals.criar(wsPath, {
+        ordem: ordemDescricao,
+        agente: agenteAlvo,
+        modelo: "padrão",
+        padrao: `hook:${hook.id}`,
+        origem: "pre-voo",
+        motivo_guard: `Gatilho do Webhook "${hook.nome}" (${hook.id}) configurado para exigir aprovação humana prévia`,
+        workspace_id: hook.workspace,
+        workspace_path: wsPath,
+        exec_id: `hook-${hook.id}-${Date.now()}`,
+      });
+      eventBus.emit("hook.aguardando_aprovacao", { hook: hook.id, pendencia_id: p.id });
+
+      return {
+        exec_id: p.id,
+        resultado: `Webhook recebido e retido para aprovação humana (pendência ${p.id}). Aprove em /approvals para executar.`,
+      };
+    }
+
     return this.executar(wsPath, hook, payload);
   }
 }

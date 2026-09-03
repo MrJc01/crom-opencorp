@@ -55,6 +55,18 @@ describe("templates", () => {
     );
     expect(substituirTemplate("vazio {{nao.existe}}", payload)).toBe("vazio ");
   });
+
+  it("substitui {{payload.name}} e {{payload.user.email}} com caminhos aninhados", () => {
+    const payload = {
+      corpo: {
+        name: "Pedro",
+        user: { email: "pedro@empresa.com", role: "admin" },
+      },
+      query: { origem: "webhook_lead" },
+    };
+    const tpl = "Lead: {{payload.name}} ({{payload.user.email}}) - Origem: {{query.origem}}";
+    expect(substituirTemplate(tpl, payload)).toBe("Lead: Pedro (pedro@empresa.com) - Origem: webhook_lead");
+  });
 });
 
 describe("HookStore — CRUD", () => {
@@ -141,6 +153,72 @@ describe("HookStore — execução", () => {
     expect(r.exec_id).toBe("exec-1");
     expect(r.resultado).toBe("feito");
     expect(chamados).toEqual(["analista:analise custos"]);
+  });
+
+  it("task_run executa task existente passando instrução e contexto de gatilho", async () => {
+    const { TaskStore } = await import("../src/core/task-store.js");
+    const taskStore = new TaskStore();
+    const task = await taskStore.criar(wsPath, {
+      titulo: "Limpeza de banco",
+      responsavel: "devops",
+    }, "teste");
+
+    let ordemExecutada = "";
+    let gatilhoExecutado: any = null;
+    const s2 = new HookStore({
+      executores: {
+        agentRun: async (agente, ordem, _p, gatilho) => {
+          ordemExecutada = ordem;
+          gatilhoExecutado = gatilho;
+          return { id: "exec-task-1", captura: "sucesso" };
+        },
+      },
+    });
+
+    const h = await s2.criar(wsPath, "corp-hook", {
+      nome: "hook-task",
+      alvo: {
+        tipo: "task_run",
+        task_id: task.id,
+        instrucao_adicional: "Parâmetro extra: {{payload.param}}",
+      },
+    });
+
+    const r = await s2.executar(wsPath, h, { corpo: { param: "forcar_purge" }, query: {} });
+    expect(r.exec_id).toBe("exec-task-1");
+    expect(ordemExecutada).toContain(`Executar task ${task.id}: Limpeza de banco`);
+    expect(ordemExecutada).toContain("Parâmetro extra: forcar_purge");
+    expect(gatilhoExecutado?.tipo).toBe("webhook");
+    expect(gatilhoExecutado?.origem).toBe(`hook:${h.id}:task:${task.id}`);
+  });
+
+  it("hook com exige_aprovacao cria pendência em ApprovalsStore e não roda direto", async () => {
+    let rodouAgente = false;
+    const s2 = new HookStore({
+      executores: {
+        agentRun: async () => {
+          rodouAgente = true;
+          return { id: "exec-nao-deve-rodar" };
+        },
+      },
+    });
+
+    const h = await s2.criar(wsPath, "corp-hook", {
+      nome: "hook-seguro",
+      alvo: { tipo: "agent_run", agente: "seguranca", ordem: "acao critica: {{payload.alvo}}" },
+      exige_aprovacao: true,
+    });
+
+    const r = await s2.disparar(wsPath, h, { corpo: { alvo: "servidor-1" }, query: {} });
+    expect(rodouAgente).toBe(false);
+    expect(r.resultado).toContain("aprovação humana");
+
+    const { ApprovalsStore } = await import("../src/core/approvals-store.js");
+    const approvals = new ApprovalsStore();
+    const pendentes = await approvals.pendentes(wsPath);
+    expect(pendentes.length).toBeGreaterThan(0);
+    expect(pendentes[0].ordem).toContain("servidor-1");
+    expect(pendentes[0].agente).toBe("seguranca");
   });
 });
 
