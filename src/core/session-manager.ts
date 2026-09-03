@@ -606,7 +606,7 @@ export class SessionManager {
     if (opcoes.title) args.push("--title", opcoes.title);
     args.push(ordem);
 
-    let runnerBin = "opencode";
+    let runnerBin = harnessEscolhido === "opencode" ? "opencode" : harnessEscolhido;
     try {
       const rPath = join(this.homeDir, ".opencorp", "runner.json");
       if (existsSync(rPath)) {
