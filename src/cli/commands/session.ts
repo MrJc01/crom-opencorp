@@ -43,11 +43,16 @@ export function registerSessionCommand(program: Command): void {
   session
     .command("list")
     .option("--agent <id>", "filtra por agente")
+    .option("--json", "saída em formato JSON")
     .description("lista as execuções registradas (registries/execucoes)")
-    .action((opts: { agent?: string; workspace?: string }) =>
+    .action((opts: { agent?: string; json?: boolean; workspace?: string }) =>
       comErros(async () => {
         const ws = await workspaceAlvo(opts);
         const registros = await sessoes.listarExecucoes(ws.path, { agente: opts.agent });
+        if (opts.json) {
+          console.log(JSON.stringify(registros, null, 2));
+          return;
+        }
         if (registros.length === 0) {
           console.log(`nenhuma sessão registrada (workspace: "${ws.id}")`);
           return;

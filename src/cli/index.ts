@@ -33,6 +33,7 @@ import { registerContextCommand } from "./commands/context.js";
 import { registerHistoricoCommand } from "./commands/historico.js";
 import { registerSecretarioCommand } from "./commands/secretario.js";
 import { registerSaudeCommand } from "./commands/saude.js";
+import { registerRelatorioCommand } from "./commands/relatorio.js";
 import { notImplementedAction } from "./placeholder.js";
 import { instalarTriggers, pendentesTriggers } from "../core/trigger-runner.js";
 import { instalarMencoes, pendentesMencoes } from "../core/mention-runner.js";
@@ -98,6 +99,7 @@ export function buildProgram(): Command {
   registerHistoricoCommand(program);
   registerSecretarioCommand(program);
   registerSaudeCommand(program);
+  registerRelatorioCommand(program);
 
   registerFlowCommand(program);
 

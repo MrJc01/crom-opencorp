@@ -39,13 +39,32 @@ function resolverWorkspace() {
     return process.env.OPENCORP_WORKSPACE.trim();
   }
 
-  // 2. Busca recursiva ascendente a partir do diretório atual procurando .opencorp
+  const homeGlobal = process.env.OPENCORP_HOME || join(process.env.HOME || "", ".opencorp");
+  const wsJson = join(homeGlobal, "workspaces.json");
+  let workspacesValidos = new Set();
+  let ativoGlobal = null;
+
+  if (existsSync(wsJson)) {
+    try {
+      const dados = JSON.parse(readFileSync(wsJson, "utf8"));
+      if (Array.isArray(dados.workspaces)) {
+        workspacesValidos = new Set(dados.workspaces.map((w) => w.id));
+      }
+      if (dados.ativo && typeof dados.ativo === "string") {
+        ativoGlobal = dados.ativo;
+      }
+    } catch {}
+  }
+
+  // 2. Busca recursiva ascendente a partir do diretório atual procurando workspace
   try {
     let dir = process.cwd();
     while (dir && dir !== "/") {
-      if (existsSync(join(dir, ".opencorp"))) {
+      const pontoOpencorp = join(dir, ".opencorp");
+      // Ignora ~/.opencorp global (onde moram workspaces, secrets, logs gerais)
+      if (existsSync(pontoOpencorp) && pontoOpencorp !== homeGlobal && dir !== process.env.HOME) {
         const candidatoId = dir.split("/").pop();
-        if (candidatoId && candidatoId !== ".opencorp") {
+        if (candidatoId && candidatoId !== ".opencorp" && workspacesValidos.has(candidatoId)) {
           return candidatoId;
         }
       }
@@ -54,6 +73,12 @@ function resolverWorkspace() {
       dir = pai;
     }
   } catch {}
+
+  // 3. Fallback: workspace globalmente ativo em ~/.opencorp/workspaces.json
+  if (ativoGlobal) {
+    return ativoGlobal;
+  }
+
   return null;
 }
 

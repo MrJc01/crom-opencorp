@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdirRecursive } from "../utils/fs-safe.js";
+import { mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { TaskError } from "./errors.js";
 import { eventBus } from "./event-bus.js";
@@ -115,7 +115,7 @@ export class TaskStore {
     const existente = this.dbs.get(wsPath);
     if (existente) return existente;
     const caminho = join(wsPath, ".opencorp", "tasks.db");
-    mkdirRecursive(dirname(caminho));
+    mkdirSync(dirname(caminho), { recursive: true });
     const db = new Database(caminho);
     db.pragma("journal_mode = WAL");
     db.exec(`

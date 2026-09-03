@@ -90,8 +90,9 @@ export function registerAgentCommand(program: Command): void {
   agent
     .command("list")
     .option("--categoria <categoria>", "ceo | secretario | operario | custom")
+    .option("--json", "saída em formato JSON")
     .description("lista os agentes do workspace ativo")
-    .action((opts: { categoria?: string; workspace?: string }) =>
+    .action((opts: { categoria?: string; json?: boolean; workspace?: string }) =>
       comErros(async () => {
         const ws = await workspaceAlvoId(opts);
         const agentes = [...(await store.listar(ws.path))];
@@ -116,6 +117,10 @@ export function registerAgentCommand(program: Command): void {
         const filtrados = opts.categoria
           ? agentes.filter((a) => a.category === opts.categoria)
           : agentes;
+        if (opts.json) {
+          console.log(JSON.stringify(filtrados, null, 2));
+          return;
+        }
         if (filtrados.length === 0) {
           console.log(`nenhum agente em ${store.dirAgentes(ws.path)} (workspace: "${ws.id}")`);
           return;
@@ -137,8 +142,9 @@ export function registerAgentCommand(program: Command): void {
   agent
     .command("show")
     .argument("<id>", "id do agente")
+    .option("--json", "saída em formato JSON")
     .description("mostra a definição completa do agente")
-    .action((id: string, opts: { workspace?: string }) =>
+    .action((id: string, opts: { json?: boolean; workspace?: string }) =>
       comErros(async () => {
         const ws = await workspaceAlvoId(opts);
         let carregado;
@@ -150,6 +156,10 @@ export function registerAgentCommand(program: Command): void {
           carregado = await store.carregar(ws.path, id);
         }
         const r = carregado;
+        if (opts.json) {
+          console.log(JSON.stringify({ ...r.frontmatter, corpo: r.corpo, path: r.path }, null, 2));
+          return;
+        }
         console.log(`arquivo:      ${r.path}`);
         console.log(`id:           ${r.frontmatter.id}`);
         console.log(`role:         ${r.frontmatter.role}`);

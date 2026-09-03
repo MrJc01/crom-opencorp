@@ -301,11 +301,16 @@ export function registerTaskCommand(program: Command): void {
     .command("list")
     .option("--coluna <coluna>", "filtra por coluna")
     .option("--responsavel <quem>", "filtra por responsável")
+    .option("--json", "saída em formato JSON")
     .description("lista as tasks do quadro")
-    .action((opts: { coluna?: string; responsavel?: string; workspace?: string }) =>
+    .action((opts: { coluna?: string; responsavel?: string; json?: boolean; workspace?: string }) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(opts));
         const lista = await store.listar(ws.path, { coluna: opts.coluna, responsavel: opts.responsavel });
+        if (opts.json) {
+          console.log(JSON.stringify(lista, null, 2));
+          return;
+        }
         if (lista.length === 0) {
           console.log('quadro vazio — crie com: opencorp task create --titulo "..."');
           return;
@@ -317,11 +322,17 @@ export function registerTaskCommand(program: Command): void {
   task
     .command("show")
     .argument("<id>", "id da task")
+    .option("--json", "saída em formato JSON")
     .description("mostra detalhes da task e o chat")
-    .action((id: string, opts: { workspace?: string }) =>
+    .action((id: string, opts: { json?: boolean; workspace?: string }) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(opts));
         const t = await store.obter(ws.path, id);
+        const msgs = await store.chat(ws.path, id);
+        if (opts.json) {
+          console.log(JSON.stringify({ ...t, chat: msgs }, null, 2));
+          return;
+        }
         console.log(`${t.titulo} (${t.id})`);
         console.log(`coluna=${t.coluna} prioridade=${t.prioridade} responsavel=${t.responsavel || "-"}`);
         if (t.labels.length > 0) console.log(`labels: ${t.labels.join(", ")}`);
@@ -330,7 +341,6 @@ export function registerTaskCommand(program: Command): void {
         if (t.lock_por) console.log(`lock: ${t.lock_por} até ${t.lock_expira}`);
         console.log(`criada por ${t.criado_por} em ${t.criado_em}`);
         if (t.descricao) console.log(`\n${t.descricao}`);
-        const msgs = await store.chat(ws.path, id);
         if (msgs.length > 0) {
           console.log(`\n── chat (${msgs.length}) ──`);
           for (const m of msgs) {

@@ -159,7 +159,7 @@ export class HookStore {
   ): Promise<Hook> {
     if (dados.nome.trim().length === 0) throw new HookError('nome obrigatório: hook create --nome "..."');
     this.validarAlvo(dados.alvo);
-    mkdirRecursive(this.dir(wsPath));
+    await mkdirRecursive(this.dir(wsPath));
     const token = dados.token || `hk_${randomBytes(16).toString("hex")}`;
     const hook: Hook = {
       id: `hook-${randomBytes(4).toString("hex")}`,

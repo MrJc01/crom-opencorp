@@ -181,7 +181,7 @@ export class RegistryStore {
     if (opts.tipo) meta.extras = { ...(meta.extras ?? {}), tipo: opts.tipo };
     if (opts.extras) meta.extras = opts.extras;
 
-    mkdirRecursive(dir);
+    await mkdirRecursive(dir);
     await writeFileAtomic(join(dir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`);
     await this.anexarEvento(wsPath, opts.categoria, opts.id, {
       ts: agora,
@@ -237,7 +237,7 @@ export class RegistryStore {
     evento: EventoJournal,
   ): Promise<void> {
     const dir = this.registroDir(wsPath, categoria, id);
-    mkdirRecursive(dir);
+    await mkdirRecursive(dir);
     await appendFile(join(dir, "journal.jsonl"), `${JSON.stringify(evento)}\n`, "utf8");
     this.db(wsPath).inserirEvento({
       registro_id: id,
@@ -458,7 +458,7 @@ export class RegistryStore {
 
   async appendConteudo(wsPath: string, categoria: string, id: string, texto: string): Promise<void> {
     const dir = this.registroDir(wsPath, categoria, id);
-    mkdirRecursive(dir);
+    await mkdirRecursive(dir);
     await appendFile(join(dir, "conteudo.md"), texto, "utf8");
     const meta = await this.lerMeta(wsPath, categoria, id);
     this.db(wsPath).upsertRegistro({
