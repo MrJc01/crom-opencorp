@@ -116,7 +116,7 @@ export const SecretarioView: Component = () => {
 
         const ult = msgs[msgs.length - 1];
         // Hash leve: só comprimentos + flag de conclusão para evitar comparações pesadas
-        const hash = msgs.length + ":" + (ult?.content?.length ?? 0) + ":" + (ult?.pensamento?.length ?? 0) + ":" + (ult?.acoes?.length ?? 0) + ":" + ult?.concluida;
+        const hash = msgs.length + ":" + (ult?.content?.length ?? 0) + ":" + (ult?.pensamento?.length ?? 0) + ":" + (ult?.acoes?.length ?? 0) + ":" + (ult?.passos?.length ?? 0) + ":" + ult?.concluida;
         if (hash !== ultimoHash) {
           ultimoHash = hash;
           tentativasSemMudanca = 0;

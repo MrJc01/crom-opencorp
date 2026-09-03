@@ -2523,6 +2523,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             const mensagens: Array<{
               role: string;
               content: string;
+              passos?: Array<{ tipo: "pensamento" | "acao" | "texto"; texto?: string; ferramenta?: string; resumo?: string; sucesso?: boolean }>;
               pensamento?: string;
               criado_em?: string;
               concluida: boolean;
@@ -2552,6 +2553,40 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   resumo: resumoDeInput(p.state?.input, p.state?.title),
                   sucesso: p.state?.status !== "error",
                 }));
+
+                // Sequência cronológica exata de passos (pensamento -> bash/ação -> texto -> pensamento...)
+                const passos: Array<{ tipo: "pensamento" | "acao" | "texto"; texto?: string; ferramenta?: string; resumo?: string; sucesso?: boolean }> = [];
+                for (const p of parts) {
+                  if (p.type === "reasoning" || p.type === "thinking") {
+                    const txt = (p.text ?? "").trim();
+                    if (txt) {
+                      const ultP = passos[passos.length - 1];
+                      if (ultP && ultP.tipo === "pensamento") {
+                        ultP.texto = `${ultP.texto}\n\n${txt}`;
+                      } else {
+                        passos.push({ tipo: "pensamento", texto: txt });
+                      }
+                    }
+                  } else if (p.type === "tool" && p.tool) {
+                    passos.push({
+                      tipo: "acao",
+                      ferramenta: p.tool,
+                      resumo: resumoDeInput(p.state?.input, p.state?.title),
+                      sucesso: p.state?.status !== "error",
+                    });
+                  } else if (p.type === "text") {
+                    const txt = (p.text ?? "").trim();
+                    if (txt) {
+                      const ultP = passos[passos.length - 1];
+                      if (ultP && ultP.tipo === "texto") {
+                        ultP.texto = `${ultP.texto}\n\n${txt}`;
+                      } else {
+                        passos.push({ tipo: "texto", texto: txt });
+                      }
+                    }
+                  }
+                }
+
                 const agora = Date.now();
                 const criadoEmMs = m.info?.time?.created ?? 0;
                 // Se não tiver time.completed mas foi criada há mais de 90s, considera concluída/expirada
@@ -2562,6 +2597,9 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 // Se a mensagem anterior já é do assistente (mesmo turno com múltiplos passos), consolida nela
                 const ult = mensagens[mensagens.length - 1];
                 if (ult && ult.role === "assistant") {
+                  if (passos.length > 0) {
+                    ult.passos = [...(ult.passos ?? []), ...passos];
+                  }
                   if (pensamento) {
                     ult.pensamento = ult.pensamento ? `${ult.pensamento}\n\n---\n\n${pensamento}` : pensamento;
                   }
@@ -2576,6 +2614,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   mensagens.push({
                     role: "assistant",
                     content: textoFinal,
+                    passos: passos.length > 0 ? passos : undefined,
                     pensamento: pensamento || undefined,
                     criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
                     concluida: isCompleted,

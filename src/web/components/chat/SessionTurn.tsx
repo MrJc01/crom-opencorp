@@ -1,5 +1,5 @@
 import { type Component, createSignal, For, Show } from "solid-js";
-import { Copy, Check, Edit3, ShieldAlert, CheckCircle, XCircle } from "lucide-solid";
+import { Copy, Check, Edit3, ShieldAlert, CheckCircle, XCircle, Terminal } from "lucide-solid";
 import { IconButton } from "../../ui/IconButton";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
@@ -10,9 +10,15 @@ export interface AcaoItem {
   sucesso?: boolean;
 }
 
+export type TurnoPasso =
+  | { tipo: "pensamento"; texto: string }
+  | { tipo: "acao"; ferramenta: string; resumo?: string; sucesso?: boolean }
+  | { tipo: "texto"; texto: string };
+
 export interface ChatMensagem {
   role: "user" | "assistant" | "system";
   content: string;
+  passos?: TurnoPasso[];
   pensamento?: string;
   concluida?: boolean;
   acoes?: AcaoItem[];
@@ -80,44 +86,6 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
         </div>
       </Show>
 
-      {/* Bloco Retrátil de Pensamento (Reasoning do Modelo) */}
-      <Show when={m().pensamento}>
-        <details
-          class="mb-3 rounded-lg bg-zinc-950/70 border border-zinc-800/80 overflow-hidden text-xs"
-          open={m().concluida === false}
-        >
-          <summary class="px-3 py-2 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
-            <span class="flex items-center gap-1.5">
-              <span>💭</span>
-              <span>{m().concluida === false ? "Pensando…" : "Raciocínio Interno"}</span>
-            </span>
-            <Show when={m().concluida === false && props.decorridoFmt}>
-              <span class="font-mono text-[10px] text-zinc-500">{props.decorridoFmt}</span>
-            </Show>
-          </summary>
-          <div class="p-3 text-zinc-400 leading-relaxed font-sans whitespace-pre-wrap border-t border-zinc-800/60 bg-zinc-950/40 max-h-60 overflow-y-auto scrollbar-thin">
-            {m().pensamento}
-          </div>
-        </details>
-      </Show>
-
-      {/* Ações / Ferramentas em Andamento */}
-      <Show when={m().acoes && m().acoes!.length > 0}>
-        <div class="space-y-1 mb-2">
-          <For each={m().acoes}>
-            {(acao) => (
-              <div class="flex items-center gap-2 text-xs text-zinc-400 bg-zinc-900/50 px-2.5 py-1 rounded border border-zinc-800/60 font-mono">
-                <span class={acao.sucesso === false ? "text-rose-400" : "text-emerald-400"}>
-                  {acao.sucesso === false ? "✗" : "✓"}
-                </span>
-                <span class="text-zinc-300 font-semibold">{acao.ferramenta || "ferramenta"}:</span>
-                <span class="text-zinc-400 truncate">{acao.resumo || "executando..."}</span>
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
-
       {/* Alerta de HITL (Human In The Loop) */}
       <Show when={m().hitl}>
         {(h) => (
@@ -158,10 +126,110 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
         </pre>
       </Show>
 
-      {/* Conteúdo Principal da Mensagem */}
-      <Show when={m().content}>
-        <div class="text-sm text-zinc-100 leading-relaxed whitespace-pre-wrap font-sans break-words">
-          {m().content}
+      {/* Exibição em Ordem Cronológica de Passos (Pensamento -> Bash/Ação -> Texto) */}
+      <Show
+        when={m().passos && m().passos!.length > 0}
+        fallback={
+          <>
+            {/* Fallback Legado: Bloco Retrátil de Pensamento */}
+            <Show when={m().pensamento}>
+              <details
+                class="mb-3 rounded-xl bg-zinc-950/70 border border-zinc-800/80 overflow-hidden text-xs"
+                open={m().concluida === false}
+              >
+                <summary class="px-3 py-2 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
+                  <span class="flex items-center gap-1.5">
+                    <span>💭</span>
+                    <span>{m().concluida === false ? "Pensando…" : "Raciocínio Interno"}</span>
+                  </span>
+                  <Show when={m().concluida === false && props.decorridoFmt}>
+                    <span class="font-mono text-[10px] text-zinc-500">{props.decorridoFmt}</span>
+                  </Show>
+                </summary>
+                <div class="p-3 text-zinc-400 leading-relaxed font-sans whitespace-pre-wrap border-t border-zinc-800/60 bg-zinc-950/40 max-h-60 overflow-y-auto scrollbar-thin">
+                  {m().pensamento}
+                </div>
+              </details>
+            </Show>
+
+            {/* Fallback Legado: Ações / Ferramentas em Andamento */}
+            <Show when={m().acoes && m().acoes!.length > 0}>
+              <div class="space-y-1 mb-2">
+                <For each={m().acoes}>
+                  {(acao) => (
+                    <div class="flex items-center gap-2 text-xs text-zinc-400 bg-zinc-900/50 px-2.5 py-1 rounded border border-zinc-800/60 font-mono">
+                      <span class={acao.sucesso === false ? "text-rose-400" : "text-emerald-400"}>
+                        {acao.sucesso === false ? "✗" : "✓"}
+                      </span>
+                      <span class="text-zinc-300 font-semibold">{acao.ferramenta || "ferramenta"}:</span>
+                      <span class="text-zinc-400 truncate">{acao.resumo || "executando..."}</span>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+
+            {/* Fallback Legado: Conteúdo Principal da Mensagem */}
+            <Show when={m().content}>
+              <div class="text-sm text-zinc-100 leading-relaxed whitespace-pre-wrap font-sans break-words">
+                {m().content}
+              </div>
+            </Show>
+          </>
+        }
+      >
+        <div class="space-y-2">
+          <For each={m().passos}>
+            {(passo) => (
+              <>
+                {/* Passo: Pensamento */}
+                <Show when={passo.tipo === "pensamento" && passo.texto}>
+                  <details
+                    class="rounded-xl bg-zinc-950/70 border border-zinc-800/80 overflow-hidden text-xs my-1"
+                    open={m().concluida === false}
+                  >
+                    <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
+                      <span class="flex items-center gap-1.5">
+                        <span>💭</span>
+                        <span>{m().concluida === false ? "Pensando…" : "Raciocínio"}</span>
+                      </span>
+                      <Show when={m().concluida === false && props.decorridoFmt}>
+                        <span class="font-mono text-[10px] text-zinc-500">{props.decorridoFmt}</span>
+                      </Show>
+                    </summary>
+                    <div class="p-3 text-zinc-400 leading-relaxed font-sans whitespace-pre-wrap border-t border-zinc-800/60 bg-zinc-950/40 max-h-60 overflow-y-auto scrollbar-thin">
+                      {passo.texto}
+                    </div>
+                  </details>
+                </Show>
+
+                {/* Passo: Ação / Tool (Bash, Comandos, Leitura) */}
+                <Show when={passo.tipo === "acao"}>
+                  <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-950/85 border border-zinc-800 text-xs font-mono text-zinc-300 my-1">
+                    <Terminal size={13} class="text-amber-400 flex-shrink-0" />
+                    <span class="text-amber-300/90 font-bold">{passo.ferramenta}:</span>
+                    <span class="truncate flex-1 text-zinc-300">{passo.resumo || "executado"}</span>
+                    <span
+                      class={`text-[10px] ml-auto flex-shrink-0 font-bold px-1.5 py-0.2 rounded border ${
+                        passo.sucesso !== false
+                          ? "bg-emerald-950/60 text-emerald-300 border-emerald-800/60"
+                          : "bg-rose-950/60 text-rose-300 border-rose-800/60"
+                      }`}
+                    >
+                      {passo.sucesso !== false ? "✓ ok" : "✗ falhou"}
+                    </span>
+                  </div>
+                </Show>
+
+                {/* Passo: Resposta de Texto */}
+                <Show when={passo.tipo === "texto" && passo.texto}>
+                  <div class="text-sm text-zinc-100 leading-relaxed whitespace-pre-wrap font-sans break-words my-1">
+                    {passo.texto}
+                  </div>
+                </Show>
+              </>
+            )}
+          </For>
         </div>
       </Show>
 

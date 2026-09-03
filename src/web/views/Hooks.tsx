@@ -393,121 +393,81 @@ export const HooksView: Component = () => {
 
               {/* Seletor de Ação */}
               <div>
-                <label class="block text-zinc-400 mb-1 font-medium">Ação a Executar quando o Webhook Chegar *</label>
+                <label class="block text-zinc-300 mb-1.5 font-medium text-xs">Ação a Executar quando o Webhook Chegar *</label>
                 <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setAlvoTipo("agent_run")}
-                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-all min-w-0 overflow-hidden ${
                       alvoTipo() === "agent_run"
                         ? "bg-emerald-950/50 border-emerald-500/80 text-emerald-200 shadow-xs"
                         : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     }`}
                   >
-                    <div class="font-bold text-xs flex items-center gap-1.5">
-                      <Bot size={13} class="text-emerald-400" /> Executar Agente
+                    <div class="font-bold text-xs flex items-center gap-1.5 truncate">
+                      <Bot size={13} class="text-emerald-400 flex-shrink-0" /> Executar Agente
                     </div>
-                    <div class="text-[10px] text-zinc-500 mt-0.5">Dispara prompt / ordem</div>
+                    <div class="text-[10px] text-zinc-500 mt-0.5 truncate">Prompt / instrução</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAlvoTipo("task_run")}
-                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-all min-w-0 overflow-hidden ${
                       alvoTipo() === "task_run"
                         ? "bg-amber-950/50 border-amber-500/80 text-amber-200 shadow-xs"
                         : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     }`}
                   >
-                    <div class="font-bold text-xs flex items-center gap-1.5">
-                      <CheckSquare size={13} class="text-amber-400" /> Rodar Task Existente
+                    <div class="font-bold text-xs flex items-center gap-1.5 truncate">
+                      <CheckSquare size={13} class="text-amber-400 flex-shrink-0" /> Rodar Task
                     </div>
-                    <div class="text-[10px] text-zinc-500 mt-0.5">Executa card do Kanban</div>
+                    <div class="text-[10px] text-zinc-500 mt-0.5 truncate">Card do Kanban</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAlvoTipo("flow_run")}
-                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-all min-w-0 overflow-hidden ${
                       alvoTipo() === "flow_run"
                         ? "bg-indigo-950/50 border-indigo-500/80 text-indigo-200 shadow-xs"
                         : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     }`}
                   >
-                    <div class="font-bold text-xs flex items-center gap-1.5">
-                      <GitBranch size={13} class="text-indigo-400" /> Executar Fluxo
+                    <div class="font-bold text-xs flex items-center gap-1.5 truncate">
+                      <GitBranch size={13} class="text-indigo-400 flex-shrink-0" /> Executar Fluxo
                     </div>
-                    <div class="text-[10px] text-zinc-500 mt-0.5">Dispara orquestração</div>
+                    <div class="text-[10px] text-zinc-500 mt-0.5 truncate">Orquestração</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAlvoTipo("task_create")}
-                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-all min-w-0 overflow-hidden ${
                       alvoTipo() === "task_create"
                         ? "bg-blue-950/50 border-blue-500/80 text-blue-200 shadow-xs"
                         : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     }`}
                   >
-                    <div class="font-bold text-xs flex items-center gap-1.5">
-                      <Layers size={13} class="text-blue-400" /> Criar Nova Task
+                    <div class="font-bold text-xs flex items-center gap-1.5 truncate">
+                      <Layers size={13} class="text-blue-400 flex-shrink-0" /> Criar Task
                     </div>
-                    <div class="text-[10px] text-zinc-500 mt-0.5">Novo card com dados</div>
+                    <div class="text-[10px] text-zinc-500 mt-0.5 truncate">Novo card no board</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAlvoTipo("webhook_out")}
-                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-all min-w-0 overflow-hidden ${
                       alvoTipo() === "webhook_out"
                         ? "bg-purple-950/50 border-purple-500/80 text-purple-200 shadow-xs"
                         : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     }`}
                   >
-                    <div class="font-bold text-xs flex items-center gap-1.5">
-                      <Globe size={13} class="text-purple-400" /> Webhook Relay
+                    <div class="font-bold text-xs flex items-center gap-1.5 truncate">
+                      <Globe size={13} class="text-purple-400 flex-shrink-0" /> Webhook Relay
                     </div>
-                    <div class="text-[10px] text-zinc-500 mt-0.5">Repassar para outra URL</div>
-                  </button>
-                </div>
-              </div>
-
-              {/* Chips de Interpolação Dinâmica */}
-              <div class="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800/80 space-y-1.5">
-                <div class="flex items-center justify-between text-[11px] text-zinc-400">
-                  <span class="font-medium flex items-center gap-1">
-                    <Sparkles size={12} class="text-amber-400" /> Variáveis dinâmicas do payload:
-                  </span>
-                  <span class="text-[10px] text-zinc-500 font-mono">clique para inserir</span>
-                </div>
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => inserirTagNoPrompt("{{payload.name}}")}
-                    class="px-2 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 font-mono text-[10px] transition-colors"
-                  >
-                    + {"{{payload.name}}"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => inserirTagNoPrompt("{{payload.email}}")}
-                    class="px-2 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 font-mono text-[10px] transition-colors"
-                  >
-                    + {"{{payload.email}}"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => inserirTagNoPrompt("{{payload}}")}
-                    class="px-2 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 font-mono text-[10px] transition-colors"
-                  >
-                    + {"{{payload}}"} (JSON completo)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => inserirTagNoPrompt("{{query.id}}")}
-                    class="px-2 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 font-mono text-[10px] transition-colors"
-                  >
-                    + {"{{query.id}}"}
+                    <div class="text-[10px] text-zinc-500 mt-0.5 truncate">Repassar para URL</div>
                   </button>
                 </div>
               </div>
@@ -516,11 +476,11 @@ export const HooksView: Component = () => {
               <Show when={alvoTipo() === "agent_run"}>
                 <div class="space-y-3 p-3.5 bg-zinc-950 rounded-xl border border-zinc-800">
                   <div>
-                    <label class="block text-zinc-400 mb-1 font-medium">Agente Executor *</label>
+                    <label class="block text-zinc-300 mb-1 font-medium">Agente Executor *</label>
                     <select
                       value={agenteSel()}
                       onChange={(e) => setAgenteSel(e.currentTarget.value)}
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 focus:outline-none cursor-pointer font-mono"
+                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 focus:outline-none cursor-pointer font-mono text-xs"
                     >
                       <For each={agentes()}>
                         {(ag) => <option value={ag.id}>@{ag.id} — {ag.papel || ag.nome || "Agente"}</option>}
@@ -529,14 +489,46 @@ export const HooksView: Component = () => {
                   </div>
 
                   <div>
-                    <label class="block text-zinc-400 mb-1 font-medium">Prompt / Ordem Customizada *</label>
+                    <label class="block text-zinc-300 mb-1 font-medium">Prompt / Ordem Customizada *</label>
                     <textarea
                       rows={3}
                       value={ordemTemplate()}
                       onInput={(e) => setOrdemTemplate(e.currentTarget.value)}
                       placeholder="Instrução do agente: use {{payload.name}}..."
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 font-mono text-[11px] resize-none"
+                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 font-mono text-[11px] resize-none focus:outline-none focus:border-zinc-700"
                     />
+                    {/* Toolbar de tags logo abaixo do input */}
+                    <div class="flex items-center gap-1.5 flex-wrap pt-1.5">
+                      <span class="text-[10px] text-zinc-500 font-medium">Inserir tag:</span>
+                      <button
+                        type="button"
+                        onClick={() => inserirTagNoPrompt("{{payload.name}}")}
+                        class="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-[10px] border border-zinc-700 transition-colors"
+                      >
+                        + {"{{payload.name}}"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => inserirTagNoPrompt("{{payload.email}}")}
+                        class="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-[10px] border border-zinc-700 transition-colors"
+                      >
+                        + {"{{payload.email}}"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => inserirTagNoPrompt("{{payload}}")}
+                        class="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-[10px] border border-zinc-700 transition-colors"
+                      >
+                        + {"{{payload}}"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => inserirTagNoPrompt("{{query.id}}")}
+                        class="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-[10px] border border-zinc-700 transition-colors"
+                      >
+                        + {"{{query.id}}"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </Show>
@@ -545,7 +537,7 @@ export const HooksView: Component = () => {
               <Show when={alvoTipo() === "task_run"}>
                 <div class="space-y-3 p-3.5 bg-zinc-950 rounded-xl border border-zinc-800">
                   <div>
-                    <label class="block text-zinc-400 mb-1 font-medium">Selecionar Task Existente *</label>
+                    <label class="block text-zinc-300 mb-1 font-medium">Selecionar Task Existente *</label>
                     <select
                       value={taskSelId()}
                       onChange={(e) => setTaskSelId(e.currentTarget.value)}
@@ -562,14 +554,24 @@ export const HooksView: Component = () => {
                   </div>
 
                   <div>
-                    <label class="block text-zinc-400 mb-1 font-medium">Instrução / Parâmetros Adicionais (Opcional)</label>
+                    <label class="block text-zinc-300 mb-1 font-medium">Instrução / Parâmetros Adicionais (Opcional)</label>
                     <textarea
                       rows={2}
                       value={taskInstrucaoAdicional()}
                       onInput={(e) => setTaskInstrucaoAdicional(e.currentTarget.value)}
                       placeholder="Ex: Execute a task com este parâmetro: {{payload.parametro}}"
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 font-mono text-[11px] resize-none"
+                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 font-mono text-[11px] resize-none focus:outline-none focus:border-zinc-700"
                     />
+                    <div class="flex items-center gap-1.5 flex-wrap pt-1.5">
+                      <span class="text-[10px] text-zinc-500 font-medium">Inserir tag:</span>
+                      <button
+                        type="button"
+                        onClick={() => inserirTagNoPrompt("{{payload}}")}
+                        class="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-[10px] border border-zinc-700 transition-colors"
+                      >
+                        + {"{{payload}}"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </Show>
@@ -578,33 +580,33 @@ export const HooksView: Component = () => {
               <Show when={alvoTipo() === "task_create"}>
                 <div class="space-y-3 p-3.5 bg-zinc-950 rounded-xl border border-zinc-800">
                   <div>
-                    <label class="block text-zinc-400 mb-1 font-medium">Título da Tarefa *</label>
+                    <label class="block text-zinc-300 mb-1 font-medium">Título da Tarefa *</label>
                     <input
                       type="text"
                       value={taskTitulo()}
                       onInput={(e) => setTaskTitulo(e.currentTarget.value)}
                       placeholder="Ex: Novo cliente {{payload.name}}"
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 font-mono"
+                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 font-mono text-xs focus:outline-none focus:border-zinc-700"
                     />
                   </div>
 
                   <div>
-                    <label class="block text-zinc-400 mb-1 font-medium">Descrição da Tarefa</label>
+                    <label class="block text-zinc-300 mb-1 font-medium">Descrição da Tarefa</label>
                     <textarea
                       rows={2}
                       value={taskDescricao()}
                       onInput={(e) => setTaskDescricao(e.currentTarget.value)}
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 font-mono text-[11px] resize-none"
+                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 font-mono text-[11px] resize-none focus:outline-none focus:border-zinc-700"
                     />
                   </div>
 
                   <div class="grid grid-cols-3 gap-2">
                     <div>
-                      <label class="block text-zinc-400 mb-1 font-medium">Coluna</label>
+                      <label class="block text-zinc-300 mb-1 font-medium">Coluna</label>
                       <select
                         value={taskColuna()}
                         onChange={(e) => setTaskColuna(e.currentTarget.value)}
-                        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 cursor-pointer"
+                        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 cursor-pointer text-xs"
                       >
                         <option value="backlog">Backlog</option>
                         <option value="fazendo">Fazendo</option>
@@ -612,11 +614,11 @@ export const HooksView: Component = () => {
                     </div>
 
                     <div>
-                      <label class="block text-zinc-400 mb-1 font-medium">Prioridade</label>
+                      <label class="block text-zinc-300 mb-1 font-medium">Prioridade</label>
                       <select
                         value={taskPrioridade()}
                         onChange={(e) => setTaskPrioridade(e.currentTarget.value)}
-                        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 cursor-pointer"
+                        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 cursor-pointer text-xs"
                       >
                         <option value="baixa">Baixa</option>
                         <option value="media">Média</option>
@@ -625,11 +627,11 @@ export const HooksView: Component = () => {
                     </div>
 
                     <div>
-                      <label class="block text-zinc-400 mb-1 font-medium">Responsável</label>
+                      <label class="block text-zinc-300 mb-1 font-medium">Responsável</label>
                       <select
                         value={agenteSel()}
                         onChange={(e) => setAgenteSel(e.currentTarget.value)}
-                        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 cursor-pointer"
+                        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 cursor-pointer text-xs"
                       >
                         <option value="">Sem responsável</option>
                         <For each={agentes()}>
@@ -645,11 +647,11 @@ export const HooksView: Component = () => {
               <Show when={alvoTipo() === "flow_run"}>
                 <div class="space-y-3 p-3.5 bg-zinc-950 rounded-xl border border-zinc-800">
                   <div>
-                    <label class="block text-zinc-400 mb-1 font-medium">Selecionar Fluxo *</label>
+                    <label class="block text-zinc-300 mb-1 font-medium">Selecionar Fluxo *</label>
                     <select
                       value={flowSel()}
                       onChange={(e) => setFlowSel(e.currentTarget.value)}
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 cursor-pointer font-mono"
+                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 cursor-pointer font-mono text-xs"
                     >
                       <For each={fluxos()}>
                         {(fl) => <option value={fl.id}>{fl.nome || fl.id}</option>}
@@ -658,13 +660,13 @@ export const HooksView: Component = () => {
                   </div>
 
                   <div>
-                    <label class="block text-zinc-400 mb-1 font-medium">Entrada do Fluxo (Payload)</label>
+                    <label class="block text-zinc-300 mb-1 font-medium">Entrada do Fluxo (Payload)</label>
                     <textarea
                       rows={2}
                       value={flowEntrada()}
                       onInput={(e) => setFlowEntrada(e.currentTarget.value)}
                       placeholder="{{payload}}"
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 font-mono text-[11px] resize-none"
+                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 font-mono text-[11px] resize-none focus:outline-none focus:border-zinc-700"
                     />
                   </div>
                 </div>
@@ -674,13 +676,13 @@ export const HooksView: Component = () => {
               <Show when={alvoTipo() === "webhook_out"}>
                 <div class="space-y-3 p-3.5 bg-zinc-950 rounded-xl border border-zinc-800">
                   <div>
-                    <label class="block text-zinc-400 mb-1 font-medium">URL de Destino *</label>
+                    <label class="block text-zinc-300 mb-1 font-medium">URL de Destino *</label>
                     <input
                       type="url"
                       placeholder="https://api.exemplo.com/webhook"
                       value={urlDestino()}
                       onInput={(e) => setUrlDestino(e.currentTarget.value)}
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 font-mono"
+                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 font-mono text-xs focus:outline-none focus:border-zinc-700"
                     />
                   </div>
                 </div>
@@ -691,49 +693,49 @@ export const HooksView: Component = () => {
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-2">
                     <Lock size={14} class="text-blue-400" />
-                    <span class="font-bold text-zinc-200">Autenticação & Hash de Segurança</span>
+                    <span class="font-bold text-zinc-200 text-xs">Autenticação & Hash de Segurança</span>
                   </div>
-                  <span class="text-[10px] text-zinc-500 font-mono">protege contra disparos indevidos</span>
+                  <span class="text-[10px] text-zinc-500 font-mono">proteção contra acessos indevidos</span>
                 </div>
 
-                <div class="grid grid-cols-3 gap-2">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setAuthTipo("token")}
-                    class={`p-2 rounded-lg border text-left cursor-pointer transition-colors ${
+                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-colors min-w-0 overflow-hidden ${
                       authTipo() === "token"
-                        ? "bg-blue-950/40 border-blue-600 text-blue-200"
+                        ? "bg-blue-950/40 border-blue-600 text-blue-200 shadow-xs"
                         : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     }`}
                   >
-                    <div class="font-bold text-xs">Token Bearer</div>
-                    <div class="text-[10px] text-zinc-500 mt-0.5">x-opencorp-token</div>
+                    <div class="font-bold text-xs truncate">Token Bearer</div>
+                    <div class="text-[10px] text-zinc-500 mt-0.5 truncate">Header / Query</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAuthTipo("hmac_sha256")}
-                    class={`p-2 rounded-lg border text-left cursor-pointer transition-colors ${
+                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-colors min-w-0 overflow-hidden ${
                       authTipo() === "hmac_sha256"
-                        ? "bg-purple-950/40 border-purple-600 text-purple-200"
+                        ? "bg-purple-950/40 border-purple-600 text-purple-200 shadow-xs"
                         : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     }`}
                   >
-                    <div class="font-bold text-xs">HMAC SHA-256</div>
-                    <div class="text-[10px] text-zinc-500 mt-0.5">GitHub / Stripe</div>
+                    <div class="font-bold text-xs truncate">HMAC SHA-256</div>
+                    <div class="text-[10px] text-zinc-500 mt-0.5 truncate">Assinatura Hash</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAuthTipo("nenhuma")}
-                    class={`p-2 rounded-lg border text-left cursor-pointer transition-colors ${
+                    class={`p-2.5 rounded-xl border text-left cursor-pointer transition-colors min-w-0 overflow-hidden ${
                       authTipo() === "nenhuma"
-                        ? "bg-amber-950/40 border-amber-600 text-amber-200"
+                        ? "bg-amber-950/40 border-amber-600 text-amber-200 shadow-xs"
                         : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     }`}
                   >
-                    <div class="font-bold text-xs">Aberto (Sem Auth)</div>
-                    <div class="text-[10px] text-zinc-500 mt-0.5">Formulários livres</div>
+                    <div class="font-bold text-xs truncate">Acesso Aberto</div>
+                    <div class="text-[10px] text-zinc-500 mt-0.5 truncate">Sem autenticação</div>
                   </button>
                 </div>
 
