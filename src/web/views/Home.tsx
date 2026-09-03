@@ -1,6 +1,12 @@
 import { type Component, createSignal, onMount, onCleanup, For, Show } from "solid-js";
 import {
   DollarSign,
+  Bot,
+  CheckSquare,
+  MessageSquare,
+  AlertCircle,
+  ExternalLink,
+  PlayCircle,
   CheckCircle2,
   AlertTriangle,
   Cpu,
@@ -72,7 +78,54 @@ export const HomeView: Component = () => {
   const [executandoAgora, setExecutandoAgora] = createSignal<any | null>(null);
   const [aprovacoes, setAprovacoes] = createSignal<any[]>([]);
   const [tasksEmAberto, setTasksEmAberto] = createSignal<any[]>([]);
+  const [todasTasks, setTodasTasks] = createSignal<any[]>([]);
   const [agentes, setAgentes] = createSignal<any[]>([]);
+  const [sessoesSecretario, setSessoesSecretario] = createSignal<any[]>([]);
+  const [fluxos, setFluxos] = createSignal<any[]>([]);
+  const [hooks, setHooks] = createSignal<any[]>([]);
+
+  const abaInicial = () => {
+    try {
+      const p = new URLSearchParams(window.location.search).get("aba");
+      if (p && ["geral", "aovivo", "secretario", "tasks", "falhas", "agendamentos", "fluxos"].includes(p)) {
+        return p as any;
+      }
+    } catch {}
+    return "geral";
+  };
+  const [abaAtiva, setAbaAtivaRaw] = createSignal<"geral" | "aovivo" | "secretario" | "tasks" | "falhas" | "agendamentos" | "fluxos">(abaInicial());
+  const setAbaAtiva = (a: any) => {
+    setAbaAtivaRaw(a);
+    try {
+      const u = new URL(window.location.href);
+      if (a === "geral") u.searchParams.delete("aba");
+      else u.searchParams.set("aba", a);
+      window.history.replaceState({}, "", u.toString());
+    } catch {}
+  };
+
+  const tasksEmAndamento = () => todasTasks().filter((t: any) =>
+    t.coluna === "fazendo" || t.coluna === "em_andamento" || t.coluna === "in_progress"
+  );
+  const execucoesFalhas = () => execucoes().filter((e: any) => e.status === "falhou");
+
+  const repetirExecucao = async (exec: any) => {
+    try {
+      if (exec.gatilho_origem && exec.gatilho_tipo === "cron") {
+        await fetchApi(`/schedules/${encodeURIComponent(exec.gatilho_origem)}/run`, { method: "POST" });
+        showToast(`Job ${exec.gatilho_origem} redisparado com sucesso!`, "sucesso");
+      } else {
+        await fetchApi("/agents/run", {
+          method: "POST",
+          body: JSON.stringify({ agente: exec.agente, ordem: exec.ordem }),
+        });
+        showToast(`Agente @${exec.agente} acionado novamente!`, "sucesso");
+      }
+      void carregarDadosHome();
+    } catch (err: any) {
+      showToast(`Erro ao repetir: ${err.message}`, "erro");
+    }
+  };
 
   // Linha de Comando Inline
   const [comando, setComando] = createSignal("");
@@ -92,7 +145,7 @@ export const HomeView: Component = () => {
 
   const carregarDadosHome = async () => {
     try {
-      const [ledger, tasks, ags, flows, aprovs, budget, status, jobs, rExecs] = await Promise.allSettled([
+      const [ledger, tasks, ags, flows, aprovs, budget, status, jobs, rExecs, sSec, rHooks] = await Promise.allSettled([
         fetchApi<any>("/ledger/resumo"),
         fetchApi<any[]>("/tasks"),
         fetchApi<any[]>("/agents"),
@@ -101,7 +154,9 @@ export const HomeView: Component = () => {
         fetchApi<any>("/budget/status"),
         fetchApi<any>("/status"),
         fetchApi<any[]>("/schedules"),
-        fetchApi<any[]>("/execucoes?limite=15"),
+        fetchApi<any[]>("/execucoes?limite=30"),
+        fetchApi<any[]>("/secretario/sessoes"),
+        fetchApi<any[]>("/hooks"),
       ]);
 
       const getVal = <T>(r: PromiseSettledResult<T>, def: T): T => (r.status === "fulfilled" ? r.value : def);
@@ -116,9 +171,13 @@ export const HomeView: Component = () => {
       const dJobs = getVal(jobs, []);
       const dExecs = getVal(rExecs, []);
 
+      setTodasTasks(dTasks);
       setAgentes(dAgentes);
       setSchedules(dJobs);
       setExecucoes(dExecs);
+      setFluxos(dFlows);
+      setHooks(getVal(rHooks, []));
+      setSessoesSecretario(getVal(sSec, []));
 
       // Identificar se há algum agente executando agora
       const emAndamento = dExecs.find((e: any) => e.status === "executando");
@@ -306,6 +365,104 @@ export const HomeView: Component = () => {
         </div>
       </div>
 
+      {/* Abas da Central de Operações */}
+      <div class="flex items-center gap-1.5 overflow-x-auto pb-2 border-b border-zinc-800/80 text-xs font-medium select-none scrollbar-none">
+        <button
+          type="button"
+          onClick={() => setAbaAtiva("geral")}
+          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
+            abaAtiva() === "geral"
+              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+          }`}
+        >
+          <Activity size={13} class="text-zinc-400" />
+          <span>Visão Geral</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setAbaAtiva("aovivo")}
+          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
+            abaAtiva() === "aovivo"
+              ? "bg-blue-950/70 text-blue-200 font-bold border border-blue-700/70 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+          }`}
+        >
+          <Radio size={13} class={executandoAgora() ? "text-blue-400 animate-pulse" : "text-zinc-400"} />
+          <span>Ao Vivo & Fundo</span>
+          <Show when={executandoAgora()}>
+            <span class="h-2 w-2 rounded-full bg-blue-400 animate-ping" />
+          </Show>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setAbaAtiva("secretario")}
+          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
+            abaAtiva() === "secretario"
+              ? "bg-purple-950/70 text-purple-200 font-bold border border-purple-700/70 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+          }`}
+        >
+          <Bot size={13} class="text-purple-400" />
+          <span>Secretário ({sessoesSecretario().length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setAbaAtiva("tasks")}
+          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
+            abaAtiva() === "tasks"
+              ? "bg-amber-950/70 text-amber-200 font-bold border border-amber-700/70 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+          }`}
+        >
+          <CheckSquare size={13} class="text-amber-400" />
+          <span>Tasks em Andamento ({tasksEmAndamento().length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setAbaAtiva("falhas")}
+          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
+            abaAtiva() === "falhas"
+              ? "bg-rose-950/70 text-rose-200 font-bold border border-rose-700/70 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+          }`}
+        >
+          <AlertTriangle size={13} class={execucoesFalhas().length > 0 ? "text-rose-400" : "text-zinc-400"} />
+          <span>Falhas & Resoluções ({execucoesFalhas().length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setAbaAtiva("agendamentos")}
+          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
+            abaAtiva() === "agendamentos"
+              ? "bg-emerald-950/70 text-emerald-200 font-bold border border-emerald-700/70 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+          }`}
+        >
+          <Timer size={13} class="text-emerald-400" />
+          <span>Agendamentos ({schedules().length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setAbaAtiva("fluxos")}
+          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
+            abaAtiva() === "fluxos"
+              ? "bg-indigo-950/70 text-indigo-200 font-bold border border-indigo-700/70 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+          }`}
+        >
+          <GitBranch size={13} class="text-indigo-400" />
+          <span>Fluxos & Hooks ({fluxos().length + hooks().length})</span>
+        </button>
+      </div>
+
+      <Show when={abaAtiva() === "geral"}>
       {/* CARD 1: EXECUTANDO AGORA (CASO HAJA AGENTE RODANDO) */}
       <Show when={executandoAgora()}>
         {(exec) => (
@@ -771,6 +928,493 @@ export const HomeView: Component = () => {
         </A>
       </div>
 
+      </Show>
+
+      {/* ─────────────────────────────────────────────────────────────
+          ABA 2: AO VIVO & FUNDO (AGENTES EM SEGUNDO PLANO)
+         ───────────────────────────────────────────────────────────── */}
+      <Show when={abaAtiva() === "aovivo"}>
+        <div class="space-y-6">
+          {/* Card em Execução Agora */}
+          <Show
+            when={executandoAgora()}
+            fallback={
+              <div class="p-6 rounded-2xl bg-zinc-900/40 border border-zinc-800 text-center space-y-2">
+                <div class="h-10 w-10 rounded-full bg-zinc-800/80 mx-auto flex items-center justify-center text-zinc-400">
+                  <Bot size={20} />
+                </div>
+                <h3 class="text-sm font-bold text-zinc-200">Nenhum agente executando neste segundo</h3>
+                <p class="text-xs text-zinc-400 max-w-md mx-auto">
+                  O scheduler e os serviços estão em espera ativa. As próximas rondas serão disparadas automaticamente no horário programado.
+                </p>
+              </div>
+            }
+          >
+            {(exec) => (
+              <div class="p-5 rounded-2xl border border-blue-500/50 bg-gradient-to-r from-blue-950/80 via-zinc-900 to-zinc-900 shadow-xl space-y-4">
+                <div class="flex items-center justify-between gap-4 flex-wrap">
+                  <div class="flex items-center gap-3">
+                    <div class="h-10 w-10 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-300">
+                      <Zap size={20} class="animate-pulse" />
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-2">
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/30 text-blue-200 border border-blue-500/50 animate-pulse font-mono">
+                          ● Processo Ativo
+                        </span>
+                        <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-blue-300 border border-zinc-800">
+                          ⏱ {formatarDecorrido(agoraMs() - new Date(exec().inicio).getTime())}
+                        </span>
+                      </div>
+                      <div class="text-base font-bold text-zinc-100 font-mono mt-1">
+                        @{exec().agente}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    <A
+                      href={`/historico?run=${encodeURIComponent(exec().id)}`}
+                      class="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs text-white font-bold transition-all shadow-md flex items-center gap-1.5 font-mono"
+                    >
+                      <ExternalLink size={13} />
+                      <span>Ver Log ao Vivo</span>
+                    </A>
+                  </div>
+                </div>
+
+                <div class="p-3.5 rounded-xl bg-black/60 border border-zinc-800 text-xs font-mono text-zinc-300 space-y-1">
+                  <div class="text-zinc-500 text-[11px]">Ordem / Instrução em execução:</div>
+                  <div class="whitespace-pre-wrap leading-relaxed">{exec().ordem || "(sem ordem detalhada)"}</div>
+                </div>
+              </div>
+            )}
+          </Show>
+
+          {/* Histórico Recente de Execuções de Fundo */}
+          <div class="p-5 rounded-2xl bg-zinc-900/40 border border-zinc-800 space-y-4">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Radio size={16} class="text-blue-400" />
+                <h3 class="text-sm font-bold text-zinc-100 font-mono">Últimas Execuções de Background</h3>
+              </div>
+              <span class="text-xs text-zinc-500 font-mono">{execucoes().length} registros</span>
+            </div>
+
+            <div class="space-y-2">
+              <For each={execucoes()}>
+                {(exec) => {
+                  const statusCor = () => {
+                    if (exec.status === "concluido") return "text-emerald-400 bg-emerald-950/60 border-emerald-800/60";
+                    if (exec.status === "executando") return "text-blue-400 bg-blue-950/60 border-blue-800/60 animate-pulse";
+                    return "text-rose-400 bg-rose-950/60 border-rose-800/60";
+                  };
+
+                  return (
+                    <div class="p-3 rounded-xl bg-zinc-950/70 border border-zinc-800/80 hover:border-zinc-700 transition-colors flex items-center justify-between gap-4">
+                      <div class="flex items-center gap-3 min-w-0">
+                        <span class={`px-2 py-0.5 rounded text-[10px] font-bold font-mono border uppercase flex-shrink-0 ${statusCor()}`}>
+                          {exec.status}
+                        </span>
+                        <div class="min-w-0">
+                          <div class="flex items-center gap-2">
+                            <span class="font-bold text-zinc-100 font-mono text-xs">@{exec.agente}</span>
+                            <span class="text-zinc-500 font-mono text-[10px] truncate max-w-[160px]">{exec.id}</span>
+                          </div>
+                          <p class="text-[11px] text-zinc-400 truncate max-w-lg mt-0.5">
+                            {exec.ordem || "Execução de rotina"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div class="flex items-center gap-2 flex-shrink-0">
+                        <span class="text-[10px] font-mono text-zinc-500">
+                          {exec.duracao_ms ? `${Math.round(exec.duracao_ms / 1000)}s` : "-"}
+                        </span>
+                        <A
+                          href={`/historico?run=${encodeURIComponent(exec.id)}`}
+                          class="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[11px] font-mono transition-colors"
+                        >
+                          Log →
+                        </A>
+                      </div>
+                    </div>
+                  );
+                }}
+              </For>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      {/* ─────────────────────────────────────────────────────────────
+          ABA 3: CONVERSAS COM O SECRETÁRIO
+         ───────────────────────────────────────────────────────────── */}
+      <Show when={abaAtiva() === "secretario"}>
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-sm font-bold text-zinc-100 font-mono flex items-center gap-2">
+                <Bot size={16} class="text-purple-400" />
+                <span>Sessões & Chats com o Secretário</span>
+              </h3>
+              <p class="text-xs text-zinc-400">
+                Histórico centralizado de conversas, consultas estratégicas e ordens despachadas.
+              </p>
+            </div>
+            <Button size="xs" variant="primary" onClick={() => navigate("/secretario")}>
+              <Plus size={13} class="mr-1" /> Nova Conversa
+            </Button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <For each={sessoesSecretario()}>
+              {(sessao) => (
+                <div class="p-4 rounded-2xl bg-zinc-900/50 border border-zinc-800/90 hover:border-purple-700/60 transition-all flex flex-col justify-between gap-3 group shadow-xs">
+                  <div class="space-y-1.5">
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="font-mono text-purple-400 font-bold">
+                        {sessao.id.slice(0, 12)}…
+                      </span>
+                      <span class="text-zinc-500 font-mono text-[10px]">
+                        {sessao.time?.updated ? new Date(sessao.time.updated).toLocaleString("pt-BR") : ""}
+                      </span>
+                    </div>
+                    <h4 class="text-sm font-semibold text-zinc-100 group-hover:text-purple-300 transition-colors line-clamp-2">
+                      {sessao.titulo_real || sessao.title || `Conversa ${sessao.id.slice(0, 8)}`}
+                    </h4>
+                    <Show when={sessao.agent}>
+                      <div class="text-[11px] text-zinc-400 font-mono">
+                        Agente: @{sessao.agent} · Modelo: {sessao.model || "padrão"}
+                      </div>
+                    </Show>
+                  </div>
+
+                  <div class="pt-2 border-t border-zinc-800/80 flex items-center justify-between">
+                    <span class="text-[10px] font-mono text-zinc-500">
+                      {sessao.summary?.files ? `${sessao.summary.files} partes` : "Sessão salva"}
+                    </span>
+                    <A
+                      href={`/secretario?sessao=${encodeURIComponent(sessao.id)}`}
+                      class="px-2.5 py-1 rounded-lg bg-purple-950/60 hover:bg-purple-900 text-purple-300 text-xs font-mono font-medium border border-purple-800/60 transition-colors flex items-center gap-1"
+                    >
+                      <MessageSquare size={12} />
+                      <span>Continuar Chat →</span>
+                    </A>
+                  </div>
+                </div>
+              )}
+            </For>
+          </div>
+        </div>
+      </Show>
+
+      {/* ─────────────────────────────────────────────────────────────
+          ABA 4: TASKS EM ANDAMENTO
+         ───────────────────────────────────────────────────────────── */}
+      <Show when={abaAtiva() === "tasks"}>
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-sm font-bold text-zinc-100 font-mono flex items-center gap-2">
+                <CheckSquare size={16} class="text-amber-400" />
+                <span>Tarefas em Andamento ({tasksEmAndamento().length})</span>
+              </h3>
+              <p class="text-xs text-zinc-400">
+                Tarefas que estão atualmente com agentes ou precisando de resolução técnica.
+              </p>
+            </div>
+            <A
+              href="/tasks"
+              class="text-xs font-mono text-amber-400 hover:text-amber-300 underline"
+            >
+              Abrir Quadro Kanban Completo →
+            </A>
+          </div>
+
+          <Show
+            when={tasksEmAndamento().length > 0}
+            fallback={
+              <div class="p-8 rounded-2xl bg-zinc-900/40 border border-zinc-800 text-center text-zinc-400 text-xs">
+                Nenhuma tarefa em andamento no momento. Todas concluídas ou no backlog.
+              </div>
+            }
+          >
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <For each={tasksEmAndamento()}>
+                {(task) => (
+                  <div class="p-4 rounded-2xl bg-zinc-900/50 border border-zinc-800 hover:border-amber-700/60 transition-all flex flex-col justify-between gap-3 shadow-xs">
+                    <div class="space-y-2">
+                      <div class="flex items-center justify-between text-[11px]">
+                        <span class="font-mono px-2 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/60 font-bold uppercase">
+                          {task.coluna}
+                        </span>
+                        <Show when={task.prioridade}>
+                          <span class={`font-mono text-[10px] uppercase font-bold ${
+                            task.prioridade === "alta" ? "text-rose-400" : "text-amber-400"
+                          }`}>
+                            Prioridade {task.prioridade}
+                          </span>
+                        </Show>
+                      </div>
+
+                      <h4 class="text-sm font-bold text-zinc-100">
+                        {task.titulo}
+                      </h4>
+
+                      <Show when={task.descricao}>
+                        <p class="text-xs text-zinc-400 line-clamp-3 leading-relaxed">
+                          {task.descricao}
+                        </p>
+                      </Show>
+
+                      <Show when={task.responsavel}>
+                        <div class="text-[11px] font-mono text-zinc-400">
+                          Responsável: <span class="text-zinc-200">@{task.responsavel.replace(/^agente:/, "")}</span>
+                        </div>
+                      </Show>
+                    </div>
+
+                    <div class="pt-2 border-t border-zinc-800/80 flex items-center justify-between">
+                      <span class="text-[10px] font-mono text-zinc-500">
+                        {task.id}
+                      </span>
+                      <A
+                        href={`/tasks?task=${encodeURIComponent(task.id)}`}
+                        class="px-2.5 py-1 rounded-lg bg-amber-950/50 hover:bg-amber-900 text-amber-200 text-xs font-mono font-medium border border-amber-800/60 transition-colors"
+                      >
+                        Ver Detalhes / Resolver →
+                      </A>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
+      </Show>
+
+      {/* ─────────────────────────────────────────────────────────────
+          ABA 5: FALHAS & RESOLUÇÕES
+         ───────────────────────────────────────────────────────────── */}
+      <Show when={abaAtiva() === "falhas"}>
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-sm font-bold text-zinc-100 font-mono flex items-center gap-2">
+                <AlertTriangle size={16} class="text-rose-400" />
+                <span>Falhas Recentes & Ações de Recuperação ({execucoesFalhas().length})</span>
+              </h3>
+              <p class="text-xs text-zinc-400">
+                Execuções que foram interrompidas ou caíram no meio do caminho. Você pode redispará-las com 1 clique.
+              </p>
+            </div>
+            <Button size="xs" variant="ghost" onClick={carregarDadosHome}>
+              <RotateCcw size={13} class="mr-1" /> Atualizar
+            </Button>
+          </div>
+
+          <Show
+            when={execucoesFalhas().length > 0}
+            fallback={
+              <div class="p-8 rounded-2xl bg-zinc-900/40 border border-zinc-800 text-center text-emerald-400 text-xs font-mono">
+                ✓ Nenhuma falha detectada nas execuções recentes. Tudo rodando com sucesso!
+              </div>
+            }
+          >
+            <div class="space-y-3">
+              <For each={execucoesFalhas()}>
+                {(exec) => (
+                  <div class="p-4 rounded-2xl bg-rose-950/20 border border-rose-800/50 hover:border-rose-700 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div class="space-y-1.5 min-w-0">
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-rose-900/60 text-rose-200 border border-rose-700 uppercase">
+                          Falhou
+                        </span>
+                        <span class="text-xs font-bold text-zinc-100 font-mono">
+                          @{exec.agente}
+                        </span>
+                        <span class="text-[10px] text-zinc-500 font-mono">
+                          {exec.id} · {exec.inicio ? new Date(exec.inicio).toLocaleTimeString("pt-BR") : ""}
+                        </span>
+                      </div>
+                      <p class="text-xs text-zinc-300 font-mono leading-relaxed line-clamp-2">
+                        {exec.ordem || "Sem descrição da ordem"}
+                      </p>
+                      <Show when={exec.duracao_ms}>
+                        <div class="text-[10px] text-rose-300 font-mono">
+                          Tempo antes de interromper: {Math.round(exec.duracao_ms / 1000)}s
+                        </div>
+                      </Show>
+                    </div>
+
+                    <div class="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto">
+                      <Button
+                        size="xs"
+                        variant="primary"
+                        onClick={() => repetirExecucao(exec)}
+                        class="bg-rose-600 hover:bg-rose-500 text-white font-bold"
+                        title="Executar novamente agora"
+                      >
+                        <RotateCcw size={12} class="mr-1" /> Repetir Execução
+                      </Button>
+                      <A
+                        href={`/historico?run=${encodeURIComponent(exec.id)}`}
+                        class="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono transition-colors"
+                      >
+                        Ver Log →
+                      </A>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
+      </Show>
+
+      {/* ─────────────────────────────────────────────────────────────
+          ABA 6: AGENDAMENTOS (SCHEDULER 24H)
+         ───────────────────────────────────────────────────────────── */}
+      <Show when={abaAtiva() === "agendamentos"}>
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-sm font-bold text-zinc-100 font-mono flex items-center gap-2">
+                <Timer size={16} class="text-emerald-400" />
+                <span>Linha do Tempo de Agendamentos (24h)</span>
+              </h3>
+              <p class="text-xs text-zinc-400">
+                Cronômetros ao vivo segundo a segundo de todas as rotinas programadas da empresa.
+              </p>
+            </div>
+            <A href="/agenda" class="text-xs font-mono text-emerald-400 hover:underline">
+              Editar Rotinas na Agenda →
+            </A>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <For each={jobsASeguir()}>
+              {(job) => {
+                const diff = () => job.diffMs;
+                return (
+                  <div class="p-4 rounded-2xl bg-zinc-900/50 border border-zinc-800 hover:border-emerald-700/60 transition-all flex flex-col justify-between gap-3 shadow-xs">
+                    <div class="space-y-1.5">
+                      <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 font-bold">
+                          ⏱ {formatarContagem(diff())}
+                        </span>
+                        <span class="text-[10px] font-mono text-zinc-500">
+                          {job.agenda?.valor || "cron"}
+                        </span>
+                      </div>
+                      <h4 class="text-sm font-bold text-zinc-100 font-mono">
+                        {job.nome}
+                      </h4>
+                      <div class="text-xs text-emerald-400 font-mono">
+                        Agente responsável: @{job.agente}
+                      </div>
+                    </div>
+
+                    <div class="pt-2 border-t border-zinc-800/80 flex items-center justify-between">
+                      <span class="text-[10px] font-mono text-zinc-500">
+                        {new Date(job.proxima_exec).toLocaleTimeString("pt-BR")}
+                      </span>
+                      <Button
+                        size="xs"
+                        variant="secondary"
+                        onClick={() => dispararJobAgora(job.id)}
+                      >
+                        <Play size={11} class="mr-1 fill-current text-emerald-400" /> Rodar Agora
+                      </Button>
+                    </div>
+                  </div>
+                );
+              }}
+            </For>
+          </div>
+        </div>
+      </Show>
+
+      {/* ─────────────────────────────────────────────────────────────
+          ABA 7: FLUXOS & HOOKS
+         ───────────────────────────────────────────────────────────── */}
+      <Show when={abaAtiva() === "fluxos"}>
+        <div class="space-y-6">
+          {/* Fluxos Operacionais */}
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-bold text-zinc-100 font-mono flex items-center gap-2">
+                <GitBranch size={16} class="text-indigo-400" />
+                <span>Fluxos de Trabalho Cadastrados ({fluxos().length})</span>
+              </h3>
+              <A href="/fluxos" class="text-xs font-mono text-indigo-400 hover:underline">
+                Abrir Editor de Fluxos →
+              </A>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <For each={fluxos()}>
+                {(fl) => (
+                  <div class="p-3.5 rounded-2xl bg-zinc-900/50 border border-zinc-800 hover:border-indigo-700/60 transition-all flex flex-col justify-between gap-2 shadow-xs">
+                    <div>
+                      <div class="text-[10px] font-mono text-zinc-500">{fl.id}</div>
+                      <div class="text-xs font-bold text-zinc-100 mt-1">{fl.nome || fl.id}</div>
+                      <div class="text-[11px] text-zinc-400 font-mono mt-1">
+                        {fl.nos ?? 0} nós · {fl.arestas ?? 0} conexões
+                      </div>
+                    </div>
+                    <A
+                      href={`/fluxos?fluxo=${encodeURIComponent(fl.id)}`}
+                      class="text-[11px] font-mono text-indigo-400 hover:underline pt-2 border-t border-zinc-800/80 block text-right"
+                    >
+                      Editar Fluxo →
+                    </A>
+                  </div>
+                )}
+              </For>
+            </div>
+          </div>
+
+          {/* Webhooks Configurados */}
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-bold text-zinc-100 font-mono flex items-center gap-2">
+                <Terminal size={16} class="text-amber-400" />
+                <span>Webhooks & Gatilhos ({hooks().length})</span>
+              </h3>
+              <A href="/hooks" class="text-xs font-mono text-amber-400 hover:underline">
+                Gerenciar Webhooks →
+              </A>
+            </div>
+
+            <Show
+              when={hooks().length > 0}
+              fallback={
+                <div class="p-6 rounded-2xl bg-zinc-900/40 border border-zinc-800 text-center text-xs text-zinc-400">
+                  Nenhum webhook configurado ainda. Você pode cadastrar em <A href="/hooks" class="text-amber-400 underline">Webhooks</A>.
+                </div>
+              }
+            >
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <For each={hooks()}>
+                  {(hk) => (
+                    <div class="p-3.5 rounded-2xl bg-zinc-900/50 border border-zinc-800 flex items-center justify-between gap-3 font-mono text-xs">
+                      <div>
+                        <div class="font-bold text-zinc-100">{hk.nome || hk.id}</div>
+                        <div class="text-[10px] text-zinc-400 mt-0.5">Rota: {hk.url || `/hooks/${hk.id}`}</div>
+                      </div>
+                      <span class="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[10px]">
+                        POST
+                      </span>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
+        </div>
+      </Show>
       {/* Modal de Criação de Tarefa Rápida */}
       <Show when={modalNovaTask()}>
         <div class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">

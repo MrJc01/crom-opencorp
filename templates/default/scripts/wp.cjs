@@ -7,12 +7,28 @@ const { join, basename } = require("node:path");
 
 // script vive em <ws>/scripts/ → workspace = pasta acima de __dirname
 const SITE = process.env.OPENCORP_SITE || basename(join(__dirname, ".."));
-const home = process.env.OPENCORP_HOME || join(process.env.HOME, ".opencorp");
 const chave = `wp_${SITE.replace(/-/g, "_")}`;
-let segredos = {};
-try {
-  segredos = JSON.parse(readFileSync(join(home, ".opencorp", "secrets.json"), "utf8"));
-} catch {}
+
+function carregarSegredos() {
+  const { existsSync } = require("node:fs");
+  const caminhos = [
+    join(process.env.HOME || "", ".opencorp", "secrets.json"),
+    join(process.env.OPENCORP_HOME || "", "secrets.json"),
+    join(process.env.OPENCORP_HOME || "", ".opencorp", "secrets.json"),
+    join(__dirname, "..", "secrets.json"),
+    join(__dirname, "..", ".opencorp", "secrets.json"),
+  ];
+  for (const c of caminhos) {
+    try {
+      if (c && existsSync(c)) {
+        return JSON.parse(readFileSync(c, "utf8"));
+      }
+    } catch {}
+  }
+  return {};
+}
+
+const segredos = carregarSegredos();
 const user = segredos[`${chave}_user`];
 const pass = segredos[`${chave}_pass`];
 if (!user || !pass) {
@@ -23,10 +39,13 @@ if (!user || !pass) {
 const modo = process.argv[2] || "posts";
 const forcarStatus = process.argv[3] || "";
 let input = {};
-try {
-  input = JSON.parse(process.argv[process.argv.length - 1] || "{}");
-} catch {
-  console.error("entrada inválida (JSON)"); process.exit(2);
+const ultimoArg = process.argv.length > 2 ? process.argv[process.argv.length - 1] : "";
+if (ultimoArg && (ultimoArg.startsWith("{") || ultimoArg.startsWith("["))) {
+  try {
+    input = JSON.parse(ultimoArg);
+  } catch {
+    console.error("entrada inválida (JSON)"); process.exit(2);
+  }
 }
 
 const tipo = (modo === "page") ? "pages" : (input.tipo === "page" ? "pages" : "posts");
@@ -48,7 +67,6 @@ const auth = "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
   };
   if (input && typeof input.categoria_nome === "string" && (modo === "post" || modo === "page" || modo === "update")) {
     input.categorias = [await resolveCategoria(input.categoria_nome)];
-    delete input.categoria_nome;
   }
 
   if (modo === "post" || modo === "page") {
@@ -108,7 +126,7 @@ const auth = "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
     if (input.force === true) opts.body = JSON.stringify({ force: true });
   } else {
     const tipoListagem = (modo === "pages") ? "pages" : "posts";
-    url = `${base}/${tipoListagem}?per_page=${Math.min(Number(input.qtd) || 5, 20)}&status=${input.status || "publish,draft"}&_fields=id,title,status,date,type,categories&_embed`;
+    url = `${base}/${tipoListagem}?per_page=${Math.min(Number(input.qtd) || 5, 100)}&status=${input.status || "publish,draft"}&_fields=id,title,status,date,type,categories&_embed`;
   }
   const r = await fetch(url, opts);
   const t = await r.text();

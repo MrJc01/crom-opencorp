@@ -207,12 +207,14 @@ export const Topbar: Component = () => {
           onMouseEnter={onMouseEnterBadge}
           onMouseLeave={onMouseLeaveBadge}
         >
-          <div
+          <A
+            href="/home?aba=aovivo"
             class={`flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer ${
               sseConnected()
                 ? "bg-emerald-950/30 border-emerald-800/50 text-emerald-300 hover:border-emerald-600/80"
                 : "bg-zinc-900/60 border-zinc-800/60 text-zinc-400 hover:border-zinc-700"
             }`}
+            title="Abrir Central de Operações Ao Vivo"
           >
             <Radio
               size={12}
@@ -224,7 +226,7 @@ export const Topbar: Component = () => {
             <Show when={statusInfo().executandoAgora}>
               <span class="h-1.5 w-1.5 rounded-full bg-blue-400 animate-ping ml-0.5" />
             </Show>
-          </div>
+          </A>
 
           {/* CARD POPOVER INFORMATIVO AO VIVO */}
           <Show when={hoverCard()}>
@@ -239,28 +241,19 @@ export const Topbar: Component = () => {
                   <div class="h-6 w-6 rounded-md bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
                     <Activity size={13} />
                   </div>
-                  <div>
-                    <h3 class="font-bold text-zinc-100 text-xs">OpenCorp Ao Vivo</h3>
-                    <span class="text-[10px] text-zinc-500 font-mono">
-                      Workspace: {workspaceAtual().id}
-                    </span>
-                  </div>
-                </div>
-                <Show
-                  when={statusInfo().executandoAgora}
-                  fallback={
-                    <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-900 text-zinc-400 border border-zinc-800 font-medium">
-                      v{statusInfo().versao || "0.7.0"}
-                    </span>
-                  }
-                >
-                  <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 font-bold animate-pulse">
-                    ● AGENTE ATIVO
+                  <span class="font-bold text-zinc-100 font-mono text-xs">
+                    Centro de Operações
                   </span>
-                </Show>
+                </div>
+                <A
+                  href="/home?aba=aovivo"
+                  class="text-[10px] font-mono text-emerald-400 hover:underline"
+                >
+                  Abrir Painel Completo →
+                </A>
               </div>
 
-              {/* SEÇÃO 1: O QUE ESTÁ SENDO EXECUTADO AGORA AO VIVO */}
+              {/* SEÇÃO 1: EXECUÇÃO AO VIVO */}
               <div class="space-y-1">
                 <div class="text-[10px] font-bold text-zinc-500 uppercase tracking-wider font-mono">
                   Execução em Tempo Real
@@ -409,18 +402,18 @@ export const Topbar: Component = () => {
               {/* Rodapé com Atalhos Rápidos */}
               <div class="pt-2 border-t border-zinc-800/80 flex items-center justify-between text-[11px]">
                 <A
+                  href="/home?aba=aovivo"
+                  class="text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 font-bold"
+                >
+                  <Activity size={12} />
+                  <span>Central de Operações →</span>
+                </A>
+                <A
                   href="/config"
                   class="text-zinc-400 hover:text-emerald-400 transition-colors flex items-center gap-1"
                 >
                   <Cpu size={12} />
-                  <span>Configurações</span>
-                </A>
-                <A
-                  href="/docs"
-                  class="text-zinc-400 hover:text-emerald-400 transition-colors flex items-center gap-1"
-                >
-                  <ExternalLink size={12} />
-                  <span>Manual & Docs</span>
+                  <span>Config</span>
                 </A>
               </div>
             </div>
