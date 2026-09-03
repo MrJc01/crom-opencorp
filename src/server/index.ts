@@ -311,7 +311,7 @@ interface NoArvore {
 /** Lista FIXA de diretórios ignorados pela árvore (não configurável nesta etapa) */
 const ARVORE_IGNORAR_DIRS = new Set(["node_modules", ".git", "dist", "web-dist", "__pycache__"]);
 /** Cap total de nós — evita varreduras gigantes; excedido → flag truncado:true */
-const ARVORE_CAP_NOS = 800;
+const ARVORE_CAP_NOS = 3000;
 
 /**
  * Constrói a árvore recursiva a partir da raiz do workspace: dirs primeiro,
@@ -335,12 +335,15 @@ async function construirArvore(raiz: string, profundidadeMax: number): Promise<{
     const visiveis = entradas.filter((e) => {
       if (ARVORE_IGNORAR_DIRS.has(e.name)) return false;
       if (e.name === "logs" && rel === ".opencorp") return false;
+      if ((e.name === "chats" || e.name === "execucoes") && rel === ".opencorp/registries") return false;
       return true;
     });
     const porNome = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
     const dirs = visiveis.filter((e) => e.isDirectory()).sort(porNome);
     const arquivos = visiveis.filter((e) => !e.isDirectory()).sort(porNome);
     const nos: NoArvore[] = [];
+
+    // Adiciona todos os nós do nível atual primeiro para garantir que pastas irmãs na raiz nunca sejam omitidas
     for (const e of [...dirs, ...arquivos]) {
       if (total >= ARVORE_CAP_NOS) {
         truncado = true;
@@ -349,11 +352,8 @@ async function construirArvore(raiz: string, profundidadeMax: number): Promise<{
       const caminhoRel = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
         const no: NoArvore = { nome: e.name, caminho: caminhoRel, tipo: "dir", filhos: [] };
-        total++;
-        if (profundidade + 1 < profundidadeMax) {
-          no.filhos = await listar(join(dirAbs, e.name), caminhoRel, profundidade + 1);
-        }
         nos.push(no);
+        total++;
       } else {
         let tamanho = 0;
         try {
@@ -365,6 +365,14 @@ async function construirArvore(raiz: string, profundidadeMax: number): Promise<{
         total++;
       }
     }
+
+    // Depois desce recursivamente nos subdiretórios
+    for (const no of nos) {
+      if (no.tipo === "dir" && profundidade + 1 < profundidadeMax && total < ARVORE_CAP_NOS) {
+        no.filhos = await listar(join(dirAbs, no.nome), no.caminho, profundidade + 1);
+      }
+    }
+
     return nos;
   }
   const arvore = await listar(raiz, "", 0);
