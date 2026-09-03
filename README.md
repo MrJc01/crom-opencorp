@@ -125,112 +125,150 @@ Abra no navegador: **`http://localhost:4100`** para acessar o painel de controle
 
 ---
 
-### 2. Gerenciando Workspaces (Empresas)
+## 💻 Referência Completa de Comandos da CLI (`opencorp` / `oc`)
 
-Cada workspace representa uma organização independente com seus próprios agentes, tarefas e dados:
+> **Dica de Ergonomia:** Os comandos `opencorp` e `oc` são equivalentes. O executável `oc` é o atalho rápido recomendado para humanos e agentes. Qualquer comando executado sem a flag `--workspace` opera automaticamente no workspace ativo ou no diretório de trabalho atual.
 
-```bash
-# Criar uma nova empresa com o template padrão
-oc workspace create minha-empresa
-
-# Listar todas as empresas cadastradas
-oc workspace list
-
-# Definir a empresa ativa globalmente
-oc workspace use minha-empresa
-
-# Exportar empresa completa como pacote .corp (segredos são excluídos automaticamente)
-oc template export minha-empresa -o /tmp/empresa.corp
-
-# Importar um pacote .corp existente
-oc template import /tmp/empresa.corp --as filial-sp
-```
+### 1. ⚡ Execução & Interação com Agentes
+| Comando | Descrição | Exemplo de Uso |
+|---|---|---|
+| `oc run <ordem>` | Dispara uma ordem para o agente executor padrão (ou especificado) | `oc run "Auditar rascunhos da fila" --agent corretor-site` |
+| `oc open [workspace]` | Abre a TUI interativa do OpenCode com o ambiente isolado | `oc open` *(digite `/quit` para sair)* |
+| `oc secretario "<msg>"` | Conversa com o Secretário Executivo direto pelo terminal | `oc secretario "Como está a saúde das rondas de hoje?"` |
+| `oc session list` | Lista as sessões ativas e recentes do OpenCode | `oc session list` |
+| `oc session log <id>` | Exibe os logs brutos capturados de uma sessão | `oc session log ses_123` |
+| `oc session kill <id>` | Encerra forçadamente um processo de agente em execução | `oc session kill ses_123` |
 
 ---
 
-### 3. Agentes e Execuções
-
-O CLI `oc` é contextual: quando executado dentro de uma empresa ou por um agente, **opera automaticamente no workspace ativo sem exigir flags adicionais**:
-
-```bash
-# Listar os agentes da empresa ativa
-oc agent list
-
-# Disparar uma tarefa para um agente
-oc run "Analise a fila de rascunhos e faça uma auditoria de qualidade" --agent corretor-site
-
-# Inspecionar detalhes de um agente
-oc agent show editor
-
-# Ver histórico de execuções da empresa
-oc historico --limite 15
-```
+### 2. 🏢 Governança de Workspaces & Pacotes `.corp`
+| Comando | Descrição | Exemplo de Uso |
+|---|---|---|
+| `oc workspace create <id>` | Cria uma nova empresa isolada a partir do template padrão | `oc workspace create filial-sp` |
+| `oc workspace list` | Lista todas as empresas cadastradas no sistema | `oc workspace list` |
+| `oc workspace use <id>` | Define a empresa ativa globalmente no terminal | `oc workspace use filial-sp` |
+| `oc workspace delete <id>` | Remove uma empresa e seus arquivos locais | `oc workspace delete filial-antiga` |
+| `oc template list` | Lista templates disponíveis para novos workspaces | `oc template list` |
+| `oc template export <id>` | Exporta a empresa como pacote `.corp` (sanitiza segredos automaticamente) | `oc template export pulso-diario -o /tmp/pulso.corp` |
+| `oc template import <arq>` | Importa um pacote `.corp` como nova empresa | `oc template import /tmp/pulso.corp --as nova-empresa` |
+| `oc subcorp run <id> "<ordem>"` | Delega uma ordem para ser executada em um sub-workspace | `oc subcorp run filial "Gere o fechamento financeiro"` |
 
 ---
 
-### 4. Gestão Segura de Segredos e Credenciais (`oc secrets`)
-
-O OpenCorp conta com um sistema hierárquico de credenciais com isolamento estrito por workspace:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. 🔒 WORKSPACE:  <workspace_dir>/.opencorp/secrets.json     │  (Maior prioridade)
-│ 2. 🌐 GLOBAL:     ~/.opencorp/secrets.json                  │  (Fallback compartilhado)
-└─────────────────────────────────────────────────────────────┘
-```
-
-* Os valores são protegidos no disco com permissão `chmod 600`.
-* A listagem **nunca expõe valores sensíveis em texto claro** — apenas nomes, tipos e origem.
-
-```bash
-# Listar segredos disponíveis no workspace atual (merge workspace + global)
-oc secrets list
-
-# Listar apenas os exclusivos do workspace atual
-oc secrets list --scope workspace
-
-# Cadastrar um segredo isolado neste workspace (padrão)
-oc secrets set wp_app_pass "minha-senha-secreta"
-
-# Cadastrar um segredo global compartilhado com todas as empresas
-oc secrets set openrouter_api_key "sk-or-v1-..." --scope global
-
-# Obter o valor de um segredo (saída limpa para scripts/agentes)
-oc secrets get wp_app_pass
-
-# Remover um segredo
-oc secrets delete wp_app_pass --scope workspace
-```
+### 3. 🤖 Catálogo e Gestão de Agentes
+| Comando | Descrição | Exemplo de Uso |
+|---|---|---|
+| `oc agent list` | Lista todos os agentes configurados no workspace atual | `oc agent list` |
+| `oc agent show <id>` | Exibe a ficha completa do agente (modelo, permissões, daily_usd) | `oc agent show editor` |
+| `oc agent create` | Assistente interativo para criar um novo agente no workspace | `oc agent create` |
+| `oc agent clone <origem> <novo>` | Clona as instruções e parâmetros de um agente existente | `oc agent clone editor editor-senior` |
+| `oc agent edit <id>` | Abre a definição em Markdown do agente para edição | `oc agent edit critico-site` |
+| `oc agent delete <id>` | Remove um agente do workspace | `oc agent delete agente-teste` |
+| `oc agent sync` | Sincroniza agentes do template default para o workspace atual | `oc agent sync` |
 
 ---
 
-### 5. Tarefas e Kanban
-
-```bash
-# Criar uma tarefa no quadro da empresa
-oc task create --titulo "Publicar artigo sobre IA" --descricao "Revisar fontes e agendar post"
-
-# Listar tarefas abertas
-oc task list
-
-# Mover tarefa no fluxo Kanban
-oc task move <task-id> "em-andamento"
-```
+### 4. 📋 Quadro Kanban de Tarefas (Task Board)
+| Comando | Descrição | Exemplo de Uso |
+|---|---|---|
+| `oc task list` | Lista as tarefas do Kanban com filtros opcionais | `oc task list --coluna backlog` |
+| `oc task create` | Cria uma nova tarefa atribuível a humanos ou agentes | `oc task create --titulo "Configurar GA4" --prioridade alta` |
+| `oc task show <id>` | Exibe detalhes, histórico e mensagens de uma tarefa | `oc task show tsk-123` |
+| `oc task move <id> <coluna>` | Move uma tarefa entre colunas (`backlog`, `fazendo`, `feito`, etc.) | `oc task move tsk-123 "fazendo"` |
+| `oc task assign <id> <agente>` | Atribui a tarefa para um agente autônomo resolver | `oc task assign tsk-123 corretor-site` |
+| `oc task chat <id> --msg` | Adiciona comentário ou instrução no chat da tarefa | `oc task chat tsk-123 --msg "@corretor-site execute agora"` |
+| `oc task label <id> <tags>` | Adiciona etiquetas organizacionais na tarefa | `oc task label tsk-123 "seo,urgente"` |
+| `oc task delete <id>` | Exclui uma tarefa do quadro | `oc task delete tsk-123` |
 
 ---
 
-### 6. Diagnóstico e Monitoramento do Sistema
+### 5. ⏰ Automação: Agendador (Cron), Workflows e Webhooks
+| Comando | Descrição | Exemplo de Uso |
+|---|---|---|
+| `oc schedule list` | Lista todos os agendamentos periódicos configurados | `oc schedule list` |
+| `oc schedule create` | Cria uma rotina cron ou intervalo recorrente de execução | `oc schedule create checar-fila --intervalo-min 60 --args "task list"` |
+| `oc schedule run-now <id>` | Força o disparo imediato de uma rotina agendada | `oc schedule run-now sch-pulso-24h` |
+| `oc schedule pause / resume` | Pausa ou retoma um agendamento sem excluí-lo | `oc schedule pause sch-pulso-24h` |
+| `oc scheduler start / stop` | Inicia ou encerra o daemon em background do scheduler | `oc scheduler start` |
+| `oc flow list` | Lista os fluxos de trabalho (workflows em grafo) do workspace | `oc flow list` |
+| `oc flow run <id>` | Executa um fluxo completo a partir do nó gatilho | `oc flow run analise-board --entrada "Auditar"` |
+| `oc flow status <id>` | Consulta o status de execução de nós e histórico do fluxo | `oc flow status analise-board` |
+| `oc hook list / create` | Cria e lista webhooks HTTP externos com verificação de token | `oc hook list` |
+| `oc trigger list / create` | Conecta eventos internos (ex: `task.concluida`) a ações de agentes | `oc trigger list` |
 
-```bash
-# Diagnóstico completo de saúde do ambiente, daemons e dependências
-oc doctor
+---
 
-# Visão rápida da saúde da empresa (execuções, workers e pids)
-oc saude
+### 6. 🔒 Gestão Segura de Segredos (`oc secrets`)
+O OpenCorp conta com hierarquia segura de resolução (`Workspace` com override prioritário sobre `Global`). Os valores são gravados com permissão estrita `chmod 600`.
 
-# Monitor em tempo real no terminal (TUI)
-oc monitor
-```
+| Comando | Descrição | Exemplo de Uso |
+|---|---|---|
+| `oc secrets list` | Lista segredos com nomes, tipos e badges de escopo | `oc secrets list` |
+| `oc secrets list --scope` | Filtra segredos apenas do `workspace` ou apenas `global` | `oc secrets list --scope workspace` |
+| `oc secrets get <nome>` | Retorna o valor limpo em stdout para piping e scripting | `oc secrets get wp_app_pass` |
+| `oc secrets set <nome> <val>` | Salva um segredo no workspace ou globalmente | `oc secrets set wp_app_pass "minha-senha" --scope workspace` |
+| `oc secrets delete <nome>` | Remove com segurança um segredo cadastrado | `oc secrets delete wp_app_pass --scope workspace` |
+| `oc secrets info` | Exibe manual sobre herança de chaves e convenções de uso | `oc secrets info` |
+
+---
+
+### 7. 🤝 Equipes Multi-Agente & Reuniões (Boardroom)
+| Comando | Descrição | Exemplo de Uso |
+|---|---|---|
+| `oc team list` | Lista os times multi-agente configurados | `oc team list` |
+| `oc team create` | Cria um time com padrão: `pipeline`, `fanout`, `review` ou `debate` | `oc team create editorial --padrao pipeline` |
+| `oc team run <id>` | Dispara uma orquestração em equipe com dados de entrada | `oc team run editorial --entrada "Tendências de IA 2026"` |
+| `oc meeting list` | Lista reuniões deliberativas da diretoria | `oc meeting list` |
+| `oc meeting run <id>` | Executa uma reunião multi-agente e gera ata oficial em Markdown | `oc meeting run reuniao-estrategica` |
+
+---
+
+### 8. 🛠️ Ferramentas Plugáveis & Protocolo MCP
+| Comando | Descrição | Exemplo de Uso |
+|---|---|---|
+| `oc tool list` | Lista ferramentas nativas (`task.*`, `http.get`, etc.) e manifests JSON | `oc tool list` |
+| `oc tool call <tool>` | Invoca uma ferramenta diretamente pelo terminal com parâmetros JSON | `oc tool call http.get --params '{"url":"https://api.site.com"}'` |
+| `oc mcp serve` | Inicia o servidor MCP stdio para conectar a IDEs (Cursor, Claude Desktop) | `oc mcp serve` |
+
+---
+
+### 9. 🛡️ Governança, Orçamento & Auditoria HITL
+| Comando | Descrição | Exemplo de Uso |
+|---|---|---|
+| `oc approvals list` | Lista ações aguardando aprovação humana (Human-In-The-Loop) | `oc approvals list` |
+| `oc approvals approve <id>` | Autoriza a execução de uma ação de agente sensível | `oc approvals approve app-001` |
+| `oc approvals reject <id>` | Rejeita uma ação bloqueada | `oc approvals reject app-001` |
+| `oc budget status` | Exibe teto diário, consumo atual e saldo em USD do workspace | `oc budget status` |
+| `oc budget reset` | Reseta os contadores de custo diário | `oc budget reset` |
+| `oc settings show` | Exibe todas as configurações consolidadas (global + workspace) | `oc settings show` |
+| `oc settings set <k> <v>` | Define um parâmetro de configuração (ex: modelo padrão, HITL) | `oc settings set model.default "gemini-3.8-flash"` |
+| `oc registry list` | Lista documentos, atas, pareceres e registros de memória | `oc registry list` |
+
+---
+
+### 10. 🩺 Diagnóstico, Histórico e Telemetria
+| Comando | Descrição | Exemplo de Uso |
+|---|---|---|
+| `oc historico` | Exibe o histórico de execuções com tempo, modelo e exit code | `oc historico --limite 20` |
+| `oc historico --falhas` | Filtra apenas execuções que falharam com diagnóstico de causa raiz | `oc historico --falhas` |
+| `oc historico retry <id>` | Redispara uma execução anterior preservando contexto e ordem | `oc historico retry exec-20260903-1234` |
+| `oc historico erro <id>` | Imprime o stacktrace e mensagem exata do erro da execução | `oc historico erro exec-20260903-1234` |
+| `oc saude` | Painel rápido com contagem de agentes, scheduler e processos | `oc saude` |
+| `oc relatorio [--hoje]` | Gera relatório consolidado de produção, custos e taxa de sucesso | `oc relatorio --hoje` |
+| `oc logs [--follow]` | Stream ao vivo de eventos estruturados do sistema (`events.jsonl`) | `oc logs -f --tail 50` |
+| `oc monitor` | TUI interativa em tempo real com métricas e custos | `oc monitor` |
+| `oc status` | Painel geral de status dos serviços ativos | `oc status` |
+| `oc doctor` | Auditoria completa do ambiente: Node, OpenCode, daemons e chaves | `oc doctor` |
+
+---
+
+### 11. 🌐 Servidores e Daemons de Fundo
+| Comando | Descrição | Exemplo de Uso |
+|---|---|---|
+| `oc serve` | Inicia o servidor daemon da API REST + SSE em background | `oc serve --host 0.0.0.0 --port 4100` |
+| `oc serve stop` | Encerra com segurança o servidor API em execução | `oc serve stop` |
+| `oc web` | Inicia a API, a interface web e abre o navegador automaticamente | `oc web --port 4100` |
+| `oc daemon start / stop` | Gerencia o supervisor permanente de processos à prova de reboot | `oc daemon start` |
 
 ---
 
