@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, onCleanup, For, Show } from "solid-js";
+import { type Component, createSignal, createEffect, onMount, onCleanup, For, Show } from "solid-js";
 import {
   DollarSign,
   Bot,
@@ -107,6 +107,53 @@ export const HomeView: Component = () => {
     } catch {}
   };
 
+  const LISTA_ABAS_CHAVES = ["geral", "aovivo", "secretario", "tasks", "falhas", "agendamentos", "fluxos"] as const;
+
+  const mudarAbaOffset = (delta: number) => {
+    const atualIdx = LISTA_ABAS_CHAVES.indexOf(abaAtiva() as any);
+    if (atualIdx === -1) return;
+    const novoIdx = Math.max(0, Math.min(LISTA_ABAS_CHAVES.length - 1, atualIdx + delta));
+    if (novoIdx !== atualIdx) {
+      setAbaAtiva(LISTA_ABAS_CHAVES[novoIdx]);
+    }
+  };
+
+  let touchStartX = 0;
+  let touchStartY = 0;
+  const onTouchStart = (e: TouchEvent) => {
+    touchStartX = e.changedTouches[0].screenX;
+    touchStartY = e.changedTouches[0].screenY;
+  };
+  const onTouchEnd = (e: TouchEvent) => {
+    const diffX = e.changedTouches[0].screenX - touchStartX;
+    const diffY = e.changedTouches[0].screenY - touchStartY;
+    // Se movimento horizontal predominante for > 50px, troca de view via swipe
+    if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY) * 1.4) {
+      if (diffX < 0) {
+        mudarAbaOffset(1); // Swipe para a esquerda -> próxima view
+      } else {
+        mudarAbaOffset(-1); // Swipe para a direita -> view anterior
+      }
+    }
+  };
+
+  // Escuta troca de workspace e recarrega dados imediatamente
+  createEffect(() => {
+    wsAtivo();
+    void carregarDadosHome();
+  });
+
+  // Mantém a aba ativa centralizada no swiper de abas
+  createEffect(() => {
+    const ativa = abaAtiva();
+    if (abasRef) {
+      const el = abasRef.querySelector(`[data-tab="${ativa}"]`) as HTMLElement;
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+      }
+    }
+  });
+
   const tasksEmAndamento = () => todasTasks().filter((t: any) =>
     t.coluna === "fazendo" || t.coluna === "em_andamento" || t.coluna === "in_progress"
   );
@@ -167,8 +214,7 @@ export const HomeView: Component = () => {
 
   const carregarDadosHome = async () => {
     try {
-      const [ledger, tasks, ags, flows, aprovs, budget, status, jobs, rExecs, sSec, rHooks] = await Promise.allSettled([
-        fetchApi<any>("/ledger/resumo"),
+      const [tasks, ags, flows, aprovs, budget, status, jobs, rExecs, sSec, rHooks] = await Promise.allSettled([
         fetchApi<any[]>("/tasks"),
         fetchApi<any[]>("/agents"),
         fetchApi<any[]>("/flows"),
@@ -181,28 +227,27 @@ export const HomeView: Component = () => {
         fetchApi<any[]>("/hooks"),
       ]);
 
-      const getVal = <T>(r: PromiseSettledResult<T>, def: T): T => (r.status === "fulfilled" ? r.value : def);
+      const getVal = <T>(r: PromiseSettledResult<T>, def: T): T => (r.status === "fulfilled" && r.value != null ? r.value : def);
 
-      const dLedger = getVal(ledger, null);
-      const dTasks = getVal(tasks, []);
-      const dAgentes = getVal(ags, []);
-      const dFlows = getVal(flows, []);
-      const dAprovs = getVal(aprovs, []);
+      const dTasks = Array.isArray(getVal(tasks, [])) ? getVal(tasks, []) : [];
+      const dAgentes = Array.isArray(getVal(ags, [])) ? getVal(ags, []) : [];
+      const dFlows = Array.isArray(getVal(flows, [])) ? getVal(flows, []) : [];
+      const dAprovs = Array.isArray(getVal(aprovs, [])) ? getVal(aprovs, []) : [];
       const dBudget = getVal(budget, null);
       const dStatus = getVal(status, null);
-      const dJobs = getVal(jobs, []);
-      const dExecs = getVal(rExecs, []);
+      const dJobs = Array.isArray(getVal(jobs, [])) ? getVal(jobs, []) : [];
+      const dExecs = Array.isArray(getVal(rExecs, [])) ? getVal(rExecs, []) : [];
 
       setTodasTasks(dTasks);
       setAgentes(dAgentes);
       setSchedules(dJobs);
       setExecucoes(dExecs);
       setFluxos(dFlows);
-      setHooks(getVal(rHooks, []));
-      setSessoesSecretario(getVal(sSec, []));
+      setHooks(Array.isArray(getVal(rHooks, [])) ? getVal(rHooks, []) : []);
+      setSessoesSecretario(Array.isArray(getVal(sSec, [])) ? getVal(sSec, []) : []);
 
       // Identificar se há algum agente executando agora (background run OU Secretário Executivo)
-      const secSessoes = getVal(sSec, []);
+      const secSessoes = Array.isArray(getVal(sSec, [])) ? getVal(sSec, []) : [];
       const secExec = secSessoes.find((s: any) => s.executando || s.status === "executando") || dStatus?.secretario_executando;
       const emAndamento = dExecs.find((e: any) => e.status === "executando") || (secExec ? {
         id: secExec.id,
@@ -219,12 +264,19 @@ export const HomeView: Component = () => {
         (t: any) => t.coluna !== "feito" && t.due && String(t.due).slice(0, 10) < hoje
       ).length;
 
+      // Custo: pega do budget ou calcula das últimas execuções
+      let custoStr = "US$ 0.0000";
+      if (dBudget?.estado?.workspace_usd_hoje !== undefined) {
+        custoStr = `US$ ${Number(dBudget.estado.workspace_usd_hoje).toFixed(4)}`;
+      } else {
+        const custoExecs = dExecs
+          .filter((e: any) => e.custo_usd && e.inicio && String(e.inicio).slice(0, 10) === hoje)
+          .reduce((acc: number, e: any) => acc + Number(e.custo_usd || 0), 0);
+        if (custoExecs > 0) custoStr = `US$ ${custoExecs.toFixed(4)}`;
+      }
+
       setMetricas({
-        custoHoje: dBudget?.estado?.workspace_usd_hoje !== undefined
-          ? `US$ ${Number(dBudget.estado.workspace_usd_hoje).toFixed(4)}`
-          : dLedger?.total_custo_estimado
-            ? `US$ ${Number(dLedger.total_custo_estimado).toFixed(4)}`
-            : "US$ 0.0000",
+        custoHoje: custoStr,
         custoTeto: dBudget?.limites?.daily_usd ? `US$ ${Number(dBudget.limites.daily_usd).toFixed(2)}` : "US$ 5.00",
         tasksPendentes: dTasks.filter((t: any) => t.coluna !== "feito").length,
         tasksVencidas: vencidas,
@@ -368,7 +420,11 @@ export const HomeView: Component = () => {
   });
 
   return (
-    <div class="h-full w-full overflow-y-auto p-6 space-y-6 scrollbar-thin bg-zinc-950">
+    <div
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+      class="h-full w-full overflow-y-auto p-6 space-y-6 scrollbar-thin bg-zinc-950"
+    >
       {/* Top Header com Ações Rápidas */}
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
         <div>
@@ -379,7 +435,7 @@ export const HomeView: Component = () => {
             </span>
           </div>
           <p class="text-xs text-zinc-400 mt-0.5">
-            Visão geral da empresa, saúde dos agentes e controle em tempo real.
+            Visão geral da empresa, saúde dos agentes e controle em tempo real. Deslize ou clique nas abas para navegar.
           </p>
         </div>
 
@@ -396,114 +452,60 @@ export const HomeView: Component = () => {
         </div>
       </div>
 
-      {/* Abas da Central de Operações */}
-      <div class="flex items-center gap-1 pb-2 border-b border-zinc-800/80 text-xs font-medium select-none">
+      {/* Abas da Central de Operações — Swiper Horizontal Touch-Friendly */}
+      <div class="relative pb-2 border-b border-zinc-800/80">
+        {/* Seta esquerda */}
         <button
           type="button"
-          class="flex-shrink-0 p-1 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
+          class="absolute left-0 top-1/2 -translate-y-1/2 z-10 p-1 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80 transition-colors cursor-pointer bg-zinc-950/80 backdrop-blur-xs shadow-md"
           onClick={() => abasRef?.scrollBy({ left: -200, behavior: "smooth" })}
           title="Rolar abas para a esquerda"
         >
           <ChevronLeft size={16} />
         </button>
-        <div ref={abasRef} class="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
-        <button
-          type="button"
-          onClick={() => setAbaAtiva("geral")}
-          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
-            abaAtiva() === "geral"
-              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
-              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
-          }`}
-        >
-          <Activity size={13} class="text-zinc-400" />
-          <span>Visão Geral</span>
-        </button>
 
-        <button
-          type="button"
-          onClick={() => setAbaAtiva("aovivo")}
-          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
-            abaAtiva() === "aovivo"
-              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
-              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
-          }`}
+        {/* Container scroll horizontal com snap */}
+        <div
+          ref={abasRef}
+          class="flex items-center gap-1.5 overflow-x-auto scrollbar-none px-7 scroll-smooth"
+          style={{ "-webkit-overflow-scrolling": "touch", "scroll-snap-type": "x proximity" }}
         >
-          <Radio size={13} class={executandoAgora() ? "text-emerald-400 animate-pulse" : "text-zinc-400"} />
-          <span>Ao Vivo & Fundo</span>
-          <Show when={executandoAgora()}>
-            <span class="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
-          </Show>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setAbaAtiva("secretario")}
-          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
-            abaAtiva() === "secretario"
-              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
-              : "bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850/60"
-          }`}
-        >
-          <Bot size={13} class="text-purple-400" />
-          <span>Secretário ({sessoesSecretario().length})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setAbaAtiva("tasks")}
-          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
-            abaAtiva() === "tasks"
-              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
-              : "bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850/60"
-          }`}
-        >
-          <CheckSquare size={13} class="text-amber-400" />
-          <span>Tasks em Andamento ({tasksEmAndamento().length})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setAbaAtiva("falhas")}
-          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
-            abaAtiva() === "falhas"
-              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
-              : "bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850/60"
-          }`}
-        >
-          <AlertTriangle size={13} class={execucoesFalhas().length > 0 ? "text-rose-400" : "text-zinc-400"} />
-          <span>Falhas & Resoluções ({execucoesFalhas().length})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setAbaAtiva("agendamentos")}
-          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
-            abaAtiva() === "agendamentos"
-              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
-              : "bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850/60"
-          }`}
-        >
-          <Timer size={13} class="text-emerald-400" />
-          <span>Agendamentos ({schedules().length})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setAbaAtiva("fluxos")}
-          class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
-            abaAtiva() === "fluxos"
-              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
-              : "bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850/60"
-          }`}
-        >
-          <GitBranch size={13} class="text-indigo-400" />
-          <span>Fluxos & Hooks ({fluxos().length + hooks().length})</span>
-        </button>
+          <For each={[
+            { key: "geral", label: "Visão Geral", icon: () => <Activity size={13} class="text-zinc-400" />, badge: null },
+            { key: "aovivo", label: "Ao Vivo", icon: () => <Radio size={13} class={executandoAgora() ? "text-emerald-400 animate-pulse" : "text-zinc-400"} />, badge: executandoAgora() ? () => <span class="h-2 w-2 rounded-full bg-emerald-400 animate-ping flex-shrink-0" /> : null },
+            { key: "secretario", label: "Secretário", icon: () => <Bot size={13} class="text-purple-400" />, badge: () => <span class="text-[10px] font-mono text-zinc-500">{sessoesSecretario().length}</span> },
+            { key: "tasks", label: "Tasks", icon: () => <CheckSquare size={13} class="text-amber-400" />, badge: () => <span class="text-[10px] font-mono text-zinc-500">{tasksEmAndamento().length}</span> },
+            { key: "falhas", label: "Falhas", icon: () => <AlertTriangle size={13} class={execucoesFalhas().length > 0 ? "text-rose-400" : "text-zinc-400"} />, badge: execucoesFalhas().length > 0 ? () => <span class="text-[10px] font-mono text-rose-400">{execucoesFalhas().length}</span> : null },
+            { key: "agendamentos", label: "Agendamentos", icon: () => <Timer size={13} class="text-emerald-400" />, badge: () => <span class="text-[10px] font-mono text-zinc-500">{schedules().length}</span> },
+            { key: "fluxos", label: "Fluxos", icon: () => <GitBranch size={13} class="text-indigo-400" />, badge: () => <span class="text-[10px] font-mono text-zinc-500">{fluxos().length + hooks().length}</span> },
+          ] as Array<{ key: string; label: string; icon: () => any; badge: (() => any) | null }>}
+          >
+            {(tab) => (
+              <button
+                type="button"
+                data-tab={tab.key}
+                onClick={() => setAbaAtiva(tab.key as any)}
+                class={`flex-shrink-0 whitespace-nowrap px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer text-xs font-medium ${
+                  abaAtiva() === tab.key
+                    ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
+                    : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+                }`}
+                style={{ "scroll-snap-align": "start" }}
+              >
+                {tab.icon()}
+                <span>{tab.label}</span>
+                <Show when={tab.badge}>
+                  {tab.badge!()}
+                </Show>
+              </button>
+            )}
+          </For>
         </div>
+
+        {/* Seta direita */}
         <button
           type="button"
-          class="flex-shrink-0 p-1 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
+          class="absolute right-0 top-1/2 -translate-y-1/2 z-10 p-1 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80 transition-colors cursor-pointer bg-zinc-950/80 backdrop-blur-xs shadow-md"
           onClick={() => abasRef?.scrollBy({ left: 200, behavior: "smooth" })}
           title="Rolar abas para a direita"
         >
@@ -552,8 +554,37 @@ export const HomeView: Component = () => {
         )}
       </Show>
 
-      {/* CARD 2: BANNER PRINCIPAL COM TIMER DA PRÓXIMA RONDA */}
-      <Show when={proximoImediato()}>
+      {/* CARD 2: BANNER PRINCIPAL COM TIMER DA PRÓXIMA RONDA OU STATUS */}
+      <Show
+        when={proximoImediato()}
+        fallback={
+          <div class="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="flex items-center gap-3.5 min-w-0">
+              <div class="h-11 w-11 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 flex-shrink-0">
+                <Clock size={22} />
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    Sistema Autônomo Online
+                  </span>
+                  <span class="text-xs font-mono px-2 py-0.5 rounded bg-zinc-900 text-zinc-300 border border-zinc-800">
+                    {schedules().length} agendamentos · {agentes().length} agentes prontos
+                  </span>
+                </div>
+                <p class="text-xs text-zinc-400 mt-1">
+                  Scheduler ativo coordenando tarefas, fluxos e rondas periódicas de auditoria.
+                </p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto">
+              <Button size="xs" variant="secondary" onClick={() => navigate("/agenda")}>
+                <Calendar size={13} class="mr-1" /> Ver Agenda 24h
+              </Button>
+            </div>
+          </div>
+        }
+      >
         {(job) => {
           const diff = () => job().diffMs;
           const perto = () => diff() > 0 && diff() < 120000;
@@ -975,6 +1006,105 @@ export const HomeView: Component = () => {
             <div class="text-[10px] text-zinc-500">Permissões e políticas</div>
           </div>
         </A>
+      </div>
+
+      {/* Seção 6: Agentes Prontos & Conversas Recentes do Secretário */}
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Coluna 1: Agentes Operacionais Disponíveis */}
+        <div class="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 space-y-3">
+          <div class="flex items-center justify-between border-b border-zinc-800/80 pb-2">
+            <div class="flex items-center gap-2">
+              <Cpu size={16} class="text-purple-400" />
+              <h2 class="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
+                Agentes Operacionais Prontos ({agentes().length})
+              </h2>
+            </div>
+            <A href="/secretario" class="text-[11px] text-purple-400 hover:underline flex items-center gap-1">
+              Falar com Agente <ArrowRight size={10} />
+            </A>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto scrollbar-thin pr-1">
+            <For
+              each={agentes()}
+              fallback={
+                <div class="col-span-2 py-6 text-center text-xs text-zinc-500">
+                  Carregando agentes do workspace...
+                </div>
+              }
+            >
+              {(ag) => (
+                <div class="p-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800/80 hover:border-zinc-700 transition-colors flex items-center justify-between gap-2 text-xs">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <div class="h-6 w-6 rounded-md bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-300 flex-shrink-0">
+                      <Bot size={13} />
+                    </div>
+                    <div class="min-w-0">
+                      <div class="font-medium text-zinc-200 truncate font-mono">@{ag.id || ag.nome}</div>
+                      <div class="text-[10px] text-zinc-500 truncate">{ag.descricao || ag.funcao || "Operacional"}</div>
+                    </div>
+                  </div>
+
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => navigate(`/secretario?ordem=${encodeURIComponent(`@${ag.id || ag.nome} `)}`)}
+                    title={`Chamar @${ag.id || ag.nome}`}
+                  >
+                    <Play size={10} class="text-emerald-400" />
+                  </Button>
+                </div>
+              )}
+            </For>
+          </div>
+        </div>
+
+        {/* Coluna 2: Sessões Recentes do Secretário */}
+        <div class="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 space-y-3">
+          <div class="flex items-center justify-between border-b border-zinc-800/80 pb-2">
+            <div class="flex items-center gap-2">
+              <MessageSquare size={16} class="text-emerald-400" />
+              <h2 class="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
+                Conversas Recentes com Secretário ({sessoesSecretario().length})
+              </h2>
+            </div>
+            <A href="/secretario" class="text-[11px] text-emerald-400 hover:underline flex items-center gap-1">
+              Abrir Chat <ArrowRight size={10} />
+            </A>
+          </div>
+
+          <div class="space-y-2 max-h-72 overflow-y-auto scrollbar-thin pr-1">
+            <For
+              each={sessoesSecretario().slice(0, 5)}
+              fallback={
+                <div class="py-6 text-center text-xs text-zinc-500">
+                  Nenhuma conversa recente com o Secretário.
+                </div>
+              }
+            >
+              {(sec) => (
+                <A
+                  href={`/secretario?sessao=${encodeURIComponent(sec.id)}`}
+                  class="p-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800/80 hover:border-zinc-700 transition-colors flex items-center justify-between gap-3 text-xs block"
+                >
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <span class={`h-2 w-2 rounded-full flex-shrink-0 ${sec.executando ? "bg-emerald-400 animate-pulse" : "bg-zinc-600"}`} />
+                    <div class="min-w-0">
+                      <div class="font-medium text-zinc-200 truncate">
+                        {sec.titulo_real || sec.title || sec.titulo || `Sessão ${sec.id.slice(0, 8)}`}
+                      </div>
+                      <div class="text-[10px] text-zinc-500 font-mono truncate">
+                        {sec.agent || "secretario-exec"} · {sec.time?.updated ? new Date(sec.time.updated).toLocaleDateString("pt-BR") : "Recente"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <ArrowRight size={12} class="text-zinc-600 flex-shrink-0" />
+                </A>
+              )}
+            </For>
+          </div>
+        </div>
       </div>
 
       </Show>
