@@ -178,6 +178,7 @@ export interface SessaoApi {
   rodar(opcoes: OpcoesRun): Promise<ResultadoRun>;
   listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<unknown[]>;
   logDe(wsPath: string, id: string): Promise<string>;
+  cancelar?(wsPath: string, id: string): Promise<boolean>;
 }
 
 export interface ApiServerOptions {
@@ -1098,16 +1099,11 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             } catch {}
           } else {
             try {
-              cancelado = await sessoes.cancelar(ws.path, id);
+              cancelado = (await sessoes.cancelar?.(ws.path, id)) ?? false;
             } catch {}
           }
           try {
-            registros.corpDb(ws.path).upsertExecucao({
-              id,
-              agente: "",
-              status: "cancelado",
-              fim: new Date().toISOString(),
-            });
+            registros.corpDb(ws.path).atualizarStatusExecucao(id, "cancelado");
           } catch {}
           eventBus.emit("execucao.cancelada", { id });
           enviar(res, 200, { ok: true, id, status: "cancelado", cancelado, mensagem: "Execução encerrada com sucesso." });

@@ -290,12 +290,7 @@ export class SessionManager {
     }
 
     try {
-      this.registros.corpDb(wsPath).upsertExecucao({
-        id: execId,
-        agente: "",
-        status: "cancelado",
-        fim: new Date().toISOString(),
-      });
+      this.registros.corpDb(wsPath).atualizarStatusExecucao(execId, "cancelado");
     } catch {}
 
     return matou;

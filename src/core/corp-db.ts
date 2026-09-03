@@ -232,6 +232,15 @@ export class CorpDb {
       .run(e);
   }
 
+  /** Atualiza apenas status e fim de uma execução existente */
+  atualizarStatusExecucao(id: string, status: string, fim?: string): void {
+    try {
+      this.db
+        .prepare(`UPDATE execucoes SET status = @status, fim = COALESCE(@fim, datetime('now')) WHERE id = @id`)
+        .run({ id, status, fim: fim ?? new Date().toISOString() });
+    } catch {}
+  }
+
   /** Consulta cross-motor do ledger: "o que rodou, por que rodou (gatilho), como terminou". */
   listarExecucoes(filtro?: FiltroExecucoes): LinhaExecucao[] {
     const condicoes: string[] = [];
