@@ -1085,6 +1085,34 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           enviar(res, 200, { id, log: await sessoes.logDe(ws.path, id) });
           return;
         }
+        const mExecCancelar = /^\/(?:execucoes|sessions)\/([^/]+)\/(?:cancelar|cancel|abort)$/.exec(rota);
+        if (mExecCancelar && (req.method === "POST" || req.method === "DELETE")) {
+          const ws = await resolverWs(url);
+          const id = decodeURIComponent(mExecCancelar[1]!);
+          let cancelado = false;
+          if (id.startsWith("ses_")) {
+            try {
+              const porta = await portaOpencodeOuErro();
+              await fetch(`http://127.0.0.1:${porta}/session/${encodeURIComponent(id)}/abort`, { method: "POST" });
+              cancelado = true;
+            } catch {}
+          } else {
+            try {
+              cancelado = await sessoes.cancelar(ws.path, id);
+            } catch {}
+          }
+          try {
+            registros.corpDb(ws.path).upsertExecucao({
+              id,
+              agente: "",
+              status: "cancelado",
+              fim: new Date().toISOString(),
+            });
+          } catch {}
+          eventBus.emit("execucao.cancelada", { id });
+          enviar(res, 200, { ok: true, id, status: "cancelado", cancelado, mensagem: "Execução encerrada com sucesso." });
+          return;
+        }
 
         // ── /historico — fonte única p/ a view Histórico (filtro por agente server-side) ──
         if (rota === "/historico" && req.method === "GET") {

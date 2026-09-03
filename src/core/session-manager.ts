@@ -253,11 +253,52 @@ export class SessionManager {
   private readonly registros = new RegistryStore();
   private readonly approvals = new ApprovalsStore();
   private readonly bridge = new OpenCodeBridge();
+  private readonly processosAtivos = new Map<string, ReturnType<typeof execa>>();
 
   constructor(opts: { homeDir?: string; cwd?: string; templatesDir?: string } = {}) {
     this.homeDir = opts.homeDir ?? opencorpHome();
     this.workspaces = new WorkspaceManager(opts);
     this.agentes = new AgentStore({ templatesDir: opts.templatesDir });
+  }
+
+  async cancelar(wsPath: string, execId: string): Promise<boolean> {
+    const child = this.processosAtivos.get(execId);
+    let matou = false;
+    if (child) {
+      try {
+        child.kill("SIGTERM");
+        setTimeout(() => {
+          try { child.kill("SIGKILL"); } catch {}
+        }, 2000);
+        matou = true;
+      } catch {}
+      this.processosAtivos.delete(execId);
+    } else {
+      try {
+        const meta = await this.registros.lerMeta(wsPath, "execucoes", execId);
+        const pid = (meta.extras as any)?.pid;
+        if (pid && typeof pid === "number") {
+          try {
+            process.kill(pid, "SIGTERM");
+            setTimeout(() => {
+              try { process.kill(pid, "SIGKILL"); } catch {}
+            }, 2000);
+            matou = true;
+          } catch {}
+        }
+      } catch {}
+    }
+
+    try {
+      this.registros.corpDb(wsPath).upsertExecucao({
+        id: execId,
+        agente: "",
+        status: "cancelado",
+        fim: new Date().toISOString(),
+      });
+    } catch {}
+
+    return matou;
   }
 
   private carregarPolicy(wsPath: string) {
@@ -574,6 +615,7 @@ export class SessionManager {
       await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, "", null);
       throw new SessionError(falha);
     }
+    this.processosAtivos.set(id, child);
     if (child.pid) {
       registro.pid = child.pid;
       const meta = await this.registros.lerMeta(ws.path, "execucoes", id);
@@ -1013,6 +1055,7 @@ export class SessionManager {
     captura: string,
     custoUsd: number | null = null,
   ): Promise<void> {
+    this.processosAtivos.delete(registro.id);
     registro.status = status;
     registro.exit_code = exitCode;
     registro.duracao_ms = duracaoMs;

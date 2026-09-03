@@ -394,14 +394,14 @@ export const HomeView: Component = () => {
           onClick={() => setAbaAtiva("aovivo")}
           class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
             abaAtiva() === "aovivo"
-              ? "bg-blue-950/70 text-blue-200 font-bold border border-blue-700/70 shadow-sm"
+              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
               : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
           }`}
         >
-          <Radio size={13} class={executandoAgora() ? "text-blue-400 animate-pulse" : "text-zinc-400"} />
+          <Radio size={13} class={executandoAgora() ? "text-emerald-400 animate-pulse" : "text-zinc-400"} />
           <span>Ao Vivo & Fundo</span>
           <Show when={executandoAgora()}>
-            <span class="h-2 w-2 rounded-full bg-blue-400 animate-ping" />
+            <span class="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
           </Show>
         </button>
 
@@ -410,8 +410,8 @@ export const HomeView: Component = () => {
           onClick={() => setAbaAtiva("secretario")}
           class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
             abaAtiva() === "secretario"
-              ? "bg-purple-950/70 text-purple-200 font-bold border border-purple-700/70 shadow-sm"
-              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
+              : "bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850/60"
           }`}
         >
           <Bot size={13} class="text-purple-400" />
@@ -423,8 +423,8 @@ export const HomeView: Component = () => {
           onClick={() => setAbaAtiva("tasks")}
           class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
             abaAtiva() === "tasks"
-              ? "bg-amber-950/70 text-amber-200 font-bold border border-amber-700/70 shadow-sm"
-              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
+              : "bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850/60"
           }`}
         >
           <CheckSquare size={13} class="text-amber-400" />
@@ -436,8 +436,8 @@ export const HomeView: Component = () => {
           onClick={() => setAbaAtiva("falhas")}
           class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
             abaAtiva() === "falhas"
-              ? "bg-rose-950/70 text-rose-200 font-bold border border-rose-700/70 shadow-sm"
-              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
+              : "bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850/60"
           }`}
         >
           <AlertTriangle size={13} class={execucoesFalhas().length > 0 ? "text-rose-400" : "text-zinc-400"} />
@@ -449,8 +449,8 @@ export const HomeView: Component = () => {
           onClick={() => setAbaAtiva("agendamentos")}
           class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
             abaAtiva() === "agendamentos"
-              ? "bg-emerald-950/70 text-emerald-200 font-bold border border-emerald-700/70 shadow-sm"
-              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
+              : "bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850/60"
           }`}
         >
           <Timer size={13} class="text-emerald-400" />
@@ -462,8 +462,8 @@ export const HomeView: Component = () => {
           onClick={() => setAbaAtiva("fluxos")}
           class={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer font-mono ${
             abaAtiva() === "fluxos"
-              ? "bg-indigo-950/70 text-indigo-200 font-bold border border-indigo-700/70 shadow-sm"
-              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+              ? "bg-zinc-800 text-zinc-100 font-bold border border-zinc-700 shadow-sm"
+              : "bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850/60"
           }`}
         >
           <GitBranch size={13} class="text-indigo-400" />
@@ -475,17 +475,17 @@ export const HomeView: Component = () => {
       {/* CARD 1: EXECUTANDO AGORA (CASO HAJA AGENTE RODANDO) */}
       <Show when={executandoAgora()}>
         {(exec) => (
-          <div class="p-4 rounded-xl border border-blue-500/40 bg-gradient-to-r from-blue-950/60 via-zinc-900 to-zinc-900/80 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div class="p-4 rounded-xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/30 via-zinc-900 to-zinc-900/80 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div class="flex items-center gap-3.5 min-w-0">
-              <div class="h-11 w-11 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-300 flex-shrink-0">
+              <div class="h-11 w-11 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300 flex-shrink-0">
                 <Zap size={22} class="animate-pulse" />
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
-                  <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/30 text-blue-200 border border-blue-500/50 animate-pulse font-mono">
+                  <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 animate-pulse font-mono">
                     ● Executando Agora
                   </span>
-                  <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-blue-300 border border-zinc-800">
+                  <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-zinc-300 border border-zinc-800">
                     ⏱ {formatarDecorrido(agoraMs() - new Date(exec().inicio).getTime())}
                   </span>
                 </div>
@@ -503,7 +503,7 @@ export const HomeView: Component = () => {
             <div class="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto">
               <A
                 href={`/historico?run=${encodeURIComponent(exec().id)}`}
-                class="px-3 py-1.5 rounded-lg bg-blue-900/40 hover:bg-blue-800/50 border border-blue-700/60 text-xs text-blue-200 font-medium transition-colors"
+                class="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs text-zinc-200 font-medium transition-colors"
               >
                 Acompanhar Log →
               </A>
@@ -777,7 +777,7 @@ export const HomeView: Component = () => {
                     <div
                       class={`h-2 w-2 rounded-full flex-shrink-0 ${
                         at.status === "executando"
-                          ? "bg-blue-400 animate-ping"
+                          ? "bg-emerald-400 animate-ping"
                           : at.status === "concluido"
                           ? "bg-emerald-400"
                           : at.status === "falhou"
@@ -960,18 +960,18 @@ export const HomeView: Component = () => {
             }
           >
             {(exec) => (
-              <div class="p-5 rounded-2xl border border-blue-500/50 bg-gradient-to-r from-blue-950/80 via-zinc-900 to-zinc-900 shadow-xl space-y-4">
+              <div class="p-5 rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/30 via-zinc-900 to-zinc-900 shadow-xl space-y-4">
                 <div class="flex items-center justify-between gap-4 flex-wrap">
                   <div class="flex items-center gap-3">
-                    <div class="h-10 w-10 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-300">
+                    <div class="h-10 w-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300">
                       <Zap size={20} class="animate-pulse" />
                     </div>
                     <div>
                       <div class="flex items-center gap-2">
-                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/30 text-blue-200 border border-blue-500/50 animate-pulse font-mono">
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 animate-pulse font-mono">
                           ● Processo Ativo
                         </span>
-                        <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-blue-300 border border-zinc-800">
+                        <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-zinc-300 border border-zinc-800">
                           ⏱ {formatarDecorrido(agoraMs() - new Date(exec().inicio).getTime())}
                         </span>
                       </div>
@@ -984,7 +984,7 @@ export const HomeView: Component = () => {
                   <div class="flex items-center gap-2">
                     <A
                       href={exec().tipo === "secretario" ? `/secretario?sessao=${encodeURIComponent(exec().id)}` : `/historico?run=${encodeURIComponent(exec().id)}`}
-                      class="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs text-white font-bold transition-all shadow-md flex items-center gap-1.5 font-mono cursor-pointer"
+                      class="px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs text-zinc-100 font-bold transition-all shadow-md flex items-center gap-1.5 font-mono cursor-pointer"
                     >
                       <ExternalLink size={13} />
                       <span>{exec().tipo === "secretario" ? "Ver Chat Ao Vivo →" : "Ver Log ao Vivo"}</span>
@@ -1015,7 +1015,7 @@ export const HomeView: Component = () => {
                 {(exec) => {
                   const statusCor = () => {
                     if (exec.status === "concluido") return "text-emerald-400 bg-emerald-950/60 border-emerald-800/60";
-                    if (exec.status === "executando") return "text-blue-400 bg-blue-950/60 border-blue-800/60 animate-pulse";
+                    if (exec.status === "executando") return "text-emerald-400 bg-emerald-950/60 border-emerald-800/60 animate-pulse";
                     return "text-rose-400 bg-rose-950/60 border-rose-800/60";
                   };
 

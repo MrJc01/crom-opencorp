@@ -16,6 +16,8 @@ import {
   Zap,
   ArrowRight,
   ExternalLink,
+  StopCircle,
+  Settings,
 } from "lucide-solid";
 import { useSearchParams, useNavigate } from "@solidjs/router";
 import { Button } from "../ui/Button";
@@ -49,6 +51,7 @@ export const HistoricoView: Component = () => {
   const [logRun, setLogRun] = createSignal<string>("");
   const [carregandoLog, setCarregandoLog] = createSignal(false);
   const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal">("chat");
+  const [encerrando, setEncerrando] = createSignal(false);
 
   let liveLogInterval: any = null;
 
@@ -189,6 +192,28 @@ export const HistoricoView: Component = () => {
     URL.revokeObjectURL(url);
   };
 
+  const encerrarExecucao = async () => {
+    const run = runSelecionado();
+    if (!run) return;
+    setEncerrando(true);
+    try {
+      await fetchApi(`/execucoes/${encodeURIComponent(run.id)}/cancelar`, {
+        method: "POST",
+      } as any);
+      showToast("Execução encerrada com sucesso", "sucesso");
+      setRunSelecionado({ ...run, status: "cancelado" });
+      if (liveLogInterval) {
+        clearInterval(liveLogInterval);
+        liveLogInterval = null;
+      }
+      void carregarHistorico();
+    } catch (e: any) {
+      showToast(`Erro ao encerrar: ${e.message}`, "erro");
+    } finally {
+      setEncerrando(false);
+    }
+  };
+
   // Reagir a alteração em ?run=
   createEffect(() => {
     const runParam = searchParams.run as string | undefined;
@@ -206,10 +231,16 @@ export const HistoricoView: Component = () => {
 
   onMount(() => {
     void carregarHistorico();
-  });
-
-  onCleanup(() => {
-    if (liveLogInterval) clearInterval(liveLogInterval);
+    const aoPressionarTecla = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && runSelecionado()) {
+        fecharLog();
+      }
+    };
+    window.addEventListener("keydown", aoPressionarTecla);
+    onCleanup(() => {
+      window.removeEventListener("keydown", aoPressionarTecla);
+      if (liveLogInterval) clearInterval(liveLogInterval);
+    });
   });
 
   const itensFiltrados = () => {
@@ -234,7 +265,7 @@ export const HistoricoView: Component = () => {
   const badgeTipo = (tipo: string) => {
     switch (tipo) {
       case "execucao":
-        return <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-blue-500/20 text-blue-300 border border-blue-500/30">EXECUÇÃO</span>;
+        return <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-zinc-700/40 text-zinc-300 border border-zinc-600/40">EXECUÇÃO</span>;
       case "task":
         return <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30">TASK</span>;
       case "conversa":
@@ -364,16 +395,16 @@ export const HistoricoView: Component = () => {
                   onClick={() => selecionarItem(item)}
                   class={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between gap-4 text-xs shadow-xs ${
                     searchParams.run === item.id
-                      ? "bg-blue-950/40 border-blue-500/80 ring-1 ring-blue-500/40"
+                      ? "bg-zinc-800/60 border-zinc-600 ring-1 ring-zinc-600/40"
                       : emAndamento
-                      ? "bg-blue-950/20 border-blue-800/80 hover:border-blue-700"
+                      ? "bg-zinc-900/80 border-zinc-700/80 hover:border-zinc-600"
                       : "bg-zinc-900/60 border-zinc-800/80 hover:border-zinc-700"
                   }`}
                 >
                   <div class="flex items-center gap-3 min-w-0">
                     <div class="flex-shrink-0">
                       {emAndamento ? (
-                        <div class="h-3.5 w-3.5 rounded-full bg-blue-500 animate-ping" />
+                        <div class="h-3.5 w-3.5 rounded-full bg-emerald-500 animate-ping" />
                       ) : ok ? (
                         <CheckCircle2 size={16} class="text-emerald-400" />
                       ) : hitl ? (
@@ -428,7 +459,7 @@ export const HistoricoView: Component = () => {
 
       {/* Modal / Visualizador de Log */}
       <Show when={runSelecionado()}>
-        <div class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50">
+        <div class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50" onClick={(e) => { if (e.target === e.currentTarget) fecharLog(); }}>
           <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-5xl w-full p-4 sm:p-5 space-y-4 shadow-2xl max-h-[92vh] flex flex-col">
             {/* Topo do Modal */}
             <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 pb-3 flex-shrink-0">
@@ -439,7 +470,7 @@ export const HistoricoView: Component = () => {
                     Execução: {runSelecionado()!.id}
                   </h2>
                   <Show when={runSelecionado()!.status === "executando"}>
-                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40 animate-pulse">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse">
                       STREAMING AO VIVO
                     </span>
                   </Show>
@@ -470,7 +501,7 @@ export const HistoricoView: Component = () => {
                         : "text-zinc-400 hover:text-zinc-200"
                     }`}
                   >
-                    <MessageSquare size={13} class="text-blue-400" />
+                    <MessageSquare size={13} class="text-zinc-400" />
                     <span>Chat ao Vivo</span>
                   </button>
                   <button
@@ -493,6 +524,38 @@ export const HistoricoView: Component = () => {
                 <Button size="xs" variant="ghost" onClick={baixarLog} title="Baixar arquivo .log">
                   <Download size={13} class="mr-1" /> Baixar
                 </Button>
+
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => {
+                    const run = runSelecionado();
+                    if (run?.agente) {
+                      navigate(`/agentes?agente=${encodeURIComponent(run.agente)}`);
+                    } else {
+                      navigate("/config");
+                    }
+                  }}
+                  title="Configurar agente ou parâmetros"
+                  class="text-zinc-400 hover:text-zinc-100"
+                >
+                  <Settings size={13} class="mr-1" /> Configurar
+                </Button>
+
+                <Show when={runSelecionado()!.status === "executando"}>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={encerrarExecucao}
+                    disabled={encerrando()}
+                    title="Encerrar esta execução"
+                    class="!bg-rose-950/40 !text-rose-300 hover:!bg-rose-900/60 !border !border-rose-800/80 font-bold"
+                  >
+                    <StopCircle size={13} class="mr-1 text-rose-400" />
+                    {encerrando() ? "Encerrando..." : "Encerrar"}
+                  </Button>
+                </Show>
+
                 <IconButton size="xs" variant="ghost" onClick={fecharLog} title="Fechar modal (ESC)">
                   <X size={16} />
                 </IconButton>

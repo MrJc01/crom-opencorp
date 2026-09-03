@@ -299,7 +299,7 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
           <button
             type="button"
             onClick={() => props.onEditarPrompt(props.indice)}
-            class="p-1 rounded-md text-zinc-500 hover:text-amber-300 hover:bg-zinc-800/80 transition-colors cursor-pointer"
+            class="p-1 rounded-md bg-transparent text-zinc-500 hover:text-amber-300 hover:bg-zinc-800/80 transition-colors cursor-pointer"
             title="Editar prompt"
             aria-label="Editar prompt"
           >
@@ -308,7 +308,7 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
           <button
             type="button"
             onClick={copiar}
-            class="p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80 transition-colors cursor-pointer"
+            class="p-1 rounded-md bg-transparent text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80 transition-colors cursor-pointer"
             title="Copiar prompt"
             aria-label="Copiar prompt"
           >
@@ -325,7 +325,7 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
           <button
             type="button"
             onClick={copiar}
-            class="p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-850/80 transition-colors cursor-pointer"
+            class="p-1 rounded-md bg-transparent text-zinc-500 hover:text-zinc-200 hover:bg-zinc-850/80 transition-colors cursor-pointer"
             title="Copiar resposta"
             aria-label="Copiar resposta"
           >
