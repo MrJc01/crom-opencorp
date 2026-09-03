@@ -214,6 +214,8 @@ export async function findSecretFiles(raizes: string[], maxDepth = 6): Promise<s
         if (entrada.name === "node_modules" || entrada.name === ".git") continue;
         await walk(completo, depth + 1);
       } else if (entrada.isFile() && entrada.name.toLowerCase().startsWith("secrets")) {
+        // .opencorp/secrets.json é o armazenamento isolado oficial suportado pelo OpenCorp
+        if (completo.endsWith("/.opencorp/secrets.json") || completo.endsWith("/.opencorp/secrets")) continue;
         encontrados.push(completo);
       }
     }
