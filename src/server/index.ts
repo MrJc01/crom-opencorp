@@ -1433,6 +1433,24 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           enviar(res, 200, nomes.map((nome) => ({ nome, definido: true, tipo_app: tipoDeNomeApp(nome) })));
           return;
         }
+        if (rota === "/secrets" && req.method === "POST") {
+          const corpo = (await lerCorpo(req)) as { nome?: string; valor?: string };
+          if (!corpo.nome || typeof corpo.valor !== "string") {
+            enviar(res, 400, { erro: "nome e valor obrigatórios" });
+            return;
+          }
+          const erroPerfil = validarPerfilApp(corpo.nome, corpo.valor);
+          if (erroPerfil) {
+            enviar(res, 422, { erro: erroPerfil });
+            return;
+          }
+          let atual: Record<string, unknown> = {};
+          try { atual = JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, unknown>; } catch {}
+          atual[corpo.nome] = corpo.valor;
+          await writeFileAtomic(secretsPath, `${JSON.stringify(atual, null, 2)}\n`, { mode: 0o600 });
+          enviar(res, 201, { ok: true, nome: corpo.nome });
+          return;
+        }
         const mSecret = /^\/secrets\/([^/]+)$/.exec(rota);
         if (mSecret && req.method === "PUT") {
           const corpo = (await lerCorpo(req)) as { valor?: string };
