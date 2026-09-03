@@ -98,12 +98,15 @@ function gerarId(prefixo: string): string {
   return `${prefixo}-${ts}-${randomUUID().slice(0, 4)}`;
 }
 
-const PADRAO_ERRO_MODELO = /usage limit|Cannot connect to API|AI_APICallError/i;
+const PADRAO_ERRO_MODELO =
+  /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found/i;
 
 export const MODELOS_ROTACAO_PADRAO = [
+  "openrouter/minimax/minimax-m3:free",
+  "openrouter/google/gemini-2.5-flash",
+  "openrouter/deepseek/deepseek-chat",
   "opencode-go/glm-5.3-flash",
-  "opencode-go/mimo-v2.5",
-  "opencode-go/minimax-m3",
+  "openrouter/meta-llama/llama-3.3-70b-instruct",
 ];
 
 const TETO_RUN_PADRAO_MIN = 20;
@@ -309,7 +312,7 @@ export class SessionManager {
    * cross-motor do PLANO-UNIFICACAO. Falha de ledger NUNCA quebra a execução
    * (mesma tolerância do job_runs do scheduler).
    */
-  private registrarNoLedger(wsPath: string, registro: RegistroExecucao, custoUsd: number | null): void {
+  private registrarNoLedger(wsPath: string, registro: RegistroExecucao, custoUsd: number | null, erro?: string | null): void {
     try {
       this.registros.corpDb(wsPath).upsertExecucao({
         id: registro.id,
@@ -323,6 +326,7 @@ export class SessionManager {
         duracao_ms: registro.duracao_ms,
         custo_usd: custoUsd,
         exit_code: registro.exit_code,
+        erro: erro ?? (registro as any).erro ?? null,
       });
     } catch {
       /* ledger é índice; os registros (MD/JSON) são a fonte documental */
@@ -705,6 +709,25 @@ export class SessionManager {
     registro.duracao_ms = duracao;
 
     const textoCaptura = captura.join("");
+
+    // Se falhou por erro de modelo/API e ainda não tentou retry, roda com o próximo da rotação
+    if (status === "falhou" && !opcoes.retryDe && PADRAO_ERRO_MODELO.test(textoCaptura)) {
+      const retry = await this.tentarRetry(ws, opcoes, registro, textoCaptura);
+      if (retry) return retry;
+    }
+
+    if (status === "falhou") {
+      let resumoErro = "";
+      const matchErro = /(?:Error|erro|Rate limit|Quota|Exception|status code \d+)[:\s]+([^\n\r]+)/i.exec(textoCaptura);
+      if (matchErro) {
+        resumoErro = matchErro[0].trim();
+      } else {
+        const linhas = textoCaptura.trim().split("\n").filter((l) => l.trim() && !l.startsWith(">") && !l.startsWith("#"));
+        resumoErro = linhas[linhas.length - 1] || `Processo encerrou com exit code ${registro.exit_code}`;
+      }
+      (registro as any).erro = resumoErro;
+    }
+
     const custo = budget.estimarCusto(
       await budget.carregar(ws.path),
       modelo,
@@ -1074,7 +1097,30 @@ export class SessionManager {
     });
     const meta = await this.registros.lerMeta(ws.path, "execucoes", registro.id);
     await this.salvarExtras(ws.path, meta, registro);
-    this.registrarNoLedger(ws.path, registro, custoUsd);
+    const erroDesc = (registro as any).erro || (status === "falhou" ? resumo : null);
+    this.registrarNoLedger(ws.path, registro, custoUsd, erroDesc);
+
+    // Notificação automática de falha de execução/modelo
+    if (status === "falhou") {
+      try {
+        const { NotificationStore } = await import("./notification-store.js");
+        const notifs = new NotificationStore();
+        const motivo = erroDesc || `Processo encerrou com falha (exit ${exitCode})`;
+        await notifs.adicionar(ws.path, {
+          tipo: "erro",
+          titulo: `Falha na execução: @${registro.agente}`,
+          corpo: `A execução ${registro.id} (@${registro.agente}) falhou no modelo ${registro.modelo}.\nMotivo: ${motivo.slice(0, 240)}`,
+        });
+        eventBus.emit("notificacao", {
+          workspace: ws.id,
+          tipo: "erro",
+          titulo: `Falha: @${registro.agente}`,
+          corpo: motivo.slice(0, 240),
+        });
+      } catch {
+        /* best-effort notification */
+      }
+    }
     await this.registros.registrarSessao(ws.path, {
       id: registro.id,
       agente: registro.agente,

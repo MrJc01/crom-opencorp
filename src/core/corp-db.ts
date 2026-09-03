@@ -54,6 +54,7 @@ export interface LinhaExecucao {
   duracao_ms: number | null;
   custo_usd: number | null;
   exit_code: number | null;
+  erro?: string | null;
 }
 
 export interface FiltroExecucoes {
@@ -127,8 +128,10 @@ export class CorpDb {
         fim TEXT,
         duracao_ms INTEGER,
         custo_usd REAL,
-        exit_code INTEGER
+        exit_code INTEGER,
+        erro TEXT
       );
+      try { this.db.exec("ALTER TABLE execucoes ADD COLUMN erro TEXT"); } catch {}
       CREATE INDEX IF NOT EXISTS idx_journal_registro ON journal (categoria, registro_id);
       CREATE INDEX IF NOT EXISTS idx_mensagens_sessao ON mensagens (sessao_id, criado_em);
       CREATE INDEX IF NOT EXISTS idx_execucoes_gatilho ON execucoes (gatilho_tipo, gatilho_origem);
@@ -237,8 +240,8 @@ export class CorpDb {
   upsertExecucao(e: LinhaExecucao): void {
     this.db
       .prepare(
-        `INSERT INTO execucoes (id, agente, modelo, gatilho_tipo, gatilho_origem, status, inicio, fim, duracao_ms, custo_usd, exit_code)
-         VALUES (@id, @agente, @modelo, @gatilho_tipo, @gatilho_origem, @status, @inicio, @fim, @duracao_ms, @custo_usd, @exit_code)
+        `INSERT INTO execucoes (id, agente, modelo, gatilho_tipo, gatilho_origem, status, inicio, fim, duracao_ms, custo_usd, exit_code, erro)
+         VALUES (@id, @agente, @modelo, @gatilho_tipo, @gatilho_origem, @status, @inicio, @fim, @duracao_ms, @custo_usd, @exit_code, @erro)
          ON CONFLICT (id) DO UPDATE SET
            agente = excluded.agente,
            modelo = excluded.modelo,
@@ -248,9 +251,10 @@ export class CorpDb {
            fim = excluded.fim,
            duracao_ms = excluded.duracao_ms,
            custo_usd = excluded.custo_usd,
-           exit_code = excluded.exit_code`,
+           exit_code = excluded.exit_code,
+           erro = excluded.erro`,
       )
-      .run(e);
+      .run({ ...e, erro: e.erro ?? null });
   }
 
   /** Atualiza apenas status e fim de uma execução existente */

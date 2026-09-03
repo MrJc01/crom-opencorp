@@ -73,7 +73,14 @@ async function loopSupervisor(home: string, comServe: boolean, host?: string): P
         reinicios.set("scheduler", tentativas);
         log(`scheduler morto — reiniciando (tentativa ${tentativas})`);
         try {
-          const bin = process.argv[1] || resolve(import.meta.dirname ?? ".", "..", "..", "..", "bin", "opencorp.mjs");
+          let bin = process.argv[1];
+          if (!bin || !existsSync(bin)) {
+            bin = resolve(import.meta.dirname ?? ".", "..", "..", "..", "bin", "opencorp.mjs");
+          }
+          if (!existsSync(bin)) {
+            const fallback = resolve(process.cwd(), "bin", "opencorp.mjs");
+            if (existsSync(fallback)) bin = fallback;
+          }
           const logFd = openSync(join(home, "logs", "scheduler-daemon.log"), "a");
           const filho = spawn(process.execPath, [bin, "scheduler", "start", "--foreground", "--intervalo-seg", "30"], {
             detached: true,

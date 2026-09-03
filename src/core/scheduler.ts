@@ -594,6 +594,17 @@ export class Scheduler {
         const msgErro = erro instanceof Error ? erro.message : String(erro);
         console.error(`[scheduler] falha ao executar job ${job.id} (${job.nome}): ${msgErro}`);
         await this.registrarRun(job, { erro: msgErro });
+        try {
+          const { NotificationStore } = await import("./notification-store.js");
+          const notifs = new NotificationStore();
+          await notifs.adicionar(job.workspace || process.cwd(), {
+            tipo: "erro",
+            titulo: `Falha no agendamento: ${job.nome}`,
+            corpo: `O job "${job.nome}" falhou ao executar: ${msgErro.slice(0, 240)}`,
+          });
+        } catch {
+          /* best-effort notification */
+        }
       }
       executados.push(job.id);
     }
