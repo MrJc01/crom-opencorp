@@ -157,13 +157,15 @@ export const DocsView: Component = () => {
                     {(item) => {
                       const ativo = () => docAtivo()?.slug === item.slug;
                       return (
-                        <button
-                          type="button"
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={() => carregarConteudo(item.slug)}
-                          class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer text-left ${
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") carregarConteudo(item.slug); }}
+                          class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer text-left select-none ${
                             ativo()
-                              ? "bg-emerald-950/50 text-emerald-300 border border-emerald-500/40 font-medium"
-                              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 border border-transparent"
+                              ? "!bg-emerald-950/60 text-emerald-300 border border-emerald-500/50 font-medium"
+                              : "!bg-transparent text-zinc-400 hover:text-zinc-200 hover:!bg-zinc-900/80 border border-transparent"
                           }`}
                         >
                           <div class="flex items-center gap-2 min-w-0">
@@ -173,7 +175,7 @@ export const DocsView: Component = () => {
                           <Show when={ativo()}>
                             <ChevronRight size={12} class="text-emerald-400 flex-shrink-0" />
                           </Show>
-                        </button>
+                        </div>
                       );
                     }}
                   </For>

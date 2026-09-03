@@ -1,10 +1,12 @@
-import { type Component, For } from "solid-js";
+import { type Component, createSignal, For } from "solid-js";
 import { useLocation } from "@solidjs/router";
-import { Building2, Radio } from "lucide-solid";
+import { Building2, Radio, Plus } from "lucide-solid";
 import { wsAtivo, setWsAtivo, workspaces, sseConnected } from "../lib/context";
+import { NovoWorkspaceModal } from "./NovoWorkspaceModal";
 
 export const Topbar: Component = () => {
   const location = useLocation();
+  const [modalNovoWs, setModalNovoWs] = createSignal(false);
 
   const getBreadcrumb = () => {
     const p = location.pathname.replace(/^\//, "") || "home";
@@ -38,22 +40,34 @@ export const Topbar: Component = () => {
       {/* Ações e Controles à Direita */}
       <div class="flex items-center gap-3">
         {/* Seletor de Workspace */}
-        <div class="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
-          <Building2 size={13} class="text-emerald-400" />
-          <select
-            class="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer"
-            value={wsAtivo()}
-            onChange={(e) => setWsAtivo(e.currentTarget.value)}
+        <div class="flex items-center gap-1.5">
+          <div class="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
+            <Building2 size={13} class="text-emerald-400" />
+            <select
+              class="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer"
+              value={wsAtivo()}
+              onChange={(e) => setWsAtivo(e.currentTarget.value)}
+            >
+              <For each={workspaces()}>
+                {(w) => (
+                  <option value={w.id} class="bg-zinc-900 text-zinc-200" selected={w.id === wsAtivo()}>
+                    {w.id}
+                  </option>
+                )}
+              </For>
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={() => setModalNovoWs(true)}
+            class="!bg-zinc-900 hover:!bg-zinc-800 p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 border border-zinc-800 transition-all cursor-pointer flex items-center justify-center"
+            title="Novo Workspace ou Conectar Pasta"
           >
-            <For each={workspaces()}>
-              {(w) => (
-                <option value={w.id} class="bg-zinc-900 text-zinc-200" selected={w.id === wsAtivo()}>
-                  {w.id}
-                </option>
-              )}
-            </For>
-          </select>
+            <Plus size={13} />
+          </button>
         </div>
+
+        <NovoWorkspaceModal open={modalNovoWs()} onClose={() => setModalNovoWs(false)} />
 
         {/* Indicador de Conexão SSE */}
         <div

@@ -654,10 +654,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
       }
-      // SPA fallback para URLs limpas (/secretario, /workspace...) — history API sem # (só para navegação, não para API JSON)
+      // SPA fallback para URLs limpas (/secretario, /workspace, /docs...) — history API sem # (só para navegação, não para API JSON)
       const accept = String(req.headers.accept || "");
       const querHtml = accept.includes("text/html");
-      if (req.method === "GET" && querHtml && /^\/(home|tasks|agentes|secretario|workspace|agenda|fluxos|hooks|apps|historico|notificacoes|config|app)(\/.*)?$/.test(rota)) {
+      if (req.method === "GET" && querHtml && /^\/(home|tasks|agentes|secretario|workspace|agenda|fluxos|hooks|apps|historico|notificacoes|docs|config|app)(\/.*)?$/.test(rota)) {
         const index = servirEstatico("/");
         if (index) {
           res.writeHead(200, { "content-type": index.tipo, "access-control-allow-origin": "*", "cache-control": "no-cache" });

@@ -539,9 +539,20 @@ export class SessionManager {
     if (opcoes.title) args.push("--title", opcoes.title);
     args.push(ordem);
 
+    let runnerBin = "opencode";
+    try {
+      const rPath = join(this.homeDir, ".opencorp", "runner.json");
+      if (existsSync(rPath)) {
+        const rJson = JSON.parse(readFileSync(rPath, "utf8")) as { binary_path?: string };
+        if (typeof rJson.binary_path === "string" && rJson.binary_path.trim().length > 0) {
+          runnerBin = rJson.binary_path.trim();
+        }
+      }
+    } catch {}
+
     let child: ReturnType<typeof execa>;
     try {
-      child = execa("opencode", args, {
+      child = execa(runnerBin, args, {
         cwd: ws.path,
         // data-dir POR workspace: auth (global ⊕ overrides) + sessões da empresa isolados
         env: envOpencodeIsolado(this.homeDir, ws.id) as Record<string, string>,
@@ -550,7 +561,7 @@ export class SessionManager {
         stdin: "ignore",
       });
     } catch (erro) {
-      const falha = `não foi possível iniciar o opencode: ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
+      const falha = `não foi possível iniciar o runner (${runnerBin}): ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
       await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, "", null);
       throw new SessionError(falha);
     }

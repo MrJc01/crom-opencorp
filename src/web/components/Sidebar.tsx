@@ -19,12 +19,15 @@ import {
   Building2,
   ChevronsUpDown,
   BookOpen,
+  Plus,
 } from "lucide-solid";
 import { wsAtivo, setWsAtivo, workspaces, notificacoesNaoLidas } from "../lib/context";
+import { NovoWorkspaceModal } from "./NovoWorkspaceModal";
 
 export const Sidebar: Component = () => {
   const location = useLocation();
   const [colapsado, setColapsado] = createSignal(localStorage.getItem("oc-sidebar-colapsada") === "1");
+  const [modalNovoWs, setModalNovoWs] = createSignal(false);
 
   const toggleColapso = () => {
     const novo = !colapsado();
@@ -88,8 +91,9 @@ export const Sidebar: Component = () => {
           </Show>
         </div>
         <button
+          type="button"
           onClick={toggleColapso}
-          class="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 border border-transparent hover:border-zinc-800 transition-all cursor-pointer"
+          class="!bg-transparent hover:!bg-zinc-900/80 p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 border border-transparent hover:border-zinc-800 transition-all cursor-pointer"
           title={colapsado() ? "Expandir menu" : "Recolher menu"}
         >
           <Show when={colapsado()} fallback={<ChevronLeft size={16} />}>
@@ -111,25 +115,37 @@ export const Sidebar: Component = () => {
             </div>
           }
         >
-          <div class="relative flex items-center bg-zinc-900/80 border border-zinc-800 rounded-lg px-2.5 py-1.5 focus-within:border-zinc-700">
-            <Building2 size={13} class="text-emerald-400 flex-shrink-0 mr-2" />
-            <select
-              class="w-full bg-transparent text-xs font-medium text-zinc-200 focus:outline-none cursor-pointer appearance-none truncate pr-4"
-              value={wsAtivo()}
-              onChange={(e) => setWsAtivo(e.currentTarget.value)}
+          <div class="flex items-center gap-1.5">
+            <div class="relative flex-1 flex items-center bg-zinc-900/80 border border-zinc-800 rounded-lg px-2.5 py-1.5 focus-within:border-zinc-700 min-w-0">
+              <Building2 size={13} class="text-emerald-400 flex-shrink-0 mr-2" />
+              <select
+                class="w-full bg-transparent text-xs font-medium text-zinc-200 focus:outline-none cursor-pointer appearance-none truncate pr-4"
+                value={wsAtivo()}
+                onChange={(e) => setWsAtivo(e.currentTarget.value)}
+              >
+                <For each={workspaces()}>
+                  {(w) => (
+                    <option value={w.id} class="bg-zinc-900 text-zinc-200" selected={w.id === wsAtivo()}>
+                      {w.id}
+                    </option>
+                  )}
+                </For>
+              </select>
+              <ChevronsUpDown size={12} class="text-zinc-500 absolute right-2 pointer-events-none" />
+            </div>
+            <button
+              type="button"
+              onClick={() => setModalNovoWs(true)}
+              class="!bg-zinc-900/80 hover:!bg-zinc-800 p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 border border-zinc-800 transition-all cursor-pointer flex-shrink-0"
+              title="Novo Workspace ou Conectar Pasta"
             >
-              <For each={workspaces()}>
-                {(w) => (
-                  <option value={w.id} class="bg-zinc-900 text-zinc-200" selected={w.id === wsAtivo()}>
-                    {w.id}
-                  </option>
-                )}
-              </For>
-            </select>
-            <ChevronsUpDown size={12} class="text-zinc-500 absolute right-2 pointer-events-none" />
+              <Plus size={14} />
+            </button>
           </div>
         </Show>
       </div>
+
+      <NovoWorkspaceModal open={modalNovoWs()} onClose={() => setModalNovoWs(false)} />
 
       {/* Lista de Navegação */}
       <nav class="flex-1 overflow-y-auto py-3 px-2.5 space-y-4 scrollbar-thin">

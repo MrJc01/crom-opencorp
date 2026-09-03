@@ -1,4 +1,4 @@
-import { copyFileSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
 import { join, basename } from "node:path";
 import type { Agente } from "../schemas/agent.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
@@ -42,6 +42,43 @@ function yamlString(valor: string): string {
 const GUIDANCE_NOTIFICAR =
   "Ao finalizar uma execução relevante, chame a tool notificar com um resumo do que foi feito (titulo ≤80 chars, corpo ≤500 chars) para o painel mostrar ao usuário.";
 
+function obterContextoAdaptativo(wsPath: string, wsId: string, agente: Agente): string {
+  const partes: string[] = [
+    "\n## Contexto Operacional Primário (OpenCorp)",
+    `- Agente Ativo: ${agente.id} (${agente.role} - categoria ${agente.category})`,
+    `- Workspace ID: ${wsId}`,
+    `- Diretório Raiz: ${wsPath}`,
+    "- Registros: sempre utilize .opencorp/registries/ (documentos, execucoes, chats). NUNCA duplique como .opencorp/.opencorp/.",
+  ];
+
+  try {
+    const scriptsDir = join(wsPath, "scripts");
+    if (existsSync(scriptsDir)) {
+      const scripts = readdirSync(scriptsDir).filter((f) => !f.startsWith("."));
+      if (scripts.length > 0) {
+        partes.push(`- Scripts Locais: ${scripts.map((s) => `scripts/${s}`).join(", ")}`);
+      }
+    }
+  } catch {}
+
+  try {
+    const docsDir = join(wsPath, ".opencorp", "registries", "documentos");
+    if (existsSync(docsDir)) {
+      const arquivos = readdirSync(docsDir)
+        .filter((f) => f.endsWith(".md"))
+        .sort()
+        .reverse()
+        .slice(0, 5);
+      if (arquivos.length > 0) {
+        partes.push(`- Documentos Recentes: ${arquivos.join(", ")}`);
+      }
+    }
+  } catch {}
+
+  partes.push("- Execução Direta: utilize comandos padrão ou o utilitário oc.");
+  return partes.join("\n") + "\n";
+}
+
 export function gerarAgenteOpencode(agente: Agente, corpo: string): string {
   const linhas: string[] = ["---"];
   const description = `${agente.role} (agente opencorp "${agente.id}", categoria ${agente.category})`;
@@ -67,7 +104,8 @@ export class OpenCodeBridge {
     // Substitui {{workspace}} pelo id real (basename do wsPath) — prompts de
     // template citam o workspace; sem isto o agente recebe o literal.
     const wsId = basename(wsPath);
-    const corpoFinal = corpo.replaceAll("{{workspace}}", wsId);
+    const priming = obterContextoAdaptativo(wsPath, wsId, agente);
+    const corpoFinal = corpo.replaceAll("{{workspace}}", wsId) + "\n" + priming;
     await writeFileAtomic(destino, gerarAgenteOpencode(agente, corpoFinal));
     this.vincular(wsPath, agente.id, destino);
     return destino;

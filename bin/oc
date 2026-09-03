@@ -1,0 +1,53 @@
+#!/usr/bin/env node
+/**
+ * oc — CLI de alta velocidade do OpenCorp
+ * Wrapper ergonômico com detecção automática do workspace pelo diretório atual (cwd)
+ */
+import { spawn } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+
+const aqui = dirname(fileURLToPath(import.meta.url));
+const opencorpBin = join(aqui, "opencorp.mjs");
+
+const args = process.argv.slice(2);
+
+// Atalho rápido: oc doc ajuda [slug]
+if (args[0] === "doc" && args[1] === "ajuda") {
+  const slug = args[2] || "estudo-padronizacao";
+  try {
+    const res = await fetch(`http://127.0.0.1:4100/docs/${slug}`);
+    if (res.ok) {
+      const data = await res.json();
+      console.log(`\n=== ${data.titulo} (${data.categoria}) ===\n`);
+      console.log(data.conteudo);
+      process.exit(0);
+    }
+  } catch {
+    console.error(`erro: não foi possível conectar na API do OpenCorp em http://127.0.0.1:4100/docs/${slug}`);
+  }
+}
+
+// Se não foi passada a flag --workspace, tenta inferir se o cwd está dentro de um workspace
+const temWsFlag = args.includes("--workspace") || args.includes("-w");
+let extraArgs = [];
+
+if (!temWsFlag) {
+  const dirAtual = process.cwd();
+  if (existsSync(join(dirAtual, ".opencorp"))) {
+    const wsId = dirAtual.split("/").pop();
+    if (wsId) {
+      extraArgs = ["--workspace", wsId];
+    }
+  }
+}
+
+const child = spawn(process.execPath, [opencorpBin, ...extraArgs, ...args], {
+  stdio: "inherit",
+  env: process.env,
+});
+
+child.on("exit", (code) => {
+  process.exit(code ?? 0);
+});
