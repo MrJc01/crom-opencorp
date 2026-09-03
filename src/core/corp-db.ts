@@ -203,6 +203,27 @@ export class CorpDb {
       .all(sessaoId) as LinhaMensagem[];
   }
 
+  /** Fallback local: lista sessões gravadas no espelho SQLite (quando opencode está offline) */
+  listarSessoesLocal(limite = 30): Array<{ id: string; agente: string; modelo: string; inicio: string; fim: string | null; status: string; titulo_real?: string }> {
+    const sessoes = this.db
+      .prepare(`SELECT * FROM sessoes ORDER BY inicio DESC LIMIT ?`)
+      .all(limite) as Array<{ id: string; agente: string; modelo: string; inicio: string; fim: string | null; status: string }>;
+    // Enriquecer com título real (1ª msg do usuário)
+    const ids = sessoes.map((s) => s.id);
+    if (ids.length) {
+      const primeiras = this.primeirasMensagensUsuario(ids);
+      const mapa = new Map<string, string>();
+      for (const p of primeiras) {
+        if (!mapa.has(p.sessao_id)) mapa.set(p.sessao_id, p.conteudo);
+      }
+      return sessoes.map((s) => ({
+        ...s,
+        titulo_real: mapa.get(s.id)?.slice(0, 70) || undefined,
+      }));
+    }
+    return sessoes;
+  }
+
   listarSessoes(filtro?: { agentePrefixo?: string; limite?: number }): LinhaSessao[] {
     const sql = `SELECT * FROM sessoes ${filtro?.agentePrefixo ? "WHERE agente LIKE ?" : ""}
                  ORDER BY COALESCE(NULLIF(inicio,''), '0000') DESC ${filtro?.limite ? "LIMIT " + Math.floor(filtro.limite) : ""}`;

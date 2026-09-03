@@ -2562,7 +2562,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         // ── /secretario/sessoes (proxy GET /session) ──
         if (rota === "/secretario/sessoes" && req.method === "GET") {
           try {
-            const porta = await portaOpencodeOuErro();
+            const porta = await portaOpencodeOuErro(true);
             const opencodeUrl = `http://127.0.0.1:${porta}/session`;
             const [resOpencode, resStatus] = await Promise.all([
               fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) }),
@@ -2633,10 +2633,38 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             }
             enviar(res, 200, data);
           } catch (erro) {
-            if (erro instanceof SecretarioError) {
-              enviar(res, erro.status ?? 409, { erro: erro.message });
-            } else {
-              enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
+            // Fallback: retornar sessões do espelho SQLite local quando opencode está offline
+            try {
+              let ws: { id: string; path: string };
+              try {
+                ws = await resolverWs(url);
+              } catch {
+                const todos = await workspaces.listar();
+                const primeiro = todos.find((w) => w.existe);
+                if (!primeiro) throw new Error("nenhum workspace");
+                ws = { id: primeiro.id, path: primeiro.path };
+              }
+              const db = registros.corpDb(ws.path);
+              const sessoesLocais = db.listarSessoesLocal(30);
+              const resultado = sessoesLocais.map((s) => ({
+                id: s.id,
+                agent: s.agente,
+                model: s.modelo,
+                title: s.titulo_real || `Conversa ${s.id.slice(0, 8)}`,
+                titulo_real: s.titulo_real,
+                updated: s.inicio ? new Date(s.inicio).getTime() : Date.now(),
+                time: { updated: s.inicio ? new Date(s.inicio).getTime() : Date.now() },
+                status: s.status || "idle",
+                executando: false,
+                sem_conteudo: !s.titulo_real,
+                _fallback: true,
+              }));
+              console.warn(`[secretario/sessoes] opencode offline, retornando ${resultado.length} sessões do espelho local`);
+              enviar(res, 200, resultado);
+            } catch (fallbackErro) {
+              // Se até o fallback falhar, retorna array vazio para não travar o frontend
+              console.error("[secretario/sessoes] fallback também falhou:", fallbackErro instanceof Error ? fallbackErro.message : fallbackErro);
+              enviar(res, 200, []);
             }
           }
           return;

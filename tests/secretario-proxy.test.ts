@@ -176,9 +176,9 @@ describe("Secretário Proxy — /secretario/*", () => {
     expect(json).toHaveProperty("erro");
   });
 
-  it("GET /secretario/sessoes sem iniciar → 409", async () => {
+  it("GET /secretario/sessoes sem iniciar → 200 resiliente (fallback local)", async () => {
     const { status, json } = await fetchApi("/secretario/sessoes");
-    expect(status).toBe(409);
-    expect(json).toHaveProperty("erro");
+    expect(status).toBe(200);
+    expect(Array.isArray(json)).toBe(true);
   });
 });

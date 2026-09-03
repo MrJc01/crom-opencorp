@@ -278,6 +278,20 @@ export const AgentesView: Component = () => {
     }
   };
 
+  const excluirAgente = async (id: string, nome?: string) => {
+    if (!confirm(`Tem certeza que deseja excluir o agente @${id} (${nome || id})? Esta ação removerá a especificação do agente.`)) return;
+    try {
+      await fetchApi(`/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+      setAgentes((prev) => prev.filter((a) => a.id !== id));
+      if (agenteInspecionado()?.id === id) {
+        setAgenteInspecionado(null);
+      }
+      showToast(`Agente @${id} excluído com sucesso!`, "sucesso");
+    } catch (err: any) {
+      showToast(`Erro ao excluir agente: ${err.message}`, "erro");
+    }
+  };
+
   const dispararExecucao = async () => {
     const alvo = alvoExecucao();
     const texto = ordemTexto().trim();
@@ -816,6 +830,16 @@ export const AgentesView: Component = () => {
                         <Copy size={13} />
                       </IconButton>
 
+                      <IconButton
+                        size="xs"
+                        variant="ghost"
+                        class="text-zinc-500 hover:text-rose-400"
+                        onClick={() => excluirAgente(agente.id, agente.name)}
+                        title="Excluir este agente"
+                      >
+                        <Trash2 size={13} />
+                      </IconButton>
+
                       <Button
                         size="xs"
                         variant="primary"
@@ -1053,20 +1077,30 @@ export const AgentesView: Component = () => {
               </Show>
             </div>
 
-            <div class="pt-3 border-t border-zinc-800 flex justify-end gap-2 flex-shrink-0">
-              <Button size="sm" variant="secondary" onClick={() => setAgenteInspecionado(null)}>
-                Fechar
+            <div class="pt-3 border-t border-zinc-800 flex items-center justify-between gap-2 flex-shrink-0">
+              <Button
+                size="sm"
+                variant="ghost"
+                class="text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 font-mono text-xs"
+                onClick={() => excluirAgente(agenteInspecionado()!.id, agenteInspecionado()!.name)}
+              >
+                <Trash2 size={13} class="mr-1.5" /> Excluir Agente
               </Button>
-              <Show when={editandoAgente()}>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  loading={salvandoAgente()}
-                  onClick={salvarEdicaoAgente}
-                >
-                  <Check size={13} class="mr-1.5" /> Salvar Alterações
+              <div class="flex items-center gap-2">
+                <Button size="sm" variant="secondary" onClick={() => setAgenteInspecionado(null)}>
+                  Fechar
                 </Button>
-              </Show>
+                <Show when={editandoAgente()}>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    loading={salvandoAgente()}
+                    onClick={salvarEdicaoAgente}
+                  >
+                    <Check size={13} class="mr-1.5" /> Salvar Alterações
+                  </Button>
+                </Show>
+              </div>
             </div>
           </div>
         </div>

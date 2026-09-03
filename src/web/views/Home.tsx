@@ -27,6 +27,9 @@ import {
   ListTodo,
   Radio,
   Zap,
+  ChevronLeft,
+  ChevronRight,
+  EyeOff,
 } from "lucide-solid";
 import { A, useNavigate } from "@solidjs/router";
 import { fetchApi, wsAtivo, setWsAtivo } from "../lib/context";
@@ -107,7 +110,26 @@ export const HomeView: Component = () => {
   const tasksEmAndamento = () => todasTasks().filter((t: any) =>
     t.coluna === "fazendo" || t.coluna === "em_andamento" || t.coluna === "in_progress"
   );
-  const execucoesFalhas = () => execucoes().filter((e: any) => e.status === "falhou");
+
+  // Falhas ignoradas (persiste em localStorage)
+  const [falhasIgnoradas, setFalhasIgnoradas] = createSignal<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem("opencorp:falhas_ignoradas");
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch { return new Set(); }
+  });
+  const ignorarFalha = (id: string) => {
+    setFalhasIgnoradas((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      try { localStorage.setItem("opencorp:falhas_ignoradas", JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  };
+  const execucoesFalhas = () => execucoes().filter((e: any) => e.status === "falhou" && !falhasIgnoradas().has(e.id));
+
+  // Ref do container de abas para scroll com setas
+  let abasRef: HTMLDivElement | undefined;
 
   const repetirExecucao = async (exec: any) => {
     try {
@@ -375,7 +397,16 @@ export const HomeView: Component = () => {
       </div>
 
       {/* Abas da Central de Operações */}
-      <div class="flex items-center gap-1.5 overflow-x-auto pb-2 border-b border-zinc-800/80 text-xs font-medium select-none scrollbar-none">
+      <div class="flex items-center gap-1 pb-2 border-b border-zinc-800/80 text-xs font-medium select-none">
+        <button
+          type="button"
+          class="flex-shrink-0 p-1 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
+          onClick={() => abasRef?.scrollBy({ left: -200, behavior: "smooth" })}
+          title="Rolar abas para a esquerda"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <div ref={abasRef} class="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
         <button
           type="button"
           onClick={() => setAbaAtiva("geral")}
@@ -468,6 +499,15 @@ export const HomeView: Component = () => {
         >
           <GitBranch size={13} class="text-indigo-400" />
           <span>Fluxos & Hooks ({fluxos().length + hooks().length})</span>
+        </button>
+        </div>
+        <button
+          type="button"
+          class="flex-shrink-0 p-1 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
+          onClick={() => abasRef?.scrollBy({ left: 200, behavior: "smooth" })}
+          title="Rolar abas para a direita"
+        >
+          <ChevronRight size={16} />
         </button>
       </div>
 
@@ -1086,7 +1126,7 @@ export const HomeView: Component = () => {
                         {sessao.id.slice(0, 12)}…
                       </span>
                       <span class="text-zinc-500 font-mono text-[10px]">
-                        {sessao.time?.updated ? new Date(sessao.time.updated).toLocaleString("pt-BR") : ""}
+                        {(() => { const ts = sessao.time?.updated || sessao.updated; return ts ? new Date(typeof ts === "number" ? ts : ts).toLocaleString("pt-BR") : ""; })()}
                       </span>
                     </div>
                     <h4 class="text-sm font-semibold text-zinc-100 group-hover:text-purple-300 transition-colors line-clamp-2">
@@ -1267,6 +1307,14 @@ export const HomeView: Component = () => {
                       >
                         <RotateCcw size={12} class="mr-1" /> Repetir Execução
                       </Button>
+                      <button
+                        type="button"
+                        class="px-2 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs font-mono transition-colors flex items-center gap-1 cursor-pointer"
+                        onClick={() => ignorarFalha(exec.id)}
+                        title="Ignorar esta falha (não mostrar mais)"
+                      >
+                        <EyeOff size={12} /> Ignorar
+                      </button>
                       <A
                         href={`/historico?run=${encodeURIComponent(exec.id)}`}
                         class="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono transition-colors"

@@ -246,6 +246,22 @@ export const FluxosView: Component = () => {
     }
   };
 
+  // Excluir Workflow
+  const excluirFluxo = async (id: string, nome?: string, e?: MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!confirm(`Tem certeza que deseja excluir o fluxo "${nome || id}"? Esta ação não pode ser desfeita.`)) return;
+    try {
+      await fetchApi(`/flows/${encodeURIComponent(id)}`, { method: "DELETE" });
+      setFluxos((prev) => prev.filter((f) => f.id !== id));
+      if (fluxoAtivo()?.id === id) {
+        voltarParaLista();
+      }
+      showToast(`Fluxo "${nome || id}" excluído com sucesso!`, "sucesso");
+    } catch (err: any) {
+      showToast(`Erro ao excluir fluxo: ${err.message}`, "erro");
+    }
+  };
+
   // Adicionar Novo Node ao Workflow Ativo
   const adicionarNodeAoWorkflow = async (tipo: string) => {
     const f = fluxoAtivo();
@@ -833,6 +849,16 @@ export const FluxosView: Component = () => {
                     >
                       <Eye size={12} class="mr-1.5" /> Abrir Canvas
                     </Button>
+
+                    <IconButton
+                      size="xs"
+                      variant="ghost"
+                      class="text-zinc-500 hover:text-rose-400"
+                      onClick={(e) => excluirFluxo(f.id, f.nome, e)}
+                      title="Excluir fluxo"
+                    >
+                      <Trash2 size={13} />
+                    </IconButton>
                   </div>
                 </div>
               )}
@@ -985,6 +1011,16 @@ export const FluxosView: Component = () => {
               >
                 <Play size={13} class="mr-1.5 fill-current" /> Executar
               </Button>
+
+              <IconButton
+                size="sm"
+                variant="ghost"
+                class="text-zinc-500 hover:text-rose-400 hover:bg-rose-950/30"
+                onClick={(e) => excluirFluxo(fluxoAtivo()!.id, fluxoAtivo()!.nome, e)}
+                title="Excluir este fluxo"
+              >
+                <Trash2 size={14} />
+              </IconButton>
             </div>
           </div>
 
