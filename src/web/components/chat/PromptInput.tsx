@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, For, Show, createMemo } from "solid-js";
+import { type Component, createSignal, onMount, For, Show, createMemo, createEffect } from "solid-js";
 import {
   ArrowUp,
   Square,
@@ -71,6 +71,18 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     textareaRef.style.height = "auto";
     textareaRef.style.height = `${Math.min(textareaRef.scrollHeight, 180)}px`;
   };
+
+  // Monitora limpeza do valor para colapsar o textarea de volta à altura padrão
+  createEffect(() => {
+    const val = props.valor;
+    if (!val || val.trim() === "") {
+      if (textareaRef) {
+        textareaRef.style.height = "auto";
+      }
+    } else {
+      setTimeout(autoResize, 10);
+    }
+  });
 
   onMount(async () => {
     if (props.refTextarea) {
@@ -444,8 +456,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (!props.carregando && (props.valor.trim() || props.anexos.length > 0)) {
-        props.onEnviar();
+      dispararEnvio();
+    }
+  };
+
+  const dispararEnvio = () => {
+    if (!props.carregando && (props.valor.trim() || props.anexos.length > 0)) {
+      props.onEnviar();
+      if (textareaRef) {
+        textareaRef.style.height = "auto";
       }
     }
   };
@@ -703,7 +722,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             when={props.carregando}
             fallback={
               <button
-                onClick={props.onEnviar}
+                onClick={dispararEnvio}
                 disabled={!props.valor.trim() && props.anexos.length === 0}
                 class="flex items-center justify-center h-8 w-8 rounded-full bg-zinc-100 text-zinc-950 font-bold transition-all disabled:opacity-30 disabled:pointer-events-none hover:bg-white active:scale-95 shadow-md cursor-pointer"
                 title="Enviar mensagem (Enter)"
