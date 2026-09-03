@@ -670,4 +670,16 @@ describe('Fluxos & Flow Store — Drag & Drop, Conexões e Contexto Encadeado n8
     expect(secSrc).toContain('/secretario/status');
     expect(secSrc).toContain('status && !status.rodando');
   });
+
+  it('flow-store suporta múltiplas saídas / bifurcações a partir de qualquer nó', () => {
+    expect(flowStoreSrc).not.toContain('v1 é linear; use um nó "condicao"/"decisao" para ramificar');
+    expect(flowStoreSrc).toContain('filaNos');
+    expect(flowStoreSrc).toContain('for (const s of saidas)');
+  });
+
+  it('Fluxos.tsx renderiza linha guia dinâmica (n8n cable) e badge de múltiplas saídas', () => {
+    expect(fluxosSrc).toContain('linhaConexaoGuia');
+    expect(fluxosSrc).toContain('numSaidas() > 1');
+    expect(fluxosSrc).toContain('criarConexao(noSelecionado()!.id, dest)');
+  });
 });

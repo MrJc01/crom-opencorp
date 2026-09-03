@@ -96,6 +96,7 @@ export const FluxosView: Component = () => {
   // Estado de Criação de Conexões entre Nós (Interligar estilo n8n)
   const [conectandoDeNoId, setConectandoDeNoId] = createSignal<string | null>(null);
   const [novoDestinoLigacao, setNovoDestinoLigacao] = createSignal("");
+  const [mousePos, setMousePos] = createSignal<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Modo no NDV: formulário visual ou JSON avançado
   const [modoNdv, setModoNdv] = createSignal<"form" | "json">("form");
@@ -375,20 +376,22 @@ export const FluxosView: Component = () => {
   // Layout Automático de Nós no Canvas
   // Conexões e Ligações entre Nós
   const iniciarConexao = (origemId: string, e?: MouseEvent) => {
-    if (e) e.stopPropagation();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setConectandoDeNoId(origemId);
-    showToast(`Conectando a partir de "${origemId}": clique no nó de destino`, "info");
+    showToast(`Ligando a partir de "${origemId}": clique no nó de destino (múltiplas saídas permitidas)`, "info");
   };
 
-  const completarConexao = (destinoId: string) => {
-    const origem = conectandoDeNoId();
+  const criarConexao = (origemId: string, destinoId: string) => {
     setConectandoDeNoId(null);
-    if (!origem || origem === destinoId) return;
+    if (!origemId || !destinoId || origemId === destinoId) return;
 
     const f = fluxoAtivo();
     if (!f) return;
 
-    const jaExiste = f.arestas.some((a) => a.de === origem && a.para === destinoId);
+    const jaExiste = f.arestas.some((a) => a.de === origemId && a.para === destinoId);
     if (jaExiste) {
       showToast("Esta conexão já existe.", "aviso");
       return;
@@ -396,10 +399,16 @@ export const FluxosView: Component = () => {
 
     const novoFluxo: FluxoCompleto = {
       ...f,
-      arestas: [...f.arestas, { de: origem, para: destinoId }],
+      arestas: [...f.arestas, { de: origemId, para: destinoId }],
     };
     void salvarAlteracoesWorkflow(novoFluxo);
-    showToast(`Ligação criada: ${origem} → ${destinoId}`, "sucesso");
+    showToast(`Ligação criada: ${origemId} → ${destinoId}`, "sucesso");
+  };
+
+  const completarConexao = (destinoId: string) => {
+    const origem = conectandoDeNoId();
+    if (!origem) return;
+    criarConexao(origem, destinoId);
   };
 
   const removerAresta = (de: string, para: string) => {
@@ -486,6 +495,23 @@ export const FluxosView: Component = () => {
         return { ...a, path, x1, y1, x2, y2, midX, midY };
       })
       .filter(Boolean);
+  });
+
+  // Linha de Conexão Ativa guiada pelo Mouse (Estilo n8n cable dragging)
+  const linhaConexaoGuia = createMemo(() => {
+    const origemId = conectandoDeNoId();
+    if (!origemId) return null;
+    const origemNo = nosPosicionados().find((n) => n.id === origemId);
+    if (!origemNo) return null;
+
+    const x1 = origemNo.x + 190;
+    const y1 = origemNo.y + 40;
+    const mx = Math.round((mousePos().x - pan().x) / zoom());
+    const my = Math.round((mousePos().y - pan().y) / zoom());
+
+    const dx = Math.max(Math.abs(mx - x1) * 0.5, 40);
+    const path = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${mx - dx} ${my}, ${mx} ${my}`;
+    return { path, mx, my };
   });
 
   const iconeDoNo = (tipo: string) => {
@@ -599,6 +625,8 @@ export const FluxosView: Component = () => {
       });
       return;
     }
+
+    setMousePos({ x: e.clientX, y: e.clientY });
 
     if (!isPanning()) return;
     setPan({ x: e.clientX - startPan().x, y: e.clientY - startPan().y });
@@ -941,6 +969,25 @@ export const FluxosView: Component = () => {
                     </g>
                   )}
                 </For>
+
+                {/* Linha Guia Dinâmica ao Conectar estilo n8n */}
+                <Show when={linhaConexaoGuia()}>
+                  <g class="pointer-events-none animate-pulse">
+                    <path
+                      d={linhaConexaoGuia()!.path}
+                      fill="none"
+                      stroke="#f97316"
+                      stroke-width="3.5"
+                      stroke-dasharray="6,4"
+                    />
+                    <circle
+                      cx={linhaConexaoGuia()!.mx}
+                      cy={linhaConexaoGuia()!.my}
+                      r="6"
+                      fill="#f97316"
+                    />
+                  </g>
+                </Show>
               </svg>
 
               {/* Nós Visuais no Canvas com Drag & Drop e Portas de Conexão */}
@@ -951,17 +998,18 @@ export const FluxosView: Component = () => {
                     const isTrigger = no.tipo === "manual" || no.tipo === "webhook";
                     const isConectandoOrigem = () => conectandoDeNoId() === no.id;
                     const isConectandoAlvo = () => conectandoDeNoId() && conectandoDeNoId() !== no.id;
+                    const numSaidas = () => (fluxoAtivo()?.arestas || []).filter((a) => a.de === no.id).length;
 
                     return (
                       <div
-                        class={`canvas-node absolute w-[190px] h-[80px] rounded-xl border p-2.5 transition-all shadow-xl flex flex-col justify-between cursor-move select-none ${
+                        class={`canvas-node absolute w-[190px] h-[80px] rounded-xl border p-2.5 transition-all shadow-xl flex flex-col justify-between select-none ${
                           corDoNo(no.tipo)
                         } ${
                           selecionado()
                             ? "ring-2 ring-orange-500 border-orange-400 shadow-orange-500/20 scale-105 z-10"
                             : isConectandoAlvo()
-                            ? "ring-2 ring-emerald-500/80 animate-pulse hover:border-emerald-400"
-                            : "hover:border-zinc-500 hover:scale-[1.02]"
+                            ? "ring-2 ring-emerald-500/90 border-emerald-400 animate-pulse cursor-pointer shadow-emerald-500/20 scale-[1.02]"
+                            : "hover:border-zinc-500 hover:scale-[1.02] cursor-move"
                         }`}
                         style={{
                           left: `${no.x}px`,
@@ -982,14 +1030,15 @@ export const FluxosView: Component = () => {
                         {/* Handle de Entrada (Esquerda) */}
                         <Show when={!isTrigger}>
                           <div
-                            class="absolute -left-2 top-[34px] w-3.5 h-3.5 rounded-full bg-zinc-900 border-2 border-orange-500 shadow-xs flex items-center justify-center hover:scale-125 transition-transform cursor-pointer"
-                            title={conectandoDeNoId() ? "Clique para conectar aqui" : "Input Port (Entrada)"}
+                            class="absolute -left-3 top-[28px] w-6 h-6 rounded-full bg-zinc-900 border-2 border-orange-500 shadow-md flex items-center justify-center hover:scale-125 transition-transform cursor-pointer z-20 group"
+                            title={conectandoDeNoId() ? "Clique para conectar aqui (Input Port)" : "Input Port (Entrada)"}
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
                               if (conectandoDeNoId()) completarConexao(no.id);
                             }}
                           >
-                            <div class="w-1 h-1 rounded-full bg-orange-400" />
+                            <div class="w-2 h-2 rounded-full bg-orange-400 group-hover:scale-125 transition-transform" />
                           </div>
                         </Show>
 
@@ -1009,9 +1058,19 @@ export const FluxosView: Component = () => {
                             </div>
                           </div>
 
-                          <Show when={selecionado()}>
-                            <span class="h-2 w-2 rounded-full bg-orange-400 animate-pulse" />
-                          </Show>
+                          <div class="flex items-center gap-1">
+                            <Show when={numSaidas() > 1}>
+                              <span
+                                class="px-1.5 py-0.2 rounded text-[9px] bg-blue-950 text-blue-400 border border-blue-800/60 font-mono font-bold"
+                                title={`${numSaidas()} saídas ativas`}
+                              >
+                                {numSaidas()} saídas
+                              </span>
+                            </Show>
+                            <Show when={selecionado()}>
+                              <span class="h-2 w-2 rounded-full bg-orange-400 animate-pulse" />
+                            </Show>
+                          </div>
                         </div>
 
                         {/* Subtítulo / Resumo do Nó */}
@@ -1027,13 +1086,19 @@ export const FluxosView: Component = () => {
                             : "Configurado"}
                         </div>
 
-                        {/* Handle de Saída (Direita) */}
+                        {/* Handle de Saída (Direita) - Permite Múltiplas Saídas */}
                         <div
-                          class="absolute -right-2 top-[34px] w-3.5 h-3.5 rounded-full bg-zinc-900 border-2 border-blue-500 shadow-xs flex items-center justify-center hover:scale-125 transition-transform cursor-pointer"
-                          title="Clique para ligar a outro nó (Output Port)"
-                          onClick={(e) => iniciarConexao(no.id, e)}
+                          class={`absolute -right-3 top-[28px] w-6 h-6 rounded-full bg-zinc-900 border-2 shadow-md flex items-center justify-center hover:scale-125 transition-transform cursor-pointer z-20 group ${
+                            isConectandoOrigem() ? "border-orange-500 ring-2 ring-orange-500/50" : "border-blue-500"
+                          }`}
+                          title="Clique para ligar a outro nó (Output Port - permite múltiplas saídas)"
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            iniciarConexao(no.id, e);
+                          }}
                         >
-                          <div class="w-1 h-1 rounded-full bg-blue-400" />
+                          <div class="w-2 h-2 rounded-full bg-blue-400 group-hover:scale-125 transition-transform" />
                         </div>
                       </div>
                     );
@@ -1406,7 +1471,7 @@ export const FluxosView: Component = () => {
                               showToast("Selecione um nó de destino", "aviso");
                               return;
                             }
-                            completarConexao(dest);
+                            criarConexao(noSelecionado()!.id, dest);
                             setNovoDestinoLigacao("");
                           }}
                         >

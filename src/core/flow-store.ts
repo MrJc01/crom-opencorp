@@ -310,15 +310,8 @@ export class FlowStore {
         }
       }
     }
-    for (const no of flow.nos) {
-      if (no.tipo === "condicao" || no.tipo === "decisao") continue;
-      const saidas = flow.arestas.filter((a) => a.de === no.id);
-      if (saidas.length > 1) {
-        throw new FlowError(
-          `flow inválido${onde("")}: nó "${no.id}" tem ${saidas.length} arestas de saída — v1 é linear; use um nó "condicao"/"decisao" para ramificar`,
-        );
-      }
-    }
+    // Suporte completo a múltiplas saídas por nó (bifurcação / execução paralela estilo n8n).
+    // Qualquer nó pode ter múltiplas arestas de saída.
     const adjacentes = new Map<string, string[]>();
     for (const no of flow.nos) {
       const lista: string[] = flow.arestas.filter((a) => a.de === no.id).map((a) => a.para);
@@ -444,18 +437,29 @@ export class FlowStore {
     }
 
     let contexto = retomando ? retomando.contexto : stripAnsi(entrada);
-    let atual: NoFlow | undefined = retomando
-      ? porId(flow, retomando.noId)
-      : flow.nos.find((n) => n.tipo === "manual");
     let status: "concluido" | "falhou" = "concluido";
     let motivo: string | null = null;
     let noFalha: string | null = null;
     let noAnterior: NoFlow | undefined = undefined;
     const saidasPorNo: Record<string, string> = {};
 
+    const filaNos: Array<{ no: NoFlow; contexto: string; noAnterior?: NoFlow }> = [];
+    const inicial = retomando
+      ? porId(flow, retomando.noId)
+      : flow.nos.find((n) => n.tipo === "manual");
+    if (inicial) {
+      filaNos.push({ no: inicial, contexto, noAnterior: undefined });
+    }
+    const executadosNaSessao = new Set<string>();
+
     try {
-      while (atual) {
-        const no = atual;
+      while (filaNos.length > 0) {
+        const item = filaNos.shift()!;
+        const no = item.no;
+        contexto = item.contexto;
+        noAnterior = item.noAnterior;
+        if (executadosNaSessao.has(no.id)) continue;
+        executadosNaSessao.add(no.id);
         if (no.tipo === "manual") {
           contexto = entrada;
           saidasPorNo[no.id] = contexto;
@@ -670,7 +674,10 @@ export class FlowStore {
           const config = no.config as { chave: string; entao: string; senao: string };
           const casou = contexto.includes(config.chave);
           await marcarNo(no.id, "ok");
-          atual = porId(flow, casou ? config.entao : config.senao);
+          saidasPorNo[no.id] = contexto;
+          const proxId = casou ? config.entao : config.senao;
+          const prox = porId(flow, proxId);
+          if (prox) filaNos.push({ no: prox, contexto, noAnterior: no });
           continue;
         } else if (no.tipo === "task_create") {
           const config = no.config as { titulo: string; descricao?: string; prioridade?: string; responsavel?: string; coluna?: string };
@@ -760,7 +767,9 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
           contexto = `${contexto}\n\n[decisão (${no.id})]: ${escolha}`;
           eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok", decisao: escolha });
           await marcarNo(no.id, "ok");
-          atual = porId(flow, proximo);
+          saidasPorNo[no.id] = contexto;
+          const prox = porId(flow, proximo);
+          if (prox) filaNos.push({ no: prox, contexto, noAnterior: no });
           continue;
         } else if (no.tipo === "script") {
           // Nó de Execução de Script / Código do Workspace (estilo n8n Code/Exec Node)
@@ -849,7 +858,10 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
         saidasPorNo[no.id] = contexto;
         noAnterior = no;
         const saidas = flow.arestas.filter((a) => a.de === no.id);
-        atual = saidas.length > 0 ? porId(flow, saidas[0]!.para) : undefined;
+        for (const s of saidas) {
+          const prox = porId(flow, s.para);
+          if (prox) filaNos.push({ no: prox, contexto, noAnterior: no });
+        }
       }
     } catch (erro) {
       status = "falhou";
