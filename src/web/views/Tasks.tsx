@@ -14,6 +14,8 @@ import {
   Tag,
   ArrowRight,
   Filter,
+  Play,
+  Bot,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -60,6 +62,7 @@ export const TasksView: Component = () => {
   const [mensagens, setMensagens] = createSignal<MensagemTask[]>([]);
   const [novoComentario, setNovoComentario] = createSignal("");
   const [enviandoComentario, setEnviandoComentario] = createSignal(false);
+  const [executandoTask, setExecutandoTask] = createSignal(false);
 
   const carregarTasks = async () => {
     try {
@@ -189,6 +192,52 @@ export const TasksView: Component = () => {
     }
   };
 
+  const executarTask = async (task: Task) => {
+    const rawResp = task.responsavel || "";
+    const agenteId = rawResp.replace(/^@/, "").replace(/^agente:/, "").trim() || agentes()[0]?.id || "secretario-exec";
+    setExecutandoTask(true);
+    try {
+      const ordem = `Executar tarefa [${task.id}] "${task.titulo}": ${task.descricao || ""}`.trim();
+      await fetchApi(`/agents/${encodeURIComponent(agenteId)}/run`, {
+        method: "POST",
+        body: JSON.stringify({ ordem }),
+      });
+
+      // Se estiver no backlog, move automaticamente para fazendo
+      if (task.coluna === "backlog") {
+        await fetchApi(`/tasks/${encodeURIComponent(task.id)}/move`, {
+          method: "POST",
+          body: JSON.stringify({ coluna: "fazendo" }),
+        }).catch(() => {});
+        setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, coluna: "fazendo" } : t)));
+        if (taskSelecionada()?.id === task.id) {
+          setTaskSelecionada((prev) => (prev ? { ...prev, coluna: "fazendo" } : null));
+        }
+      }
+
+      // Registra mensagem no chat da task
+      await fetchApi(`/tasks/${encodeURIComponent(task.id)}/mensagens`, {
+        method: "POST",
+        body: JSON.stringify({
+          corpo: `[EXECUÇÃO INICIADA] Disparado agente @${agenteId} para trabalhar nesta tarefa.`,
+          autor: "sistema",
+          tipo: "execucao",
+        }),
+      }).catch(() => {});
+
+      if (taskSelecionada()?.id === task.id) {
+        const msgs = await fetchApi<MensagemTask[]>(`/tasks/${encodeURIComponent(task.id)}/mensagens`).catch(() => []);
+        setMensagens(msgs || []);
+      }
+
+      showToast(`Execução da tarefa iniciada com @${agenteId}!`, "sucesso");
+    } catch (err: any) {
+      showToast(`Erro ao executar tarefa: ${err.message}`, "erro");
+    } finally {
+      setExecutandoTask(false);
+    }
+  };
+
   onMount(() => {
     void carregarTasks();
   });
@@ -312,18 +361,34 @@ export const TasksView: Component = () => {
 
                         {/* Metadados do Card */}
                         <div class="flex items-center justify-between pt-1 border-t border-zinc-800/60 text-[10px] text-zinc-500">
-                          <Show when={task.responsavel} fallback={<span class="text-zinc-600">Sem agente</span>}>
-                            <span class="text-emerald-400 font-mono font-medium truncate max-w-[120px]">
-                              @{task.responsavel}
-                            </span>
-                          </Show>
+                          <div class="flex items-center gap-1.5 min-w-0">
+                            <Show when={task.responsavel} fallback={<span class="text-zinc-600">Sem agente</span>}>
+                              <span class="text-emerald-400 font-mono font-medium truncate max-w-[110px]">
+                                @{task.responsavel}
+                              </span>
+                            </Show>
+                          </div>
 
-                          <Show when={task.due}>
-                            <span class="flex items-center gap-1 font-mono text-zinc-400">
-                              <Calendar size={10} />
-                              {new Date(task.due!).toLocaleDateString("pt-BR", { month: "short", day: "numeric" })}
-                            </span>
-                          </Show>
+                          <div class="flex items-center gap-1.5">
+                            <Show when={task.due}>
+                              <span class="flex items-center gap-1 font-mono text-zinc-400">
+                                <Calendar size={10} />
+                                {new Date(task.due!).toLocaleDateString("pt-BR", { month: "short", day: "numeric" })}
+                              </span>
+                            </Show>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void executarTask(task);
+                              }}
+                              class="p-1 rounded bg-zinc-800 hover:bg-emerald-600 hover:text-white text-zinc-400 transition-colors cursor-pointer"
+                              title="Executar tarefa com agente"
+                            >
+                              <Play size={10} class="fill-current" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -385,6 +450,27 @@ export const TasksView: Component = () => {
                   )}
                 </For>
               </div>
+            </div>
+
+            {/* Bloco de Execução com Agente */}
+            <div class="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/30 flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <span class="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
+                  <Bot size={13} class="text-emerald-400" /> Executar Tarefa
+                </span>
+                <span class="text-[11px] text-zinc-400 truncate block mt-0.5">
+                  Dispara agente @{taskSelecionada()!.responsavel || agentes()[0]?.id || "secretario-exec"}
+                </span>
+              </div>
+              <Button
+                size="xs"
+                variant="primary"
+                loading={executandoTask()}
+                onClick={() => executarTask(taskSelecionada()!)}
+                class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex-shrink-0"
+              >
+                <Play size={12} class="mr-1 fill-current" /> Executar
+              </Button>
             </div>
 
             {/* Metadados: Responsável e Prioridade */}
@@ -465,10 +551,10 @@ export const TasksView: Component = () => {
         </div>
       </Show>
 
-      {/* Modal de Criação de Tarefa */}
+      {/* Modal / Drawer de Criação de Tarefa */}
       <Show when={modalCriacaoAberto()}>
-        <div class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+        <div class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50" onClick={() => setModalCriacaoAberto(false)}>
+          <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-md w-full p-5 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
               <h2 class="text-sm font-bold text-zinc-100">Criar Nova Tarefa</h2>
               <IconButton size="xs" variant="ghost" onClick={() => setModalCriacaoAberto(false)}>

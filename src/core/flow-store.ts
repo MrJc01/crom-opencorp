@@ -809,7 +809,7 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
               model: config.model,
               workspaceDir: wsPath,
             });
-            const ata = sala.ata || sala.resultado || `Reunião ${salaId} concluída.`;
+            const ata = sala.ata || (sala as any).resultado || `Reunião ${salaId} concluída.`;
             contexto = `${contexto}\n\n[parecer da reunião (${salaId})]:\n${ata}`;
             eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok", reuniao: salaId });
             await marcarNo(no.id, "ok");

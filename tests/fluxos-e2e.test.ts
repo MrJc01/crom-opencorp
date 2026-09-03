@@ -503,3 +503,83 @@ describe('Secretario.tsx — botão de acesso a Reuniões', () => {
     expect(secSrc).toContain('Reuniões');
   });
 });
+
+/* ────────────────────────────────────────────────────────────
+   4. TASKS.TSX — Execução de tarefas criadas
+   ──────────────────────────────────────────────────────────── */
+describe('Tasks.tsx — Execução de tarefas criadas', () => {
+  const tasksPath = join(RAIZ, 'src/web/views/Tasks.tsx');
+  const tasksSrc = readFileSync(tasksPath, 'utf8');
+
+  it('implementa função executarTask', () => {
+    expect(tasksSrc).toContain('executarTask');
+    expect(tasksSrc).toContain('setExecutandoTask');
+  });
+
+  it('chama endpoint de execução de agente /agents/:id/run', () => {
+    expect(tasksSrc).toContain('/agents/');
+    expect(tasksSrc).toContain('/run');
+  });
+
+  it('move automaticamente para fazendo se estiver no backlog', () => {
+    expect(tasksSrc).toContain('task.coluna === "backlog"');
+    expect(tasksSrc).toContain('"fazendo"');
+  });
+
+  it('registra mensagem de execução iniciada no histórico da task', () => {
+    expect(tasksSrc).toContain('[EXECUÇÃO INICIADA]');
+    expect(tasksSrc).toContain('/mensagens');
+  });
+
+  it('renderiza botão de execução rápida em cada card do Kanban', () => {
+    expect(tasksSrc).toContain('title="Executar tarefa com agente"');
+  });
+
+  it('renderiza bloco de execução com agente no drawer lateral', () => {
+    expect(tasksSrc).toContain('Executar Tarefa');
+    expect(tasksSrc).toContain('Dispara agente @');
+  });
+
+  it('modal de criação fecha no backdrop click', () => {
+    expect(tasksSrc).toContain('onClick={() => setModalCriacaoAberto(false)}');
+    expect(tasksSrc).toContain('e.stopPropagation()');
+  });
+});
+
+/* ────────────────────────────────────────────────────────────
+   5. AGENDA.TSX — Agendamento de execução de tarefas existentes
+   ──────────────────────────────────────────────────────────── */
+describe('Agenda.tsx — Executar tarefas existentes via agendamento', () => {
+  const agendaPath = join(RAIZ, 'src/web/views/Agenda.tsx');
+  const agendaSrc = readFileSync(agendaPath, 'utf8');
+
+  it('carrega tasks existentes ao montar a view', () => {
+    expect(agendaSrc).toContain('tasksExistentes');
+    expect(agendaSrc).toContain('fetchApi<any[]>("/tasks")');
+  });
+
+  it('implementa alternância entre Executar Tarefa Existente e Criar Nova Tarefa', () => {
+    expect(agendaSrc).toContain('modoTask');
+    expect(agendaSrc).toContain('"executar"');
+    expect(agendaSrc).toContain('"criar"');
+    expect(agendaSrc).toContain('Executar Tarefa Existente');
+    expect(agendaSrc).toContain('Criar Nova Tarefa Recorrente');
+  });
+
+  it('permite buscar tarefa existente por nome ou descrição', () => {
+    expect(agendaSrc).toContain('buscaTask');
+    expect(agendaSrc).toContain('Pesquisar Tarefa pelo Nome ou Descrição');
+    expect(agendaSrc).toContain('t.titulo.toLowerCase().includes(q)');
+  });
+
+  it('ao selecionar tarefa existente, agenda execução com agente', () => {
+    expect(agendaSrc).toContain('modoTask() === "executar"');
+    expect(agendaSrc).toContain('args = ["agent", "run"');
+    expect(agendaSrc).toContain('taskAgenteExecutor');
+  });
+
+  it('modal de agendamento fecha no backdrop click', () => {
+    expect(agendaSrc).toContain('onClick={() => setModalAberto(false)}');
+    expect(agendaSrc).toContain('e.stopPropagation()');
+  });
+});

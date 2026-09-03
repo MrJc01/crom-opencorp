@@ -48,6 +48,11 @@ export const AgendaView: Component = () => {
   const [reuniaoAgentes, setReuniaoAgentes] = createSignal<string[]>([]);
 
   // Campos específicos: Task
+  const [tasksExistentes, setTasksExistentes] = createSignal<any[]>([]);
+  const [modoTask, setModoTask] = createSignal<"executar" | "criar">("executar");
+  const [buscaTask, setBuscaTask] = createSignal("");
+  const [taskSelecionada, setTaskSelecionada] = createSignal<any | null>(null);
+  const [taskAgenteExecutor, setTaskAgenteExecutor] = createSignal("");
   const [taskTitulo, setTaskTitulo] = createSignal("");
   const [taskColuna, setTaskColuna] = createSignal("backlog");
   const [taskPrioridade, setTaskPrioridade] = createSignal("media");
@@ -55,16 +60,21 @@ export const AgendaView: Component = () => {
 
   const carregarAgenda = async () => {
     try {
-      const [listaJobs, listaAgentes, listaFlows] = await Promise.all([
+      const [listaJobs, listaAgentes, listaFlows, listaTasks] = await Promise.all([
         fetchApi<any[]>("/schedules").catch(() => []),
         fetchApi<any[]>("/agents").catch(() => []),
         fetchApi<any[]>("/flows").catch(() => []),
+        fetchApi<any[]>("/tasks").catch(() => []),
       ]);
       setAgendamentos(listaJobs || []);
       setAgentes(listaAgentes || []);
       setFluxos(listaFlows || []);
+      setTasksExistentes(listaTasks || []);
       if (listaAgentes && listaAgentes.length > 0 && !novoAgente()) {
         setNovoAgente(listaAgentes[0].id);
+      }
+      if (listaAgentes && listaAgentes.length > 0 && !taskAgenteExecutor()) {
+        setTaskAgenteExecutor(listaAgentes[0].id);
       }
       if (listaFlows && listaFlows.length > 0 && !novoFlowId()) {
         setNovoFlowId(listaFlows[0].id);
@@ -118,14 +128,25 @@ export const AgendaView: Component = () => {
         args.push("--agentes", reuniaoAgentes().join(","));
       }
     } else if (tipoAlvo() === "task") {
-      const tit = taskTitulo().trim();
-      if (!tit) {
-        showToast("Informe o título da tarefa recorrente", "aviso");
-        return;
-      }
-      args = ["task", "create", "--titulo", tit, "--coluna", taskColuna(), "--prioridade", taskPrioridade()];
-      if (taskResponsavel().trim()) {
-        args.push("--responsavel", taskResponsavel().trim());
+      if (modoTask() === "executar") {
+        const t = taskSelecionada();
+        if (!t) {
+          showToast("Selecione uma tarefa existente para agendar a execução", "aviso");
+          return;
+        }
+        const ag = taskAgenteExecutor() || t.responsavel || (agentes()[0]?.id ?? "secretario-exec");
+        const ordem = `Executar tarefa [${t.id}] "${t.titulo}": ${t.descricao || ""}`.trim();
+        args = ["agent", "run", ag, "--ordem", ordem];
+      } else {
+        const tit = taskTitulo().trim();
+        if (!tit) {
+          showToast("Informe o título da tarefa recorrente", "aviso");
+          return;
+        }
+        args = ["task", "create", "--titulo", tit, "--coluna", taskColuna(), "--prioridade", taskPrioridade()];
+        if (taskResponsavel().trim()) {
+          args.push("--responsavel", taskResponsavel().trim());
+        }
       }
     } else if (tipoAlvo() === "doctor") {
       args = ["doctor"];
@@ -386,8 +407,8 @@ export const AgendaView: Component = () => {
 
       {/* Modal Novo Agendamento Universal */}
       <Show when={modalAberto()}>
-        <div class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg w-full p-5 space-y-4 shadow-2xl max-h-[85vh] flex flex-col">
+        <div class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50" onClick={() => setModalAberto(false)}>
+          <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg w-full p-5 space-y-4 max-h-[90vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div class="flex items-center justify-between border-b border-zinc-800 pb-3 flex-shrink-0">
               <h2 class="text-sm font-bold text-zinc-100">Novo Agendamento Periódico (Cron)</h2>
               <IconButton size="xs" variant="ghost" onClick={() => setModalAberto(false)}>
@@ -575,57 +596,186 @@ export const AgendaView: Component = () => {
               {/* Formulário Específico de Task */}
               <Show when={tipoAlvo() === "task"}>
                 <div class="space-y-3 p-3 rounded-lg bg-zinc-950 border border-zinc-800">
-                  <div>
-                    <label class="block text-zinc-400 mb-1 font-medium">Título da Tarefa Recorrente *</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Auditoria semanal de SEO e links quebrados"
-                      value={taskTitulo()}
-                      onInput={(e) => setTaskTitulo(e.currentTarget.value)}
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 font-mono"
-                    />
-                  </div>
-
-                  <div class="grid grid-cols-2 gap-2">
-                    <div>
-                      <label class="block text-zinc-400 mb-1 font-medium">Coluna Inicial</label>
-                      <select
-                        value={taskColuna()}
-                        onChange={(e) => setTaskColuna(e.currentTarget.value)}
-                        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-2 text-zinc-200 cursor-pointer"
-                      >
-                        <option value="backlog">Backlog</option>
-                        <option value="fazendo">Fazendo</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label class="block text-zinc-400 mb-1 font-medium">Prioridade</label>
-                      <select
-                        value={taskPrioridade()}
-                        onChange={(e) => setTaskPrioridade(e.currentTarget.value)}
-                        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-2 text-zinc-200 cursor-pointer"
-                      >
-                        <option value="baixa">Baixa</option>
-                        <option value="media">Média</option>
-                        <option value="alta">Alta</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label class="block text-zinc-400 mb-1 font-medium">Responsável (Opcional)</label>
-                    <select
-                      value={taskResponsavel()}
-                      onChange={(e) => setTaskResponsavel(e.currentTarget.value)}
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-2 text-zinc-200 cursor-pointer"
+                  {/* Tabs: Executar Existente vs Criar Nova */}
+                  <div class="flex items-center gap-1.5 p-1 bg-zinc-900 rounded-lg border border-zinc-800 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setModoTask("executar")}
+                      class={`flex-1 py-1 px-2 rounded-md font-medium text-center transition-colors cursor-pointer ${
+                        modoTask() === "executar"
+                          ? "bg-zinc-800 text-amber-300 font-semibold shadow-xs"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
                     >
-                      <option value="">Sem responsável inicial</option>
-                      <For each={agentes()}>
-                        {(ag) => <option value={`agente:${ag.id}`}>@{ag.id}</option>}
-                      </For>
-                    </select>
+                      Executar Tarefa Existente
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModoTask("criar")}
+                      class={`flex-1 py-1 px-2 rounded-md font-medium text-center transition-colors cursor-pointer ${
+                        modoTask() === "criar"
+                          ? "bg-zinc-800 text-amber-300 font-semibold shadow-xs"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      Criar Nova Tarefa Recorrente
+                    </button>
                   </div>
+
+                  {/* MODO: Executar Tarefa Existente */}
+                  <Show when={modoTask() === "executar"}>
+                    <div class="space-y-2">
+                      <label class="block text-zinc-400 text-xs font-medium">
+                        Pesquisar Tarefa pelo Nome ou Descrição *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Digite para buscar tarefas existentes..."
+                        value={buscaTask()}
+                        onInput={(e) => setBuscaTask(e.currentTarget.value)}
+                        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-amber-500 font-mono"
+                      />
+
+                      {/* Lista de Tarefas Encontradas */}
+                      <div class="max-h-36 overflow-y-auto space-y-1.5 scrollbar-thin p-1">
+                        <For
+                          each={tasksExistentes().filter((t) => {
+                            if (!buscaTask().trim()) return true;
+                            const q = buscaTask().toLowerCase();
+                            return (
+                              (t.titulo && t.titulo.toLowerCase().includes(q)) ||
+                              (t.descricao && t.descricao.toLowerCase().includes(q)) ||
+                              (t.id && t.id.toLowerCase().includes(q))
+                            );
+                          })}
+                          fallback={
+                            <div class="text-[11px] text-zinc-500 py-3 text-center">
+                              Nenhuma tarefa encontrada.
+                            </div>
+                          }
+                        >
+                          {(t) => {
+                            const isSelecionada = () => taskSelecionada()?.id === t.id;
+                            return (
+                              <div
+                                onClick={() => {
+                                  setTaskSelecionada(t);
+                                  if (t.responsavel) setTaskAgenteExecutor(t.responsavel);
+                                  if (!novoNome()) setNovoNome(`exec-task-${t.id.toLowerCase()}`);
+                                  showToast(`Tarefa "${t.titulo}" selecionada!`, "sucesso");
+                                }}
+                                class={`p-2 rounded-lg border cursor-pointer text-xs transition-colors flex items-center justify-between gap-2 ${
+                                  isSelecionada()
+                                    ? "bg-amber-950/40 border-amber-500 text-zinc-100"
+                                    : "bg-zinc-900/60 border-zinc-800/80 hover:border-zinc-700 text-zinc-300"
+                                }`}
+                              >
+                                <div class="min-w-0">
+                                  <div class="flex items-center gap-1.5">
+                                    <span class="font-mono text-[10px] text-zinc-400">{t.id}</span>
+                                    <span class="font-medium truncate">{t.titulo}</span>
+                                  </div>
+                                  <Show when={t.descricao}>
+                                    <p class="text-[10px] text-zinc-400 truncate mt-0.5">{t.descricao}</p>
+                                  </Show>
+                                </div>
+                                <span class={`text-[9px] font-mono px-1.5 py-0.5 rounded flex-shrink-0 ${
+                                  t.coluna === "feito" ? "bg-emerald-950/60 text-emerald-400" :
+                                  t.coluna === "fazendo" ? "bg-blue-950/60 text-blue-400" :
+                                  t.coluna === "bloqueado" ? "bg-amber-950/60 text-amber-400" :
+                                  "bg-zinc-800 text-zinc-400"
+                                }`}>
+                                  {t.coluna}
+                                </span>
+                              </div>
+                            );
+                          }}
+                        </For>
+                      </div>
+
+                      {/* Tarefa Selecionada Card */}
+                      <Show when={taskSelecionada()}>
+                        <div class="p-2.5 rounded-lg bg-amber-950/20 border border-amber-500/40 text-xs space-y-1">
+                          <span class="text-[10px] font-semibold text-amber-400 uppercase tracking-wider block">
+                            Tarefa Selecionada para Execução
+                          </span>
+                          <div class="font-medium text-zinc-100">{taskSelecionada()!.titulo}</div>
+                          <div class="text-[10px] text-zinc-400 font-mono">ID: {taskSelecionada()!.id}</div>
+                        </div>
+                      </Show>
+
+                      {/* Agente Executor */}
+                      <div>
+                        <label class="block text-zinc-400 mb-1 text-xs font-medium">Agente Executor da Tarefa</label>
+                        <select
+                          value={taskAgenteExecutor()}
+                          onChange={(e) => setTaskAgenteExecutor(e.currentTarget.value)}
+                          class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-2 text-xs text-zinc-200 cursor-pointer"
+                        >
+                          <For each={agentes()}>
+                            {(ag) => <option value={ag.id}>@{ag.id} ({ag.nome || ag.papel || "agente"})</option>}
+                          </For>
+                        </select>
+                      </div>
+                    </div>
+                  </Show>
+
+                  {/* MODO: Criar Nova Tarefa */}
+                  <Show when={modoTask() === "criar"}>
+                    <div class="space-y-3">
+                      <div>
+                        <label class="block text-zinc-400 mb-1 font-medium">Título da Tarefa Recorrente *</label>
+                        <input
+                          type="text"
+                          placeholder="Ex: Auditoria semanal de SEO e links quebrados"
+                          value={taskTitulo()}
+                          onInput={(e) => setTaskTitulo(e.currentTarget.value)}
+                          class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 font-mono text-xs"
+                        />
+                      </div>
+
+                      <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <label class="block text-zinc-400 mb-1 font-medium">Coluna Inicial</label>
+                          <select
+                            value={taskColuna()}
+                            onChange={(e) => setTaskColuna(e.currentTarget.value)}
+                            class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-2 text-zinc-200 cursor-pointer"
+                          >
+                            <option value="backlog">Backlog</option>
+                            <option value="fazendo">Fazendo</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label class="block text-zinc-400 mb-1 font-medium">Prioridade</label>
+                          <select
+                            value={taskPrioridade()}
+                            onChange={(e) => setTaskPrioridade(e.currentTarget.value)}
+                            class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-2 text-zinc-200 cursor-pointer"
+                          >
+                            <option value="baixa">Baixa</option>
+                            <option value="media">Média</option>
+                            <option value="alta">Alta</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div class="text-xs">
+                        <label class="block text-zinc-400 mb-1 font-medium">Responsável (Opcional)</label>
+                        <select
+                          value={taskResponsavel()}
+                          onChange={(e) => setTaskResponsavel(e.currentTarget.value)}
+                          class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-2 text-zinc-200 cursor-pointer"
+                        >
+                          <option value="">Sem responsável inicial</option>
+                          <For each={agentes()}>
+                            {(ag) => <option value={`agente:${ag.id}`}>@{ag.id}</option>}
+                          </For>
+                        </select>
+                      </div>
+                    </div>
+                  </Show>
                 </div>
               </Show>
             </div>
