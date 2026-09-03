@@ -323,9 +323,9 @@ describe("Rotação de modelo no retry (execa mockado)", () => {
     });
     expect(execaMock).toHaveBeenCalledTimes(2);
     expect(r.status).toBe("concluido");
-    expect(r.modelo).toBe("opencode-go/mimo-v2.5");
+    expect(r.modelo).toBe("openrouter/meta-llama/llama-3.3-70b-instruct");
     const [, args2] = execaMock.mock.calls[1]!;
-    expect(args2).toContain("opencode-go/mimo-v2.5");
+    expect(args2).toContain("openrouter/meta-llama/llama-3.3-70b-instruct");
 
     const registros = new RegistryStore();
     const metas = await registros.listar(ws.path, "execucoes");
@@ -338,7 +338,7 @@ describe("Rotação de modelo no retry (execa mockado)", () => {
     });
     expect(metaRetry.tags).toContain("retry");
     expect((metaRetry.extras!.gatilho as any).origem).toBe(
-      "sch-ciclo-1 · retry:opencode-go/mimo-v2.5",
+      "sch-ciclo-1 · retry:openrouter/meta-llama/llama-3.3-70b-instruct",
     );
     expect(await lerJournal(ws.path, metaOriginal.id)).toContain("retry_modelo");
 
@@ -346,7 +346,9 @@ describe("Rotação de modelo no retry (execa mockado)", () => {
     const linhas = db.listarExecucoes({ gatilho_tipo: "cron" });
     expect(linhas).toHaveLength(2);
     const linhaRetry = linhas.find((l) => l.gatilho_origem.includes("retry"))!;
-    expect(linhaRetry.gatilho_origem).toBe("sch-ciclo-1 · retry:opencode-go/mimo-v2.5");
+    expect(linhaRetry.gatilho_origem).toBe(
+      "sch-ciclo-1 · retry:openrouter/meta-llama/llama-3.3-70b-instruct",
+    );
     expect(linhaRetry.status).toBe("concluido");
     db.fechar();
   });

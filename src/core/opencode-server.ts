@@ -154,7 +154,7 @@ export function prepararAuthWorkspace(homeDir: string, wsId: string): string {
 
 /** Env isolado para QUALQUER processo opencode spawnado pelo opencorp.
  *  Com wsId: data-dir do workspace (auth = global ⊕ overrides do workspace). */
-export function envOpencodeIsolado(homeDir: string, wsId?: string): NodeJS.ProcessEnv {
+export function envOpencodeIsolado(homeDir: string, wsId?: string, wsPath?: string): NodeJS.ProcessEnv {
   const configHome = join(homeDir, ".opencorp", "opencode-config");
   const dataHome = wsId ? dirDadosWorkspace(homeDir, wsId) : dirOpencodeData(homeDir);
   mkdirSync(join(dataHome, "opencode"), { recursive: true });
@@ -164,7 +164,14 @@ export function envOpencodeIsolado(homeDir: string, wsId?: string): NodeJS.Proce
   } else {
     copiarAuthSeNovo(homeDir, dataHome);
   }
-  return { ...process.env, OPENCORP_HOME: homeDir, XDG_DATA_HOME: dataHome, XDG_CONFIG_HOME: configHome };
+  return {
+    ...process.env,
+    OPENCORP_HOME: homeDir,
+    ...(wsId ? { OPENCORP_WORKSPACE: wsId } : {}),
+    ...(wsPath ? { OPENCORP_WORKSPACE_DIR: wsPath } : {}),
+    XDG_DATA_HOME: dataHome,
+    XDG_CONFIG_HOME: configHome,
+  };
 }
 
 async function lerPidfile(homeDir: string): Promise<OpencodeServerInfo | null> {

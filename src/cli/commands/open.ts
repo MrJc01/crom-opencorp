@@ -46,7 +46,7 @@ export function registerOpenCommand(program: Command): void {
 
           const child = spawn("opencode", args, {
             cwd: ws.path,
-            env: envOpencodeIsolado(opencorpHome(), ws.id),
+            env: envOpencodeIsolado(opencorpHome(), ws.id, ws.path),
             stdio: "inherit",
           });
           child.on("error", (err) => {

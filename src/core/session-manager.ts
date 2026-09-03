@@ -99,7 +99,7 @@ function gerarId(prefixo: string): string {
 }
 
 const PADRAO_ERRO_MODELO =
-  /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found/i;
+  /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found|insufficient balance|payment_required|402|credit balance|temporarily unavailable|Provider returned error/i;
 
 export const MODELOS_ROTACAO_PADRAO = [
   "openrouter/nvidia/nemotron-3-ultra-550b-a55b",
@@ -607,13 +607,14 @@ export class SessionManager {
       child = execa(runnerBin, args, {
         cwd: ws.path,
         // data-dir POR workspace: auth (global ⊕ overrides) + sessões da empresa isolados
-        env: envOpencodeIsolado(this.homeDir, ws.id) as Record<string, string>,
+        env: envOpencodeIsolado(this.homeDir, ws.id, ws.path) as Record<string, string>,
         buffer: false,
         reject: false,
         stdin: "ignore",
       });
     } catch (erro) {
       const falha = `não foi possível iniciar o runner (${runnerBin}): ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
+      (registro as any).erro = falha;
       await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, "", null);
       throw new SessionError(falha);
     }
@@ -660,6 +661,7 @@ export class SessionManager {
               mortePorTimeout = true;
               const mensagem = `timeout de ${Math.round(tetoMs / 1000)}s excedido — opencode morto (modelo travado?)`;
               registro.status = "falhou";
+              (registro as any).erro = mensagem;
               registro.exit_code = null;
               registro.duracao_ms = decorrido;
               registro.fim = new Date().toISOString();
@@ -688,6 +690,7 @@ export class SessionManager {
         return await resolverAposTimeout();
       }
       const falha = `não foi possível executar o opencode: ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
+      (registro as any).erro = falha;
       await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, captura.join(""), null);
       throw new SessionError(falha);
     }
@@ -1100,7 +1103,12 @@ export class SessionManager {
     });
     const meta = await this.registros.lerMeta(ws.path, "execucoes", registro.id);
     await this.salvarExtras(ws.path, meta, registro);
-    const erroDesc = (registro as any).erro || (status === "falhou" ? resumo : null);
+    const erroDesc =
+      (registro as any).erro ||
+      (status === "falhou"
+        ? (resumo && resumo.trim() ? resumo : `Processo encerrou com falha (exit code ${exitCode ?? "desconhecido"})`)
+        : null);
+    (registro as any).erro = erroDesc;
     this.registrarNoLedger(ws.path, registro, custoUsd, erroDesc);
 
     // Notificação automática de falha de execução/modelo

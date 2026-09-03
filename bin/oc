@@ -29,26 +29,38 @@ if (args[0] === "doc" && args[1] === "ajuda") {
   }
 }
 
-// Se não foi passada a flag --workspace, tenta inferir se o cwd está dentro de um workspace
+// Se não foi passada a flag --workspace, tenta inferir com máxima precisão
 const temWsFlag = args.includes("--workspace") || args.includes("-w");
 let extraArgs = [];
 
-if (!temWsFlag) {
-  const dirAtual = process.cwd();
-  if (existsSync(join(dirAtual, ".opencorp"))) {
-    const wsId = dirAtual.split("/").pop();
-    if (wsId) {
-      try {
-        const home = process.env.OPENCORP_HOME || join(process.env.HOME || "", ".opencorp");
-        const wsFile = join(home, "workspaces.json");
-        if (existsSync(wsFile)) {
-          const dados = JSON.parse(readFileSync(wsFile, "utf8"));
-          if (dados.workspaces?.some((w) => w.id === wsId)) {
-            extraArgs = ["--workspace", wsId];
-          }
+function resolverWorkspace(): string | null {
+  // 1. Variável de ambiente explícita injetada pelo OpenCorp no runner
+  if (process.env.OPENCORP_WORKSPACE && process.env.OPENCORP_WORKSPACE.trim()) {
+    return process.env.OPENCORP_WORKSPACE.trim();
+  }
+
+  // 2. Busca recursiva ascendente a partir do diretório atual procurando .opencorp
+  try {
+    let dir = process.cwd();
+    while (dir && dir !== "/") {
+      if (existsSync(join(dir, ".opencorp"))) {
+        const candidatoId = dir.split("/").pop();
+        if (candidatoId && candidatoId !== ".opencorp") {
+          return candidatoId;
         }
-      } catch {}
+      }
+      const pai = dirname(dir);
+      if (pai === dir) break;
+      dir = pai;
     }
+  } catch {}
+  return null;
+}
+
+if (!temWsFlag) {
+  const wsId = resolverWorkspace();
+  if (wsId) {
+    extraArgs = ["--workspace", wsId];
   }
 }
 
