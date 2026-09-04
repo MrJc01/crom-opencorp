@@ -396,7 +396,7 @@ async function construirArvore(raiz: string, profundidadeMax: number): Promise<{
  * O cache-control: no-cache já garante reload do HTML/JS no boot.
  */
 
-function servirEstatico(rota: string): { tipo: string; corpo: string } | null {
+function servirEstatico(rota: string): { tipo: string; corpo: string | Buffer } | null {
   try {
     const raiz = resolve(import.meta.dirname ?? ".", "..", "..", "web-dist");
     const caminhoRel = rota === "/" ? "index.html" : rota.replace(/^\/+/, "");
@@ -407,19 +407,38 @@ function servirEstatico(rota: string): { tipo: string; corpo: string } | null {
       return { tipo: "text/html; charset=utf-8", corpo: readFileSync(join(raiz, "index.html"), "utf8") };
     }
     const ext = caminhoRel.split(".").pop() ?? "";
-    const tipos: Record<string, string> = {
+    const tiposTexto: Record<string, string> = {
       html: "text/html; charset=utf-8",
       js: "text/javascript",
       css: "text/css",
       json: "application/json",
       svg: "image/svg+xml",
+    };
+    const tiposBinario: Record<string, string> = {
       png: "image/png",
       ico: "image/x-icon",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      webp: "image/webp",
+      avif: "image/avif",
+      woff: "font/woff",
+      woff2: "font/woff2",
+      ttf: "font/ttf",
+      eot: "application/vnd.ms-fontobject",
+      mp4: "video/mp4",
+      webm: "video/webm",
     };
-    if (ext === "html") {
-      return { tipo: tipos[ext]!, corpo: readFileSync(alvo, "utf8") };
+    // Arquivos de texto: ler como UTF-8
+    if (tiposTexto[ext]) {
+      return { tipo: tiposTexto[ext]!, corpo: readFileSync(alvo, "utf8") };
     }
-    return { tipo: tipos[ext] ?? "application/octet-stream", corpo: readFileSync(alvo, "utf8") };
+    // Arquivos binários: ler como Buffer nativo (sem corrupção UTF-8)
+    if (tiposBinario[ext]) {
+      return { tipo: tiposBinario[ext]!, corpo: readFileSync(alvo) };
+    }
+    // Extensão desconhecida: tratar como binário por segurança
+    return { tipo: "application/octet-stream", corpo: readFileSync(alvo) };
   } catch {
     return null;
   }

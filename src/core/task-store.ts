@@ -118,6 +118,7 @@ export class TaskStore {
     mkdirSync(dirname(caminho), { recursive: true });
     const db = new Database(caminho);
     db.pragma("journal_mode = WAL");
+    db.pragma("busy_timeout = 5000");
     db.exec(`
       CREATE TABLE IF NOT EXISTS tasks (
         id TEXT PRIMARY KEY,

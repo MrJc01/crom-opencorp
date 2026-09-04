@@ -63,9 +63,21 @@ export function registerSecretarioCommand(program: Command): void {
     .description("interage com o Secretário Executivo direto da CLI")
     .option("--status", "mostra status do serviço do secretário")
     .option("--sessoes", "lista conversas recentes com o secretário")
-    .action((msgArgs: string[], opts: { status?: boolean; sessoes?: boolean; workspace?: string }) =>
+    .option("--stop", "para o serviço do secretário")
+    .action((msgArgs: string[], opts: { status?: boolean; sessoes?: boolean; stop?: boolean; workspace?: string }) =>
       comErros(async () => {
         const ws = await workspaceAlvo(opts);
+
+        const querParar = opts.stop || (msgArgs.length === 1 && msgArgs[0]?.toLowerCase() === "stop");
+        if (querParar) {
+          const res = await chamarApiSecretario("/secretario/stop", "POST");
+          if (res.ok) {
+            console.log("🛑 Secretário parado com sucesso.");
+          } else {
+            console.log(`Secretário não pôde ser parado ou já estava parado: ${res.data?.erro ?? "sem resposta"}`);
+          }
+          return;
+        }
 
         if (opts.status) {
           const res = await chamarApiSecretario("/secretario/status");

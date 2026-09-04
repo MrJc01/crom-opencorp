@@ -135,9 +135,23 @@ describe("MCP stdio", () => {
     );
     child.stdin!.end();
     const saida: string[] = [];
-    for await (const linha of child.stdout!) {
-      saida.push(linha.toString());
+    let buffer = "";
+    for await (const chunk of child.stdout!) {
+      buffer += chunk.toString();
+      const linhas = buffer.split("\n");
+      // O último elemento pode ser incompleto — mantém no buffer
+      buffer = linhas.pop() ?? "";
+      for (const linha of linhas) {
+        const trimmed = linha.trim();
+        if (!trimmed) continue;
+        saida.push(trimmed);
+        if (saida.length >= 3) break;
+      }
       if (saida.length >= 3) break;
+    }
+    // Processar resto do buffer se ainda faltam respostas
+    if (saida.length < 3 && buffer.trim()) {
+      saida.push(buffer.trim());
     }
     child.kill();
     const init = JSON.parse(saida[0]!) as { result: { serverInfo: { name: string } } };

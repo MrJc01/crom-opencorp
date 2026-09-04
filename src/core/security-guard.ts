@@ -20,7 +20,9 @@ const REDE_EXECUTAVEIS = ["curl", "wget", "npm", "npx", "pip", "pip3", "git"];
 
 export function casaPadrao(padrao: string, texto: string): boolean {
   const escapado = padrao
+    .trim()
     .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\s+/g, "\\s+")
     .replace(/\*/g, "[\\s\\S]*");
   return new RegExp(escapado, "i").test(texto);
 }

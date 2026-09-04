@@ -262,6 +262,7 @@ export class Scheduler {
     await mkdirRecursive(dirname(caminho));
     const db = new Database(caminho);
     db.pragma("journal_mode = WAL");
+    db.pragma("busy_timeout = 5000");
     db.exec(`
       CREATE TABLE IF NOT EXISTS jobs (
         id TEXT PRIMARY KEY,
