@@ -44,7 +44,7 @@ export interface OpcoesRun {
   /** graça SIGTERM→SIGKILL do watchdog em ms (padrão 5s) — knob de teste */
   watchdogGracaMs?: number;
   /** uso interno (retry de rotação de modelo): marca este run como retry de outra execução */
-  retryDe?: { de_modelo: string; de_exec: string; tentativas?: number };
+  retryDe?: { de_modelo: string; de_exec: string; tentativas?: number; modelosTentados?: string[] };
   /**
    * Gatilho da execução (PLANO-UNIFICACAO): quem chamou e por quê — cron, menção, nó de flow,
    * passo de team, turno de reunião, evento ou manual. Vai para extras, ledger (corp.db) e eventos.
@@ -102,13 +102,14 @@ export const PADRAO_ERRO_MODELO =
   /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found|insufficient balance|payment_required|402|credit balance|temporarily unavailable|Provider returned error|requires more credits|can only afford|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits|in-flight requests|database is locked|sqlite_busy/i;
 
 export const MODELOS_ROTACAO_PADRAO = [
-  "openrouter/nvidia/nemotron-3-ultra-550b-a55b",
   "openrouter/nvidia/nemotron-3.5-lightning:free",
-  "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
   "openrouter/minimax/minimax-m3:free",
+  "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+  "openrouter/z-ai/glm-5.2:free",
+  "opencode-go/glm-5.3-flash",
+  "openrouter/nvidia/nemotron-3-ultra-550b-a55b",
   "openrouter/google/gemini-2.5-flash",
   "openrouter/deepseek/deepseek-chat",
-  "opencode-go/glm-5.3-flash",
   "openrouter/meta-llama/llama-3.3-70b-instruct",
 ];
 
@@ -143,6 +144,43 @@ export function proximoModeloRotacao(lista: string[], modeloFalho: string): stri
   if (idx === -1) return limpa[0] !== modeloFalho ? limpa[0]! : null;
   const proximo = limpa[(idx + 1) % limpa.length]!;
   return proximo !== modeloFalho ? proximo : null;
+}
+
+export async function obterListaRotacaoCompleta(
+  agenteStore?: AgentStore,
+  wsPath?: string,
+  agenteId?: string,
+  homeDir?: string,
+): Promise<string[]> {
+  const lista: string[] = [];
+  if (agenteStore && wsPath && agenteId) {
+    try {
+      const ag = await agenteStore.carregar(wsPath, agenteId);
+      const rot = ag.frontmatter.rotation || ag.frontmatter.model_fallback;
+      if (Array.isArray(rot)) {
+        for (const m of rot) {
+          const s = String(m).trim();
+          if (s && !lista.includes(s)) lista.push(s);
+        }
+      }
+    } catch {}
+  }
+  let globalLista = MODELOS_ROTACAO_PADRAO;
+  try {
+    const r = await new SettingsStore({ homeDir, cwd: wsPath ?? homeDir }).resolve();
+    const configurada = [...r.origens.entries()].some(
+      ([chave, origem]) => chave.startsWith("tests.rotation") && origem !== "default",
+    );
+    if (configurada && r.settings.tests.rotation.length > 0) {
+      globalLista = [...r.settings.tests.rotation];
+    }
+  } catch {}
+
+  for (const m of globalLista) {
+    const s = String(m).trim();
+    if (s && !lista.includes(s)) lista.push(s);
+  }
+  return lista;
 }
 
 function sufixarRetry(origem: string, modelo: string): string {
@@ -748,10 +786,8 @@ export class SessionManager {
 
     const textoCaptura = captura.join("");
 
-    // Se falhou por erro de modelo/API e ainda não esgotou retries, roda com o próximo da rotação
-    const maxRetries = 2;
-    const tentativas = opcoes.retryDe?.tentativas ?? (opcoes.retryDe ? 1 : 0);
-    if (status === "falhou" && tentativas < maxRetries && PADRAO_ERRO_MODELO.test(textoCaptura)) {
+    // Se falhou por erro de modelo/API e ainda há modelos na rotação, tenta o próximo
+    if (status === "falhou" && PADRAO_ERRO_MODELO.test(textoCaptura)) {
       const retry = await this.tentarRetry(ws, opcoes, registro, textoCaptura);
       if (retry) return retry;
     }
@@ -860,13 +896,18 @@ export class SessionManager {
     registro: RegistroExecucao,
     captura: string,
   ): Promise<ResultadoRun | null> {
-    const maxRetries = 2;
-    const tentativas = opcoes.retryDe?.tentativas ?? (opcoes.retryDe ? 1 : 0);
-    if (tentativas >= maxRetries) return null;
     if (registro.status === "hitl_pendente") return null;
     if (!PADRAO_ERRO_MODELO.test(captura)) return null;
-    const proximo = await this.proximoModeloDaRotacao(registro.modelo, ws.path, opcoes.agente);
+
+    const tentados = [...(opcoes.retryDe?.modelosTentados ?? []), registro.modelo];
+    const lista = await obterListaRotacaoCompleta(this.agentes, ws.path, opcoes.agente, this.homeDir);
+    const maxRetries = Math.max(1, lista.length);
+    const tentativas = opcoes.retryDe?.tentativas ?? 0;
+    if (tentativas >= maxRetries) return null;
+
+    const proximo = await this.proximoModeloDaRotacao(registro.modelo, ws.path, opcoes.agente, tentados);
     if (!proximo || proximo === registro.modelo) return null;
+
     const idRetry = gerarId("exec");
     try {
       await this.registros.anexarEvento(ws.path, "execucoes", registro.id, {
@@ -886,7 +927,12 @@ export class SessionManager {
       ...opcoes,
       model: proximo,
       execId: idRetry,
-      retryDe: { de_modelo: registro.modelo, de_exec: registro.id, tentativas: tentativas + 1 },
+      retryDe: {
+        de_modelo: registro.modelo,
+        de_exec: registro.id,
+        tentativas: tentativas + 1,
+        modelosTentados: [...tentados, proximo],
+      },
       gatilho: opcoes.gatilho
         ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, proximo) }
         : undefined,
@@ -894,40 +940,20 @@ export class SessionManager {
   }
 
   /**
-   * Lista de rotação: prioriza rotação personalizada do próprio agente (rotation / model_fallback).
-   * Se o agente não definir, herda settings.tests.rotation do workspace/global.
+   * Lista de rotação completa (agente + fallbacks globais/workspace).
+   * Retorna o próximo modelo que ainda não foi tentado nesta cadeia de execução.
+   * Só retorna null se todos os modelos disponíveis já tiverem falhado.
    */
   public async proximoModeloDaRotacao(
     modeloFalho: string,
     wsPath?: string,
     agenteId?: string,
+    modelosJaTentados: string[] = [],
   ): Promise<string | null> {
-    // 1. Prioridade máxima: rotação personalizada configurada no frontmatter do próprio agente
-    if (wsPath && agenteId) {
-      try {
-        const ag = await this.agentes.carregar(wsPath, agenteId);
-        const rotAgente = ag.frontmatter.rotation || ag.frontmatter.model_fallback;
-        if (Array.isArray(rotAgente) && rotAgente.length > 0) {
-          const prox = proximoModeloRotacao(rotAgente, modeloFalho);
-          if (prox) return prox;
-        }
-      } catch {}
-    }
-
-    // 2. Fallback: rotação global configurada no workspace
-    let lista = MODELOS_ROTACAO_PADRAO;
-    try {
-      const r = await new SettingsStore({ homeDir: this.homeDir, cwd: wsPath ?? this.homeDir }).resolve();
-      const configurada = [...r.origens.entries()].some(
-        ([chave, origem]) => chave.startsWith("tests.rotation") && origem !== "default",
-      );
-      if (configurada && r.settings.tests.rotation.length > 0) {
-        lista = [...r.settings.tests.rotation];
-      }
-    } catch {
-      /* settings indisponível — rotação padrão */
-    }
-    return proximoModeloRotacao(lista, modeloFalho);
+    const lista = await obterListaRotacaoCompleta(this.agentes, wsPath, agenteId, this.homeDir);
+    const tentados = new Set([...modelosJaTentados, modeloFalho]);
+    const prox = lista.find((m) => !tentados.has(m));
+    return prox ?? null;
   }
 
   async listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<ResumoExecucao[]> {

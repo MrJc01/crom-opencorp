@@ -184,7 +184,7 @@ export interface SessaoApi {
   logDe(wsPath: string, id: string): Promise<string>;
   cancelar?(wsPath: string, id: string): Promise<boolean>;
   reconciliarZombieSeNecessario?(wsPath: string, id: string): Promise<unknown>;
-  proximoModeloDaRotacao?(modeloFalho: string, wsPath?: string, agenteId?: string): Promise<string | null>;
+  proximoModeloDaRotacao?(modeloFalho: string, wsPath?: string, agenteId?: string, modelosJaTentados?: string[]): Promise<string | null>;
 }
 
 export interface ApiServerOptions {
@@ -1301,7 +1301,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             } catch {}
             const erroOriginal = String(extras.erro ?? "");
             if (PADRAO_ERRO_MODELO.test(erroOriginal) || PADRAO_ERRO_MODELO.test(logOriginal) || extras.status === "falhou") {
-              const prox = await sessoes.proximoModeloDaRotacao(modeloParaExecutar, wsEfetivo.path, agenteOriginal);
+              const prox = await sessoes.proximoModeloDaRotacao(modeloParaExecutar, wsEfetivo.path, agenteOriginal, [modeloParaExecutar]);
               if (prox && prox !== modeloParaExecutar) {
                 modeloParaExecutar = prox;
               }
