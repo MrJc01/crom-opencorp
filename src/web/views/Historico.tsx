@@ -18,6 +18,7 @@ import {
   ExternalLink,
   StopCircle,
   Settings,
+  RotateCcw,
 } from "lucide-solid";
 import { useSearchParams, useNavigate } from "@solidjs/router";
 import { Button } from "../ui/Button";
@@ -52,6 +53,7 @@ export const HistoricoView: Component = () => {
   const [carregandoLog, setCarregandoLog] = createSignal(false);
   const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal">("chat");
   const [encerrando, setEncerrando] = createSignal(false);
+  const [reenviando, setReenviando] = createSignal(false);
 
   let liveLogInterval: any = null;
 
@@ -127,14 +129,47 @@ export const HistoricoView: Component = () => {
     let r = itens().find((item) => item.id === runId);
     if (!r) {
       try {
-        const h = await fetchApi<ItemHistorico[]>("/historico?limite=50");
+        const h = await fetchApi<ItemHistorico[]>("/historico?limite=100");
         if (Array.isArray(h)) {
           r = h.find((item) => item.id === runId);
         }
       } catch {}
       if (!r) {
+        try {
+          const reg = await fetchApi<{ meta?: { criado_por?: string; descricao?: string; criado_em?: string; extras?: any } }>(
+            `/registries/execucoes/${encodeURIComponent(runId)}`
+          );
+          if (reg?.meta) {
+            const ex = reg.meta.extras || {};
+            r = {
+              id: runId,
+              tipo: "execucao",
+              agente: reg.meta.criado_por || ex.agente || "executor-padrao",
+              status: ex.status || "concluido",
+              quando: reg.meta.criado_em,
+              ordem: ex.ordem || reg.meta.descricao?.replace(/^Ordem:\s*/i, ""),
+              modelo: ex.modelo,
+              duracao_ms: ex.duracao_ms,
+              custo_usd: ex.custo_usd,
+            };
+          }
+        } catch {}
+      }
+      if (!r) {
         r = { id: runId, tipo: "execucao", agente: "agente", status: "registrada" };
       }
+    } else if (!r.ordem) {
+      try {
+        const reg = await fetchApi<{ meta?: { descricao?: string; extras?: any } }>(
+          `/registries/execucoes/${encodeURIComponent(runId)}`
+        );
+        if (reg?.meta) {
+          const ordem = reg.meta.extras?.ordem || reg.meta.descricao?.replace(/^Ordem:\s*/i, "");
+          if (ordem) {
+            r = { ...r, ordem };
+          }
+        }
+      } catch {}
     }
     setRunSelecionado(r);
 
@@ -216,6 +251,47 @@ export const HistoricoView: Component = () => {
       showToast(`Erro ao encerrar execução: ${e.message || String(e)}`, "erro");
     } finally {
       setEncerrando(false);
+    }
+  };
+
+  const reenviarExecucao = async () => {
+    const run = runSelecionado();
+    if (!run) return;
+    setReenviando(true);
+    try {
+      const res = await fetchApi<{
+        ok?: boolean;
+        exec_id?: string;
+        exec_id_original?: string;
+        agente?: string;
+        ordem?: string;
+        mensagem?: string;
+        erro?: string;
+      }>(
+        `/execucoes/${encodeURIComponent(run.id)}/retry`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" } as any
+      );
+      if (res?.erro) {
+        showToast(`Falha ao reenviar: ${res.erro}`, "erro");
+        return;
+      }
+      showToast(
+        res?.mensagem || `Execução reenviada como ${res?.exec_id ?? "?"}`,
+        "sucesso"
+      );
+      // Navegar para a nova execução
+      if (res?.exec_id) {
+        fecharLog();
+        void carregarHistorico();
+        // Abre o novo run após breve delay para dar tempo do historico atualizar
+        setTimeout(() => {
+          setSearchParams({ run: res.exec_id });
+        }, 1200);
+      }
+    } catch (e: any) {
+      showToast(`Erro ao reenviar execução: ${e.message || String(e)}`, "erro");
+    } finally {
+      setReenviando(false);
     }
   };
 
@@ -483,7 +559,19 @@ export const HistoricoView: Component = () => {
                 <div class="text-[11px] text-zinc-400 font-mono mt-0.5 flex items-center gap-2">
                   <span>@{runSelecionado()!.agente}</span>
                   <span>·</span>
-                  <span class="capitalize text-emerald-400 font-semibold">
+                  <span
+                    class={`capitalize font-semibold ${
+                      runSelecionado()!.status === "executando"
+                        ? "text-emerald-400 animate-pulse"
+                        : runSelecionado()!.status === "concluido"
+                        ? "text-emerald-400"
+                        : runSelecionado()!.status === "falhou"
+                        ? "text-rose-400"
+                        : runSelecionado()!.status === "cancelado"
+                        ? "text-amber-400"
+                        : "text-zinc-400"
+                    }`}
+                  >
                     {runSelecionado()!.status}
                   </span>
                   <Show when={runSelecionado()!.modelo}>
@@ -491,6 +579,14 @@ export const HistoricoView: Component = () => {
                     <span class="text-zinc-500 truncate max-w-xs">{runSelecionado()!.modelo}</span>
                   </Show>
                 </div>
+                <Show when={runSelecionado()!.ordem}>
+                  <div class="mt-2 text-xs bg-zinc-950/70 border border-zinc-800/80 rounded-lg px-2.5 py-1.5 text-zinc-300 font-sans max-h-20 overflow-y-auto leading-relaxed select-text">
+                    <span class="text-[10px] uppercase font-mono font-bold tracking-wider text-zinc-500 block mb-0.5">
+                      Ordem Original:
+                    </span>
+                    {runSelecionado()!.ordem}
+                  </div>
+                </Show>
               </div>
 
               {/* Controles e Alternador de Visão */}
@@ -545,6 +641,18 @@ export const HistoricoView: Component = () => {
                   class="text-zinc-400 hover:text-zinc-100"
                 >
                   <Settings size={13} class="mr-1" /> Configurar
+                </Button>
+
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={reenviarExecucao}
+                  disabled={reenviando()}
+                  title="Reenviar esta execução com os mesmos parâmetros"
+                  class="!bg-sky-950/40 !text-sky-300 hover:!bg-sky-900/60 !border !border-sky-800/80 font-bold"
+                >
+                  <RotateCcw size={13} class={`mr-1 text-sky-400 ${reenviando() ? "animate-spin" : ""}`} />
+                  {reenviando() ? "Reenviando..." : "Reenviar"}
                 </Button>
 
                 <Show when={runSelecionado()!.status === "executando"}>

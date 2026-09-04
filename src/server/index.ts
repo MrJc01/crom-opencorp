@@ -13,7 +13,7 @@ import { opencorpHome } from "../utils/paths.js";
 import { AgentStore } from "../core/agent-store.js";
 import { TemplateStore } from "../core/template-store.js";
 import { SessionManager, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
-import { RegistryStore } from "../core/registry-store.js";
+import { RegistryStore, type MetaRegistro } from "../core/registry-store.js";
 import { BudgetManager } from "../core/budget-manager.js";
 import { ApprovalsStore } from "../core/approvals-store.js";
 import { SettingsError, SettingsStore } from "../core/settings-store.js";
@@ -91,6 +91,7 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/sessions", descricao: "Lista execuções/sessões" },
   { method: "GET", path: "/historico", descricao: "Histórico unificado (execuções + tasks + rotinas + conversas da secretária) — query: agente, tipo, limite" },
   { method: "GET", path: "/execucoes", descricao: "Ledger unificado de execuções com gatilho (query: agente, gatilho, origem, status, limite)" },
+  { method: "POST", path: "/execucoes/:id/retry", descricao: "Reenvia (clona) uma execução com os mesmos parâmetros originais (agente, ordem, modelo)" },
   { method: "GET", path: "/sessions/:id/log", descricao: "Retorna log de uma execução" },
   { method: "GET", path: "/registries/:categoria", descricao: "Lista registros de uma categoria" },
   { method: "POST", path: "/registries/:categoria", descricao: "Cria registro em uma categoria", corpo: true },
@@ -1147,8 +1148,22 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         if (mSessaoLog && req.method === "GET") {
           const ws = await resolverWs(url);
           const id = decodeURIComponent(mSessaoLog[1]!);
-          enviar(res, 200, { id, log: await sessoes.logDe(ws.path, id) });
-          return;
+          try {
+            enviar(res, 200, { id, log: await sessoes.logDe(ws.path, id) });
+            return;
+          } catch {
+            const todosWs = await workspaces.listar();
+            for (const outro of todosWs) {
+              if (outro.path === ws.path) continue;
+              try {
+                const log = await sessoes.logDe(outro.path, id);
+                enviar(res, 200, { id, log });
+                return;
+              } catch {}
+            }
+            enviar(res, 200, { id, log: "(Nenhuma saída de log capturada para esta execução)" });
+            return;
+          }
         }
         const mExecCancelar = /^\/(?:execucoes|sessions)\/([^/]+)\/(?:cancelar|cancel|abort)$/.exec(rota);
         if (mExecCancelar && (req.method === "POST" || req.method === "DELETE")) {
@@ -1174,6 +1189,74 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
+        // ── /execucoes/:id/retry — reenvia (clona) uma execução com os mesmos parâmetros originais ──
+        const mExecRetry = /^\/(?:execucoes|sessions)\/([^/]+)\/retry$/.exec(rota);
+        if (mExecRetry && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const idOriginal = decodeURIComponent(mExecRetry[1]!);
+          let meta: MetaRegistro | null = null;
+          let wsEfetivo = ws;
+
+          try {
+            meta = await registros.lerMeta(ws.path, "execucoes", idOriginal);
+          } catch {
+            // Se não encontrou no workspace atual, busca em todos os workspaces conhecidos
+            const todosWs = await workspaces.listar();
+            for (const outro of todosWs) {
+              if (outro.path === ws.path) continue;
+              try {
+                meta = await registros.lerMeta(outro.path, "execucoes", idOriginal);
+                wsEfetivo = { id: outro.id, path: outro.path };
+                break;
+              } catch {}
+            }
+          }
+
+          if (!meta) {
+            enviar(res, 404, { erro: `Execução "${idOriginal}" não encontrada` });
+            return;
+          }
+
+          const extras = (meta.extras ?? {}) as Record<string, unknown>;
+          const agenteOriginal = meta.criado_por || String(extras.agente ?? "executor-padrao");
+          const ordemOriginal = String(extras.ordem || meta.descricao?.replace(/^Ordem:\s*/i, "") || "");
+          const modeloOriginal = extras.modelo ? String(extras.modelo) : undefined;
+
+          // Verificar se o agente ainda existe e está ativo no workspace da execução
+          try {
+            const alvo = await agentes.carregar(wsEfetivo.path, agenteOriginal);
+            if (alvo.frontmatter.ativo === false) {
+              enviar(res, 409, { erro: `Agente '${agenteOriginal}' está desativado — ative no painel de agentes` });
+              return;
+            }
+          } catch {
+            // agente pode ter sido removido — prossegue mesmo assim
+          }
+
+          const novoExecId = gerarIdExec();
+          const opcoesRun: OpcoesRun = {
+            agente: agenteOriginal,
+            ordem: ordemOriginal,
+            model: modeloOriginal !== "-" ? modeloOriginal : undefined,
+            workspaceDir: wsEfetivo.path,
+            workspaceId: wsEfetivo.id,
+            execId: novoExecId,
+            gatilho: { tipo: "manual", origem: `retry:${idOriginal}` },
+            retryDe: { de_modelo: modeloOriginal || "-", de_exec: idOriginal },
+          };
+          void sessoes.rodar(opcoesRun).catch(() => undefined);
+          enviar(res, 202, {
+            ok: true,
+            exec_id: novoExecId,
+            exec_id_original: idOriginal,
+            agente: agenteOriginal,
+            ordem: ordemOriginal.slice(0, 200),
+            status: "iniciado",
+            mensagem: `Execução reenviada como ${novoExecId} (clone de ${idOriginal})`,
+          });
+          return;
+        }
+
         // ── /historico — fonte única p/ a view Histórico (filtro por agente server-side) ──
         if (rota === "/historico" && req.method === "GET") {
           const ws = await resolverWs(url);
@@ -1190,8 +1273,30 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               status: string;
               gatilho?: { tipo: string; origem: string };
             }>;
+            // Enriquecer com ordem do registro (extras.ordem)
+            const execIds = execs.slice(0, limite).map((e) => e.id);
+            const metaMap = new Map<string, Record<string, unknown>>();
+            for (const eid of execIds) {
+              try {
+                const m = await registros.lerMeta(ws.path, "execucoes", eid);
+                if (m.extras) metaMap.set(eid, m.extras as Record<string, unknown>);
+              } catch { /* meta ausente — continua */ }
+            }
             for (const e of execs.slice(0, limite)) {
-              itens.push({ id: e.id, tipo: "execucao", titulo: e.id, agente: e.agente, quando: e.inicio, status: e.status, gatilho: e.gatilho });
+              const ex = metaMap.get(e.id);
+              itens.push({
+                id: e.id,
+                tipo: "execucao",
+                titulo: e.id,
+                agente: e.agente,
+                quando: e.inicio,
+                status: e.status,
+                gatilho: e.gatilho,
+                ordem: ex?.ordem ? String(ex.ordem) : undefined,
+                modelo: ex?.modelo ? String(ex.modelo) : undefined,
+                duracao_ms: typeof ex?.duracao_ms === "number" ? ex.duracao_ms : undefined,
+                custo_usd: typeof ex?.custo_usd === "number" ? ex.custo_usd : undefined,
+              } as any);
             }
           }
           if (!tipo || tipo === "task") {
@@ -1312,8 +1417,23 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             return;
           }
           if (regId && req.method === "GET") {
-            enviar(res, 200, await registros.obter(ws.path, cat, regId));
-            return;
+            try {
+              enviar(res, 200, await registros.obter(ws.path, cat, regId));
+              return;
+            } catch (err) {
+              if (cat === "execucoes") {
+                const todosWs = await workspaces.listar();
+                for (const outro of todosWs) {
+                  if (outro.path === ws.path) continue;
+                  try {
+                    enviar(res, 200, await registros.obter(outro.path, cat, regId));
+                    return;
+                  } catch {}
+                }
+              }
+              enviar(res, 404, { erro: `Registro "${cat}/${regId}" não encontrado` });
+              return;
+            }
           }
           if (regId && req.method === "PUT") {
             const corpo = (await lerCorpo(req)) as { conteudo?: string };
