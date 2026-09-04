@@ -101,13 +101,25 @@ function gerarId(prefixo: string): string {
 export const PADRAO_ERRO_MODELO =
   /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found|insufficient balance|payment_required|402|credit balance|temporarily unavailable|Provider returned error|requires more credits|can only afford|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits|in-flight requests|database is locked|sqlite_busy/i;
 
+export const PADRAO_ERRO_CREDITOS =
+  /requires more credits|can only afford|insufficient balance|payment_required|402|credit balance|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits/i;
+
+export function ehModeloGratuito(modelo: string): boolean {
+  const m = modelo.trim().toLowerCase();
+  if (m.endsWith(":free")) return true;
+  if (m.startsWith("opencode-go/")) return true;
+  if (m.startsWith("antigravity/")) return true;
+  if (m.startsWith("claude-code/")) return true;
+  if (m.includes("free")) return true;
+  return false;
+}
+
 export const MODELOS_ROTACAO_PADRAO = [
   "openrouter/nvidia/nemotron-3.5-lightning:free",
   "openrouter/minimax/minimax-m3:free",
   "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
   "openrouter/z-ai/glm-5.2:free",
   "opencode-go/glm-5.3-flash",
-  "openrouter/nvidia/nemotron-3-ultra-550b-a55b",
   "openrouter/google/gemini-2.5-flash",
   "openrouter/deepseek/deepseek-chat",
   "openrouter/meta-llama/llama-3.3-70b-instruct",
@@ -173,6 +185,13 @@ export async function obterListaRotacaoCompleta(
     );
     if (configurada && r.settings.tests.rotation.length > 0) {
       globalLista = [...r.settings.tests.rotation];
+    }
+    const defOrigem = r.origens.get("default_model");
+    if (defOrigem && defOrigem !== "default" && r.settings.default_model && typeof r.settings.default_model === "string") {
+      const def = r.settings.default_model.trim();
+      if (def && !globalLista.includes(def)) {
+        globalLista.push(def);
+      }
     }
   } catch {}
 
@@ -899,14 +918,15 @@ export class SessionManager {
     if (registro.status === "hitl_pendente") return null;
     if (!PADRAO_ERRO_MODELO.test(captura)) return null;
 
-    const tentados = [...(opcoes.retryDe?.modelosTentados ?? []), registro.modelo];
+    const falhaCreditos = PADRAO_ERRO_CREDITOS.test(captura);
+    const tentados = Array.from(new Set([...(opcoes.retryDe?.modelosTentados ?? []), registro.modelo]));
+    const proximo = await this.proximoModeloDaRotacao(registro.modelo, ws.path, opcoes.agente, tentados, falhaCreditos);
+    if (!proximo || proximo === registro.modelo) return null;
+
     const lista = await obterListaRotacaoCompleta(this.agentes, ws.path, opcoes.agente, this.homeDir);
-    const maxRetries = Math.max(1, lista.length);
+    const maxRetries = Math.max(1, lista.length + 2);
     const tentativas = opcoes.retryDe?.tentativas ?? 0;
     if (tentativas >= maxRetries) return null;
-
-    const proximo = await this.proximoModeloDaRotacao(registro.modelo, ws.path, opcoes.agente, tentados);
-    if (!proximo || proximo === registro.modelo) return null;
 
     const idRetry = gerarId("exec");
     try {
@@ -914,7 +934,7 @@ export class SessionManager {
         ts: new Date().toISOString(),
         por: "opencorp",
         evento: "retry_modelo",
-        resumo: `falha de modelo/API (${registro.modelo}) — retry ${tentativas + 1}/${maxRetries} com ${proximo} → ${idRetry}`,
+        resumo: `falha de modelo/API (${registro.modelo}) — retry ${tentativas + 1}/${maxRetries} com ${proximo}${falhaCreditos ? " (filtrando apenas gratuitos)" : ""} → ${idRetry}`,
       });
     } catch {
       /* journal best-effort */
@@ -931,7 +951,7 @@ export class SessionManager {
         de_modelo: registro.modelo,
         de_exec: registro.id,
         tentativas: tentativas + 1,
-        modelosTentados: [...tentados, proximo],
+        modelosTentados: Array.from(new Set([...tentados, proximo])),
       },
       gatilho: opcoes.gatilho
         ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, proximo) }
@@ -942,6 +962,7 @@ export class SessionManager {
   /**
    * Lista de rotação completa (agente + fallbacks globais/workspace).
    * Retorna o próximo modelo que ainda não foi tentado nesta cadeia de execução.
+   * Quando apenasGratuitos for true (ex.: cota/créditos esgotados), prioriza modelos gratuitos.
    * Só retorna null se todos os modelos disponíveis já tiverem falhado.
    */
   public async proximoModeloDaRotacao(
@@ -949,11 +970,16 @@ export class SessionManager {
     wsPath?: string,
     agenteId?: string,
     modelosJaTentados: string[] = [],
+    apenasGratuitos: boolean = false,
   ): Promise<string | null> {
     const lista = await obterListaRotacaoCompleta(this.agentes, wsPath, agenteId, this.homeDir);
     const tentados = new Set([...modelosJaTentados, modeloFalho]);
-    const prox = lista.find((m) => !tentados.has(m));
-    return prox ?? null;
+    const naoTentados = lista.filter((m) => !tentados.has(m));
+    if (apenasGratuitos) {
+      const gratuitos = naoTentados.filter((m) => ehModeloGratuito(m));
+      if (gratuitos.length > 0) return gratuitos[0]!;
+    }
+    return naoTentados[0] ?? null;
   }
 
   async listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<ResumoExecucao[]> {

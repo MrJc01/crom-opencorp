@@ -12,7 +12,7 @@ import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
 import { AgentStore } from "../core/agent-store.js";
 import { TemplateStore } from "../core/template-store.js";
-import { SessionManager, PADRAO_ERRO_MODELO, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
+import { SessionManager, PADRAO_ERRO_MODELO, PADRAO_ERRO_CREDITOS, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
 import { RegistryStore, type MetaRegistro } from "../core/registry-store.js";
 import { BudgetManager } from "../core/budget-manager.js";
 import { ApprovalsStore } from "../core/approvals-store.js";
@@ -184,7 +184,7 @@ export interface SessaoApi {
   logDe(wsPath: string, id: string): Promise<string>;
   cancelar?(wsPath: string, id: string): Promise<boolean>;
   reconciliarZombieSeNecessario?(wsPath: string, id: string): Promise<unknown>;
-  proximoModeloDaRotacao?(modeloFalho: string, wsPath?: string, agenteId?: string, modelosJaTentados?: string[]): Promise<string | null>;
+  proximoModeloDaRotacao?(modeloFalho: string, wsPath?: string, agenteId?: string, modelosJaTentados?: string[], apenasGratuitos?: boolean): Promise<string | null>;
 }
 
 export interface ApiServerOptions {
@@ -1300,8 +1300,15 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               logOriginal = await sessoes.logDe(wsEfetivo.path, idOriginal);
             } catch {}
             const erroOriginal = String(extras.erro ?? "");
+            const erroCreditos = PADRAO_ERRO_CREDITOS.test(erroOriginal) || PADRAO_ERRO_CREDITOS.test(logOriginal);
             if (PADRAO_ERRO_MODELO.test(erroOriginal) || PADRAO_ERRO_MODELO.test(logOriginal) || extras.status === "falhou") {
-              const prox = await sessoes.proximoModeloDaRotacao(modeloParaExecutar, wsEfetivo.path, agenteOriginal, [modeloParaExecutar]);
+              const prox = await sessoes.proximoModeloDaRotacao(
+                modeloParaExecutar,
+                wsEfetivo.path,
+                agenteOriginal,
+                [modeloParaExecutar],
+                erroCreditos,
+              );
               if (prox && prox !== modeloParaExecutar) {
                 modeloParaExecutar = prox;
               }
@@ -1328,6 +1335,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             workspaceId: wsEfetivo.id,
             execId: novoExecId,
             gatilho: { tipo: "manual", origem: `retry:${idOriginal}` },
+            retryDe: {
+              de_modelo: String(extras.modelo || modeloParaExecutar || ""),
+              de_exec: idOriginal,
+            },
           };
           void sessoes.rodar(opcoesRun).catch(() => undefined);
           enviar(res, 202, {
