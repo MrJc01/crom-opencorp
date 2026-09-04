@@ -12,7 +12,7 @@ import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
 import { AgentStore } from "../core/agent-store.js";
 import { TemplateStore } from "../core/template-store.js";
-import { SessionManager, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
+import { SessionManager, PADRAO_ERRO_MODELO, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
 import { RegistryStore, type MetaRegistro } from "../core/registry-store.js";
 import { BudgetManager } from "../core/budget-manager.js";
 import { ApprovalsStore } from "../core/approvals-store.js";
@@ -184,6 +184,7 @@ export interface SessaoApi {
   logDe(wsPath: string, id: string): Promise<string>;
   cancelar?(wsPath: string, id: string): Promise<boolean>;
   reconciliarZombieSeNecessario?(wsPath: string, id: string): Promise<unknown>;
+  proximoModeloDaRotacao?(modeloFalho: string, wsPath?: string, agenteId?: string): Promise<string | null>;
 }
 
 export interface ApiServerOptions {
@@ -1289,7 +1290,23 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const extras = (meta.extras ?? {}) as Record<string, unknown>;
           const agenteOriginal = meta.criado_por || String(extras.agente ?? "executor-padrao");
           const ordemOriginal = String(extras.ordem || meta.descricao?.replace(/^Ordem:\s*/i, "") || "");
-          const modeloOriginal = extras.modelo ? String(extras.modelo) : undefined;
+          let modeloParaExecutar = extras.modelo ? String(extras.modelo) : undefined;
+          if (modeloParaExecutar === "-") modeloParaExecutar = undefined;
+
+          // Se a execução original falhou, rotaciona automaticamente para o próximo modelo se houve erro de modelo/tokens
+          if (modeloParaExecutar && sessoes.proximoModeloDaRotacao) {
+            let logOriginal = "";
+            try {
+              logOriginal = await sessoes.logDe(wsEfetivo.path, idOriginal);
+            } catch {}
+            const erroOriginal = String(extras.erro ?? "");
+            if (PADRAO_ERRO_MODELO.test(erroOriginal) || PADRAO_ERRO_MODELO.test(logOriginal) || extras.status === "falhou") {
+              const prox = await sessoes.proximoModeloDaRotacao(modeloParaExecutar, wsEfetivo.path, agenteOriginal);
+              if (prox && prox !== modeloParaExecutar) {
+                modeloParaExecutar = prox;
+              }
+            }
+          }
 
           // Verificar se o agente ainda existe e está ativo no workspace da execução
           try {
@@ -1306,12 +1323,11 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const opcoesRun: OpcoesRun = {
             agente: agenteOriginal,
             ordem: ordemOriginal,
-            model: modeloOriginal !== "-" ? modeloOriginal : undefined,
+            model: modeloParaExecutar,
             workspaceDir: wsEfetivo.path,
             workspaceId: wsEfetivo.id,
             execId: novoExecId,
             gatilho: { tipo: "manual", origem: `retry:${idOriginal}` },
-            retryDe: { de_modelo: modeloOriginal || "-", de_exec: idOriginal },
           };
           void sessoes.rodar(opcoesRun).catch(() => undefined);
           enviar(res, 202, {
@@ -1319,9 +1335,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             exec_id: novoExecId,
             exec_id_original: idOriginal,
             agente: agenteOriginal,
+            modelo: modeloParaExecutar,
             ordem: ordemOriginal.slice(0, 200),
             status: "iniciado",
-            mensagem: `Execução reenviada como ${novoExecId} (clone de ${idOriginal})`,
+            mensagem: `Execução reenviada como ${novoExecId} (clone de ${idOriginal}${modeloParaExecutar ? ` com modelo ${modeloParaExecutar}` : ""})`,
           });
           return;
         }

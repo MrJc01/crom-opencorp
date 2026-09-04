@@ -44,7 +44,7 @@ export interface OpcoesRun {
   /** graça SIGTERM→SIGKILL do watchdog em ms (padrão 5s) — knob de teste */
   watchdogGracaMs?: number;
   /** uso interno (retry de rotação de modelo): marca este run como retry de outra execução */
-  retryDe?: { de_modelo: string; de_exec: string };
+  retryDe?: { de_modelo: string; de_exec: string; tentativas?: number };
   /**
    * Gatilho da execução (PLANO-UNIFICACAO): quem chamou e por quê — cron, menção, nó de flow,
    * passo de team, turno de reunião, evento ou manual. Vai para extras, ledger (corp.db) e eventos.
@@ -748,8 +748,10 @@ export class SessionManager {
 
     const textoCaptura = captura.join("");
 
-    // Se falhou por erro de modelo/API e ainda não tentou retry, roda com o próximo da rotação
-    if (status === "falhou" && !opcoes.retryDe && PADRAO_ERRO_MODELO.test(textoCaptura)) {
+    // Se falhou por erro de modelo/API e ainda não esgotou retries, roda com o próximo da rotação
+    const maxRetries = 2;
+    const tentativas = opcoes.retryDe?.tentativas ?? (opcoes.retryDe ? 1 : 0);
+    if (status === "falhou" && tentativas < maxRetries && PADRAO_ERRO_MODELO.test(textoCaptura)) {
       const retry = await this.tentarRetry(ws, opcoes, registro, textoCaptura);
       if (retry) return retry;
     }
@@ -848,9 +850,9 @@ export class SessionManager {
   }
 
   /**
-   * Retry único de rotação de modelo: run "falhou" com erro de cota/conexão de API
-   * e ainda não é retry → respawna 1x com o próximo modelo da rotação.
-   * Nunca retry em hitl_pendente nem em cima de outro retry.
+   * Retry de rotação de modelo: run "falhou" com erro de cota/conexão de API
+   * e ainda não esgotou retries → respawna com o próximo modelo da rotação.
+   * Nunca retry em hitl_pendente.
    */
   private async tentarRetry(
     ws: { path: string; id: string },
@@ -858,7 +860,9 @@ export class SessionManager {
     registro: RegistroExecucao,
     captura: string,
   ): Promise<ResultadoRun | null> {
-    if (opcoes.retryDe) return null;
+    const maxRetries = 2;
+    const tentativas = opcoes.retryDe?.tentativas ?? (opcoes.retryDe ? 1 : 0);
+    if (tentativas >= maxRetries) return null;
     if (registro.status === "hitl_pendente") return null;
     if (!PADRAO_ERRO_MODELO.test(captura)) return null;
     const proximo = await this.proximoModeloDaRotacao(registro.modelo, ws.path, opcoes.agente);
@@ -869,7 +873,7 @@ export class SessionManager {
         ts: new Date().toISOString(),
         por: "opencorp",
         evento: "retry_modelo",
-        resumo: `falha de modelo/API (${registro.modelo}) — 1 retry com ${proximo} → ${idRetry}`,
+        resumo: `falha de modelo/API (${registro.modelo}) — retry ${tentativas + 1}/${maxRetries} com ${proximo} → ${idRetry}`,
       });
     } catch {
       /* journal best-effort */
@@ -878,7 +882,7 @@ export class SessionManager {
       ...opcoes,
       model: proximo,
       execId: idRetry,
-      retryDe: { de_modelo: registro.modelo, de_exec: registro.id },
+      retryDe: { de_modelo: registro.modelo, de_exec: registro.id, tentativas: tentativas + 1 },
       gatilho: opcoes.gatilho
         ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, proximo) }
         : undefined,
@@ -889,7 +893,7 @@ export class SessionManager {
    * Lista de rotação: prioriza rotação personalizada do próprio agente (rotation / model_fallback).
    * Se o agente não definir, herda settings.tests.rotation do workspace/global.
    */
-  private async proximoModeloDaRotacao(
+  public async proximoModeloDaRotacao(
     modeloFalho: string,
     wsPath?: string,
     agenteId?: string,
