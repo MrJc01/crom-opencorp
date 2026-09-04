@@ -183,6 +183,7 @@ export interface SessaoApi {
   listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<unknown[]>;
   logDe(wsPath: string, id: string): Promise<string>;
   cancelar?(wsPath: string, id: string): Promise<boolean>;
+  reconciliarZombieSeNecessario?(wsPath: string, id: string): Promise<unknown>;
 }
 
 export interface ApiServerOptions {
@@ -1161,6 +1162,23 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 return;
               } catch {}
             }
+            // Fallback: verificar se o conteúdo/log foi salvo no registro de execuções
+            try {
+              const reg = await registros.obter(ws.path, "execucoes", id);
+              if (reg.conteudo && reg.conteudo.trim()) {
+                enviar(res, 200, { id, log: reg.conteudo });
+                return;
+              }
+            } catch {}
+            for (const outro of todosWs) {
+              try {
+                const reg = await registros.obter(outro.path, "execucoes", id);
+                if (reg.conteudo && reg.conteudo.trim()) {
+                  enviar(res, 200, { id, log: reg.conteudo });
+                  return;
+                }
+              } catch {}
+            }
             enviar(res, 200, { id, log: "(Nenhuma saída de log capturada para esta execução)" });
             return;
           }
@@ -1170,6 +1188,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const ws = await resolverWs(url);
           const id = decodeURIComponent(mExecCancelar[1]!);
           let cancelado = false;
+          let wsAlvo = ws.path;
+
           if (id.startsWith("ses_")) {
             try {
               const porta = await portaOpencodeOuErro();
@@ -1180,12 +1200,61 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             try {
               cancelado = (await sessoes.cancelar?.(ws.path, id)) ?? false;
             } catch {}
+
+            // Se não encontrou ou falhou no workspace atual, busca em todos os outros workspaces
+            const todosWs = await workspaces.listar();
+            for (const outro of todosWs) {
+              try {
+                const meta = await registros.lerMeta(outro.path, "execucoes", id);
+                if (meta) {
+                  wsAlvo = outro.path;
+                  if (!cancelado) {
+                    cancelado = (await sessoes.cancelar?.(outro.path, id)) ?? false;
+                  }
+                  break;
+                }
+              } catch {}
+            }
           }
+
+          // Garantir atualização no meta.json da execução para não ficar preso em "executando"
+          const atualizarMetaExec = async (caminhoWs: string) => {
+            try {
+              const meta = await registros.lerMeta(caminhoWs, "execucoes", id);
+              const extras = (meta.extras ?? {}) as Record<string, unknown>;
+              const inicio = Date.parse(meta.criado_em);
+              const fim = new Date().toISOString();
+              const duracao = Number.isFinite(inicio) ? Date.now() - inicio : 0;
+              meta.extras = {
+                ...extras,
+                status: "cancelado",
+                fim,
+                duracao_ms: (extras.duracao_ms as number | null) ?? duracao,
+                pid: null,
+              };
+              await registros.salvarMeta(caminhoWs, "execucoes", id, meta);
+              return true;
+            } catch {
+              return false;
+            }
+          };
+
+          await atualizarMetaExec(wsAlvo);
+          if (wsAlvo !== ws.path) {
+            await atualizarMetaExec(ws.path);
+          }
+
           try {
-            registros.corpDb(ws.path).atualizarStatusExecucao(id, "cancelado");
+            registros.corpDb(wsAlvo).atualizarStatusExecucao(id, "cancelado");
           } catch {}
+          if (wsAlvo !== ws.path) {
+            try {
+              registros.corpDb(ws.path).atualizarStatusExecucao(id, "cancelado");
+            } catch {}
+          }
+
           eventBus.emit("execucao.cancelada", { id });
-          enviar(res, 200, { ok: true, id, status: "cancelado", cancelado, mensagem: "Execução encerrada com sucesso." });
+          enviar(res, 200, { ok: true, id, status: "cancelado", cancelado: true, mensagem: "Execução encerrada com sucesso." });
           return;
         }
 
@@ -1418,6 +1487,9 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           }
           if (regId && req.method === "GET") {
             try {
+              if (cat === "execucoes") {
+                await sessoes.reconciliarZombieSeNecessario?.(ws.path, regId);
+              }
               enviar(res, 200, await registros.obter(ws.path, cat, regId));
               return;
             } catch (err) {
@@ -1426,6 +1498,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 for (const outro of todosWs) {
                   if (outro.path === ws.path) continue;
                   try {
+                    await sessoes.reconciliarZombieSeNecessario?.(outro.path, regId);
                     enviar(res, 200, await registros.obter(outro.path, cat, regId));
                     return;
                   } catch {}

@@ -88,10 +88,31 @@ export const HistoricoView: Component = () => {
         if (itemReal) {
           setRunSelecionado(itemReal);
           if (itemReal.status === "executando" && !liveLogInterval) {
+            let pollCount = 0;
             liveLogInterval = setInterval(async () => {
+              pollCount++;
               const atualizado = await buscarLog(runAtual);
               setLogRun(atualizado);
+
+              if (pollCount % 2 === 0) {
+                try {
+                  const reg = await fetchApi<{ meta?: { extras?: any } }>(
+                    `/registries/execucoes/${encodeURIComponent(runAtual)}`
+                  );
+                  const st = reg?.meta?.extras?.status;
+                  if (st && st !== "executando") {
+                    setRunSelecionado((prev: any) => prev ? { ...prev, status: st } : null);
+                    if (liveLogInterval) {
+                      clearInterval(liveLogInterval);
+                      liveLogInterval = null;
+                    }
+                  }
+                } catch {}
+              }
             }, 2500);
+          } else if (itemReal.status !== "executando" && liveLogInterval) {
+            clearInterval(liveLogInterval);
+            liveLogInterval = null;
           }
         }
       }
@@ -183,9 +204,28 @@ export const HistoricoView: Component = () => {
     }
 
     if (r.status === "executando") {
+      let pollCount = 0;
       liveLogInterval = setInterval(async () => {
+        pollCount++;
         const atualizado = await buscarLog(runId);
         setLogRun(atualizado);
+
+        if (pollCount % 2 === 0) {
+          try {
+            const reg = await fetchApi<{ meta?: { extras?: any } }>(
+              `/registries/execucoes/${encodeURIComponent(runId)}`
+            );
+            const st = reg?.meta?.extras?.status;
+            if (st && st !== "executando") {
+              setRunSelecionado((prev: any) => prev ? { ...prev, status: st } : null);
+              if (liveLogInterval) {
+                clearInterval(liveLogInterval);
+                liveLogInterval = null;
+              }
+              void carregarHistorico();
+            }
+          } catch {}
+        }
       }, 2500);
     }
   };

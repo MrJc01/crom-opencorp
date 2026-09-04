@@ -91,7 +91,7 @@ describe("API — perfis de app em /secrets", () => {
     expect(entrada).toBeDefined();
     expect(entrada!.definido).toBe(true);
     expect(entrada!.tipo_app).toBe("vps");
-    expect(Object.keys(entrada!).sort()).toEqual(["definido", "nome", "tipo_app"]);
+    expect(Object.keys(entrada!).sort()).toEqual(["definido", "nome", "origem", "tipo_app"]);
     expect(JSON.stringify(lista.json)).not.toContain("senhasupersecreta-vps");
     expect(JSON.stringify(lista.json)).not.toContain("203.0.113.10");
   });

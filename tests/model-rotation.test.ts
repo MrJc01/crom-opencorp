@@ -1,38 +1,41 @@
 import { describe, it, expect } from "vitest";
-import { MODELOS_ROTACAO_PADRAO } from "../src/core/session-manager.js";
+import { MODELOS_ROTACAO_PADRAO, PADRAO_ERRO_MODELO } from "../src/core/session-manager.js";
 
 describe("Rotação de Modelos e Detecção de Erros de API (TEST-04)", () => {
-  // Regex idêntica à do SessionManager para validação unitária estrita
-  const padraoErroModelo =
-    /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found|insufficient balance|payment_required|402|credit balance|temporarily unavailable|Provider returned error/i;
-
   it("detecta erro HTTP 429 e rate limit", () => {
     const saida = 'Error: 429 Rate limit exceeded: You have exceeded the free models per day quota.';
-    expect(padraoErroModelo.test(saida)).toBe(true);
+    expect(PADRAO_ERRO_MODELO.test(saida)).toBe(true);
   });
 
   it("detecta erro HTTP 402, payment_required e insufficient balance (OpenRouter/NVIDIA)", () => {
     const saidaJson = '{"code":402,"message":"Insufficient balance","metadata":{"error_type":"payment_required"}}';
-    expect(padraoErroModelo.test(saidaJson)).toBe(true);
+    expect(PADRAO_ERRO_MODELO.test(saidaJson)).toBe(true);
 
     const saidaTexto = 'Your account has an insufficient credit balance to complete this request.';
-    expect(padraoErroModelo.test(saidaTexto)).toBe(true);
+    expect(PADRAO_ERRO_MODELO.test(saidaTexto)).toBe(true);
+  });
+
+  it("detecta erro de créditos insuficientes do OpenRouter (requires more credits / can only afford)", () => {
+    const erroReal = 'Error: This request requires more credits, or fewer max_tokens. You requested up to 32000 tokens, but can only afford 9572. To increase, visit https://openrouter.ai/settings/credits and add more credits';
+    expect(PADRAO_ERRO_MODELO.test(erroReal)).toBe(true);
   });
 
   it("detecta sobrecarga e indisponibilidade de modelos gratuitos", () => {
     const saidaOverloaded = 'Provider returned error: model is temporarily overloaded or resource exhausted.';
-    expect(padraoErroModelo.test(saidaOverloaded)).toBe(true);
+    expect(PADRAO_ERRO_MODELO.test(saidaOverloaded)).toBe(true);
+  });
 
+  it("detecta indisponibilidade de modelos gratuitos", () => {
     const saidaUnavailable = 'Model openrouter/nvidia/nemotron-3-ultra-550b-a55b is unavailable for free users.';
-    expect(padraoErroModelo.test(saidaUnavailable)).toBe(true);
+    expect(PADRAO_ERRO_MODELO.test(saidaUnavailable)).toBe(true);
   });
 
   it("não dispara falso positivo para saída de sucesso ou erros normais de aplicação", () => {
     const saidaOk = 'Processamento concluído com sucesso. 10 arquivos atualizados.';
-    expect(padraoErroModelo.test(saidaOk)).toBe(false);
+    expect(PADRAO_ERRO_MODELO.test(saidaOk)).toBe(false);
 
     const erroSintaxe = 'SyntaxError: Unexpected token < in JSON at position 0';
-    expect(padraoErroModelo.test(erroSintaxe)).toBe(false);
+    expect(PADRAO_ERRO_MODELO.test(erroSintaxe)).toBe(false);
   });
 
   it("garante que a lista de rotação contém os modelos NVIDIA e Fallbacks em ordem válida", () => {

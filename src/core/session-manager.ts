@@ -98,8 +98,8 @@ function gerarId(prefixo: string): string {
   return `${prefixo}-${ts}-${randomUUID().slice(0, 4)}`;
 }
 
-const PADRAO_ERRO_MODELO =
-  /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found|insufficient balance|payment_required|402|credit balance|temporarily unavailable|Provider returned error/i;
+export const PADRAO_ERRO_MODELO =
+  /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found|insufficient balance|payment_required|402|credit balance|temporarily unavailable|Provider returned error|requires more credits|can only afford|billing_not_active|exceeded your current quota|insufficient.?credits|add more credits/i;
 
 export const MODELOS_ROTACAO_PADRAO = [
   "openrouter/nvidia/nemotron-3-ultra-550b-a55b",
@@ -294,6 +294,23 @@ export class SessionManager {
         }
       } catch {}
     }
+
+    // Persiste status "cancelado" no registry (meta.json)
+    try {
+      const meta = await this.registros.lerMeta(wsPath, "execucoes", execId);
+      const extras = (meta.extras ?? {}) as Record<string, unknown>;
+      const inicio = Date.parse(meta.criado_em);
+      const fim = new Date().toISOString();
+      const duracao = Number.isFinite(inicio) ? Date.now() - inicio : 0;
+      meta.extras = {
+        ...extras,
+        status: "cancelado",
+        fim,
+        duracao_ms: (extras.duracao_ms as number | null) ?? duracao,
+        pid: null,
+      };
+      await this.registros.salvarMeta(wsPath, "execucoes", execId, meta);
+    } catch {}
 
     try {
       this.registros.corpDb(wsPath).atualizarStatusExecucao(execId, "cancelado");
@@ -917,15 +934,14 @@ export class SessionManager {
   }
 
   /** execução "executando" cujo processo morreu sem finalizar → marca status final (zombie) */
-  private async reconciliarZombie(wsPath: string, meta: MetaRegistro): Promise<void> {
+  async reconciliarZombie(wsPath: string, meta: MetaRegistro): Promise<void> {
     const extras = (meta.extras ?? {}) as Record<string, unknown>;
     if (extras.status !== "executando") return;
     const pid = extras.pid as number | null;
     if (!pid) {
-      // Sem pid (ex.: registro migrado): se já passou 1h do início, é zumbi —
-      // nenhuma execução real fica 1h sem pid capturado.
+      // Sem pid (ex.: processo falhou ao iniciar ou mention sem fork): se já passou 60s do início, é zumbi
       const inicio = Date.parse(meta.criado_em);
-      if (Number.isFinite(inicio) && Date.now() - inicio < 3600_000) return;
+      if (Number.isFinite(inicio) && Date.now() - inicio < 60_000) return;
       const registro = await this.paraRegistro(meta);
       registro.status = "falhou";
       registro.fim = new Date().toISOString();
@@ -938,11 +954,11 @@ export class SessionManager {
         "falhou",
         null,
         registro.duracao_ms,
-        `zombie: registro "executando" sem pid há >1h — processo morreu sem finalizar (reaper) — reconciliado em ${registro.fim}`,
+        `zombie: registro "executando" sem pid há >60s — processo morreu sem finalizar (reaper) — reconciliado em ${registro.fim}`,
         "",
         null,
       );
-      meta.extras = { ...extras, status: "falhou", duracao_ms: registro.duracao_ms, fim: registro.fim };
+      meta.extras = { ...extras, status: "falhou", duracao_ms: registro.duracao_ms, fim: registro.fim, pid: null };
       return;
     }
     let viva = true;
@@ -970,7 +986,19 @@ export class SessionManager {
       "",
       null,
     );
-    meta.extras = { ...extras, status: "falhou", duracao_ms: duracao, fim: registro.fim };
+    meta.extras = { ...extras, status: "falhou", duracao_ms: duracao, fim: registro.fim, pid: null };
+  }
+
+  async reconciliarZombieSeNecessario(wsPath: string, execId: string): Promise<MetaRegistro | null> {
+    try {
+      const meta = await this.registros.lerMeta(wsPath, "execucoes", execId);
+      if ((meta.extras as any)?.status === "executando") {
+        await this.reconciliarZombie(wsPath, meta);
+      }
+      return meta;
+    } catch {
+      return null;
+    }
   }
 
   async caminhoLog(wsPath: string, id: string): Promise<string> {
