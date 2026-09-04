@@ -20,6 +20,16 @@ describe("Rotação de Modelos e Detecção de Erros de API (TEST-04)", () => {
     expect(PADRAO_ERRO_MODELO.test(erroReal)).toBe(true);
   });
 
+  it("detecta erro de saldo excedido por requisições concorrentes (in-flight requests)", () => {
+    const erroInFlight = 'Error: This request would exceed your available credits given your current in-flight requests. Retry after in-flight requests settle, or add credits.';
+    expect(PADRAO_ERRO_MODELO.test(erroInFlight)).toBe(true);
+  });
+
+  it("detecta travamento de concorrência de banco SQLite (database is locked)", () => {
+    const erroSqlite = 'Error: Unexpected error\n\ndatabase is locked';
+    expect(PADRAO_ERRO_MODELO.test(erroSqlite)).toBe(true);
+  });
+
   it("detecta sobrecarga e indisponibilidade de modelos gratuitos", () => {
     const saidaOverloaded = 'Provider returned error: model is temporarily overloaded or resource exhausted.';
     expect(PADRAO_ERRO_MODELO.test(saidaOverloaded)).toBe(true);

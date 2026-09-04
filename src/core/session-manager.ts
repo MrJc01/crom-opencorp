@@ -99,7 +99,7 @@ function gerarId(prefixo: string): string {
 }
 
 export const PADRAO_ERRO_MODELO =
-  /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found|insufficient balance|payment_required|402|credit balance|temporarily unavailable|Provider returned error|requires more credits|can only afford|billing_not_active|exceeded your current quota|insufficient.?credits|add more credits/i;
+  /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found|insufficient balance|payment_required|402|credit balance|temporarily unavailable|Provider returned error|requires more credits|can only afford|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits|in-flight requests|database is locked|sqlite_busy/i;
 
 export const MODELOS_ROTACAO_PADRAO = [
   "openrouter/nvidia/nemotron-3-ultra-550b-a55b",
@@ -878,6 +878,10 @@ export class SessionManager {
     } catch {
       /* journal best-effort */
     }
+
+    // Pausa breve com jitter para aliviar requisições em voo (in-flight) e liberar locks de banco
+    await new Promise((resolve) => setTimeout(resolve, 1500 + Math.random() * 1000));
+
     return this.rodar({
       ...opcoes,
       model: proximo,
