@@ -100,8 +100,10 @@ export async function carregarWorkspaces(): Promise<WorkspaceInfo[]> {
   try {
     const lista = await fetchApi<WorkspaceInfo[]>("/workspaces");
     setWorkspaces(lista);
-    if (!wsAtivo() && lista.length > 0) {
-      setWsAtivo(lista[0].id);
+    if (lista.length === 0) {
+      setWsAtivo("");
+    } else if (wsAtivo() && !lista.some((w) => w.id === wsAtivo())) {
+      setWsAtivo("");
     }
     return lista;
   } catch {

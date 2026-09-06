@@ -85,17 +85,24 @@ export const Topbar: Component = () => {
 
   const carregarStatus = async () => {
     try {
-      const [st, hl, execs, jobs, tasks, aprovs] = await Promise.allSettled([
+      const calls: Promise<any>[] = [
         fetchApi<{ scheduler: boolean; secretario: boolean }>("/status"),
         fetchApi<{ ok: boolean; versao: string }>("/health"),
-        fetchApi<any[]>("/execucoes?limite=6"),
-        fetchApi<any[]>("/schedules"),
-        fetchApi<any[]>("/tasks"),
-        fetchApi<any[]>("/approvals"),
-      ]);
+      ];
 
-      const getVal = <T,>(r: PromiseSettledResult<T>, def: T): T =>
-        r.status === "fulfilled" ? r.value : def;
+      if (wsAtivo()) {
+        calls.push(
+          fetchApi<any[]>("/execucoes?limite=6"),
+          fetchApi<any[]>("/schedules"),
+          fetchApi<any[]>("/tasks"),
+          fetchApi<any[]>("/approvals")
+        );
+      }
+
+      const [st, hl, execs, jobs, tasks, aprovs] = await Promise.allSettled(calls);
+
+      const getVal = <T,>(r: PromiseSettledResult<T> | undefined, def: T): T =>
+        r && r.status === "fulfilled" ? r.value : def;
 
       const dStatus = getVal(st, null);
       const dHealth = getVal(hl, null);

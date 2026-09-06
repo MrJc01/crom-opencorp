@@ -1,9 +1,10 @@
-import { type Component, onMount } from "solid-js";
-import { Router, Route } from "@solidjs/router";
+import { type Component, onMount, createEffect, Show } from "solid-js";
+import { Router, Route, useLocation, useNavigate } from "@solidjs/router";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
+import { GlobalTitlebar } from "./components/GlobalTitlebar";
 import { ToastContainer } from "./ui/Toast";
-import { carregarWorkspaces, conectarSSE } from "./lib/context";
+import { carregarWorkspaces, conectarSSE, wsAtivo } from "./lib/context";
 
 // Views
 import { SecretarioView } from "./views/Secretario";
@@ -22,20 +23,45 @@ import { ConfigView } from "./views/Config";
 import { DocsView } from "./views/Docs";
 
 export const AppLayout: Component<{ children?: any }> = (props) => {
+  const location = useLocation();
+  const navigate = useNavigate();
+
   onMount(() => {
     void carregarWorkspaces();
     conectarSSE();
   });
 
+  // Quando não há workspace ativo, rotas restritas a workspaces redirecionam para a home global
+  createEffect(() => {
+    const ws = wsAtivo();
+    const rota = location.pathname;
+    const rotasGlobais = ["/", "/home", "/docs", "/config"];
+    if (!ws && !rotasGlobais.some((r) => rota === r || rota.startsWith(r + "/"))) {
+      navigate("/home", { replace: true });
+    }
+  });
+
   return (
     <div class="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased font-sans">
-      <Sidebar />
-      <div class="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
-        <Topbar />
-        <main class="flex-1 min-h-0 overflow-y-auto relative bg-zinc-950">
-          {props.children}
-        </main>
-      </div>
+      <Show
+        when={wsAtivo()}
+        fallback={
+          <div class="flex flex-col flex-1 min-w-0 h-full overflow-hidden bg-zinc-950">
+            <GlobalTitlebar />
+            <main class="flex-1 min-h-0 overflow-y-auto relative bg-zinc-950">
+              {props.children}
+            </main>
+          </div>
+        }
+      >
+        <Sidebar />
+        <div class="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
+          <Topbar />
+          <main class="flex-1 min-h-0 overflow-y-auto relative bg-zinc-950">
+            {props.children}
+          </main>
+        </div>
+      </Show>
       <ToastContainer />
     </div>
   );

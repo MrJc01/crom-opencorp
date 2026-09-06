@@ -133,6 +133,9 @@ export const Sidebar: Component = () => {
                 value={wsAtivo()}
                 onChange={(e) => setWsAtivo(e.currentTarget.value)}
               >
+                <option value="" class="bg-zinc-900 text-zinc-400" selected={!wsAtivo()}>
+                  {workspaces().length === 0 ? "(Nenhuma empresa)" : "(Início / Sem empresa)"}
+                </option>
                 <For each={workspaces()}>
                   {(w) => (
                     <option value={w.id} class="bg-zinc-900 text-zinc-200" selected={w.id === wsAtivo()}>

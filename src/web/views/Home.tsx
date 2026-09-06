@@ -32,7 +32,8 @@ import {
   EyeOff,
 } from "lucide-solid";
 import { A, useNavigate } from "@solidjs/router";
-import { fetchApi, wsAtivo, setWsAtivo } from "../lib/context";
+import { fetchApi, wsAtivo, setWsAtivo, workspaces } from "../lib/context";
+import { HomeZeroState } from "../components/HomeZeroState";
 import { descreverCron } from "../lib/cron-helper";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -223,6 +224,7 @@ export const HomeView: Component = () => {
   let polling5s: any = null;
 
   const carregarDadosHome = async () => {
+    if (!wsAtivo()) return;
     try {
       const [tasks, ags, flows, aprovs, budget, status, jobs, rExecs, sSec, rHooks] = await Promise.allSettled([
         fetchApi<any[]>("/tasks"),
@@ -411,7 +413,9 @@ export const HomeView: Component = () => {
   };
 
   onMount(() => {
-    void carregarDadosHome();
+    if (wsAtivo()) {
+      void carregarDadosHome();
+    }
 
     // 1. Ticker de 1s para o relógio e cronômetros
     ticker1s = setInterval(() => {
@@ -420,8 +424,16 @@ export const HomeView: Component = () => {
 
     // 2. Polling inteligente a cada 5s para sincronizar status sem recarregar tela
     polling5s = setInterval(() => {
-      void carregarDadosHome();
+      if (wsAtivo()) {
+        void carregarDadosHome();
+      }
     }, 5000);
+  });
+
+  createEffect(() => {
+    if (wsAtivo()) {
+      void carregarDadosHome();
+    }
   });
 
   onCleanup(() => {
@@ -430,11 +442,12 @@ export const HomeView: Component = () => {
   });
 
   return (
-    <div
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
-      class="h-full w-full overflow-y-auto p-6 space-y-6 scrollbar-thin bg-zinc-950"
-    >
+    <Show when={wsAtivo()} fallback={<HomeZeroState workspaces={workspaces()} />}>
+      <div
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        class="h-full w-full overflow-y-auto p-6 space-y-6 scrollbar-thin bg-zinc-950"
+      >
       {/* Top Header com Ações Rápidas */}
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
         <div>
@@ -1688,5 +1701,6 @@ export const HomeView: Component = () => {
         </div>
       </Show>
     </div>
+    </Show>
   );
 };

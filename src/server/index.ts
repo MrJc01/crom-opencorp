@@ -1466,7 +1466,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         const mDoc = /^\/docs\/([^/]+)$/.exec(rota);
         if (mDoc && req.method === "GET") {
           const slug = decodeURIComponent(mDoc[1]!);
-          const mapaArquivos: Record<string, { titulo: string; arquivo: string; categoria: string }> = {
+          const mapaArquivos: Record<string, { slug?: string; titulo: string; arquivo: string; categoria: string }> = {
             "estudo-padronizacao": { titulo: "Estudo de Arquitetura e Padronização", arquivo: "ESTUDO-ARQUITETURA-E-PADRONIZACAO-AGENTES.md", categoria: "Guia & Padronização" },
             "01-visao-geral": { titulo: "01. Visão Geral da Plataforma", arquivo: "01-visao-geral.md", categoria: "Conceitos" },
             "02-arquitetura": { titulo: "02. Arquitetura do Sistema", arquivo: "02-arquitetura.md", categoria: "Conceitos" },
@@ -1477,6 +1477,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             "07-seguranca": { titulo: "07. Segurança e Orçamento", arquivo: "07-seguranca-custos.md", categoria: "Governança" },
             "08-cli": { titulo: "08. Referência do CLI e oc", arquivo: "08-cli-referencia.md", categoria: "Referência" },
             "capacidades": { titulo: "Capacidades da Empresa", arquivo: "CAPACIDADES-EMPRESA.md", categoria: "Referência" },
+            "secretario": { slug: "04-agentes", titulo: "04. Agentes e Papéis (Secretário Executivo)", arquivo: "04-agentes.md", categoria: "Operação" },
+            "agentes": { slug: "04-agentes", titulo: "04. Agentes e Papéis", arquivo: "04-agentes.md", categoria: "Operação" },
+            "arquitetura": { slug: "02-arquitetura", titulo: "02. Arquitetura do Sistema", arquivo: "02-arquitetura.md", categoria: "Conceitos" },
+            "wordpress": { slug: "capacidades", titulo: "Capacidades da Empresa", arquivo: "CAPACIDADES-EMPRESA.md", categoria: "Referência" },
           };
           const item = mapaArquivos[slug];
           const arquivoNome = item?.arquivo || (slug.endsWith(".md") ? slug : `${slug}.md`);
@@ -1487,7 +1491,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           }
           const conteudo = readFileSync(arquivoPath, "utf8");
           enviar(res, 200, {
-            slug,
+            slug: item?.slug || slug,
             titulo: item?.titulo || slug,
             categoria: item?.categoria || "Documentação",
             arquivo: arquivoNome,

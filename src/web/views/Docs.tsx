@@ -71,10 +71,25 @@ export const DocsView: Component = () => {
       }
     } catch (e: any) {
       showToast("Erro ao carregar documento: " + (e.message || e), "erro");
+      const lista = docs();
+      if (lista.length > 0 && slug !== lista[0].slug) {
+        try {
+          const fallback = await fetchApi<DocDetalhe>(`/docs/${encodeURIComponent(lista[0].slug)}`);
+          setDocAtivo(fallback);
+          if (atualizarUrl) setSearchParams({ doc: lista[0].slug }, { replace: true });
+        } catch {}
+      }
     } finally {
       setCarregando(false);
     }
   };
+
+  createEffect(() => {
+    const slugUrl = searchParams.doc as string | undefined;
+    if (slugUrl && docAtivo()?.slug !== slugUrl) {
+      void carregarDocumento(slugUrl, false);
+    }
+  });
 
   onMount(async () => {
     garantirCopyGlobal();
