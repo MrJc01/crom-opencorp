@@ -1025,11 +1025,11 @@ export class MeetingManager {
     return msgObj;
   }
 
-  /** Executa respostas dos agentes: modo sequencial (todos respondem) ou direcionado (agente específico) */
+  /** Executa respostas dos agentes: modo sequencial, paralelo ou direcionado */
   async responderGrupo(
     wsPath: string,
     salaId: string,
-    opcoes: { modo: "sequencial" | "direcionado"; agente?: string; instrucao?: string },
+    opcoes: { modo: "sequencial" | "paralelo" | "direcionado"; agente?: string; instrucao?: string },
   ): Promise<MensagemSala[]> {
     const viva = this.vivas.get(salaId);
     const { sala } = await this.lerSala(wsPath, salaId);
@@ -1043,18 +1043,18 @@ export class MeetingManager {
       }
       agentesAlvo.push(ag);
     } else {
-      // Modo sequencial: todos os participantes respondem na sua vez
+      // Modo sequencial ou paralelo: todos os participantes respondem
       agentesAlvo.push(...participantes);
     }
 
     const respostas: MensagemSala[] = [];
 
-    for (const falante of agentesAlvo) {
+    const executarFalaAgente = async (falante: string): Promise<MensagemSala | null> => {
       let arquivo: AgenteArquivo;
       try {
         arquivo = await this.agentes.carregar(wsPath, falante);
       } catch {
-        continue;
+        return null;
       }
 
       const transcript = await this.registros.obter(wsPath, "chats", salaId);
@@ -1080,23 +1080,51 @@ export class MeetingManager {
 
         const falaLimpa = (resultado.captura ?? "").trim();
         if (falaLimpa.length > 0) {
-          const msgObj: MensagemSala = {
+          return {
             agente: falante,
             texto: falaLimpa,
             ts: new Date().toISOString(),
           };
-          this.anexarBuffer(salaId, falante, falaLimpa);
+        }
+        return null;
+      } catch (err) {
+        console.error(`[reunião ${salaId}] erro no turno de @${falante}:`, err);
+        return null;
+      }
+    };
+
+    if (opcoes.modo === "paralelo") {
+      // Execução paralela simultânea de todos os agentes
+      const resultados = await Promise.allSettled(agentesAlvo.map((ag) => executarFalaAgente(ag)));
+      for (const res of resultados) {
+        if (res.status === "fulfilled" && res.value) {
+          const msgObj = res.value;
+          this.anexarBuffer(salaId, msgObj.agente, msgObj.texto);
           await this.registros.appendConteudo(
             wsPath,
             "chats",
             salaId,
-            `## Turno ${sala.turno + 1} — @${falante}\n\n${falaLimpa}\n\n`,
+            `## Turno ${sala.turno + 1} — @${msgObj.agente} (Paralelo)\n\n${msgObj.texto}\n\n`,
           );
           sala.turno += 1;
           respostas.push(msgObj);
         }
-      } catch (err) {
-        console.error(`[reunião ${salaId}] erro no turno de @${falante}:`, err);
+      }
+    } else {
+      // Modo sequencial / direcionado: um após o outro
+      for (const falante of agentesAlvo) {
+        const msgObj = await executarFalaAgente(falante);
+        if (msgObj) {
+          this.anexarBuffer(salaId, msgObj.agente, msgObj.texto);
+          await this.registros.appendConteudo(
+            wsPath,
+            "chats",
+            salaId,
+            `## Turno ${sala.turno + 1} — @${msgObj.agente}\n\n${msgObj.texto}\n\n`,
+          );
+          sala.turno += 1;
+          respostas.push(msgObj);
+        }
       }
     }
 

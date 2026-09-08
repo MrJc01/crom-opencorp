@@ -52,7 +52,7 @@ export interface CampoPerfil {
 export const APP_PERFIL_NOME_REGEX = /^app:(vps|wordpress|mercadopago|cartao|custom):[a-z0-9][a-z0-9-]{0,40}$/;
 
 export const BANNER_CARTAO =
-  '⚠ Atenção: recurso NÃO testado corretamente ainda — armazene apenas referência (bandeira/últimos 4), nunca número completo nem CVV. O servidor rejeita esses campos.';
+  'Atenção: recurso NÃO testado corretamente ainda — armazene apenas referência (bandeira/últimos 4), nunca número completo nem CVV. O servidor rejeita esses campos.';
 
 export const CAMPOS_APP: Record<string, CampoPerfil[]> = {
   vps: [

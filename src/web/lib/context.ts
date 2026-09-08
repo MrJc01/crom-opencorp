@@ -16,8 +16,10 @@ const [workspaces, setWorkspacesSignal] = createSignal<WorkspaceInfo[]>([]);
 const [sseConnected, setSseConnected] = createSignal(false);
 const [notificacoesNaoLidas, setNotificacoesNaoLidas] = createSignal(0);
 const [autenticado, setAutenticado] = createSignal(true); // default true para servidores sem token
+const [sidebarMobileAberta, setSidebarMobileAberta] = createSignal(false);
 
-export { token, wsAtivo, workspaces, sseConnected, notificacoesNaoLidas, autenticado };
+export { token, wsAtivo, workspaces, sseConnected, notificacoesNaoLidas, autenticado, setAutenticado, sidebarMobileAberta, setSidebarMobileAberta };
+
 
 export function setToken(novoToken: string) {
   setTokenSignal(novoToken);

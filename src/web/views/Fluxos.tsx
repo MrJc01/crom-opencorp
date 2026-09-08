@@ -46,6 +46,7 @@ import {
   History,
   ChevronDown,
   AlertCircle,
+  Zap,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -1048,8 +1049,11 @@ export const FluxosView: Component = () => {
             {/* Banner Flutuante de Conexão Ativa */}
             <Show when={conectandoDeNoId()}>
               <div class="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-orange-950/90 border border-orange-500/60 rounded-full px-4 py-1.5 shadow-2xl flex items-center gap-3 text-xs text-orange-200 backdrop-blur-md animate-pulse">
-                <span>
-                  ⚡ Conectando a partir de <strong class="font-mono text-white">{conectandoDeNoId()}</strong> — clique no nó de destino
+                <span class="flex items-center gap-1.5">
+                  <Zap size={12} class="text-orange-400" />
+                  <span>
+                    Conectando a partir de <strong class="font-mono text-white">{conectandoDeNoId()}</strong> — clique no nó de destino
+                  </span>
                 </span>
                 <button
                   type="button"
@@ -1905,10 +1909,10 @@ export const FluxosView: Component = () => {
                   onChange={(e) => setNovoFluxoTemplate(e.currentTarget.value as any)}
                   class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-200 focus:outline-none focus:border-orange-500"
                 >
-                  <option value="pipeline">Pipeline Sequencial (Gatilho ➔ Agente ➔ Registro)</option>
-                  <option value="fanout">Fanout Paralelo (Múltiplos agentes ➔ Síntese)</option>
-                  <option value="review">Review de Qualidade (Executor ➔ Revisor)</option>
-                  <option value="debate">Debate de Diretoria (Proponentes ➔ Moderador)</option>
+                  <option value="pipeline">Pipeline Sequencial (Gatilho → Agente → Registro)</option>
+                  <option value="fanout">Fanout Paralelo (Múltiplos agentes → Síntese)</option>
+                  <option value="review">Review de Qualidade (Executor → Revisor)</option>
+                  <option value="debate">Debate de Diretoria (Proponentes → Moderador)</option>
                 </select>
               </div>
 

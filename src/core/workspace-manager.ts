@@ -44,13 +44,36 @@ export interface DetalhesWorkspace extends InfoWorkspace {
 
 const ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-const estadoSchema = z.object({
-  version: z.number().int().default(1),
-  ativo: z.string().nullable().default(null),
-  workspaces: z
-    .array(z.object({ id: z.string().min(1), criado_em: z.string().min(1), path: z.string().optional() }))
-    .default([]),
-});
+const estadoSchema = z.union([
+  z.object({
+    version: z.number().int().default(1),
+    ativo: z.string().nullable().default(null),
+    workspaces: z
+      .array(z.object({ id: z.string().min(1), criado_em: z.string().min(1), path: z.string().optional() }))
+      .default([]),
+  }),
+  z.array(
+    z.object({
+      id: z.string().min(1),
+      criado_em: z.string().optional(),
+      path: z.string().optional(),
+      padrao: z.boolean().optional(),
+      nome: z.string().optional(),
+    })
+  ).transform((arr) => {
+    const padrao = arr.find((a) => a.padrao)?.id ?? arr[0]?.id ?? null;
+    return {
+      version: 1,
+      ativo: padrao,
+      workspaces: arr.map((a) => ({
+        id: a.id,
+        criado_em: a.criado_em ?? new Date().toISOString(),
+        path: a.path,
+      })),
+    };
+  }),
+]);
+
 
 function msg(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);

@@ -23,6 +23,10 @@ export interface AgenteResumo {
   permissions: string;
   budget_daily_usd: number;
   ativo: boolean;
+  harness?: string;
+  engine?: string;
+  harness_fallback?: string[];
+  rotation?: string[];
 }
 
 export interface EventoAgente {
@@ -51,6 +55,7 @@ export function serializarFrontmatter(ag: Agente): string {
   saida += linhaFrontmatter("ativo", String(ag.ativo));
   saida += linhaFrontmatter("model", ag.model);
   if (ag.harness) saida += linhaFrontmatter("harness", ag.harness);
+  if (ag.harness_fallback && ag.harness_fallback.length > 0) saida += linhaFrontmatter("harness_fallback", listaInline(ag.harness_fallback));
   if (ag.rotation && ag.rotation.length > 0) saida += linhaFrontmatter("rotation", listaInline(ag.rotation));
   if (ag.model_fallback && ag.model_fallback.length > 0) saida += linhaFrontmatter("model_fallback", listaInline(ag.model_fallback));
   if (ag.inherits) saida += linhaFrontmatter("inherits", ag.inherits);
@@ -337,5 +342,9 @@ function resumo(ag: Agente): AgenteResumo {
     permissions: ag.permissions,
     budget_daily_usd: ag.budget.daily_usd,
     ativo: ag.ativo,
+    harness: ag.harness || (ag as any).engine,
+    engine: (ag as any).engine || ag.harness,
+    harness_fallback: ag.harness_fallback || (ag as any).engine_fallback,
+    rotation: ag.rotation || ag.model_fallback,
   };
 }

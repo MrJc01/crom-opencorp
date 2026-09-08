@@ -19,8 +19,9 @@ import {
   ChevronsUpDown,
   BookOpen,
   Plus,
+  X,
 } from "lucide-solid";
-import { wsAtivo, setWsAtivo, workspaces } from "../lib/context";
+import { wsAtivo, setWsAtivo, workspaces, sidebarMobileAberta, setSidebarMobileAberta } from "../lib/context";
 import { NovoWorkspaceModal } from "./NovoWorkspaceModal";
 
 interface NavItem {
@@ -82,35 +83,58 @@ export const Sidebar: Component = () => {
   };
 
   return (
-    <aside
-      class={`flex flex-col flex-shrink-0 bg-zinc-950 border-r border-zinc-800/80 transition-all duration-200 select-none z-20 h-full ${
-        colapsado() ? "w-16" : "w-60"
-      }`}
-    >
-      {/* Cabeçalho do App / Logo */}
-      <div class="h-14 flex items-center justify-between px-3 border-b border-zinc-800/80">
-        <div class="flex items-center gap-2.5 overflow-hidden">
-          <div class="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0 font-mono font-bold text-xs shadow-xs">
-            OC
-          </div>
-          <Show when={!colapsado()}>
-            <div class="flex flex-col min-w-0">
-              <span class="font-bold tracking-tight text-sm text-zinc-100 truncate">opencorp</span>
-              <span class="text-[9px] text-zinc-500 font-mono">v0.7.0</span>
+    <>
+      {/* Backdrop mobile */}
+      <Show when={sidebarMobileAberta()}>
+        <div
+          class="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 md:hidden animate-in fade-in duration-150"
+          onClick={() => setSidebarMobileAberta(false)}
+        />
+      </Show>
+
+      <aside
+        class={`flex flex-col bg-zinc-950 border-r border-zinc-800/80 transition-all duration-200 select-none z-50 h-full ${
+          sidebarMobileAberta()
+            ? "fixed inset-y-0 left-0 w-72 shadow-2xl md:static md:shadow-none md:flex"
+            : "hidden md:flex flex-shrink-0"
+        } ${colapsado() ? "md:w-16" : "md:w-60"}`}
+      >
+        {/* Cabeçalho do App / Logo */}
+        <div class="h-14 flex items-center justify-between px-3 border-b border-zinc-800/80">
+          <div class="flex items-center gap-2.5 overflow-hidden">
+            <div class="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0 font-mono font-bold text-xs shadow-xs">
+              OC
             </div>
-          </Show>
+            <Show when={!colapsado() || sidebarMobileAberta()}>
+              <div class="flex flex-col min-w-0">
+                <span class="font-bold tracking-tight text-sm text-zinc-100 truncate">opencorp</span>
+                <span class="text-[9px] text-zinc-500 font-mono">v0.7.0</span>
+              </div>
+            </Show>
+          </div>
+          <div class="flex items-center gap-1">
+            {/* Botão fechar drawer no mobile */}
+            <button
+              type="button"
+              onClick={() => setSidebarMobileAberta(false)}
+              class="md:hidden p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 transition-colors"
+              title="Fechar menu"
+            >
+              <X size={16} />
+            </button>
+            {/* Botão colapsar no desktop */}
+            <button
+              type="button"
+              onClick={toggleColapso}
+              class="hidden md:flex !bg-transparent hover:!bg-zinc-900/80 p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 border border-transparent hover:border-zinc-800 transition-all cursor-pointer"
+              title={colapsado() ? "Expandir menu" : "Recolher menu"}
+            >
+              <Show when={colapsado()} fallback={<ChevronLeft size={16} />}>
+                <ChevronRight size={16} />
+              </Show>
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={toggleColapso}
-          class="!bg-transparent hover:!bg-zinc-900/80 p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 border border-transparent hover:border-zinc-800 transition-all cursor-pointer"
-          title={colapsado() ? "Expandir menu" : "Recolher menu"}
-        >
-          <Show when={colapsado()} fallback={<ChevronLeft size={16} />}>
-            <ChevronRight size={16} />
-          </Show>
-        </button>
-      </div>
 
       {/* Workspace Ativo Selector */}
       <div class="px-3 py-2.5 border-b border-zinc-800/60">
@@ -179,6 +203,7 @@ export const Sidebar: Component = () => {
                   return (
                     <A
                       href={item.href}
+                      onClick={() => setSidebarMobileAberta(false)}
                       class={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-medium transition-all ${
                         ativo()
                           ? "bg-zinc-900 text-zinc-100 font-semibold border border-zinc-800/90 shadow-xs"
@@ -242,6 +267,7 @@ export const Sidebar: Component = () => {
               return (
                 <A
                   href={item.href}
+                  onClick={() => setSidebarMobileAberta(false)}
                   class={`relative p-2 rounded-xl transition-all flex items-center justify-center group ${
                     ativo()
                       ? "bg-zinc-900 text-emerald-400 border border-zinc-750 shadow-xs"
@@ -267,5 +293,6 @@ export const Sidebar: Component = () => {
         </div>
       </div>
     </aside>
+    </>
   );
 };

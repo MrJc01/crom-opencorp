@@ -214,11 +214,11 @@ export function registerRelatorioCommand(program: Command): void {
         return;
       }
 
-      console.log(`\n📊 ══════ Relatório OpenCorp — ${wsId} ══════`);
+      console.log(`\n══════ Relatório OpenCorp — ${wsId} ══════`);
       console.log(`Período:           ${relatorio.periodo}`);
       console.log(`Total Execuções:   ${relatorio.total_execucoes}`);
-      console.log(`✅ Concluídas:     ${relatorio.concluidas}`);
-      console.log(`❌ Falhas:         ${relatorio.falhas}`);
+      console.log(`Concluídas:        ${relatorio.concluidas}`);
+      console.log(`Falhas:            ${relatorio.falhas}`);
       console.log(`Taxa de Sucesso:   ${relatorio.taxa_sucesso_pct}%`);
       console.log(`Duração Média:     ${relatorio.duracao_media_s}s`);
 

@@ -18,8 +18,12 @@ export const agentSchema = z.object({
   }),
   /** Motor de execução preferido do agente (opencode, claude-code, antigravity, etc.) */
   harness: z.string().optional(),
+  /** Alias para harness (motor do agente) */
+  engine: z.string().optional(),
   /** Lista de fallback de motores para este agente */
   harness_fallback: z.array(z.string()).optional(),
+  /** Alias para harness_fallback */
+  engine_fallback: z.array(z.string()).optional(),
   /** Lista de fallback/rotação de modelos personalizada para este agente */
   rotation: z.array(z.string()).optional(),
   /** Alias para rotation */

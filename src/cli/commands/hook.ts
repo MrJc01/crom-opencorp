@@ -204,13 +204,13 @@ export function registerHookCommands(program: Command): void {
         }
 
         if (resultado.valido) {
-          console.log("\x1b[32m✅ Conteúdo APROVADO para publicação!\x1b[0m");
+          console.log("\x1b[32m[OK] Conteúdo APROVADO para publicação!\x1b[0m");
           if (resultado.avisos.length > 0) {
             console.log("\nAvisos:");
             for (const a of resultado.avisos) console.log(`  • ${a}`);
           }
         } else {
-          console.log("\x1b[31m❌ Publicação BLOQUEADA por políticas de qualidade/segurança:\x1b[0m");
+          console.log("\x1b[31m[BLOQUEADO] Publicação BLOQUEADA por políticas de qualidade/segurança:\x1b[0m");
           for (const e of resultado.erros) console.log(`  • ${e}`);
           if (resultado.avisos.length > 0) {
             console.log("\nAvisos adicionais:");

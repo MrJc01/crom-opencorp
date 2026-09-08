@@ -85,7 +85,7 @@ export function registerSecretsCommand(program: Command): void {
 
       for (const s of lista) {
         const tipo = s.tipo_app ?? "—";
-        const badge = s.origem === "workspace" ? "🔒 workspace" : "🌐 global";
+        const badge = s.origem === "workspace" ? "[workspace]" : "[global]";
         console.log(`  ${s.nome.padEnd(40)} ${tipo.padEnd(14)} ${badge}`);
       }
 
@@ -144,7 +144,7 @@ export function registerSecretsCommand(program: Command): void {
         return;
       }
 
-      const badge = escopo === "workspace" ? "🔒 workspace" : "🌐 global";
+      const badge = escopo === "workspace" ? "[workspace]" : "[global]";
       console.log(`ok: segredo "${nome}" definido (${badge})`);
     });
 
@@ -182,8 +182,8 @@ export function registerSecretsCommand(program: Command): void {
 ╰─────────────────────────────────────────────────────────╯
 
   Hierarquia de resolução (maior prioridade primeiro):
-    1. 🔒 Workspace: <workspace>/.opencorp/secrets.json
-    2. 🌐 Global:    ~/.opencorp/secrets.json
+    1. [workspace]: <workspace>/.opencorp/secrets.json
+    2. [global]:    ~/.opencorp/secrets.json
 
   Quando o workspace define um segredo com o mesmo nome do
   global, o valor do workspace prevalece.

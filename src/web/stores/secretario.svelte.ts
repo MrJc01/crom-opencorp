@@ -728,7 +728,7 @@ async function enviarComandoLocal(comando: {
   } catch (e) {
     mensagensStore.update((prev) => {
       const copy = [...prev];
-      if (copy[idx]) copy[idx]!.content = "⚠ " + (e as Error).message;
+      if (copy[idx]) copy[idx]!.content = (e as Error).message;
       return copy;
     });
   }
@@ -750,8 +750,8 @@ export async function resolverComandoProprio(nome: string): Promise<string> {
       const total = Object.values(porColuna).reduce((a, b) => a + b, 0);
       return [
         "**Estado da empresa**",
-        `- Scheduler: ${st?.scheduler ? "🟢 rodando" : "🔴 parado"}`,
-        `- Secretário: ${st?.secretario ? "🟢 rodando" : "🔴 parado"}`,
+        `- Scheduler: ${st?.scheduler ? "ativo" : "parado"}`,
+        `- Secretário: ${st?.secretario ? "ativo" : "parado"}`,
         `- Tasks: ${total}` +
           (total
             ? ` — ${Object.entries(porColuna)
@@ -855,7 +855,7 @@ async function enviarTerminalLocal(
   } catch (e) {
     mensagensStore.update((prev) => {
       const copy = [...prev];
-      if (copy[idx]) copy[idx]!.content = "⚠ " + (e as Error).message;
+      if (copy[idx]) copy[idx]!.content = (e as Error).message;
       return copy;
     });
   }

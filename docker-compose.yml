@@ -1,0 +1,22 @@
+services:
+  opencorp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: opencorp-server
+    restart: unless-stopped
+    ports:
+      - "4100:4100"
+    environment:
+      - NODE_ENV=production
+      - OPENCORP_HOME=/data
+      - PORT=4100
+      - HOST=0.0.0.0
+    volumes:
+      - ./data:/data
+    networks:
+      - opencorp-network
+
+networks:
+  opencorp-network:
+    driver: bridge

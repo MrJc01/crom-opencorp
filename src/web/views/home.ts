@@ -280,7 +280,7 @@ async function executarTerminalHome(comando: string, resultado: HTMLElement | nu
     resultado.innerHTML = `<pre class="terminal-saida">${escapeHtml('$ ' + comando + '\n' + saida)}${r.codigo !== 0 ? escapeHtml('\n[código de saída: ' + r.codigo + ']') : ''}</pre>`;
     toast(r.codigo === 0 ? 'Terminal executado' : `Terminal encerrou com código ${r.codigo}`, r.codigo === 0 ? 'ok' : 'aviso');
   } catch (e) {
-    resultado.innerHTML = `<pre class="terminal-saida">${escapeHtml('$ ' + comando + '\n⚠ ' + (e as Error).message)}</pre>`;
+    resultado.innerHTML = `<pre class="terminal-saida">${escapeHtml('$ ' + comando + '\n[Erro] ' + (e as Error).message)}</pre>`;
     toast('Erro: ' + (e as Error).message, 'erro');
   }
 }
@@ -302,7 +302,7 @@ async function executarComandoHome(comando: { nome: string; args: string }, resu
     const md = await resolverComandoProprio(comando.nome);
     resultado.innerHTML = `<div class="border border-zinc-800 rounded-lg p-3 text-sm">${renderMarkdown(md)}</div>`;
   } catch (e) {
-    resultado.innerHTML = `<div class="text-sm" style="color:var(--err)">⚠ ${escapeHtml((e as Error).message)}</div>`;
+    resultado.innerHTML = `<div class="text-sm" style="color:var(--err)">[Erro] ${escapeHtml((e as Error).message)}</div>`;
   }
 }
 

@@ -117,7 +117,7 @@ async function carregarAgendaLista(): Promise<void> {
           ${j.proxima_exec ? '<div class="text-xs text-zinc-500 font-mono mt-1">próxima: ' + formatarDataLocal(String(j.proxima_exec)) + '</div>' : ''}
           ${j.ultima_exec
             ? '<div class="text-xs text-zinc-500 font-mono">última: ' + formatarDataLocal(String(j.ultima_exec)) + '</div>'
-            : '<div class="text-xs mt-1" style="color:var(--warn)">⚠ nunca rodou</div>'}
+            : '<div class="text-xs mt-1" style="color:var(--warn)">nunca rodou</div>'}
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
           <button class="btn btn-ghost text-sm" onclick="executarAgendaAgora('${escapeHtml(String(j.id))}')" aria-label="Executar agora">${icone('run')} Agora</button>

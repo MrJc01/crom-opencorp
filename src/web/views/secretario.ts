@@ -66,7 +66,7 @@ function htmlAcoes(acoes?: AcaoChat[]): string {
     const ok = a.status === 'completed';
     const falhou = a.status === 'error';
     return `<div class="oc-acao ${ok ? 'ok' : falhou ? 'erro' : 'rodando'}">` +
-      `<span class="oc-acao-ico" aria-hidden="true">${ok ? '✓' : falhou ? '✕' : '⚙'}</span>` +
+      `<span class="oc-acao-ico" aria-hidden="true">${ok ? icone('check') : falhou ? icone('close') : icone('gear')}</span>` +
       `<span class="oc-acao-nome">${escapeHtml(a.tool)}</span>` +
       (a.resumo ? `<span class="oc-acao-resumo">${escapeHtml(a.resumo)}</span>` : '') +
       `</div>`;
@@ -113,7 +113,7 @@ function renderAnexos(): void {
   if (!anexos.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
   wrap.style.display = 'flex';
   wrap.innerHTML = anexos.map((a, i) => `
-    <span class="anexo-chip">🖼 ${escapeHtml(a.nome)}
+    <span class="anexo-chip">${escapeHtml(a.nome)}
       <button onclick="window.__secretarioAnexoRemover(${i})" aria-label="Remover anexo" title="Remover">✕</button>
     </span>`).join('');
 }
@@ -132,7 +132,7 @@ const CAPACIDADES = [
   'Mantém o contexto da conversa atual',
   'Consulta tasks, custos, fluxos e agenda',
   'Entende comandos / e terminal !',
-  'Analisa imagens e arquivos anexados 📎',
+  'Analisa imagens e arquivos anexados',
 ];
 
 const LIMITACOES = [
@@ -378,13 +378,13 @@ function renderChatLayout(): void {
         <div class="composer">
           <div id="anexos-chips" class="anexos-chips" style="display:none"></div>
           <div class="composer-row2">
-            <button class="btn-ghost composer-anexo" onclick="window.__secretarioAnexar()" title="Anexar imagem ou arquivo" aria-label="Anexar">📎</button>
+            <button class="btn-ghost composer-anexo" onclick="window.__secretarioAnexar()" title="Anexar imagem ou arquivo" aria-label="Anexar">${icone('paperclip')}</button>
             <input id="anexo-input" type="file" multiple accept="image/*,.txt,.md,.json,.csv,.log,.py,.js,.ts,.sh,.yaml,.yml,.html,.css" style="display:none" onchange="window.__secretarioAnexos(this.files)" />
             <textarea id="chat-input" placeholder="Pergunte qualquer coisa… (/ comandos · @ contexto · ! terminal)" rows="1" onkeydown="window.__composerTecla(event,'pagina')" oninput="window.__composerInput(this.value,'pagina')"></textarea>
             <button class="btn composer-enviar" id="btn-enviar" onclick="window.__secretarioEnviar('pagina', true)" aria-label="Enviar mensagem">${icone('run')}</button>
           </div>
           <div class="composer-row">
-            <span class="text-xs text-zinc-500 composer-dica">secretário analisa · secretário-exec executa · / comandos · @ contexto · ! terminal · 📎 anexa</span>
+            <span class="text-xs text-zinc-500 composer-dica">secretário analisa · secretário-exec executa · / comandos · @ contexto · ! terminal · anexar arquivos</span>
           </div>
         </div>
         </div>
@@ -418,7 +418,7 @@ function renderChatLayout(): void {
       dt.items.add(comNome);
       (g2.__secretarioAnexos as ((f: FileList) => void) | undefined)?.(dt.files);
     });
-    toast('Imagem colada — pronta para enviar 📎', 'ok');
+    toast('Imagem colada — pronta para enviar', 'ok');
   });
 
   renderListaSessoes();
@@ -695,7 +695,7 @@ function mostrarAvisoSemResposta(sessaoId: string): void {
   for (const a of alvosAtivos('pagina')) {
     const el = document.getElementById(idDe(a, 'corpo'));
     if (!el || el.querySelector('.oc-aviso-sem-resposta')) continue;
-    el.insertAdjacentHTML('beforeend', `<div class="oc-msg oc-aviso-sem-resposta"><div class="oc-msg-corpo" style="color:var(--warn)">⚠ A última mensagem ficou sem resposta — o modelo pode ter falhado. Reenvie.</div></div>`);
+    el.insertAdjacentHTML('beforeend', `<div class="oc-msg oc-aviso-sem-resposta"><div class="oc-msg-corpo" style="color:var(--warn)">A última mensagem ficou sem resposta — o modelo pode ter falhado. Reenvie.</div></div>`);
   }
   toast('A última mensagem ficou sem resposta — reenvie', 'aviso');
 }
@@ -866,7 +866,7 @@ function statusPensando(acoes?: AcaoChat[]): string {
       : `<span class="oc-pensando-texto">Pensando<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span>${decorrendo}</span>`;
   }
   return acoesEmAndamento > 0
-    ? `<span class="oc-pensando-texto">⚙ Executando ações (${acoesEmAndamento})<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span>${decorrendo}</span>`
+    ? `<span class="oc-pensando-texto">Executando ações (${acoesEmAndamento})<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span>${decorrendo}</span>`
     : `<span class="oc-pensando-texto">Pensando<span class="oc-dots"><i>.</i><i>.</i><i>.</i></span>${decorrendo}</span>`;
 }
 
@@ -895,7 +895,7 @@ async function enviar(alvo: Alvo = 'pagina', forcarStop = false): Promise<void> 
     // em andamento sem o usuário perceber (parecia "não respondeu").
     const taOcupada = document.getElementById(idDe(alvo, 'input')) as HTMLTextAreaElement | null;
     if (!forcarStop && taOcupada && taOcupada.value.trim()) {
-      toast('Resposta em andamento — aguarde ou clique ⏹ para interromper', 'aviso');
+      toast('Resposta em andamento — aguarde ou clique no botão para interromper', 'aviso');
       return;
     }
     controller?.abort();
@@ -1060,7 +1060,7 @@ async function enviarComandoLocal(comando: { nome: string; args: string }): Prom
   try {
     mensagensCache[idx].content = await resolverComandoProprio(comando.nome);
   } catch (e) {
-    mensagensCache[idx].content = '⚠ ' + (e as Error).message;
+    mensagensCache[idx].content = '[Erro] ' + (e as Error).message;
   }
   renderMensagens();
 }
@@ -1082,8 +1082,8 @@ export async function resolverComandoProprio(nome: string): Promise<string> {
       const total = Object.values(porColuna).reduce((a, b) => a + b, 0);
       return [
         '**Estado da empresa**',
-        `- Scheduler: ${st?.scheduler ? '🟢 rodando' : '🔴 parado'}`,
-        `- Secretário: ${st?.secretario ? '🟢 rodando' : '🔴 parado'}`,
+        `- Scheduler: ${st?.scheduler ? 'rodando' : 'parado'}`,
+        `- Secretário: ${st?.secretario ? 'rodando' : 'parado'}`,
         `- Tasks: ${total}` + (total ? ` — ${Object.entries(porColuna).map(([c, n]) => `${c} ${n}`).join(' · ')}` : ''),
       ].join('\n');
     }
@@ -1140,7 +1140,7 @@ async function enviarTerminalLocal(comando: string, textoBruto: string): Promise
     mensagensCache[idx].content = saida;
     mensagensCache[idx].terminal = `$ ${comando}\n${saida}` + (r.codigo !== 0 ? `\n[código de saída: ${r.codigo}]` : '');
   } catch (e) {
-    mensagensCache[idx].content = '⚠ ' + (e as Error).message;
+    mensagensCache[idx].content = '[Erro] ' + (e as Error).message;
   }
   renderMensagens();
 }

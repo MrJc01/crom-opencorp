@@ -19,8 +19,9 @@ import {
   CheckSquare,
   ArrowRight,
   Terminal,
+  Menu,
 } from "lucide-solid";
-import { sseConnected, wsAtivo, workspaces, fetchApi, notificacoesNaoLidas } from "../lib/context";
+import { sseConnected, wsAtivo, workspaces, fetchApi, notificacoesNaoLidas, setSidebarMobileAberta } from "../lib/context";
 
 interface StatusInfo {
   scheduler?: boolean;
@@ -190,12 +191,21 @@ export const Topbar: Component = () => {
   };
 
   return (
-    <header class="h-14 border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur-md px-4 sm:px-6 flex items-center justify-between flex-shrink-0 z-30 select-none">
-      {/* Breadcrumb */}
+    <header class="h-14 border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur-md px-3 sm:px-6 flex items-center justify-between flex-shrink-0 z-30 select-none">
+      {/* Breadcrumb & Menu Mobile */}
       <div class="flex items-center gap-2 text-xs">
-        <span class="text-zinc-500 font-medium">opencorp</span>
-        <span class="text-zinc-600">/</span>
-        <span class="text-zinc-200 font-semibold">{getBreadcrumb()}</span>
+        <button
+          type="button"
+          onClick={() => setSidebarMobileAberta(true)}
+          class="md:hidden p-1.5 -ml-1 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 border border-zinc-800 transition-colors cursor-pointer"
+          title="Abrir navegação"
+          aria-label="Abrir navegação"
+        >
+          <Menu size={15} />
+        </button>
+        <span class="text-zinc-500 font-medium hidden sm:inline">opencorp</span>
+        <span class="text-zinc-600 hidden sm:inline">/</span>
+        <span class="text-zinc-200 font-semibold truncate max-w-[140px] sm:max-w-none">{getBreadcrumb()}</span>
       </div>
 
       {/* Ações e Controles à Direita */}

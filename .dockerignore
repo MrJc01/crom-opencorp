@@ -1,0 +1,13 @@
+node_modules
+web-dist
+dist
+.git
+.github
+.opencorp
+data
+*.log
+*.sqlite
+*.db
+.env
+.tempmediaStorage
+.user_uploaded

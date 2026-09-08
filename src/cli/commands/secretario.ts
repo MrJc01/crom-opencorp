@@ -72,7 +72,7 @@ export function registerSecretarioCommand(program: Command): void {
         if (querParar) {
           const res = await chamarApiSecretario("/secretario/stop", "POST");
           if (res.ok) {
-            console.log("🛑 Secretário parado com sucesso.");
+            console.log("Secretário parado com sucesso.");
           } else {
             console.log(`Secretário não pôde ser parado ou já estava parado: ${res.data?.erro ?? "sem resposta"}`);
           }
@@ -115,7 +115,7 @@ export function registerSecretarioCommand(program: Command): void {
           return;
         }
 
-        console.log(`💬 Enviando ao Secretário: "${mensagem}"...`);
+        console.log(`Enviando ao Secretário: "${mensagem}"...`);
 
         // Tenta enviar via API HTTP rápida
         const apiRes = await chamarApiSecretario("/secretario/conversa", "POST", {
@@ -124,7 +124,7 @@ export function registerSecretarioCommand(program: Command): void {
         });
 
         if (apiRes.ok && apiRes.data?.resposta) {
-          console.log(`\n🤖 Secretário (@secretario-exec):\n`);
+          console.log(`\nSecretário (@secretario-exec):\n`);
           console.log(apiRes.data.resposta);
           return;
         }
@@ -138,7 +138,7 @@ export function registerSecretarioCommand(program: Command): void {
           gatilho: { tipo: "manual", origem: "cli:secretario" },
         });
 
-        console.log(`\n🤖 Secretário (@secretario-exec) [sessão ${res.id}]:\n`);
+        console.log(`\nSecretário (@secretario-exec) [sessão ${res.id}]:\n`);
         console.log(res.captura.trim() || `Concluído com status ${res.status}`);
       }),
     );

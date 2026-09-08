@@ -160,7 +160,7 @@ export async function carregarCardAcoes(): Promise<void> {
     execs = rExecs;
   } catch {
     elSeguir.innerHTML = elExecutando.innerHTML = elExecutadas.innerHTML =
-      '<div class="text-xs" style="color:var(--err)">⚠ Falha ao carregar ações</div>';
+      '<div class="text-xs" style="color:var(--err)">Falha ao carregar ações</div>';
     return;
   }
 
@@ -234,7 +234,7 @@ export async function carregarCardNaoVistas(): Promise<void> {
     lista = r.notificacoes || [];
     naoLidas = r.resumo?.nao_lidas ?? lista.length;
   } catch {
-    elLista.innerHTML = '<div class="text-xs" style="color:var(--err)">⚠ Falha ao carregar notificações</div>';
+    elLista.innerHTML = '<div class="text-xs" style="color:var(--err)">Falha ao carregar notificações</div>';
     return;
   }
 

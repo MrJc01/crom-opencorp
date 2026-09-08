@@ -19,6 +19,8 @@ import {
   ChevronRight,
   ExternalLink,
   Bot,
+  MapPin,
+  Key,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -658,7 +660,8 @@ export const AppsView: Component = () => {
                     : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
-                <span>🔒 Workspace</span>
+                <Lock size={11} class="mr-1 inline" />
+                <span>Workspace</span>
               </button>
               <button
                 type="button"
@@ -669,7 +672,8 @@ export const AppsView: Component = () => {
                     : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
-                <span>🌐 Global</span>
+                <Globe size={11} class="mr-1 inline" />
+                <span>Global</span>
               </button>
             </div>
           </div>
@@ -708,13 +712,15 @@ export const AppsView: Component = () => {
                             {tmpl.rotulo}
                           </span>
                           <span
-                            class={`text-[10px] font-mono px-2 py-0.2 rounded border ${
+                            class={`text-[10px] font-mono px-2 py-0.2 rounded border flex items-center gap-1 ${
                               origem === "workspace"
                                 ? "bg-amber-950/40 text-amber-300 border-amber-800/60"
                                 : "bg-blue-950/40 text-blue-300 border-blue-800/60"
                             }`}
                           >
-                            {origem === "workspace" ? "🔒 Workspace" : "🌐 Global"}
+                            <Show when={origem === "workspace"} fallback={<><Globe size={10} /> Global</>}>
+                              <Lock size={10} /> Workspace
+                            </Show>
                           </span>
                         </div>
                         <div class="font-mono text-[10px] text-zinc-500 mt-0.5 flex items-center gap-1.5">
@@ -805,8 +811,9 @@ export const AppsView: Component = () => {
 
                 {/* Como Encontrar */}
                 <div class="space-y-1">
-                  <div class="font-semibold text-zinc-200 text-[11px] uppercase tracking-wider font-mono">
-                    📍 Como Encontrar / Gerar o Token:
+                  <div class="font-semibold text-zinc-200 text-[11px] uppercase tracking-wider font-mono flex items-center gap-1">
+                    <MapPin size={11} class="text-zinc-400" />
+                    <span>Como Encontrar / Gerar o Token:</span>
                   </div>
                   <div class="text-zinc-300 space-y-1 leading-relaxed pl-1 text-[11px]">
                     <For each={templateAtual().comoEncontrar}>
@@ -817,8 +824,9 @@ export const AppsView: Component = () => {
 
                 {/* O Que Dá Acesso */}
                 <div class="space-y-1 pt-1 border-t border-blue-900/30">
-                  <div class="font-semibold text-zinc-200 text-[11px] uppercase tracking-wider font-mono">
-                    🔑 O Que Esta Credencial Acessa:
+                  <div class="font-semibold text-zinc-200 text-[11px] uppercase tracking-wider font-mono flex items-center gap-1">
+                    <Key size={11} class="text-zinc-400" />
+                    <span>O Que Esta Credencial Acessa:</span>
                   </div>
                   <ul class="list-disc list-inside text-zinc-300 space-y-0.5 pl-1 text-[11px]">
                     <For each={templateAtual().oQueDaAcesso}>
@@ -865,7 +873,7 @@ export const AppsView: Component = () => {
                       }`}
                     >
                       <span class="text-xs font-bold flex items-center gap-1">
-                        🔒 Workspace Atual
+                        <Lock size={11} class="text-amber-400" /> Workspace Atual
                       </span>
                       <span class="text-[10px] opacity-80 leading-tight">
                         {wsAtivo() ? `Isolado em ${wsAtivo()}` : "Isolado no workspace ativo"}
@@ -881,7 +889,7 @@ export const AppsView: Component = () => {
                       }`}
                     >
                       <span class="text-xs font-bold flex items-center gap-1">
-                        🌐 Global (Todos)
+                        <Globe size={11} class="text-blue-400" /> Global (Todos)
                       </span>
                       <span class="text-[10px] opacity-80 leading-tight">
                         Disponível para todos os workspaces
@@ -1019,13 +1027,15 @@ export const AppsView: Component = () => {
                       Tipo: {detalhesSecret()!.tmpl.rotulo}
                     </span>
                     <span
-                      class={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${
+                      class={`text-[10px] font-mono px-1.5 py-0.2 rounded border flex items-center gap-1 ${
                         detalhesSecret()!.origem === "workspace"
                           ? "bg-amber-950/40 text-amber-300 border-amber-800/60"
                           : "bg-blue-950/40 text-blue-300 border-blue-800/60"
                       }`}
                     >
-                      {detalhesSecret()!.origem === "workspace" ? "🔒 Workspace" : "🌐 Global"}
+                      <Show when={detalhesSecret()!.origem === "workspace"} fallback={<><Globe size={10} /> Global</>}>
+                        <Lock size={10} /> Workspace
+                      </Show>
                     </span>
                   </div>
                 </div>
@@ -1038,8 +1048,9 @@ export const AppsView: Component = () => {
             <div class="space-y-3.5 text-xs">
               {/* O que dá acesso */}
               <div class="space-y-1.5 p-3 rounded-xl bg-zinc-950 border border-zinc-800/80">
-                <span class="font-bold text-zinc-200 uppercase font-mono text-[10px] tracking-wider block">
-                  🔑 O que este token acessa:
+                <span class="font-bold text-zinc-200 uppercase font-mono text-[10px] tracking-wider block flex items-center gap-1">
+                  <Key size={11} class="text-zinc-400" />
+                  <span>O que este token acessa:</span>
                 </span>
                 <ul class="list-disc list-inside text-zinc-300 space-y-0.5 text-[11px]">
                   <For each={detalhesSecret()!.tmpl.oQueDaAcesso}>
@@ -1050,8 +1061,9 @@ export const AppsView: Component = () => {
 
               {/* Regras de Uso & Boas Práticas */}
               <div class="space-y-1.5 p-3 rounded-xl bg-amber-950/20 border border-amber-800/50">
-                <span class="font-bold text-amber-300 uppercase font-mono text-[10px] tracking-wider block">
-                  🛡️ Regras de Uso & Limites de Segurança:
+                <span class="font-bold text-amber-300 uppercase font-mono text-[10px] tracking-wider block flex items-center gap-1">
+                  <ShieldCheck size={11} />
+                  <span>Regras de Uso & Limites de Segurança:</span>
                 </span>
                 <ul class="list-disc list-inside text-amber-200/90 space-y-0.5 text-[11px] leading-relaxed">
                   <For each={detalhesSecret()!.tmpl.regrasDeUso}>
@@ -1062,8 +1074,9 @@ export const AppsView: Component = () => {
 
               {/* Como renovar ou revogar */}
               <div class="space-y-1 p-3 rounded-xl bg-zinc-950 border border-zinc-800/80">
-                <span class="font-bold text-zinc-200 uppercase font-mono text-[10px] tracking-wider block">
-                  📍 Como encontrar ou revogar:
+                <span class="font-bold text-zinc-200 uppercase font-mono text-[10px] tracking-wider block flex items-center gap-1">
+                  <MapPin size={11} class="text-zinc-400" />
+                  <span>Como encontrar ou revogar:</span>
                 </span>
                 <div class="text-zinc-400 text-[11px] space-y-1">
                   <For each={detalhesSecret()!.tmpl.comoEncontrar}>

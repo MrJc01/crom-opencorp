@@ -19,7 +19,7 @@ export function garantirCopyGlobal(): void {
       const texto = pre?.textContent ?? "";
       void navigator.clipboard.writeText(texto).then(() => {
         const original = btn.textContent;
-        btn.textContent = "copiado ✓";
+        btn.textContent = "copiado";
         setTimeout(() => { btn.textContent = original ?? "copy"; }, 1500);
       });
     };
@@ -310,7 +310,7 @@ export function renderMarkdown(texto: string): string {
         return `
           <div class="md-mermaid-container" data-code="${escapeHtml(b.conteudo)}">
             <div class="md-mermaid-header">
-              <span class="md-mermaid-title">📊 Fluxograma / Diagrama</span>
+              <span class="md-mermaid-title">Fluxograma / Diagrama</span>
               <button type="button" class="md-mermaid-toggle" onclick="window.__mdToggleMermaid(this)">Ver Código</button>
             </div>
             <div class="md-mermaid-svg">

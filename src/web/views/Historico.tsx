@@ -23,7 +23,7 @@ import {
 import { useSearchParams, useNavigate } from "@solidjs/router";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
-import { fetchApi } from "../lib/context";
+import { fetchApi, wsAtivo } from "../lib/context";
 import { showToast } from "../ui/Toast";
 import { LogChatViewer } from "../components/chat/LogChatViewer";
 
@@ -54,15 +54,18 @@ export const HistoricoView: Component = () => {
   const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal">("chat");
   const [encerrando, setEncerrando] = createSignal(false);
   const [reenviando, setReenviando] = createSignal(false);
+  const [tempoRealAtivo, setTempoRealAtivo] = createSignal(true);
+  const [ultimaAtualizacao, setUltimaAtualizacao] = createSignal<string>("");
 
   let liveLogInterval: any = null;
+  let timerTempoReal: any = null;
 
   const filtroTipo = () => (searchParams.tipo as string) || "tudo";
   const filtroStatus = () => (searchParams.status as string) || "todos";
   const filtroAgente = () => (searchParams.agente as string) || "todos";
 
-  const carregarHistorico = async () => {
-    setCarregando(true);
+  const carregarHistorico = async (silencioso = false) => {
+    if (!silencioso) setCarregando(true);
     try {
       // Buscar do endpoint unificado /historico que agrupa execucoes, tasks, rotinas e conversas
       const dados = await fetchApi<ItemHistorico[]>("/historico?limite=200");
@@ -80,13 +83,20 @@ export const HistoricoView: Component = () => {
         }));
       }
       setItens(listaFinal);
+      setUltimaAtualizacao(
+        new Date().toLocaleTimeString("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })
+      );
 
       // Se há um run aberto na URL, atualiza seus dados reais
       const runAtual = searchParams.run as string | undefined;
       if (runAtual) {
         const itemReal = listaFinal.find((x) => x.id === runAtual);
         if (itemReal) {
-          setRunSelecionado(itemReal);
+          setRunSelecionado((prev: any) => (prev ? { ...prev, ...itemReal } : itemReal));
           if (itemReal.status === "executando" && !liveLogInterval) {
             let pollCount = 0;
             liveLogInterval = setInterval(async () => {
@@ -101,7 +111,7 @@ export const HistoricoView: Component = () => {
                   );
                   const st = reg?.meta?.extras?.status;
                   if (st && st !== "executando") {
-                    setRunSelecionado((prev: any) => prev ? { ...prev, status: st } : null);
+                    setRunSelecionado((prev: any) => (prev ? { ...prev, status: st } : null));
                     if (liveLogInterval) {
                       clearInterval(liveLogInterval);
                       liveLogInterval = null;
@@ -109,7 +119,7 @@ export const HistoricoView: Component = () => {
                   }
                 } catch {}
               }
-            }, 2500);
+            }, 2000);
           } else if (itemReal.status !== "executando" && liveLogInterval) {
             clearInterval(liveLogInterval);
             liveLogInterval = null;
@@ -126,9 +136,16 @@ export const HistoricoView: Component = () => {
           titulo: e.ordem || e.id,
         }));
         setItens(mapeados);
+        setUltimaAtualizacao(
+          new Date().toLocaleTimeString("pt-BR", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })
+        );
       } catch {}
     } finally {
-      setCarregando(false);
+      if (!silencioso) setCarregando(false);
     }
   };
 
@@ -350,16 +367,64 @@ export const HistoricoView: Component = () => {
     }
   });
 
+  // Reagir a troca de workspace selecionado
+  createEffect(() => {
+    wsAtivo();
+    void carregarHistorico(false);
+  });
+
   onMount(() => {
-    void carregarHistorico();
+    void carregarHistorico(false);
+
+    // Polling inteligente em tempo real: 2.5s se ativo na tela, 6s se em background
+    const iniciarPolling = () => {
+      if (timerTempoReal) clearInterval(timerTempoReal);
+      const intervaloMs = typeof document !== "undefined" && document.hidden ? 6000 : 2500;
+      timerTempoReal = setInterval(() => {
+        if (tempoRealAtivo()) {
+          void carregarHistorico(true);
+        }
+      }, intervaloMs);
+    };
+
+    iniciarPolling();
+
+    const aoMudarVisibilidade = () => {
+      iniciarPolling();
+      if (typeof document !== "undefined" && !document.hidden && tempoRealAtivo()) {
+        void carregarHistorico(true);
+      }
+    };
+
+    const aoFocarJanela = () => {
+      if (tempoRealAtivo()) {
+        void carregarHistorico(true);
+      }
+    };
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", aoMudarVisibilidade);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", aoFocarJanela);
+    }
+
     const aoPressionarTecla = (e: KeyboardEvent) => {
       if (e.key === "Escape" && runSelecionado()) {
         fecharLog();
       }
     };
     window.addEventListener("keydown", aoPressionarTecla);
+
     onCleanup(() => {
-      window.removeEventListener("keydown", aoPressionarTecla);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", aoMudarVisibilidade);
+      }
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", aoFocarJanela);
+        window.removeEventListener("keydown", aoPressionarTecla);
+      }
+      if (timerTempoReal) clearInterval(timerTempoReal);
       if (liveLogInterval) clearInterval(liveLogInterval);
     });
   });
@@ -488,7 +553,39 @@ export const HistoricoView: Component = () => {
             </select>
           </div>
 
-          <Button size="sm" variant="ghost" onClick={carregarHistorico} title="Atualizar">
+          {/* Badge Tempo Real */}
+          <button
+            type="button"
+            onClick={() => setTempoRealAtivo(!tempoRealAtivo())}
+            class={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium cursor-pointer transition-all ${
+              tempoRealAtivo()
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
+                : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300"
+            }`}
+            title={
+              tempoRealAtivo()
+                ? `Tempo Real ATIVO (atualizando a cada 2.5s). Clique para pausar.`
+                : `Tempo Real PAUSADO. Clique para reativar auto-atualização.`
+            }
+          >
+            <span class="relative flex h-2 w-2">
+              <Show when={tempoRealAtivo()}>
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </Show>
+              <Show when={!tempoRealAtivo()}>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-zinc-600"></span>
+              </Show>
+            </span>
+            <span class="font-medium">{tempoRealAtivo() ? "Ao Vivo" : "Pausado"}</span>
+            <Show when={tempoRealAtivo() && ultimaAtualizacao()}>
+              <span class="text-[10px] text-emerald-500/70 font-mono hidden md:inline ml-0.5">
+                {ultimaAtualizacao()}
+              </span>
+            </Show>
+          </button>
+
+          <Button size="sm" variant="ghost" onClick={() => carregarHistorico(false)} title="Atualizar agora">
             <RefreshCw size={13} class={carregando() ? "animate-spin" : ""} />
           </Button>
         </div>
@@ -750,7 +847,7 @@ export const HistoricoView: Component = () => {
               <span class="text-[11px] font-mono">
                 {runSelecionado()!.status === "executando"
                   ? "● Polling de streaming ativo (2.5s)"
-                  : "✓ Sessão arquivada"}
+                  : "Sessão arquivada"}
               </span>
               <Button size="sm" variant="secondary" onClick={fecharLog}>
                 Fechar Visualizador

@@ -208,7 +208,7 @@ export function registerHistoricoCommand(program: Command): void {
           return;
         }
 
-        console.log(`⚡ Redisparando execução "${id}":`);
+        console.log(`Redisparando execução "${id}":`);
         console.log(`   Agente: @${agente}`);
         console.log(`   Modelo: ${modeloEscolhido || "(padrão do agente)"}`);
         console.log(`   Ordem:  ${ordem.slice(0, 100)}...`);

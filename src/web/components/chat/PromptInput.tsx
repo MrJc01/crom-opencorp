@@ -48,8 +48,9 @@ export interface PromptInputProps {
   onAdicionarAnexo: (a: Anexo) => void;
   onRemoverAnexo: (index: number) => void;
   placeholder?: string;
-  agenteSelecionado: "secretario" | "secretario-exec";
-  onMudarAgente: (ag: "secretario" | "secretario-exec") => void;
+  agenteSelecionado: string;
+  onMudarAgente: (ag: any) => void;
+  agentesLista?: Array<{ id: string; role?: string }>;
   refTextarea?: (el: HTMLTextAreaElement) => void;
 }
 
@@ -642,12 +643,26 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         <div class="flex items-center gap-2 text-zinc-400">
           {/* Seletor de Agente Secretário / Secretário Executivo */}
           <select
-            class="bg-zinc-800 border border-zinc-700/80 rounded-md px-2 py-1 text-xs text-zinc-200 focus:outline-none cursor-pointer hover:bg-zinc-700/80 transition-colors"
+            class="bg-zinc-800 border border-zinc-700/80 rounded-md px-2 py-1 text-xs text-zinc-200 focus:outline-none cursor-pointer hover:bg-zinc-700/80 transition-colors max-w-[200px] truncate"
             value={props.agenteSelecionado}
-            onChange={(e) => props.onMudarAgente(e.currentTarget.value as any)}
+            onChange={(e) => props.onMudarAgente(e.currentTarget.value)}
           >
-            <option value="secretario-exec">secretário-exec (ações)</option>
-            <option value="secretario">secretário (consulta)</option>
+            <For
+              each={
+                props.agentesLista && props.agentesLista.length > 0
+                  ? props.agentesLista
+                  : [
+                      { id: "secretario-exec", role: "secretário-exec (ações)" },
+                      { id: "secretario", role: "secretário (consulta)" },
+                    ]
+              }
+            >
+              {(ag) => (
+                <option value={ag.id}>
+                  {ag.role ? `${ag.id} (${ag.role})` : ag.id}
+                </option>
+              )}
+            </For>
           </select>
 
           {/* Botão de Anexo */}

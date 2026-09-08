@@ -138,25 +138,25 @@ export function registerSaudeCommand(program: Command): void {
           return;
         }
 
-        console.log(`\n🏥 Saúde do Sistema — Workspace: "${ws.id}"`);
+        console.log(`\nSaúde do Sistema — Workspace: "${ws.id}"`);
         console.log("──────────────────────────────────────────────────");
         console.log(
-          `Serviços:   Daemon: ${daemonVivo ? "🟢 ATIVO" : "🔴 PARADO"} | Scheduler: ${schedulerVivo ? "🟢 ATIVO" : "🔴 PARADO"} | Serve: ${serveVivo ? "🟢 ATIVO" : "⚪ OFFLINE"}`,
+          `Serviços:   Daemon: ${daemonVivo ? "[ATIVO]" : "[PARADO]"} | Scheduler: ${schedulerVivo ? "[ATIVO]" : "[PARADO]"} | Serve: ${serveVivo ? "[ATIVO]" : "[OFFLINE]"}`,
         );
         console.log(
           `Hoje:       ${dados.metricas_hoje.total} execuções (${dados.metricas_hoje.concluidas} ok, ${dados.metricas_hoje.falhas} falhas — taxa de sucesso: ${dados.metricas_hoje.taxa_sucesso})`,
         );
 
         if (ultimaExec) {
-          const statusIcon = ultimaExec.status === "concluido" ? "🟢" : ultimaExec.status === "falhou" ? "🔴" : "🟡";
+          const statusIcon = ultimaExec.status === "concluido" ? "[OK]" : ultimaExec.status === "falhou" ? "[FALHA]" : "[PENDENTE]";
           console.log(`Última:     ${statusIcon} ${ultimaExec.id} (@${ultimaExec.agente}) em ${ultimaExec.inicio.slice(0, 19).replace("T", " ")}`);
         }
 
         if (ultimaFalha) {
-          console.log(`Última Falha: 🔴 ${ultimaFalha.id} (@${ultimaFalha.agente})`);
+          console.log(`Última Falha: [FALHA] ${ultimaFalha.id} (@${ultimaFalha.agente})`);
           console.log(`             ↳ ${String(ultimaFalha.erro || "").slice(0, 120)}`);
         } else {
-          console.log("Última Falha: Nenhuma falha recente registrada 🎉");
+          console.log("Última Falha: Nenhuma falha recente registrada");
         }
         console.log("──────────────────────────────────────────────────\n");
       }),

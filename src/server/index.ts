@@ -36,6 +36,7 @@ import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairP
 import { taskCreateSchema } from "../schemas/task.js";
 import { SecretsStore, type SecretOrigem } from "../core/secrets-store.js";
 import { completarChatDirect, testarModeloDirect, listarProvedoresStatus } from "../core/llm-client.js";
+import { engineRegistry, getEngineAuthInstructions, checkEngineAuthStatus, EngineAccountStore, WebLoginOrchestrator } from "../core/engines/index.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
@@ -626,6 +627,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   const approvals = new ApprovalsStore();
   const settings = new SettingsStore(base);
   const secretsStore = new SecretsStore(opcoes.homeDir ?? opencorpHome());
+  const engineAccounts = new EngineAccountStore({ homeDir: opcoes.homeDir ?? opencorpHome() });
   const flows = new FlowStore({ ...base, sessoes: opcoes.sessoes as unknown as SessaoFlow | undefined });
   const meetings = new MeetingManager({ ...base, sessoes: opcoes.sessoes as never });
   const tasks = new TaskStore();
@@ -887,7 +889,39 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             }
           }
         } catch {}
-        enviar(res, 200, { scheduler, secretario, secretario_executando: secretarioExecutando });
+        let infoMotores: any = null;
+        try {
+          const rawMotores = await engineRegistry.listSummaries(home, false);
+          const accts = new EngineAccountStore({ homeDir: home });
+          const limitesMotores = await accts.obterLimitesMotores();
+          const contas = await accts.listar();
+          const tokensAoVivo: Record<string, any> = await engineRegistry.fetchAllLiveTokens(home).catch(() => ({}));
+          let rJson: any = { engine: "opencode", harness_fallback: ["antigravity", "copilot", "opencode"] };
+          const rPath = join(home, ".opencorp", "runner.json");
+          if (existsSync(rPath)) {
+            try { rJson = JSON.parse(readFileSync(rPath, "utf8")); } catch {}
+          }
+          infoMotores = {
+            motor_ativo: rJson.engine || "opencode",
+            harness_fallback: rJson.harness_fallback || ["antigravity", "copilot", "opencode"],
+            motores: rawMotores.map((m) => {
+              const lim = limitesMotores[m.id];
+              const contasMotor = contas.filter((c) => c.motorId === m.id);
+              const liveTok = tokensAoVivo[m.id];
+              return {
+                id: m.id,
+                nome: m.name,
+                instalado: m.installed,
+                ativo: m.id === (rJson.engine || "opencode"),
+                contas: contasMotor.length,
+                conta_ativa: contasMotor.find((c) => c.ativa)?.nome || null,
+                limits: lim,
+                tokens: liveTok || null,
+              };
+            }),
+          };
+        } catch {}
+        enviar(res, 200, { scheduler, secretario, secretario_executando: secretarioExecutando, motores: infoMotores });
         return;
       }
       // GET /doc — público (sem auth), retorna OpenAPI 3.0
@@ -1098,7 +1132,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             budget_max_turns: typeof corpo.budget_max_turns === "number" ? corpo.budget_max_turns : undefined,
             ativo: corpo.ativo as boolean | undefined,
             corpo: typeof corpo.corpo_prompt === "string" ? corpo.corpo_prompt : (typeof corpo.corpo === "string" ? corpo.corpo : undefined),
-            harness: typeof corpo.harness === "string" ? corpo.harness.trim() : undefined,
+            harness: typeof corpo.harness === "string" ? corpo.harness.trim() : (typeof (corpo as any).engine === "string" ? (corpo as any).engine.trim() : undefined),
             harness_fallback: Array.isArray(corpo.harness_fallback) ? (corpo.harness_fallback as unknown[]).map(String).filter(Boolean) : undefined,
             rotation: Array.isArray(corpo.rotation) ? (corpo.rotation as unknown[]).map(String).filter(Boolean) : undefined,
             model_fallback: Array.isArray(corpo.model_fallback) ? (corpo.model_fallback as unknown[]).map(String).filter(Boolean) : undefined,
@@ -1136,7 +1170,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         if (mAgenteRun && req.method === "POST") {
           const ws = await resolverWs(url);
           const idRun = decodeURIComponent(mAgenteRun[1]!);
-          const corpo = (await lerCorpo(req)) as { ordem?: string; model?: string };
+          const corpo = (await lerCorpo(req)) as { ordem?: string; model?: string; engine?: string; harness?: string };
           // Etapa 5 — guard antes do 202: agente desativado não entra em execução
           const alvo = await agentes.carregar(ws.path, idRun);
           if (alvo.frontmatter.ativo === false) {
@@ -1148,6 +1182,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             agente: idRun,
             ordem: corpo.ordem ?? "",
             model: corpo.model,
+            engine: corpo.engine || corpo.harness,
+            harness: corpo.harness || corpo.engine,
             workspaceDir: ws.path,
             workspaceId: ws.id,
             execId,
@@ -1815,12 +1851,28 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
-        // ── /motores/status — diagnóstico do OpenCode, provedores e daemons ──
-        if ((rota === "/motores/status" || rota === "/api/motores/status") && req.method === "GET") {
+        // ── /motores/status e /api/motores — catálogo dinâmico de múltiplos motores, diagnósticos e isolamento ──
+        if ((rota === "/motores/status" || rota === "/api/motores/status" || rota === "/api/motores") && req.method === "GET") {
           const home = opcoes.homeDir ?? opencorpHome();
           const ws = await resolverWs(url).catch(() => ({ id: "default", path: home }));
           const ocInfo = await detectarOpencodeInfo(home);
           const provedores = listarProvedoresStatus(home);
+
+          const rPath = join(home, ".opencorp", "runner.json");
+          let runnerAtual = { engine: "opencode", binary_path: "opencode", timeout_min: 20 };
+          if (existsSync(rPath)) {
+            try { runnerAtual = JSON.parse(readFileSync(rPath, "utf8")); } catch {}
+          }
+
+          const rawMotores = await engineRegistry.listSummaries(home, true);
+          const motores = rawMotores.map((m) => {
+            const authStatus = checkEngineAuthStatus(m.id, home);
+            return {
+              ...m,
+              ativo: m.id === (runnerAtual.engine || "opencode"),
+              authStatus,
+            };
+          });
 
           const pidSchedulerPath = join(home, ".opencorp", "scheduler.pid");
           let schedulerVivo = false;
@@ -1836,25 +1888,338 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             } catch {}
           }
 
+          const todasContas = await engineAccounts.listar();
+          const limitesMotores = await engineAccounts.obterLimitesMotores();
+          const tokensAoVivo: Record<string, any> = await engineRegistry.fetchAllLiveTokens(home).catch(() => ({}));
+          const motoresComDetalhes = motores.map((m) => {
+            const contasMotor = todasContas.filter((c) => c.motorId === m.id);
+            const contaAtiva = contasMotor.find((c) => c.ativa) || contasMotor[0] || null;
+            return {
+              ...m,
+              contas: contasMotor,
+              contaAtiva,
+              tokens: tokensAoVivo[m.id] || null,
+              limits: limitesMotores[m.id] || {
+                timeout_min: 20,
+                max_turns: 40,
+                rate_limit_rpm: 30,
+                daily_cost_usd: 10.0,
+                status_cota: "normal",
+                fallback_action: "rotate",
+              },
+            };
+          });
+
           const secStatus = await opencodeServer.status().catch(() => ({ rodando: false, porta: null, pid: null }));
 
           enviar(res, 200, {
             ok: true,
+            runner: runnerAtual,
+            motor_ativo: runnerAtual.engine || "opencode",
             opencode: {
               ...ocInfo,
               data_workspace: join(home, ".opencorp", "opencode-data", ws.id),
             },
+            motores: motoresComDetalhes,
+            contas: todasContas,
+            limits: limitesMotores,
+            tokens: tokensAoVivo,
             provedores,
             daemons: {
               scheduler: { ativo: schedulerVivo, pid: schedulerPid },
               secretario: { ativo: secStatus.rodando, pid: secStatus.pid, porta: secStatus.porta },
             },
-            harnesses_suportados: [
-              { id: "opencode", nome: "OpenCode Runtime", disponivel: ocInfo.instalado, padrao: true },
-              { id: "claude-code", nome: "Claude Code CLI", disponivel: false, em_breve: true },
-              { id: "antigravity", nome: "Google Antigravity", disponivel: false, em_breve: true },
-            ],
+            harnesses_suportados: motores.map((m) => ({
+              id: m.id,
+              nome: m.name,
+              disponivel: m.installed,
+              padrao: m.id === (runnerAtual.engine || "opencode"),
+              isManaged: m.isManaged,
+              version: m.version,
+            })),
           });
+          return;
+        }
+
+        // ── /api/motores/tokens — obtém tokens e cotas reais de todos os motores via seus adaptadores ──
+        if (rota === "/api/motores/tokens" && req.method === "GET") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const tokens = await engineRegistry.fetchAllLiveTokens(home);
+          enviar(res, 200, { ok: true, tokens });
+          return;
+        }
+
+        // ── /api/motores/:id/tokens — obtém tokens e cotas reais de um motor específico ──
+        const mTokensMotor = /^\/api\/motores\/([^/]+)\/tokens$/.exec(rota);
+        if (mTokensMotor && req.method === "GET") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const motorId = decodeURIComponent(mTokensMotor[1]!);
+          const driver = engineRegistry.get(motorId);
+          if (!driver) {
+            enviar(res, 404, { erro: `Motor "${motorId}" não encontrado` });
+            return;
+          }
+          const tokens = await driver.fetchLiveTokens(home);
+          enviar(res, 200, { ok: true, motorId, tokens });
+          return;
+        }
+
+        // ── /api/motores/:id/contas/:contaId/tokens — obtém tokens reais de uma conta específica ──
+        const mTokensConta = /^\/api\/motores\/([^/]+)\/contas\/([^/]+)\/tokens$/.exec(rota);
+        if (mTokensConta && req.method === "GET") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const motorId = decodeURIComponent(mTokensConta[1]!);
+          const contaId = decodeURIComponent(mTokensConta[2]!);
+          const conta = await engineAccounts.obter(contaId);
+          const driver = engineRegistry.get(motorId);
+          if (!driver) {
+            enviar(res, 404, { erro: `Motor "${motorId}" não encontrado` });
+            return;
+          }
+          const tokens = await driver.fetchLiveTokens(home, conta ? { tokenOuChave: conta.tokenOuChave, authType: conta.authType } : undefined);
+          enviar(res, 200, { ok: true, motorId, contaId, tokens });
+          return;
+        }
+
+        // ── /api/motores/contas — lista todas as contas cadastradas ──
+        if (rota === "/api/motores/contas" && req.method === "GET") {
+          const lista = await engineAccounts.listar();
+          enviar(res, 200, { ok: true, contas: lista });
+          return;
+        }
+
+        // ── /api/motores/limites — obtém ou define limites globais dos motores ──
+        if (rota === "/api/motores/limites" && req.method === "GET") {
+          const limites = await engineAccounts.obterLimitesMotores();
+          enviar(res, 200, { ok: true, limites });
+          return;
+        }
+        if (rota === "/api/motores/limites" && req.method === "PUT") {
+          const corpo = (await lerCorpo(req)) as Record<string, any>;
+          await engineAccounts.salvarLimitesMotores(corpo);
+          const atualizados = await engineAccounts.obterLimitesMotores();
+          enviar(res, 200, { ok: true, limites: atualizados });
+          return;
+        }
+
+        // ── /api/motores/:id/contas — listar ou cadastrar contas para um motor ──
+        const mContasMotor = /^\/api\/motores\/([^/]+)\/contas$/.exec(rota);
+        if (mContasMotor && req.method === "GET") {
+          const motorId = decodeURIComponent(mContasMotor[1]!);
+          const contas = await engineAccounts.listar(motorId);
+          enviar(res, 200, { ok: true, motorId, contas });
+          return;
+        }
+        if (mContasMotor && req.method === "POST") {
+          const motorId = decodeURIComponent(mContasMotor[1]!);
+          const corpo = (await lerCorpo(req)) as {
+            nome: string;
+            authType?: "token" | "apiKey" | "deviceOAuth";
+            tokenOuChave?: string;
+            limits?: any;
+          };
+          if (!corpo.nome || corpo.nome.trim().length === 0) {
+            enviar(res, 400, { erro: "Nome da conta é obrigatório" });
+            return;
+          }
+          const novaConta = await engineAccounts.adicionarConta(motorId, corpo);
+          enviar(res, 201, { ok: true, motorId, conta: novaConta });
+          return;
+        }
+
+        // ── /api/motores/:id/contas/:contaId/ativar — define como conta ativa ──
+        const mAtivarConta = /^\/api\/motores\/([^/]+)\/contas\/([^/]+)\/ativar$/.exec(rota);
+        if (mAtivarConta && req.method === "POST") {
+          const motorId = decodeURIComponent(mAtivarConta[1]!);
+          const contaId = decodeURIComponent(mAtivarConta[2]!);
+          await engineAccounts.ativarConta(motorId, contaId);
+          enviar(res, 200, { ok: true, motorId, contaId, ativa: true });
+          return;
+        }
+
+        // ── /api/motores/:id/contas/:contaId/limites — atualiza limites da conta ──
+        const mLimitesConta = /^\/api\/motores\/([^/]+)\/contas\/([^/]+)\/limites$/.exec(rota);
+        if (mLimitesConta && req.method === "PUT") {
+          const contaId = decodeURIComponent(mLimitesConta[2]!);
+          const corpo = (await lerCorpo(req)) as any;
+          const atualizada = await engineAccounts.atualizarLimitesConta(contaId, corpo);
+          enviar(res, 200, { ok: true, conta: atualizada });
+          return;
+        }
+
+        // ── /api/motores/:id/contas/:contaId — desconecta conta ──
+        const mDeleteConta = /^\/api\/motores\/([^/]+)\/contas\/([^/]+)$/.exec(rota);
+        if (mDeleteConta && req.method === "DELETE") {
+          const motorId = decodeURIComponent(mDeleteConta[1]!);
+          const contaId = decodeURIComponent(mDeleteConta[2]!);
+          await engineAccounts.desconectarConta(motorId, contaId);
+          enviar(res, 200, { ok: true, motorId, contaId, desconectada: true });
+          return;
+        }
+
+        // ── /api/motores/:id/install — instala ou compila o binário isolado em ~/.opencorp/bin/<id> ──
+        const mInstallMotor = /^\/api\/motores\/([^/]+)\/install$/.exec(rota);
+        if (mInstallMotor && req.method === "POST") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const motorId = decodeURIComponent(mInstallMotor[1]!);
+          const driver = engineRegistry.get(motorId);
+          if (!driver) {
+            enviar(res, 404, { erro: `Motor "${motorId}" não encontrado` });
+            return;
+          }
+          try {
+            const result = await driver.install(home);
+            enviar(res, 200, { ok: true, motorId, ...result });
+          } catch (err: any) {
+            enviar(res, 500, { erro: err?.message || String(err) });
+          }
+          return;
+        }
+
+        // ── /api/motores/:id/conectar — define o motor como motor ativo padrão do sistema ──
+        const mConectarMotor = /^\/api\/motores\/([^/]+)\/conectar$/.exec(rota);
+        if (mConectarMotor && req.method === "POST") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const motorId = decodeURIComponent(mConectarMotor[1]!);
+          const driver = engineRegistry.get(motorId);
+          if (!driver) {
+            enviar(res, 404, { erro: `Motor "${motorId}" não encontrado` });
+            return;
+          }
+          const status = await driver.isInstalled(home);
+          if (!status.installed) {
+            enviar(res, 400, { erro: `Motor "${motorId}" não está instalado. Instale-o primeiro clicando em 'Instalar'.` });
+            return;
+          }
+
+          // Validação real de autenticação e prontidão operacional (evita conexões cegas e placebo)
+          const health = await driver.checkHealth(home);
+          const forcar = url.searchParams.get("forcar") === "true";
+          if (!health.healthy && !forcar) {
+            enviar(res, 400, {
+              ok: false,
+              requiresAuth: true,
+              erro: `Motor "${motorId}" não pode ser ativado: ${health.statusText}`,
+              statusText: health.statusText,
+              health,
+              authInstructions: getEngineAuthInstructions(motorId),
+            });
+            return;
+          }
+
+          const rPath = join(home, ".opencorp", "runner.json");
+          const novoRunner = {
+            engine: motorId,
+            binary_path: status.path || motorId,
+            timeout_min: 20,
+          };
+          await writeFileAtomic(rPath, `${JSON.stringify(novoRunner, null, 2)}\n`);
+          enviar(res, 200, { ok: true, motorId, runner: novoRunner, health });
+          return;
+        }
+
+        // ── /api/motores/:id/auth-instructions — orientações reais de login/chaves para cada CLI ──
+        const mAuthMotor = /^\/api\/motores\/([^/]+)\/auth-instructions$/.exec(rota);
+        if (mAuthMotor && req.method === "GET") {
+          const motorId = decodeURIComponent(mAuthMotor[1]!);
+          const instructions = getEngineAuthInstructions(motorId);
+          enviar(res, 200, { ok: true, motorId, instructions });
+          return;
+        }
+
+        // ── /api/motores/:id/desconectar — desconecta o motor ativo revertendo para opencode padrão ──
+        const mDesconectarMotor = /^\/api\/motores\/([^/]+)\/desconectar$/.exec(rota);
+        if (mDesconectarMotor && req.method === "POST") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const motorId = decodeURIComponent(mDesconectarMotor[1]!);
+          const rPath = join(home, ".opencorp", "runner.json");
+          const novoRunner = {
+            engine: "opencode",
+            binary_path: "opencode",
+            timeout_min: 20,
+          };
+          await writeFileAtomic(rPath, `${JSON.stringify(novoRunner, null, 2)}\n`);
+          enviar(res, 200, { ok: true, motorId, desconectado: true, runner: novoRunner });
+          return;
+        }
+
+        // ── /api/motores/:id/test — executa diagnóstico de saúde em tempo real do motor ──
+        const mTestMotor = /^\/api\/motores\/([^/]+)\/test$/.exec(rota);
+        if (mTestMotor && req.method === "POST") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const motorId = decodeURIComponent(mTestMotor[1]!);
+          const driver = engineRegistry.get(motorId);
+          if (!driver) {
+            enviar(res, 404, { erro: `Motor "${motorId}" não encontrado` });
+            return;
+          }
+          const health = await driver.checkHealth(home);
+          enviar(res, 200, { ok: true, motorId, health });
+          return;
+        }
+
+        // ── /api/motores/:id/login-web — inicia fluxo de login 1-clique no navegador (OAuth/Device) ──
+        const mLoginWeb = /^\/api\/motores\/([^/]+)\/login-web$/.exec(rota);
+        if (mLoginWeb && req.method === "POST") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const motorId = decodeURIComponent(mLoginWeb[1]!);
+          try {
+            const session = await WebLoginOrchestrator.iniciarLogin(motorId, home);
+            enviar(res, 200, { ok: true, session });
+          } catch (err: any) {
+            enviar(res, 500, { erro: err.message || "Erro ao iniciar login web" });
+          }
+          return;
+        }
+
+        // ── /api/motores/:id/login-web/:sessionId — verifica status da autenticação web ──
+        const mStatusLoginWeb = /^\/api\/motores\/([^/]+)\/login-web\/([^/]+)$/.exec(rota);
+        if (mStatusLoginWeb && req.method === "GET") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const sessionId = decodeURIComponent(mStatusLoginWeb[2]!);
+          try {
+            const session = await WebLoginOrchestrator.verificarStatus(sessionId, home);
+            enviar(res, 200, { ok: true, session });
+          } catch (err: any) {
+            enviar(res, 404, { erro: err.message });
+          }
+          return;
+        }
+
+        // ── /api/motores/:id/login-web/:sessionId/cancel — cancela sessão de login web ──
+        const mCancelLoginWeb = /^\/api\/motores\/([^/]+)\/login-web\/([^/]+)\/cancel$/.exec(rota);
+        if (mCancelLoginWeb && req.method === "POST") {
+          const sessionId = decodeURIComponent(mCancelLoginWeb[2]!);
+          await WebLoginOrchestrator.cancelarLogin(sessionId);
+          enviar(res, 200, { ok: true, cancelado: true });
+          return;
+        }
+
+        // ── /api/motores/:id/login-web/:sessionId/code — envia código de resposta ao processo ativo ──
+        const mCodeLoginWeb = /^\/api\/motores\/([^/]+)\/login-web\/([^/]+)\/code$/.exec(rota);
+        if (mCodeLoginWeb && req.method === "POST") {
+          const sessionId = decodeURIComponent(mCodeLoginWeb[2]!);
+          try {
+            const corpo = (await lerCorpo(req)) as { code?: string };
+            const enviado = await WebLoginOrchestrator.enviarCodigo(sessionId, corpo?.code || "");
+            enviar(res, 200, { ok: enviado });
+          } catch (err: any) {
+            enviar(res, 400, { erro: err.message });
+          }
+          return;
+        }
+
+        // ── /api/motores/:id/login-auto — herda credencial automaticamente (ex: GitHub CLI) ──
+        const mLoginAuto = /^\/api\/motores\/([^/]+)\/login-auto$/.exec(rota);
+        if (mLoginAuto && req.method === "POST") {
+          const home = opcoes.homeDir ?? opencorpHome();
+          const motorId = decodeURIComponent(mLoginAuto[1]!);
+          try {
+            const result = await WebLoginOrchestrator.conectarAutomatico(motorId, home);
+            enviar(res, 200, { ...result });
+          } catch (err: any) {
+            enviar(res, 400, { erro: err.message });
+          }
           return;
         }
 
@@ -2177,7 +2542,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const meetingId = decodeURIComponent(mMeetingMsg[1]!);
           const corpo = (await lerCorpo(req)) as {
             mensagem: string;
-            modo?: "sequencial" | "direcionado";
+            modo?: "sequencial" | "paralelo" | "direcionado";
             agente?: string;
             responder?: boolean;
           };

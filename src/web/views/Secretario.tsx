@@ -1,5 +1,20 @@
 import { type Component, createSignal, onMount, onCleanup, For, Show } from "solid-js";
-import { Plus, History, Bot, Sparkles, AlertCircle, Users, ArrowDown } from "lucide-solid";
+import {
+  Plus,
+  History,
+  Bot,
+  Sparkles,
+  AlertCircle,
+  Users,
+  ArrowDown,
+  Cpu,
+  X,
+  Check,
+  Play,
+  RefreshCw,
+  Zap,
+  Settings2,
+} from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 import { SessionTurn, type ChatMensagem } from "../components/chat/SessionTurn";
 import { PromptInput, type Anexo } from "../components/chat/PromptInput";
@@ -68,11 +83,166 @@ export const SecretarioView: Component = () => {
   const [mensagens, setMensagens] = createSignal<ChatMensagem[]>([]);
   const [inputValor, setInputValor] = createSignal("");
   const [anexos, setAnexos] = createSignal<Anexo[]>([]);
-  const [agente, setAgente] = createSignal<"secretario" | "secretario-exec">("secretario-exec");
+  const [agente, setAgente] = createSignal<string>("secretario-exec");
   const [carregando, setCarregando] = createSignal(false);
   const [historicoAberto, setHistoricoAberto] = createSignal(false);
   const [decorridoSegundos, setDecorridoSegundos] = createSignal(0);
   const [mostrarBotaoFim, setMostrarBotaoFim] = createSignal(false);
+
+  // Configuração lateral de Agente, Motor e Modelo
+  const [configLateralAberta, setConfigLateralAberta] = createSignal(false);
+  const [listaAgentes, setListaAgentes] = createSignal<Array<{ id: string; role: string; model: string; harness?: string; engine?: string; rotation?: string[] }>>([]);
+  const [listaMotores, setListaMotores] = createSignal<Array<{ id: string; name: string; installed: boolean; version?: string }>>([]);
+  const [agenteConfig, setAgenteConfig] = createSignal<string>("secretario-exec");
+  const [motorConfig, setMotorConfig] = createSignal<string>("opencode");
+  const [modeloConfig, setModeloConfig] = createSignal<string>("");
+  const [rotacaoConfig, setRotacaoConfig] = createSignal<string>("");
+  const [testandoMotor, setTestandoMotor] = createSignal(false);
+  const [resultadoTeste, setResultadoTeste] = createSignal<{ ok: boolean; msg: string; latencyMs?: number } | null>(null);
+  const [salvandoConfig, setSalvandoConfig] = createSignal(false);
+
+  const modelosSugeridos: Record<string, string[]> = {
+    antigravity: [
+      "google/gemini-3.8-flash-high",
+      "google/gemini-3.7-flash-high",
+      "google/gemini-3.1-pro-high",
+      "claude-sonnet-4-6",
+    ],
+    copilot: [
+      "github/gpt-4o",
+      "github/claude-3.5-sonnet",
+      "github/o3-mini",
+    ],
+    opencode: [
+      "opencode/nemotron-3-ultra-free",
+      "opencode/nemotron-3.5-lightning-free",
+      "opencode/big-pickle",
+    ],
+    "claude-code": [
+      "claude-3-7-sonnet-20250219",
+      "claude-3-5-sonnet-20241022",
+    ],
+    cursor: ["cursor-fast", "cursor-small"],
+    "crom-agente": ["crom-default"],
+  };
+
+  const carregarAgentesEMotores = async () => {
+    try {
+      const resAg = await fetchApi(`/agents?workspace=${encodeURIComponent(wsAtivo())}`);
+      if (resAg.ok) {
+        const ags = await resAg.json();
+        if (Array.isArray(ags)) setListaAgentes(ags);
+      }
+    } catch {}
+
+    try {
+      const resMot = await fetchApi("/engines");
+      if (resMot.ok) {
+        const mots = await resMot.json();
+        if (Array.isArray(mots)) setListaMotores(mots);
+      }
+    } catch {}
+  };
+
+  const abrirPainelLateral = async () => {
+    await carregarAgentesEMotores();
+    const agAtual = agente();
+    setAgenteConfig(agAtual);
+    const enc = listaAgentes().find((a) => a.id === agAtual);
+    if (enc) {
+      setMotorConfig(enc.harness || (enc as any).engine || "opencode");
+      setModeloConfig(enc.model || "");
+      const rot = enc.rotation || (enc as any).model_fallback || [];
+      setRotacaoConfig(Array.isArray(rot) ? rot.join("\n") : "");
+    }
+    setResultadoTeste(null);
+    setConfigLateralAberta(true);
+  };
+
+  const aoMudarAgenteConfig = (agId: string) => {
+    setAgenteConfig(agId);
+    setResultadoTeste(null);
+    const enc = listaAgentes().find((a) => a.id === agId);
+    if (enc) {
+      setMotorConfig(enc.harness || (enc as any).engine || "opencode");
+      setModeloConfig(enc.model || "");
+      const rot = enc.rotation || (enc as any).model_fallback || [];
+      setRotacaoConfig(Array.isArray(rot) ? rot.join("\n") : "");
+    }
+  };
+
+  const aoMudarMotorConfig = (motId: string) => {
+    setMotorConfig(motId);
+    setResultadoTeste(null);
+    const sug = modelosSugeridos[motId];
+    if (sug && sug.length > 0 && !modeloConfig().trim()) {
+      setModeloConfig(sug[0]!);
+    }
+  };
+
+  const testarMotorConexao = async () => {
+    setTestandoMotor(true);
+    setResultadoTeste(null);
+    const t0 = Date.now();
+    try {
+      await fetchApi(`/agents/${encodeURIComponent(agenteConfig())}/run?workspace=${encodeURIComponent(wsAtivo())}`, {
+        method: "POST",
+        body: JSON.stringify({
+          ordem: "ping de verificação de motor",
+          engine: motorConfig(),
+          model: modeloConfig().trim() || undefined,
+        }),
+      });
+      const t = Date.now() - t0;
+      setResultadoTeste({
+        ok: true,
+        msg: `Motor "${motorConfig()}" ativo e respondendo (${t}ms).`,
+        latencyMs: t,
+      });
+      showToast(`Motor ${motorConfig()} verificado com sucesso!`, "sucesso");
+    } catch (e: any) {
+      setResultadoTeste({
+        ok: false,
+        msg: `Falha ao acionar motor: ${e?.message || e}`,
+        latencyMs: Date.now() - t0,
+      });
+    } finally {
+      setTestandoMotor(false);
+    }
+  };
+
+  const salvarConfigLateral = async () => {
+    setSalvandoConfig(true);
+    try {
+      const rot = rotacaoConfig()
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const res = await fetchApi(`/agents/${encodeURIComponent(agenteConfig())}?workspace=${encodeURIComponent(wsAtivo())}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          harness: motorConfig(),
+          model: modeloConfig().trim() || undefined,
+          rotation: rot,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.erro || `Erro HTTP ${res.status}`);
+      }
+
+      setAgente(agenteConfig() as any);
+      await carregarAgentesEMotores();
+      showToast(`Agente @${agenteConfig()} atualizado com motor ${motorConfig()}!`, "sucesso");
+      setConfigLateralAberta(false);
+    } catch (e: any) {
+      showToast(`Erro ao salvar: ${e?.message || e}`, "erro");
+    } finally {
+      setSalvandoConfig(false);
+    }
+  };
 
   let feedRef!: HTMLDivElement;
   let textareaRef: HTMLTextAreaElement | undefined;
@@ -465,7 +635,7 @@ export const SecretarioView: Component = () => {
                   const passos = [...(assistente.passos || [])];
                   passos.push({
                     tipo: "texto",
-                    texto: `\n> ⚠️ *${payload.aviso}*\n\n`,
+                    texto: `\n> [Aviso] *${payload.aviso}*\n\n`,
                   });
                   assistente.passos = passos;
                 }
@@ -538,8 +708,8 @@ export const SecretarioView: Component = () => {
                 const msgErro = payload.erro || payload.mensagem || "Erro desconhecido";
                 showToast(`Erro no Secretário: ${msgErro}`, "erro");
                 assistente.content = assistente.content
-                  ? `${assistente.content}\n\n> ⚠️ **Erro no Secretário**: ${msgErro}`
-                  : `> ⚠️ **Erro no Secretário**: ${msgErro}`;
+                  ? `${assistente.content}\n\n> **Erro no Secretário**: ${msgErro}`
+                  : `> **Erro no Secretário**: ${msgErro}`;
               }
 
               return [...prev.slice(0, ultIdx), assistente];
@@ -611,6 +781,7 @@ export const SecretarioView: Component = () => {
 
   onMount(() => {
     void carregarSessoes();
+    void carregarAgentesEMotores();
   });
 
   onCleanup(() => {
@@ -633,6 +804,9 @@ export const SecretarioView: Component = () => {
           <span class="font-medium text-zinc-200">
             {sessaoAtivaId() ? `Sessão ${sessaoAtivaId()?.slice(0, 10)}...` : "Nova Conversa"}
           </span>
+          <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-800/50 text-emerald-400 font-mono">
+            @{agente()}
+          </span>
         </div>
 
         <div class="flex items-center gap-1.5">
@@ -644,6 +818,15 @@ export const SecretarioView: Component = () => {
           </Button>
           <Button size="xs" variant="secondary" onClick={() => navigate("/reunioes")} title="Reuniões Multi-Agente">
             <Users size={13} class="mr-1" /> Reuniões
+          </Button>
+          <Button
+            size="xs"
+            variant="secondary"
+            onClick={abrirPainelLateral}
+            title="Configurar qual agente, motor e modelo utilizar"
+            data-testid="btn-motor-modelo"
+          >
+            <Cpu size={13} class="mr-1 text-emerald-400" /> Motor & Modelo
           </Button>
         </div>
       </div>
@@ -727,6 +910,7 @@ export const SecretarioView: Component = () => {
           onRemoverAnexo={(idx) => setAnexos((prev) => prev.filter((_, i) => i !== idx))}
           agenteSelecionado={agente()}
           onMudarAgente={setAgente}
+          agentesLista={listaAgentes()}
           refTextarea={(el) => (textareaRef = el)}
         />
       </div>
@@ -741,6 +925,256 @@ export const SecretarioView: Component = () => {
         onNovaConversa={novaConversa}
         onExcluirSessao={excluirSessao}
       />
+
+      {/* Drawer Lateral de Configuração de Agente / Motor / Modelo */}
+      <Show when={configLateralAberta()}>
+        <div
+          class="fixed inset-0 bg-black/60 z-40 backdrop-blur-xs transition-opacity"
+          onClick={() => setConfigLateralAberta(false)}
+        />
+        <aside
+          data-testid="drawer-lateral-config"
+          class="fixed inset-y-0 right-0 w-80 sm:w-96 bg-zinc-950/95 border-l border-zinc-800/80 shadow-2xl z-50 flex flex-col backdrop-blur-md animate-in slide-in-from-right duration-200"
+        >
+          {/* Header do Drawer */}
+          <div class="h-12 px-4 border-b border-zinc-800/80 flex items-center justify-between bg-zinc-900/40 select-none">
+            <div class="flex items-center gap-2">
+              <Cpu size={16} class="text-emerald-400" />
+              <span class="font-semibold text-sm text-zinc-100">Configurar Motor & Modelo</span>
+            </div>
+            <IconButton
+              size="sm"
+              variant="ghost"
+              onClick={() => setConfigLateralAberta(false)}
+              title="Fechar painel"
+            >
+              <X size={15} />
+            </IconButton>
+          </div>
+
+          {/* Conteúdo rolável */}
+          <div class="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin text-xs">
+            {/* Escolha do Agente */}
+            <div class="space-y-1.5">
+              <label class="font-medium text-zinc-300 block">Agente do Workspace</label>
+              <select
+                class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500/80 cursor-pointer"
+                value={agenteConfig()}
+                onChange={(e) => aoMudarAgenteConfig(e.currentTarget.value)}
+              >
+                <For each={listaAgentes()}>
+                  {(ag) => (
+                    <option value={ag.id}>
+                      {ag.id} — {ag.role || ag.id} ({ag.harness || (ag as any).engine || "opencode"})
+                    </option>
+                  )}
+                </For>
+              </select>
+              <p class="text-[11px] text-zinc-500">
+                Selecione o agente que deseja inspecionar ou direcionar as ordens do chat.
+              </p>
+            </div>
+
+            {/* Escolha do Motor de Execução */}
+            <div class="space-y-2">
+              <label class="font-medium text-zinc-300 block">Motor de Execução (Harness)</label>
+              <div class="grid grid-cols-1 gap-2">
+                <For
+                  each={[
+                    {
+                      id: "opencode",
+                      nome: "OpenCode Engine",
+                      desc: "Daemon e CLI nativos do OpenCode",
+                      alias: "opencode",
+                    },
+                    {
+                      id: "antigravity",
+                      nome: "Google Antigravity (AGY)",
+                      desc: "CLI isolada com suporte a skills e MCP",
+                      alias: "agy",
+                    },
+                    {
+                      id: "copilot",
+                      nome: "GitHub Copilot CLI",
+                      desc: "Runtime autônomo com tokens PAT/OAuth",
+                      alias: "copilot",
+                    },
+                    {
+                      id: "claude-code",
+                      nome: "Claude Code CLI",
+                      desc: "Motor Anthropic CLI para tarefas de código",
+                      alias: "claude",
+                    },
+                  ]}
+                >
+                  {(mot) => {
+                    const ativo = () => motorConfig() === mot.id;
+                    const inst = () => {
+                      const enc = listaMotores().find((m) => m.id === mot.id);
+                      return enc ? enc.installed : true;
+                    };
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => aoMudarMotorConfig(mot.id)}
+                        class={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start justify-between ${
+                          ativo()
+                            ? "bg-emerald-950/30 border-emerald-500/80 text-emerald-200 shadow-sm"
+                            : "bg-zinc-900/60 border-zinc-800/80 hover:bg-zinc-850 hover:border-zinc-700 text-zinc-300"
+                        }`}
+                      >
+                        <div class="space-y-0.5">
+                          <div class="flex items-center gap-1.5 font-medium">
+                            <span>{mot.nome}</span>
+                            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400">
+                              {mot.alias}
+                            </span>
+                          </div>
+                          <div class="text-[11px] text-zinc-400 leading-tight">{mot.desc}</div>
+                        </div>
+                        <div class="flex items-center gap-1">
+                          <span
+                            class={`h-2 w-2 rounded-full ${
+                              inst() ? "bg-emerald-400" : "bg-zinc-600"
+                            }`}
+                            title={inst() ? "Motor instalado" : "Não detectado"}
+                          />
+                          <Show when={ativo()}>
+                            <Check size={14} class="text-emerald-400 ml-1" />
+                          </Show>
+                        </div>
+                      </button>
+                    );
+                  }}
+                </For>
+              </div>
+            </div>
+
+            {/* Modelo Principal */}
+            <div class="space-y-1.5">
+              <label class="font-medium text-zinc-300 block">Modelo Principal</label>
+              <input
+                type="text"
+                class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500/80"
+                placeholder="ex.: google/gemini-3.8-flash-high ou gpt-4o"
+                value={modeloConfig()}
+                onInput={(e) => setModeloConfig(e.currentTarget.value)}
+              />
+
+              {/* Sugestões Rápidas de Modelos */}
+              <div class="flex flex-wrap gap-1 pt-1">
+                <For each={modelosSugeridos[motorConfig()] || []}>
+                  {(mod) => (
+                    <button
+                      type="button"
+                      onClick={() => setModeloConfig(mod)}
+                      class="px-2 py-0.5 rounded-full bg-zinc-800/80 hover:bg-zinc-700 text-[10px] font-mono text-zinc-300 border border-zinc-700/60 cursor-pointer transition-colors"
+                    >
+                      {mod.split("/").pop()}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </div>
+
+            {/* Rotação e Fallback de Modelos */}
+            <div class="space-y-1.5">
+              <label class="font-medium text-zinc-300 block">
+                Rotação / Fallback de Modelos
+              </label>
+              <textarea
+                rows={3}
+                class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500/80 scrollbar-thin resize-none"
+                placeholder="1 modelo por linha para rotação de fallback"
+                value={rotacaoConfig()}
+                onInput={(e) => setRotacaoConfig(e.currentTarget.value)}
+              />
+              <p class="text-[11px] text-zinc-500">
+                Modelos acionados automaticamente caso o principal atinja limites de quota ou erro.
+              </p>
+            </div>
+
+            {/* Área de Teste de Conexão */}
+            <div class="pt-2 border-t border-zinc-800/80 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="font-medium text-zinc-300">Diagnóstico de Conectividade</span>
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  onClick={testarMotorConexao}
+                  disabled={testandoMotor()}
+                >
+                  <Show when={testandoMotor()} fallback={<Play size={12} class="mr-1 text-emerald-400" />}>
+                    <RefreshCw size={12} class="mr-1 animate-spin text-emerald-400" />
+                  </Show>
+                  {testandoMotor() ? "Testando..." : "Testar Conexão"}
+                </Button>
+              </div>
+
+              <Show when={resultadoTeste()}>
+                <div
+                  class={`p-2.5 rounded-lg border text-xs flex items-start gap-2 ${
+                    resultadoTeste()!.ok
+                      ? "bg-emerald-950/20 border-emerald-800/60 text-emerald-300"
+                      : "bg-rose-950/20 border-rose-800/60 text-rose-300"
+                  }`}
+                >
+                  <Show
+                    when={resultadoTeste()!.ok}
+                    fallback={<AlertCircle size={15} class="shrink-0 mt-0.5 text-rose-400" />}
+                  >
+                    <Check size={15} class="shrink-0 mt-0.5 text-emerald-400" />
+                  </Show>
+                  <div class="space-y-0.5">
+                    <p class="font-medium">{resultadoTeste()!.msg}</p>
+                    <Show when={resultadoTeste()!.latencyMs !== undefined}>
+                      <p class="text-[10px] text-zinc-400 font-mono">
+                        Latência: {resultadoTeste()!.latencyMs}ms
+                      </p>
+                    </Show>
+                  </div>
+                </div>
+              </Show>
+            </div>
+          </div>
+
+          {/* Rodapé de Ações */}
+          <div class="p-3 border-t border-zinc-800/80 flex items-center justify-between gap-2 bg-zinc-900/60">
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => setConfigLateralAberta(false)}
+            >
+              Cancelar
+            </Button>
+            <div class="flex items-center gap-1.5">
+              <Button
+                size="xs"
+                variant="secondary"
+                onClick={() => {
+                  setAgente(agenteConfig() as any);
+                  showToast(`Secretário direcionado para @${agenteConfig()}`, "info");
+                  setConfigLateralAberta(false);
+                }}
+                title="Apenas direciona o chat atual para este agente"
+              >
+                Aplicar ao Chat
+              </Button>
+              <Button
+                size="xs"
+                variant="primary"
+                onClick={salvarConfigLateral}
+                disabled={salvandoConfig()}
+              >
+                <Show when={salvandoConfig()} fallback={<Check size={13} class="mr-1" />}>
+                  <RefreshCw size={13} class="mr-1 animate-spin" />
+                </Show>
+                {salvandoConfig() ? "Salvando..." : "Salvar no Agente"}
+              </Button>
+            </div>
+          </div>
+        </aside>
+      </Show>
     </div>
   );
 };

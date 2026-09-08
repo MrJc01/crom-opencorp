@@ -3,8 +3,9 @@ import { Router, Route, useLocation, useNavigate } from "@solidjs/router";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { GlobalTitlebar } from "./components/GlobalTitlebar";
+import { LoginModal } from "./components/LoginModal";
 import { ToastContainer } from "./ui/Toast";
-import { carregarWorkspaces, conectarSSE, wsAtivo } from "./lib/context";
+import { carregarWorkspaces, conectarSSE, wsAtivo, autenticado } from "./lib/context";
 
 // Views
 import { SecretarioView } from "./views/Secretario";
@@ -42,7 +43,10 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
   });
 
   return (
-    <div class="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased font-sans">
+    <div id="app" class="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased font-sans">
+      <Show when={!autenticado()}>
+        <LoginModal />
+      </Show>
       <Show
         when={wsAtivo()}
         fallback={

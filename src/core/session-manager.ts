@@ -20,6 +20,7 @@ import { mkdirRecursive } from "../utils/fs-safe.js";
 import { opencorpHome, resolvePath } from "../utils/paths.js";
 import { envOpencodeIsolado } from "./opencode-server.js";
 import { SettingsStore } from "./settings-store.js";
+import { engineRegistry } from "./engines/index.js";
 
 export type StatusExecucao = "executando" | "concluido" | "falhou" | "cancelado" | "hitl_pendente";
 
@@ -28,6 +29,10 @@ export interface OpcoesRun {
   ordem?: string;
   file?: string;
   model?: string;
+  /** Motor de execução explicitamente solicitado para esta ordem (sobrescreve frontmatter e sistema) */
+  engine?: string;
+  /** Alias para engine */
+  harness?: string;
   session?: string;
   title?: string;
   workspaceId?: string;
@@ -43,8 +48,15 @@ export interface OpcoesRun {
   watchdogIntervalMs?: number;
   /** graça SIGTERM→SIGKILL do watchdog em ms (padrão 5s) — knob de teste */
   watchdogGracaMs?: number;
-  /** uso interno (retry de rotação de modelo): marca este run como retry de outra execução */
-  retryDe?: { de_modelo: string; de_exec: string; tentativas?: number; modelosTentados?: string[] };
+  /** uso interno (retry de rotação de modelo e motor): marca este run como retry de outra execução */
+  retryDe?: {
+    de_modelo: string;
+    de_harness?: string;
+    de_exec: string;
+    tentativas?: number;
+    modelosTentados?: string[];
+    motoresTentados?: string[];
+  };
   /**
    * Gatilho da execução (PLANO-UNIFICACAO): quem chamou e por quê — cron, menção, nó de flow,
    * passo de team, turno de reunião, evento ou manual. Vai para extras, ledger (corp.db) e eventos.
@@ -99,7 +111,7 @@ function gerarId(prefixo: string): string {
 }
 
 export const PADRAO_ERRO_MODELO =
-  /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found|insufficient balance|payment_required|402|credit balance|temporarily unavailable|Provider returned error|requires more credits|can only afford|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits|in-flight requests|database is locked|sqlite_busy/i;
+  /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found|not available|Provider not found|from --model flag|insufficient balance|payment_required|402|credit balance|temporarily unavailable|Provider returned error|requires more credits|can only afford|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits|in-flight requests|database is locked|sqlite_busy/i;
 
 export const PADRAO_ERRO_CREDITOS =
   /requires more credits|can only afford|insufficient balance|payment_required|402|credit balance|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits/i;
@@ -115,13 +127,12 @@ export function ehModeloGratuito(modelo: string): boolean {
 }
 
 export const MODELOS_ROTACAO_PADRAO = [
-  "openrouter/nvidia/nemotron-3.5-lightning:free",
-  "openrouter/minimax/minimax-m3:free",
-  "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-  "openrouter/z-ai/glm-5.2:free",
   "opencode-go/glm-5.3-flash",
+  "opencode/nemotron-3.5-lightning-free",
+  "opencode/nemotron-3-ultra-free",
+  "opencode-go/minimax-m3",
+  "opencode-go/deepseek-v4-flash",
   "openrouter/google/gemini-2.5-flash",
-  "openrouter/deepseek/deepseek-chat",
   "openrouter/meta-llama/llama-3.3-70b-instruct",
 ];
 
@@ -199,6 +210,110 @@ export async function obterListaRotacaoCompleta(
     const s = String(m).trim();
     if (s && !lista.includes(s)) lista.push(s);
   }
+  return lista;
+}
+
+export const MODELOS_ROTACAO_POR_HARNESS: Record<string, string[]> = {
+  antigravity: [
+    "google/gemini-3.8-flash-high",
+    "google/gemini-3.7-flash-high",
+    "google/gemini-3.1-pro-high",
+    "claude-sonnet-4-6",
+  ],
+  copilot: [
+    "github/gpt-4o",
+    "github/claude-3.5-sonnet",
+    "github/o3-mini",
+  ],
+  opencode: [
+    "opencode/nemotron-3-ultra-free",
+    "opencode/nemotron-3.5-lightning-free",
+    "opencode/big-pickle",
+  ],
+  "claude-code": [
+    "claude-3-7-sonnet-20250219",
+    "claude-3-5-sonnet-20241022",
+  ],
+};
+
+export const HARNESS_FALLBACK_PADRAO = [
+  "antigravity",
+  "copilot",
+  "opencode",
+];
+
+export async function obterCadeiaHarness(
+  agenteStore?: AgentStore,
+  wsPath?: string,
+  agenteId?: string,
+  homeDir?: string,
+): Promise<string[]> {
+  const cadeia: string[] = [];
+  if (agenteStore && wsPath && agenteId) {
+    try {
+      const ag = await agenteStore.carregar(wsPath, agenteId);
+      const hPrimary = ag.frontmatter.harness || (ag.frontmatter as any).engine;
+      if (hPrimary) cadeia.push(hPrimary);
+      const hFallbacks = ag.frontmatter.harness_fallback || (ag.frontmatter as any).engine_fallback;
+      if (Array.isArray(hFallbacks)) {
+        for (const h of hFallbacks) {
+          const s = String(h).trim();
+          if (s && !cadeia.includes(s)) cadeia.push(s);
+        }
+      }
+    } catch {}
+  }
+
+  // Fallback padrão do sistema e runner.json
+  try {
+    const rPath = join(homeDir || process.env.HOME || "", ".opencorp", "runner.json");
+    if (existsSync(rPath)) {
+      const rJson = JSON.parse(readFileSync(rPath, "utf8")) as { engine?: string; harness_fallback?: string[] };
+      if (rJson.engine && !cadeia.includes(rJson.engine.trim())) {
+        cadeia.push(rJson.engine.trim());
+      }
+      if (Array.isArray(rJson.harness_fallback)) {
+        for (const h of rJson.harness_fallback) {
+          const s = String(h).trim();
+          if (s && !cadeia.includes(s)) cadeia.push(s);
+        }
+      }
+    }
+  } catch {}
+
+  for (const h of HARNESS_FALLBACK_PADRAO) {
+    if (!cadeia.includes(h)) cadeia.push(h);
+  }
+  return cadeia;
+}
+
+export async function obterListaRotacaoPorHarness(
+  harness: string,
+  agenteStore?: AgentStore,
+  wsPath?: string,
+  agenteId?: string,
+  _homeDir?: string,
+): Promise<string[]> {
+  const lista: string[] = [];
+  if (agenteStore && wsPath && agenteId) {
+    try {
+      const ag = await agenteStore.carregar(wsPath, agenteId);
+      const rot = ag.frontmatter.rotation || (ag.frontmatter as any).model_fallback;
+      if (Array.isArray(rot)) {
+        for (const m of rot) {
+          const s = String(m).trim();
+          if (s && !lista.includes(s)) lista.push(s);
+        }
+      }
+    } catch {}
+  }
+
+  const padraoHarness = MODELOS_ROTACAO_POR_HARNESS[harness] || [];
+  for (const m of padraoHarness) {
+    const s = String(m).trim();
+    if (s && !lista.includes(s)) lista.push(s);
+  }
+
   return lista;
 }
 
@@ -651,8 +766,25 @@ export class SessionManager {
 
     await this.bridge.sincronizarAgente(ws.path, ag.frontmatter, ag.corpo);
 
-    // Resolução do Harness e Modelo Efetivo:
-    let harnessEscolhido = ag.frontmatter.harness || "opencode";
+    // Resolução do Harness Ativo (prioridade: frontmatter do agente > runner.json ativo > padrão opencode)
+    let runnerConfigEngine = "opencode";
+    try {
+      const rPath = join(this.homeDir, ".opencorp", "runner.json");
+      if (existsSync(rPath)) {
+        const rJson = JSON.parse(readFileSync(rPath, "utf8")) as { engine?: string };
+        if (rJson.engine && typeof rJson.engine === "string") {
+          runnerConfigEngine = rJson.engine.trim();
+        }
+      }
+    } catch {}
+
+    let harnessEscolhido =
+      opcoes.engine ||
+      opcoes.harness ||
+      ag.frontmatter.harness ||
+      (ag.frontmatter as any).engine ||
+      runnerConfigEngine ||
+      "opencode";
     let modeloEfetivo = modelo;
 
     if (modeloEfetivo.startsWith("opencode/") && modeloEfetivo.indexOf("/", "opencode/".length) !== -1) {
@@ -664,44 +796,108 @@ export class SessionManager {
     } else if (modeloEfetivo.startsWith("antigravity/")) {
       harnessEscolhido = "antigravity";
       modeloEfetivo = modeloEfetivo.slice("antigravity/".length);
+    } else if (modeloEfetivo.startsWith("crom-agente/") || modeloEfetivo.startsWith("crom/")) {
+      harnessEscolhido = "crom-agente";
+      modeloEfetivo = modeloEfetivo.replace(/^(crom-agente|crom)\//, "");
+    } else if (modeloEfetivo.startsWith("cursor/")) {
+      harnessEscolhido = "cursor";
+      modeloEfetivo = modeloEfetivo.slice("cursor/".length);
+    } else if (modeloEfetivo.startsWith("copilot/")) {
+      harnessEscolhido = "copilot";
+      modeloEfetivo = modeloEfetivo.slice("copilot/".length);
+    } else if (modeloEfetivo.startsWith("codex/")) {
+      harnessEscolhido = "codex";
+      modeloEfetivo = modeloEfetivo.slice("codex/".length);
+    } else if (modeloEfetivo.startsWith("aider/")) {
+      harnessEscolhido = "aider";
+      modeloEfetivo = modeloEfetivo.slice("aider/".length);
     }
 
-    const args = [
-      "run",
-      "--auto",
-      "--agent",
-      ag.frontmatter.id,
-      "--model",
-      modeloEfetivo,
-      "--dir",
-      ws.path,
-    ];
-    if (opcoes.session) args.push("--session", opcoes.session);
-    if (opcoes.title) args.push("--title", opcoes.title);
-    args.push(ordem);
+    const driver = engineRegistry.resolveDriver(harnessEscolhido);
+    let runnerBin: string;
+    let args: string[];
+    let execEnv: Record<string, string>;
+    let execCwd = ws.path;
 
-    let runnerBin = harnessEscolhido === "opencode" ? "opencode" : harnessEscolhido;
-    try {
-      const rPath = join(this.homeDir, ".opencorp", "runner.json");
-      if (existsSync(rPath)) {
-        const rJson = JSON.parse(readFileSync(rPath, "utf8")) as { binary_path?: string };
-        if (typeof rJson.binary_path === "string" && rJson.binary_path.trim().length > 0) {
-          runnerBin = rJson.binary_path.trim();
-        }
+    if (driver.id === "opencode") {
+      // Normalização automática de modelos legados openrouter/ para modelos suportados pelo binário opencode
+      if (
+        modeloEfetivo === "openrouter/nvidia/nemotron-3.5-lightning:free" ||
+        modeloEfetivo === "nvidia/nemotron-3.5-lightning:free"
+      ) {
+        modeloEfetivo = "opencode-go/glm-5.3-flash";
+      } else if (
+        modeloEfetivo === "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free" ||
+        modeloEfetivo === "nvidia/nemotron-3-ultra-550b-a55b:free"
+      ) {
+        modeloEfetivo = "opencode/nemotron-3-ultra-free";
+      } else if (
+        modeloEfetivo === "openrouter/minimax/minimax-m3:free" ||
+        modeloEfetivo === "minimax/minimax-m3:free"
+      ) {
+        modeloEfetivo = "opencode-go/minimax-m3";
+      } else if (modeloEfetivo === "openrouter/z-ai/glm-5.2:free") {
+        modeloEfetivo = "opencode-go/glm-5.3-flash";
       }
-    } catch {}
+
+      args = [
+        "run",
+        "--auto",
+        "--agent",
+        ag.frontmatter.id,
+        "--model",
+        modeloEfetivo,
+        "--dir",
+        ws.path,
+      ];
+      if (opcoes.session) args.push("--session", opcoes.session);
+      if (opcoes.title) args.push("--title", opcoes.title);
+      args.push(ordem);
+
+      runnerBin = "opencode";
+      const managedBin = join(this.homeDir, ".opencorp", "bin", "opencode");
+      if (existsSync(managedBin)) {
+        runnerBin = managedBin;
+      } else {
+        try {
+          const rPath = join(this.homeDir, ".opencorp", "runner.json");
+          if (existsSync(rPath)) {
+            const rJson = JSON.parse(readFileSync(rPath, "utf8")) as { binary_path?: string };
+            if (typeof rJson.binary_path === "string" && rJson.binary_path.trim().length > 0) {
+              runnerBin = rJson.binary_path.trim();
+            }
+          }
+        } catch {}
+      }
+      execEnv = envOpencodeIsolado(this.homeDir, ws.id, ws.path) as Record<string, string>;
+    } else {
+      const prep = await driver.prepareExecution({
+        workspaceId: ws.id,
+        workspacePath: ws.path,
+        sessionId: id,
+        agentId: ag.frontmatter.id,
+        model: modeloEfetivo,
+        prompt: ordem,
+        homeDir: this.homeDir,
+      });
+      runnerBin = prep.binary;
+      args = prep.args;
+      execEnv = prep.env;
+      execCwd = prep.cwd;
+    }
 
     let child: ReturnType<typeof execa>;
     try {
       child = execa(runnerBin, args, {
-        cwd: ws.path,
-        // data-dir POR workspace: auth (global ⊕ overrides) + sessões da empresa isolados
-        env: envOpencodeIsolado(this.homeDir, ws.id, ws.path) as Record<string, string>,
+        cwd: execCwd,
+        env: execEnv,
         buffer: false,
         reject: false,
         stdin: "ignore",
       });
     } catch (erro) {
+      const retry = await this.tentarRetry(ws, opcoes, registro, msg(erro));
+      if (retry) return retry;
       const falha = `não foi possível iniciar o runner (${runnerBin}): ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
       (registro as any).erro = falha;
       await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, "", null);
@@ -778,7 +974,9 @@ export class SessionManager {
       if (watchdog?.estourou || mortePorTimeout) {
         return await resolverAposTimeout();
       }
-      const falha = `não foi possível executar o opencode: ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
+      const retry = await this.tentarRetry(ws, opcoes, registro, msg(erro));
+      if (retry) return retry;
+      const falha = `não foi possível executar o runner (${runnerBin}): ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
       (registro as any).erro = falha;
       await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, captura.join(""), null);
       throw new SessionError(falha);
@@ -805,8 +1003,8 @@ export class SessionManager {
 
     const textoCaptura = captura.join("");
 
-    // Se falhou por erro de modelo/API e ainda há modelos na rotação, tenta o próximo
-    if (status === "falhou" && PADRAO_ERRO_MODELO.test(textoCaptura)) {
+    // Se falhou (erro de modelo ou de motor), tenta retry com rotação de modelo ou rotação de motor
+    if (status === "falhou") {
       const retry = await this.tentarRetry(ws, opcoes, registro, textoCaptura);
       if (retry) return retry;
     }
@@ -905,9 +1103,10 @@ export class SessionManager {
   }
 
   /**
-   * Retry de rotação de modelo: run "falhou" com erro de cota/conexão de API
-   * e ainda não esgotou retries → respawna com o próximo modelo da rotação.
-   * Nunca retry em hitl_pendente.
+   * Retry com rotabilidade de modelo e de harness:
+   * 1. Se foi erro de modelo/cota e há modelos disponíveis para o motor atual, rotaciona o modelo.
+   * 2. Se os modelos do motor se esgotaram ou o motor falhou (crash, processo abortado, erro do binário),
+   *    rotaciona para o próximo motor da cadeia de harness (agente ou padrão do sistema).
    */
   private async tentarRetry(
     ws: { path: string; id: string },
@@ -916,47 +1115,86 @@ export class SessionManager {
     captura: string,
   ): Promise<ResultadoRun | null> {
     if (registro.status === "hitl_pendente") return null;
-    if (!PADRAO_ERRO_MODELO.test(captura)) return null;
 
-    const falhaCreditos = PADRAO_ERRO_CREDITOS.test(captura);
-    const tentados = Array.from(new Set([...(opcoes.retryDe?.modelosTentados ?? []), registro.modelo]));
-    const proximo = await this.proximoModeloDaRotacao(registro.modelo, ws.path, opcoes.agente, tentados, falhaCreditos);
-    if (!proximo || proximo === registro.modelo) return null;
-
-    const lista = await obterListaRotacaoCompleta(this.agentes, ws.path, opcoes.agente, this.homeDir);
-    const maxRetries = Math.max(1, lista.length + 2);
+    const harnessAtual = opcoes.engine || opcoes.harness || "opencode";
+    const modelosTentados = Array.from(new Set([...(opcoes.retryDe?.modelosTentados ?? []), registro.modelo]));
+    const motoresTentados = Array.from(new Set([...(opcoes.retryDe?.motoresTentados ?? []), harnessAtual]));
     const tentativas = opcoes.retryDe?.tentativas ?? 0;
-    if (tentativas >= maxRetries) return null;
+    if (tentativas >= 6) return null;
 
-    const idRetry = gerarId("exec");
-    try {
+    // 1. Rotação de MODELO dentro do mesmo harness se for erro de modelo
+    if (PADRAO_ERRO_MODELO.test(captura)) {
+      const listaModelosHarness = await obterListaRotacaoPorHarness(harnessAtual, this.agentes, ws.path, opcoes.agente, this.homeDir);
+      const proximoModelo = listaModelosHarness.find((m) => !modelosTentados.includes(m));
+
+      if (proximoModelo) {
+        const idRetry = gerarId("exec");
+        await this.registros.anexarEvento(ws.path, "execucoes", registro.id, {
+          ts: new Date().toISOString(),
+          por: "opencorp",
+          evento: "retry_modelo",
+          resumo: `falha no modelo (${registro.modelo}) do motor ${harnessAtual} — retry ${tentativas + 1} com ${proximoModelo} -> ${idRetry}`,
+        }).catch(() => undefined);
+
+        await new Promise((resolve) => setTimeout(resolve, 1000 + Math.random() * 500));
+        return this.rodar({
+          ...opcoes,
+          engine: harnessAtual,
+          model: proximoModelo,
+          execId: idRetry,
+          retryDe: {
+            de_modelo: registro.modelo,
+            de_harness: harnessAtual,
+            de_exec: registro.id,
+            tentativas: tentativas + 1,
+            modelosTentados: [...modelosTentados, proximoModelo],
+            motoresTentados,
+          },
+          gatilho: opcoes.gatilho
+            ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, proximoModelo) }
+            : undefined,
+        });
+      }
+    }
+
+    // 2. Rotação de HARNESS / MOTOR (quando modelos se esgotam ou motor falha no processo)
+    const cadeiaHarness = await obterCadeiaHarness(this.agentes, ws.path, opcoes.agente, this.homeDir);
+    const proximoHarness = cadeiaHarness.find((h) => !motoresTentados.includes(h));
+
+    if (proximoHarness) {
+      const modelosNovoHarness = await obterListaRotacaoPorHarness(proximoHarness, this.agentes, ws.path, opcoes.agente, this.homeDir);
+      const modeloNovo = modelosNovoHarness[0] || "padrao";
+
+      const idRetry = gerarId("exec");
       await this.registros.anexarEvento(ws.path, "execucoes", registro.id, {
         ts: new Date().toISOString(),
         por: "opencorp",
-        evento: "retry_modelo",
-        resumo: `falha de modelo/API (${registro.modelo}) — retry ${tentativas + 1}/${maxRetries} com ${proximo}${falhaCreditos ? " (filtrando apenas gratuitos)" : ""} → ${idRetry}`,
+        evento: "retry_harness",
+        resumo: `falha no motor (${harnessAtual}) — alternando para motor ${proximoHarness} com modelo ${modeloNovo} -> ${idRetry}`,
+      }).catch(() => undefined);
+
+      await new Promise((resolve) => setTimeout(resolve, 1200 + Math.random() * 600));
+      return this.rodar({
+        ...opcoes,
+        engine: proximoHarness,
+        harness: proximoHarness,
+        model: modeloNovo,
+        execId: idRetry,
+        retryDe: {
+          de_modelo: registro.modelo,
+          de_harness: harnessAtual,
+          de_exec: registro.id,
+          tentativas: tentativas + 1,
+          modelosTentados: [...modelosTentados, modeloNovo],
+          motoresTentados: [...motoresTentados, proximoHarness],
+        },
+        gatilho: opcoes.gatilho
+          ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, `${proximoHarness}:${modeloNovo}`) }
+          : undefined,
       });
-    } catch {
-      /* journal best-effort */
     }
 
-    // Pausa breve com jitter para aliviar requisições em voo (in-flight) e liberar locks de banco
-    await new Promise((resolve) => setTimeout(resolve, 1500 + Math.random() * 1000));
-
-    return this.rodar({
-      ...opcoes,
-      model: proximo,
-      execId: idRetry,
-      retryDe: {
-        de_modelo: registro.modelo,
-        de_exec: registro.id,
-        tentativas: tentativas + 1,
-        modelosTentados: Array.from(new Set([...tentados, proximo])),
-      },
-      gatilho: opcoes.gatilho
-        ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, proximo) }
-        : undefined,
-    });
+    return null;
   }
 
   /**

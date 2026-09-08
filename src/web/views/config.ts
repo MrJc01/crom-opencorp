@@ -619,7 +619,7 @@ async function carregarOpencode(): Promise<void> {
       </div>
       <div class="flex flex-wrap items-center gap-2 mt-2">
         <button class="btn" onclick="window.__cfgOpencodeSalvar()">Salvar</button>
-        <span class="cfg-dica" style="color:var(--warn)">⚠ alterações valem após reiniciar o secretário (Config → Ações → Reiniciar secretário)</span>
+        <span class="cfg-dica" style="color:var(--warn)">alterações valem após reiniciar o secretário (Config → Ações → Reiniciar secretário)</span>
       </div>
     </section>
   `;
@@ -706,7 +706,7 @@ export async function carregarChaves(): Promise<void> {
         <input id="cfg-chave-valor" type="password" placeholder="chave de API (sk-…)" class="font-mono text-xs"/>
         <button class="btn" onclick="window.__cfgChaveSalvar('${noWorkspace ? 'workspace' : 'global'}')">Salvar chave ${noWorkspace ? 'no workspace' : 'no global'}</button>
       </div>
-      <div class="cfg-dica" style="color:var(--warn)">⚠ após alterar, reinicie o secretário para aplicar no chat (agentes novos já pegam no próximo run)</div>
+      <div class="cfg-dica" style="color:var(--warn)">após alterar, reinicie o secretário para aplicar no chat (agentes novos já pegam no próximo run)</div>
     </section>
   `;
 

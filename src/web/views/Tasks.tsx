@@ -18,6 +18,7 @@ import {
   Bot,
   Lock,
   Unlock,
+  Zap,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -815,8 +816,8 @@ export const TasksView: Component = () => {
                   onChange={(e) => setExecutarImediato(e.currentTarget.checked)}
                   class="rounded border-zinc-700 bg-zinc-900 text-emerald-500 cursor-pointer"
                 />
-                <label for="checkImediato" class="text-xs text-zinc-300 font-medium cursor-pointer select-none">
-                  ⚡ Executar imediatamente após a criação
+                <label for="checkImediato" class="text-xs text-zinc-300 font-medium cursor-pointer select-none flex items-center gap-1.5">
+                  <Zap size={12} class="text-emerald-400" /> Executar imediatamente após a criação
                 </label>
               </div>
 
@@ -831,8 +832,8 @@ export const TasksView: Component = () => {
                       onChange={(e) => setAgendarTask(e.currentTarget.checked)}
                       class="rounded border-zinc-700 bg-zinc-900 text-amber-500 cursor-pointer"
                     />
-                    <label for="checkAgendar" class="text-xs text-zinc-300 font-medium cursor-pointer select-none">
-                      📅 Agendar Execução / Repetição
+                    <label for="checkAgendar" class="text-xs text-zinc-300 font-medium cursor-pointer select-none flex items-center gap-1.5">
+                      <Calendar size={12} class="text-amber-400" /> Agendar Execução / Repetição
                     </label>
                   </div>
                   <span class="text-[10px] text-zinc-500 font-mono">OpenCorp Scheduler</span>

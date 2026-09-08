@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
 import { TaskStore, type Task } from "../../core/task-store.js";
@@ -8,6 +9,8 @@ import { Scheduler } from "../../core/scheduler.js";
 import { opencorpHome } from "../../utils/paths.js";
 import { pidVivo } from "../../core/supervisor.js";
 import { SessionManager } from "../../core/session-manager.js";
+import { EngineAccountStore } from "../../core/engines/engine-account-store.js";
+import { engineRegistry } from "../../core/engines/index.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -69,6 +72,32 @@ export interface StatusInfo {
     status: string;
     data: string;
   } | null;
+  motores?: {
+    motor_ativo: string;
+    harness_fallback: string[];
+    lista: Array<{
+      id: string;
+      nome: string;
+      instalado: boolean;
+      ativo: boolean;
+      timeout_min: number;
+      max_turns: number;
+      rate_limit_rpm: number;
+      daily_cost_usd: number;
+      status_cota: string;
+      contas_total: number;
+      conta_ativa: string | null;
+      contas: Array<{ id: string; nome: string; ativa: boolean; status_cota: string }>;
+      tokens?: {
+        tokensDisponiveis: number | string;
+        saldoUsd?: number;
+        statusCota: string;
+        mensagem: string;
+        source: string;
+        provedor: string;
+      };
+    }>;
+  };
 }
 
 export async function coletarStatus(wsId?: string): Promise<StatusInfo> {
@@ -166,6 +195,65 @@ export async function coletarStatus(wsId?: string): Promise<StatusInfo> {
     }
   } catch {}
 
+  // 6. Motores, Contas & Limites
+  let infoMotores: StatusInfo["motores"] = undefined;
+  try {
+    const accts = new EngineAccountStore({ homeDir: home });
+    const limitesMotores = await accts.obterLimitesMotores();
+    const contas = await accts.listar();
+    const rawMotores = await engineRegistry.listSummaries(home, false);
+    const tokensAoVivo: Record<string, any> = await engineRegistry.fetchAllLiveTokens(home).catch(() => ({}));
+    const rPath = join(home, ".opencorp", "runner.json");
+    let runner: any = { engine: "opencode", timeout_min: 20 };
+    if (existsSync(rPath)) {
+      try { runner = JSON.parse(readFileSync(rPath, "utf8")); } catch {}
+    }
+
+    infoMotores = {
+      motor_ativo: runner.engine || "opencode",
+      harness_fallback: runner.harness_fallback || ["antigravity", "copilot", "opencode"],
+      lista: rawMotores.map((m) => {
+        const lim = limitesMotores[m.id] || {
+          timeout_min: 20,
+          max_turns: 40,
+          rate_limit_rpm: 30,
+          daily_cost_usd: 10.0,
+          status_cota: "normal",
+        };
+        const contasDoMotor = contas.filter((c) => c.motorId === m.id);
+        const contaAtiva = contasDoMotor.find((c) => c.ativa) || null;
+        const liveTok = tokensAoVivo[m.id];
+        return {
+          id: m.id,
+          nome: m.name,
+          instalado: m.installed,
+          ativo: m.id === (runner.engine || "opencode"),
+          timeout_min: lim.timeout_min,
+          max_turns: lim.max_turns,
+          rate_limit_rpm: lim.rate_limit_rpm,
+          daily_cost_usd: lim.daily_cost_usd,
+          status_cota: lim.status_cota,
+          contas_total: contasDoMotor.length,
+          conta_ativa: contaAtiva ? contaAtiva.nome : null,
+          contas: contasDoMotor.map((c) => ({
+            id: c.id,
+            nome: c.nome,
+            ativa: c.ativa,
+            status_cota: c.limits.status_cota,
+          })),
+          tokens: liveTok ? {
+            tokensDisponiveis: liveTok.tokensDisponiveis,
+            saldoUsd: liveTok.saldoUsd,
+            statusCota: liveTok.statusCota,
+            mensagem: liveTok.mensagem,
+            source: liveTok.source,
+            provedor: liveTok.provedor,
+          } : undefined,
+        };
+      }),
+    };
+  } catch {}
+
   return {
     workspace: {
       id: ws.id,
@@ -198,6 +286,7 @@ export async function coletarStatus(wsId?: string): Promise<StatusInfo> {
       proximo_job: proximoJob,
     },
     ultima_execucao: ultimaExec,
+    motores: infoMotores,
   };
 }
 
@@ -257,7 +346,7 @@ export function registerStatusCommand(program: Command): void {
         if (info.approvals.total_pendentes === 0) {
           console.log("  0 pendência(s) de aprovação (nenhuma ação travada no painel)");
         } else {
-          console.log(`  ⚠ ${info.approvals.total_pendentes} pendência(s) aguardando aprovação humana:`);
+          console.log(`  [Aviso] ${info.approvals.total_pendentes} pendência(s) aguardando aprovação humana:`);
           for (const p of info.approvals.pendencias) {
             console.log(`    - [${p.id}] ${p.acao}${p.agente ? ` (${p.agente})` : ""}${p.descricao ? `: ${p.descricao}` : ""}`);
           }
@@ -279,6 +368,25 @@ export function registerStatusCommand(program: Command): void {
           const u = info.ultima_execucao;
           console.log("\n● Última Execução");
           console.log(`  ${u.id} · agente: ${u.agente} · status: ${u.status} (${u.data})`);
+        }
+
+        // Motores, Contas & Limites
+        if (info.motores) {
+          console.log("\n● Motores, Contas & Limites");
+          console.log(`  motor padrão: ${info.motores.motor_ativo} · fallback: ${info.motores.harness_fallback.join(" → ")}`);
+          for (const m of info.motores.lista) {
+            const statusTag = m.ativo ? "ativo (padrão)" : m.instalado ? "disponível" : "não instalado";
+            const contasDesc = m.contas_total > 0
+              ? `${m.contas_total} conta(s) [ativa: ${m.conta_ativa || "nenhuma"}]`
+              : "sem contas configuradas";
+            const liveCota = m.tokens && m.tokens.source !== "unconfigured"
+              ? ` · tokens: ${m.tokens.mensagem} [Consulta Real ao Vivo]`
+              : ` · cota: ${m.status_cota} ($${m.daily_cost_usd.toFixed(2)}/dia)`;
+            console.log(`  - ${m.id.padEnd(12)}: ${statusTag.padEnd(16)} · timeout: ${m.timeout_min}m · max_turns: ${m.max_turns}${liveCota} · ${contasDesc}`);
+            for (const c of m.contas) {
+              console.log(`      * [${c.ativa ? "ATIVA" : "SECUNDÁRIA"}] ${c.nome} (cota: ${c.status_cota})`);
+            }
+          }
         }
 
         console.log("");

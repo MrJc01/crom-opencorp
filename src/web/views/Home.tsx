@@ -550,8 +550,8 @@ export const HomeView: Component = () => {
                   <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 animate-pulse font-mono">
                     ● Executando Agora
                   </span>
-                  <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-zinc-300 border border-zinc-800">
-                    ⏱ {formatarDecorrido(agoraMs() - new Date(exec().inicio).getTime())}
+                  <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-zinc-300 border border-zinc-800 flex items-center">
+                    <Clock size={11} class="mr-1 inline" /> {formatarDecorrido(agoraMs() - new Date(exec().inicio).getTime())}
                   </span>
                 </div>
                 <div class="flex items-center gap-2 mt-1.5 flex-wrap">
@@ -644,8 +644,8 @@ export const HomeView: Component = () => {
                     </span>
 
                     {/* TIMER AO VIVO DE SEGUNDO A SEGUNDO */}
-                    <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-emerald-300 border border-zinc-800">
-                      ⏱ {formatarContagem(diff())}
+                    <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-emerald-300 border border-zinc-800 flex items-center">
+                      <Clock size={11} class="mr-1 inline" /> {formatarContagem(diff())}
                     </span>
                   </div>
 
@@ -1164,8 +1164,8 @@ export const HomeView: Component = () => {
                         <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 animate-pulse font-mono">
                           ● Processo Ativo
                         </span>
-                        <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-zinc-300 border border-zinc-800">
-                          ⏱ {formatarDecorrido(agoraMs() - new Date(exec().inicio).getTime())}
+                        <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/60 text-zinc-300 border border-zinc-800 flex items-center">
+                          <Clock size={11} class="mr-1 inline" /> {formatarDecorrido(agoraMs() - new Date(exec().inicio).getTime())}
                         </span>
                       </div>
                       <div class="text-base font-bold text-zinc-100 font-mono mt-1">
@@ -1419,8 +1419,8 @@ export const HomeView: Component = () => {
           <Show
             when={execucoesFalhas().length > 0}
             fallback={
-              <div class="p-8 rounded-2xl bg-zinc-900/40 border border-zinc-800 text-center text-emerald-400 text-xs font-mono">
-                ✓ Nenhuma falha detectada nas execuções recentes. Tudo rodando com sucesso!
+              <div class="p-8 rounded-2xl bg-zinc-900/40 border border-zinc-800 text-center text-emerald-400 text-xs font-mono flex items-center justify-center gap-1.5">
+                <Check size={14} class="mr-1" /> Nenhuma falha detectada nas execuções recentes. Tudo rodando com sucesso!
               </div>
             }
           >
@@ -1511,8 +1511,8 @@ export const HomeView: Component = () => {
                   <div class="p-4 rounded-2xl bg-zinc-900/50 border border-zinc-800 hover:border-emerald-700/60 transition-all flex flex-col justify-between gap-3 shadow-xs">
                     <div class="space-y-1.5">
                       <div class="flex items-center justify-between">
-                        <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 font-bold">
-                          ⏱ {formatarContagem(diff())}
+                        <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 font-bold flex items-center">
+                          <Clock size={10} class="mr-1 inline" /> {formatarContagem(diff())}
                         </span>
                         <span class="text-[10px] font-mono text-zinc-500">
                           {job.agenda?.valor || "cron"}

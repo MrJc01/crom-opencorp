@@ -73,7 +73,7 @@ export interface TeamSpec {
 }
 
 export const MODELOS_DISPONIVEIS = [
-  { id: "openrouter/google/gemini-3.8-flash", label: "⚡ Google Gemini 3.8 Flash (BYOK Custo $0) — Recomendado" },
+  { id: "openrouter/google/gemini-3.8-flash", label: "Google Gemini 3.8 Flash (BYOK Custo $0) — Recomendado" },
   { id: "openrouter/nvidia/nemotron-3.5-lightning:free", label: "NVIDIA Nemotron 3.5 Lightning (Gratuito / Rápido)" },
   { id: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free", label: "NVIDIA Nemotron 3 Ultra 550B (Gratuito / Robusto)" },
   { id: "openrouter/minimax/minimax-m3:free", label: "MiniMax M3 (Gratuito)" },
@@ -1003,8 +1003,9 @@ export const AgentesView: Component = () => {
                       </div>
                       <div class="bg-zinc-950 p-2.5 rounded-xl border border-zinc-800">
                         <span class="text-zinc-500 block text-[10px] uppercase font-bold mb-0.5">Status</span>
-                        <span class={`font-semibold text-xs ${agenteInspecionado()!.ativo !== false ? "text-emerald-400" : "text-zinc-500"}`}>
-                          {agenteInspecionado()!.ativo !== false ? "🟢 Ativo" : "⚪ Desativado"}
+                        <span class={`font-semibold text-xs flex items-center gap-1.5 ${agenteInspecionado()!.ativo !== false ? "text-emerald-400" : "text-zinc-500"}`}>
+                          <span class={`w-1.5 h-1.5 rounded-full ${agenteInspecionado()!.ativo !== false ? "bg-emerald-400" : "bg-zinc-500"}`} />
+                          {agenteInspecionado()!.ativo !== false ? "Ativo" : "Desativado"}
                         </span>
                       </div>
                     </div>
@@ -1273,7 +1274,7 @@ export const AgentesView: Component = () => {
                       <Layers size={13} class="text-blue-400" /> Pipeline (Sequencial)
                     </div>
                     <div class="text-[11px] text-zinc-400 font-normal leading-snug whitespace-normal break-words">
-                      Passo 1 processa ➔ Passo 2 aprimora ➔ Conclusão em esteira
+                      Passo 1 processa → Passo 2 aprimora → Conclusão em esteira
                     </div>
                   </button>
 
@@ -1290,7 +1291,7 @@ export const AgentesView: Component = () => {
                       <RotateCcw size={13} class="text-amber-400" /> Loop de Revisão
                     </div>
                     <div class="text-[11px] text-zinc-400 font-normal leading-snug whitespace-normal break-words">
-                      Executor cria ➔ Revisor avalia e aprova ou devolve para ajustes
+                      Executor cria → Revisor avalia e aprova ou devolve para ajustes
                     </div>
                   </button>
 
@@ -1307,7 +1308,7 @@ export const AgentesView: Component = () => {
                       <Users size={13} class="text-purple-400" /> Simultâneo (Fanout)
                     </div>
                     <div class="text-[11px] text-zinc-400 font-normal leading-snug whitespace-normal break-words">
-                      Agentes executam ao mesmo tempo ➔ Síntese consolidada final
+                      Agentes executam ao mesmo tempo → Síntese consolidada final
                     </div>
                   </button>
 
@@ -1324,7 +1325,7 @@ export const AgentesView: Component = () => {
                       <MessageSquare size={13} class="text-emerald-400" /> Debate Multi-Agente
                     </div>
                     <div class="text-[11px] text-zinc-400 font-normal leading-snug whitespace-normal break-words">
-                      Debatedores discutem hipóteses ➔ Moderador toma a decisão
+                      Debatedores discutem hipóteses → Moderador toma a decisão
                     </div>
                   </button>
                 </div>

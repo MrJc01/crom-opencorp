@@ -1,5 +1,5 @@
 import { type Component, createMemo, For, Show } from "solid-js";
-import { Bot, Sparkles } from "lucide-solid";
+import { Bot, Sparkles, Check, X, Clock } from "lucide-solid";
 import { SessionTurn, type ChatMensagem, type TurnoPasso } from "./SessionTurn";
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -331,18 +331,18 @@ export const LogChatViewer: Component<LogChatViewerProps> = (props) => {
             </span>
           </Show>
           <Show when={props.status === "concluido"}>
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">
-              ✓ Concluído
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-1">
+              <Check size={10} /> Concluído
             </span>
           </Show>
           <Show when={props.status === "falhou"}>
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono text-rose-400 bg-rose-500/10 border border-rose-500/20">
-              ✗ Falhou
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono text-rose-400 bg-rose-500/10 border border-rose-500/20 flex items-center gap-1">
+              <X size={10} /> Falhou
             </span>
           </Show>
           <Show when={duracaoFmt()}>
-            <span class="text-[10px] text-zinc-500 font-mono ml-auto">
-              ⏱ {duracaoFmt()}
+            <span class="text-[10px] text-zinc-500 font-mono ml-auto flex items-center gap-1">
+              <Clock size={10} /> {duracaoFmt()}
             </span>
           </Show>
         </div>

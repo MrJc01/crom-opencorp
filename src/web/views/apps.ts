@@ -255,7 +255,7 @@ interface CampoPerfil {
   dica?: string;
 }
 
-const BANNER_CARTAO = '⚠ Atenção: recurso NÃO testado corretamente ainda — armazene apenas referência (bandeira/últimos 4), nunca número completo nem CVV. O servidor rejeita esses campos.';
+const BANNER_CARTAO = 'Atenção: recurso NÃO testado corretamente ainda — armazene apenas referência (bandeira/últimos 4), nunca número completo nem CVV. O servidor rejeita esses campos.';
 
 const CAMPOS_APP: Record<string, CampoPerfil[]> = {
   vps: [

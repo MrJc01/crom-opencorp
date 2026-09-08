@@ -302,7 +302,7 @@ export const HooksView: Component = () => {
                       {/* Badge de HITL Aprovação */}
                       <Show when={h.exige_aprovacao}>
                         <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-950/60 text-amber-300 border border-amber-800/80 font-bold flex items-center gap-1">
-                          🛡️ Exige Aprovação Humana
+                          <ShieldAlert size={10} /> Exige Aprovação Humana
                         </span>
                       </Show>
                     </div>

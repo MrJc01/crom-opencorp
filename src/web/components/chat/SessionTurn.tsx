@@ -1,5 +1,5 @@
 import { type Component, createSignal, createEffect, For, Show } from "solid-js";
-import { Copy, Check, Edit3, ShieldAlert, CheckCircle, XCircle, Terminal } from "lucide-solid";
+import { Copy, Check, Edit3, ShieldAlert, CheckCircle, XCircle, Terminal, Brain } from "lucide-solid";
 import { IconButton } from "../../ui/IconButton";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
@@ -243,7 +243,7 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
                   >
                     <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
                       <span class="flex items-center gap-1.5">
-                        <span>💭</span>
+                        <Brain size={13} class="text-purple-400" />
                         <span class={m().concluida === false ? "text-purple-300 animate-pulse font-semibold" : "text-zinc-300 font-medium"}>
                           {m().concluida === false ? "Pensando…" : `Raciocínio (${idx() + 1})`}
                         </span>
