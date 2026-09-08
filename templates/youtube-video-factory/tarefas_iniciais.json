@@ -1,0 +1,52 @@
+[
+  {
+    "id": "tsk-setup-01-identidade",
+    "titulo": "[SETUP] Definição Estratégica e Identidade do Canal",
+    "descricao": "Conceber o nome oficial do canal, nicho e sub-nicho prioritário, público-alvo, persona do apresentador e tom de voz (didático, intrigante e dinâmico). Salvar em registries/identidade_canal.json.",
+    "coluna": "backlog",
+    "pos": 1,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "branding", "estrategia"],
+    "responsavel": "agente:pautador-youtube"
+  },
+  {
+    "id": "tsk-setup-02-brandkit",
+    "titulo": "[SETUP] Criação do Brand Kit & Identidade Visual",
+    "descricao": "Definir paleta de cores institucional, tipografia de alto impacto para títulos/legendas (Impact/Montserrat), gerar avatar e banner em SVG local e matriz de prompts para thumbnails de alto CTR.",
+    "coluna": "backlog",
+    "pos": 2,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "design", "brandkit"],
+    "responsavel": "agente:produtor-video"
+  },
+  {
+    "id": "tsk-setup-03-manual-retencao",
+    "titulo": "[SETUP] Diretrizes Editoriais & Manual de Retenção (Regra dos 3s)",
+    "descricao": "Elaborar o manual de produção (docs/manual_producao.md) contendo as regras de ouro: gancho instantâneo sem saudações (0 a 3s), ritmo de cortes a cada 3.5s, abertura de loops de curiosidade e chamada para ação natural no meio do vídeo.",
+    "coluna": "backlog",
+    "pos": 3,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "roteiro", "retencao"],
+    "responsavel": "agente:roteirista-video"
+  },
+  {
+    "id": "tsk-setup-04-banco-30-pautas",
+    "titulo": "[SETUP] Banco Inicial de 30 Pautas Validadas",
+    "descricao": "Pesquisar e estruturar em registries/pautas.json uma matriz com os primeiros 30 temas de alto potencial de busca e clique, já contendo título A e título B para teste de CTR e premissa central.",
+    "coluna": "backlog",
+    "pos": 4,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "pautas", "banco-conteudo"],
+    "responsavel": "agente:pautador-youtube"
+  },
+  {
+    "id": "tsk-setup-05-calibracao-tecnica",
+    "titulo": "[SETUP] Calibração Técnica do Estúdio FFMPEG & Voz TTS Local",
+    "descricao": "Testar a síntese vocal neural local em português (pt-BR-FranciscaNeural ou pt-BR-AntonioNeural), validar geração de legendas SRT sincronizadas e verificar dimensões de vídeo (Shorts 1080x1920 e Widescreen 1920x1080).",
+    "coluna": "backlog",
+    "pos": 5,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "audio-video", "infra-local"],
+    "responsavel": "agente:produtor-video"
+  }
+]

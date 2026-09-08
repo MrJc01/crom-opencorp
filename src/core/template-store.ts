@@ -1,6 +1,7 @@
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { dirname, basename, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { TemplateError } from "./errors.js";
@@ -19,9 +20,13 @@ interface TemplateJson {
 
 export class TemplateStore {
   private readonly homeDir: string;
+  private readonly templatesDir: string;
 
-  constructor(opts: { homeDir?: string } = {}) {
+  constructor(opts: { homeDir?: string; templatesDir?: string } = {}) {
     this.homeDir = opts.homeDir ?? opencorpHome();
+    this.templatesDir =
+      opts.templatesDir ??
+      join(dirname(fileURLToPath(import.meta.url)), "..", "..", "templates");
   }
 
   dirUsuario(): string {
@@ -33,33 +38,43 @@ export class TemplateStore {
   }
 
   async listar(): Promise<{ id: string; tipo: string; descricao: string }[]> {
-    const saida = [
-      {
-        id: "default",
-        tipo: "skeleton (projeto)",
-        descricao: "workspace completo padrão (3 agentes + categorias)",
-      },
-    ];
-    const dir = this.dirUsuario();
-    if (!existsSync(dir)) return saida;
-    for (const entrada of readdirSync(dir, { withFileTypes: true })) {
-      if (!entrada.isDirectory()) continue;
-      const tipo = existsSync(join(dir, entrada.name, ".opencorp")) ? "skeleton" : "pacote";
-      let descricao = "";
-      const tj = join(dir, entrada.name, "template.json");
-      if (existsSync(tj)) {
-        try {
-          const dados = JSON.parse(readFileSync(tj, "utf8")) as TemplateJson;
-          descricao = [dados.description, `v${dados.version ?? "?"}`, dados.author]
-            .filter((x) => Boolean(x))
-            .join(" · ");
-        } catch {
-          descricao = "(template.json inválido)";
+    const mapa = new Map<string, { id: string; tipo: string; descricao: string }>();
+
+    // Default básico
+    mapa.set("default", {
+      id: "default",
+      tipo: "skeleton (projeto)",
+      descricao: "workspace completo padrão (agentes + categorias)",
+    });
+
+    const escanearDir = (dir: string) => {
+      if (!existsSync(dir)) return;
+      for (const entrada of readdirSync(dir, { withFileTypes: true })) {
+        if (!entrada.isDirectory()) continue;
+        if (entrada.name === "default") continue;
+        const tipo = existsSync(join(dir, entrada.name, ".opencorp")) ? "skeleton" : "pacote";
+        let descricao = "";
+        const tj = join(dir, entrada.name, "template.json");
+        if (existsSync(tj)) {
+          try {
+            const dados = JSON.parse(readFileSync(tj, "utf8")) as TemplateJson;
+            descricao = [dados.description, dados.version ? `v${dados.version}` : null, dados.author]
+              .filter((x) => Boolean(x))
+              .join(" · ");
+          } catch {
+            descricao = "(template.json inválido)";
+          }
         }
+        mapa.set(entrada.name, { id: entrada.name, tipo, descricao });
       }
-      saida.push({ id: entrada.name, tipo, descricao });
-    }
-    return saida.sort((a, b) => a.id.localeCompare(b.id));
+    };
+
+    // 1. Templates embutidos do repositório/instalação
+    escanearDir(this.templatesDir);
+    // 2. Templates customizados pelo usuário em ~/.opencorp/templates
+    escanearDir(this.dirUsuario());
+
+    return Array.from(mapa.values()).sort((a, b) => a.id.localeCompare(b.id));
   }
 
   async criar(idBruto: string): Promise<string> {

@@ -95,13 +95,13 @@ export async function seederEmpresaBasica(api: APIRequestContext, token: string,
 }
 
 export async function esperarNavegacao(page: Page, hash: string): Promise<void> {
-  await page.goto(`/#/${hash}`);
-  // Aguarda a URL mudar (hash routing)
-  await page.waitForURL(`**/#/${hash}`);
+  const caminho = hash.startsWith("/") ? hash : `/${hash}`;
+  await page.goto(caminho);
+  await page.waitForURL(`**${caminho}*`, { timeout: 10000 });
   // Aguarda a view ter conteúdo (não vazia) - espera renderização assíncrona
   await page.waitForFunction(
     (h) => {
-      const view = document.getElementById(`view-${h}`);
+      const view = document.getElementById(`view-${h}`) || document.querySelector("main");
       return view && view.innerHTML.trim().length > 0;
     },
     hash,

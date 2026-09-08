@@ -214,7 +214,8 @@ export const Topbar: Component = () => {
         {/* Central de Notificações com Badge */}
         <A
           href="/notificacoes"
-          class={`relative p-2 rounded-lg border transition-all flex items-center justify-center ${
+          data-view="notificacoes"
+          class={`nav-item relative p-2 rounded-lg border transition-all flex items-center justify-center ${
             location.pathname === "/notificacoes"
               ? "bg-zinc-800 border-zinc-700 text-zinc-100 shadow-xs"
               : "bg-zinc-900/60 border-zinc-800/80 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 hover:border-zinc-700"
@@ -223,7 +224,10 @@ export const Topbar: Component = () => {
         >
           <Bell size={15} />
           <Show when={notificacoesNaoLidas() > 0}>
-            <span class="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-zinc-950 ring-2 ring-zinc-950 animate-pulse">
+            <span
+              id="nav-badge-notificacoes"
+              class="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-zinc-950 ring-2 ring-zinc-950 animate-pulse"
+            >
               {notificacoesNaoLidas() > 99 ? "99+" : notificacoesNaoLidas()}
             </span>
           </Show>

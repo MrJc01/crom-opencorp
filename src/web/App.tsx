@@ -43,6 +43,15 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
     }
   });
 
+  // Suporte a links e testes com hash legado (ex: /#/notificacoes -> /notificacoes)
+  createEffect(() => {
+    const hash = window.location.hash;
+    if (hash && hash.startsWith("#/")) {
+      const rota = hash.slice(1);
+      navigate(rota, { replace: true });
+    }
+  });
+
   return (
     <div id="app" class="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased font-sans">
       <Show when={!autenticado()}>

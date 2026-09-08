@@ -1,5 +1,5 @@
 import { type Component, createSignal, onMount, For, Show } from "solid-js";
-import { FolderPlus, Folder, Upload, FileArchive, X, FileUp } from "lucide-solid";
+import { FolderPlus, Folder, Upload, FileArchive, X, FileUp, Video, Newspaper, Zap, Target, Sparkles } from "lucide-solid";
 import { Modal } from "../ui/Dialog";
 import { Button } from "../ui/Button";
 import { showToast } from "../ui/Toast";
@@ -214,23 +214,122 @@ export const NovoWorkspaceModal: Component<NovoWorkspaceModalProps> = (props) =>
           </div>
 
           <div>
-            <label class="block text-xs font-semibold text-zinc-300 mb-1">
-              Template Base
+            <label class="block text-xs font-semibold text-zinc-300 mb-2">
+              Escolha a Base Inicial do Workspace
             </label>
-            <select
-              value={template()}
-              onChange={(e) => setTemplate(e.currentTarget.value)}
-              class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/60 cursor-pointer"
-            >
-              <option value="default">Padrão (Empresa Completa com Agentes, Registros e Workflows)</option>
-              <For each={templatesDisponiveis().filter((t) => t.id !== "default")}>
-                {(t) => (
-                  <option value={t.id}>
-                    {t.id} {t.descricao ? `— ${t.descricao}` : ""}
-                  </option>
-                )}
-              </For>
-            </select>
+            <div class="grid grid-cols-2 gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => setTemplate("youtube-video-factory")}
+                class={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                  template() === "youtube-video-factory"
+                    ? "bg-red-950/40 border-red-500/60 ring-1 ring-red-500/40"
+                    : "bg-zinc-950 border-zinc-800/80 hover:border-zinc-700"
+                }`}
+              >
+                <div class="flex items-center gap-2 mb-1">
+                  <div class="p-1.5 rounded-lg bg-red-900/40 text-red-400">
+                    <Video size={14} />
+                  </div>
+                  <span class="text-xs font-semibold text-zinc-100">YouTube Factory</span>
+                </div>
+                <p class="text-[10px] text-zinc-400 line-clamp-2 leading-relaxed">
+                  Vídeos curtos, roteiros com retenção de 3s, voz local e player.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTemplate("portal-conteudo")}
+                class={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                  template() === "portal-conteudo"
+                    ? "bg-sky-950/40 border-sky-500/60 ring-1 ring-sky-500/40"
+                    : "bg-zinc-950 border-zinc-800/80 hover:border-zinc-700"
+                }`}
+              >
+                <div class="flex items-center gap-2 mb-1">
+                  <div class="p-1.5 rounded-lg bg-sky-900/40 text-sky-400">
+                    <Newspaper size={14} />
+                  </div>
+                  <span class="text-xs font-semibold text-zinc-100">Portal Conteúdo</span>
+                </div>
+                <p class="text-[10px] text-zinc-400 line-clamp-2 leading-relaxed">
+                  Artigos técnicos, SEO, fact-checking e Analytics SQLite local.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTemplate("micro-saas")}
+                class={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                  template() === "micro-saas"
+                    ? "bg-emerald-950/40 border-emerald-500/60 ring-1 ring-emerald-500/40"
+                    : "bg-zinc-950 border-zinc-800/80 hover:border-zinc-700"
+                }`}
+              >
+                <div class="flex items-center gap-2 mb-1">
+                  <div class="p-1.5 rounded-lg bg-emerald-900/40 text-emerald-400">
+                    <Zap size={14} />
+                  </div>
+                  <span class="text-xs font-semibold text-zinc-100">Micro-SaaS Uptime</span>
+                </div>
+                <p class="text-[10px] text-zinc-400 line-clamp-2 leading-relaxed">
+                  Monitoramento contínuo, telemetria SQLite WAL e status page.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTemplate("automacao-radar")}
+                class={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                  template() === "automacao-radar"
+                    ? "bg-amber-950/40 border-amber-500/60 ring-1 ring-amber-500/40"
+                    : "bg-zinc-950 border-zinc-800/80 hover:border-zinc-700"
+                }`}
+              >
+                <div class="flex items-center gap-2 mb-1">
+                  <div class="p-1.5 rounded-lg bg-amber-900/40 text-amber-400">
+                    <Target size={14} />
+                  </div>
+                  <span class="text-xs font-semibold text-zinc-100">Radar & Oportunidades</span>
+                </div>
+                <p class="text-[10px] text-zinc-400 line-clamp-2 leading-relaxed">
+                  Scraping de oportunidades, leads B2B e scoring 0 a 100.
+                </p>
+              </button>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setTemplate("default")}
+                class={`py-1.5 px-3 rounded-lg border text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                  template() === "default"
+                    ? "bg-zinc-800 border-zinc-600 text-zinc-100 font-medium"
+                    : "bg-zinc-950 border-zinc-850 text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <Sparkles size={12} class="text-zinc-400" />
+                <span>Em Branco / Base Padrão</span>
+              </button>
+
+              <Show when={templatesDisponiveis().length > 0}>
+                <select
+                  value={template()}
+                  onChange={(e) => setTemplate(e.currentTarget.value)}
+                  class="bg-zinc-950 border border-zinc-800/80 rounded-lg px-2 py-1 text-[11px] text-zinc-400 focus:outline-none cursor-pointer flex-1"
+                >
+                  <option value={template()}>Base selecionada: {template()}</option>
+                  <For each={templatesDisponiveis()}>
+                    {(t) => (
+                      <option value={t.id}>
+                        {t.id} {t.descricao ? `— ${t.descricao}` : ""}
+                      </option>
+                    )}
+                  </For>
+                </select>
+              </Show>
+            </div>
           </div>
 
           <div class="pt-3 border-t border-zinc-800/80 flex items-center justify-end gap-2">

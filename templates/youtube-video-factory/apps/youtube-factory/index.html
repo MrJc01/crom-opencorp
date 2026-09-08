@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Video Factory · Estúdio Autônomo</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(15, 23, 42, 0.75);
+      --card-border: rgba(56, 189, 248, 0.15);
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.3);
+      --highlight: #facc15;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --success: #22c55e;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body {
+      background: radial-gradient(circle at 10% 20%, #0f172a 0%, #020617 90%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 1.25rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--card-border);
+      backdrop-filter: blur(12px);
+      background: rgba(9, 13, 22, 0.8);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 800;
+      font-size: 1.2rem;
+      letter-spacing: -0.5px;
+    }
+    .logo-badge {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: white;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 900;
+    }
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 4px;
+      border-radius: 12px;
+      border: 1px solid var(--card-border);
+    }
+    .nav-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .nav-btn.active, .nav-btn:hover {
+      background: var(--accent);
+      color: #090d16;
+    }
+    main {
+      flex: 1;
+      padding: 2rem;
+      max-width: 1300px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Grid do Estúdio */
+    .studio-grid {
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      gap: 24px;
+    }
+    .player-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .video-viewport {
+      width: 100%;
+      max-width: 320px;
+      aspect-ratio: 9/16;
+      background: #000;
+      border-radius: 12px;
+      border: 2px solid rgba(255,255,255,0.1);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 16px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.8);
+    }
+    .captions-box {
+      background: rgba(0,0,0,0.75);
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+      font-size: 0.95rem;
+      font-weight: 800;
+      color: var(--highlight);
+      text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+    .video-controls {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+      margin-top: 16px;
+    }
+    .btn {
+      flex: 1;
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #090d16;
+    }
+    .btn-primary:hover {
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+    .meta-panel {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      backdrop-filter: blur(16px);
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+      margin-right: 6px;
+    }
+    .badge-success {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--success);
+    }
+    .pautas-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+    }
+    .pautas-table th, .pautas-table td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .pautas-table th { color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; }
+    .evolution-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-left: 4px solid var(--accent);
+      padding: 1rem 1.25rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <div class="logo-badge">PROD</div>
+      <span>YouTube Video Factory</span>
+      <span class="badge badge-success">Autônomo Nível 5</span>
+    </div>
+    <div class="nav-tabs">
+      <button class="nav-btn active" onclick="switchTab('studio')">Estúdio & Vídeos</button>
+      <button class="nav-btn" onclick="switchTab('pautas')">Banco de 30 Pautas</button>
+      <button class="nav-btn" onclick="switchTab('brand')">Identidade & Retenção</button>
+      <button class="nav-btn" onclick="switchTab('auto-evo')">Auto-Evolução</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- TAB 1: ESTÚDIO & VÍDEO -->
+    <div id="tab-studio" class="tab-content active">
+      <div class="studio-grid">
+        <div class="player-card">
+          <div class="video-viewport" id="viewport">
+            <div style="position: absolute; top: 16px; left: 16px; font-size: 0.75rem; background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 4px;">
+              ⏱ 00:03 / 00:48
+            </div>
+            <div class="captions-box" id="captionText">
+              "COMO UMA LINHA DE CÓDIGO CUSTOU 4 BILHÕES DE DÓLARES?"
+            </div>
+          </div>
+          <div class="video-controls">
+            <button class="btn btn-primary" onclick="simulatePlay()">▶ Reproduzir Demonstração</button>
+            <button class="btn" style="background: rgba(255,255,255,0.1); color: #fff;" onclick="alert('Pacote completo em exports/videos/')">📁 Abrir Pasta</button>
+          </div>
+        </div>
+
+        <div class="meta-panel">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+              <span class="badge">Shorts 9:16</span>
+              <span class="badge badge-success">Renderizado</span>
+              <h2 style="margin: 8px 0 4px; font-size: 1.4rem;">O bug de 1 caractere que derrubou a internet 🤯</h2>
+              <p style="color: var(--text-muted); font-size: 0.9rem;">Pauta #001 · Roteiro otimizado para retenção e engajamento mobile</p>
+            </div>
+          </div>
+
+          <div style="margin-top: 1.5rem; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 1rem;">
+            <h4 style="font-size: 0.85rem; color: var(--accent); margin-bottom: 8px; text-transform: uppercase;">Metadados de Publicação (SEO)</h4>
+            <p style="font-size: 0.85rem; line-height: 1.6; color: #cbd5e1;">
+              <strong>Título A (Mistério):</strong> O bug de 1 caractere que derrubou a internet (Revelado)<br>
+              <strong>Título B (Benefício):</strong> Como uma linha de código custou 4 bilhões de dólares?<br>
+              <strong>Tags:</strong> #tecnologia, #programação, #curiosidades, #engenharia, #shorts
+            </p>
+          </div>
+
+          <div style="margin-top: 1.5rem;">
+            <h4 style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase;">Estrutura do Roteiro (Retenção 3s)</h4>
+            <div style="display: flex; gap: 8px; font-size: 0.8rem;">
+              <div style="background: rgba(56, 189, 248, 0.1); padding: 8px 12px; border-radius: 6px; flex: 1;">
+                <strong style="color: var(--accent);">00s-03s (Hook)</strong><br>Quebra instantânea de padrão
+              </div>
+              <div style="background: rgba(255, 255, 255, 0.05); padding: 8px 12px; border-radius: 6px; flex: 1;">
+                <strong>03s-15s (Enigma)</strong><br>Colapso e tensão
+              </div>
+              <div style="background: rgba(255, 255, 255, 0.05); padding: 8px 12px; border-radius: 6px; flex: 1;">
+                <strong>15s-35s (Clímax)</strong><br>A revelação real
+              </div>
+              <div style="background: rgba(250, 204, 21, 0.1); padding: 8px 12px; border-radius: 6px; flex: 1;">
+                <strong style="color: var(--highlight);">35s-48s (CTA)</strong><br>Curta e siga
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: BANCO DE PAUTAS -->
+    <div id="tab-pautas" class="tab-content">
+      <div class="meta-panel">
+        <h3>Banco de 30 Pautas Validadas (Setup Inicial Day 0)</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 4px;">Pautas pesquisadas autonomamente e ordenadas por potencial de clique e CTR.</p>
+        
+        <table class="pautas-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Título / Premissa</th>
+              <th>Gancho de Abertura (0 a 3s)</th>
+              <th>Categoria</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>01</td>
+              <td><strong>O bug de 1 caractere que derrubou a internet</strong></td>
+              <td>Como uma linha de código custou 4 bilhões de dólares?</td>
+              <td>Erros Históricos</td>
+              <td><span class="badge badge-success">Concluído</span></td>
+            </tr>
+            <tr>
+              <td>02</td>
+              <td><strong>Por que aviões ainda usam disquetes em 2026?</strong></td>
+              <td>O segredo de segurança dos jatos que ninguém conta.</td>
+              <td>Engenharia</td>
+              <td><span class="badge">Próximo da Fila</span></td>
+            </tr>
+            <tr>
+              <td>03</td>
+              <td><strong>O experimento de IA que os cientistas desligaram</strong></td>
+              <td>Quando duas máquinas criaram seu próprio idioma.</td>
+              <td>Inteligência Artificial</td>
+              <td><span class="badge">Validado</span></td>
+            </tr>
+            <tr>
+              <td>04</td>
+              <td><strong>Como cabos submarinos aguentam tubarões</strong></td>
+              <td>99% da internet passa por cabos de 7 centímetros.</td>
+              <td>Infraestrutura</td>
+              <td><span class="badge">Validado</span></td>
+            </tr>
+            <tr>
+              <td>05</td>
+              <td><strong>A senha protegida em 7 chaves físicas</strong></td>
+              <td>As 7 pessoas que reiniciam a internet se tudo quebrar.</td>
+              <td>Criptografia</td>
+              <td><span class="badge">Validado</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TAB 3: IDENTIDADE E RETENÇÃO -->
+    <div id="tab-brand" class="tab-content">
+      <div class="meta-panel">
+        <h3>Identidade Estratégica & Brand Kit</h3>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 1.5rem;">
+          <div>
+            <h4 style="color: var(--accent); margin-bottom: 8px;">Diretrizes do Canal</h4>
+            <p style="font-size: 0.9rem; line-height: 1.6; color: #cbd5e1;">
+              <strong>Nome:</strong> Curiosidades & Fronteiras Tech<br>
+              <strong>Nicho:</strong> Mistérios da Ciência e Engenharia da Computação<br>
+              <strong>Tom de Voz:</strong> Investigativo, acelerado, didático e sem enrolação<br>
+              <strong>Resolução Alvo:</strong> 1080x1920 (Shorts) e 1920x1080 (Longs)
+            </p>
+          </div>
+          <div>
+            <h4 style="color: var(--highlight); margin-bottom: 8px;">A Regra dos 3 Segundos</h4>
+            <p style="font-size: 0.9rem; line-height: 1.6; color: #cbd5e1;">
+              Nunca cumprimente o espectador nos primeiros momentos. Lance uma premissa irresistível no instante 00:00:00 para prender o scroll e elevar a retenção acima de 85%.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: AUTO-EVOLUÇÃO -->
+    <div id="tab-auto-evo" class="tab-content">
+      <div class="meta-panel">
+        <h3>Histórico de Auto-Melhoria Contínua dos Agentes</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 4px; margin-bottom: 1.5rem;">
+          Regras injetadas autonomamente nas diretrizes dos agentes com base em auditorias de retenção:
+        </p>
+
+        <div class="evolution-card">
+          <div style="display: flex; justify-content: space-between;">
+            <strong style="color: var(--accent);">Regra de Auto-Evolução V2 (Retenção Mobile)</strong>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">Injetado em roteirista-video.md</span>
+          </div>
+          <p style="font-size: 0.85rem; color: #e2e8f0; margin-top: 6px;">
+            "O gancho inicial nos primeiros 3s deve cortar silêncios antes e depois da frase e encadear a pergunta com a Cena 2 com no máximo 150ms de intervalo para reter 85%+ da audiência mobile."
+          </p>
+        </div>
+
+        <div class="evolution-card" style="border-left-color: var(--highlight);">
+          <div style="display: flex; justify-content: space-between;">
+            <strong style="color: var(--highlight);">Regra de Auto-Evolução V1 (Contraste de Legendas)</strong>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">Injetado em produtor-video.md</span>
+          </div>
+          <p style="font-size: 0.85rem; color: #e2e8f0; margin-top: 6px;">
+            "Legendas SRT devem usar fonte de alto contraste (#FACC15 sobre fundo escuro com sombra preta) para garantir 100% de legibilidade em telas pequenas sob luz solar."
+          </p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById('tab-' + tabId).classList.add('active');
+      event.target.classList.add('active');
+    }
+
+    function simulatePlay() {
+      const texts = [
+        "COMO UMA LINHA DE CÓDIGO CUSTOU 4 BILHÕES DE DÓLARES?",
+        "EM 10 MINUTOS, 40 PAÍSES FICARAM SEM INTERNET.",
+        "ENGENHEIROS PROCURAVAM POR ATAQUES OU VÍRUS...",
+        "MAS ERA APENAS UM LOOP ESQUECIDO DE 2012.",
+        "CURTA E SIGA PARA OS PRÓXIMOS MISTÉRIOS!"
+      ];
+      let i = 0;
+      const el = document.getElementById('captionText');
+      const interval = setInterval(() => {
+        i++;
+        if (i < texts.length) {
+          el.innerText = `"${texts[i]}"`;
+        } else {
+          clearInterval(interval);
+          el.innerText = `"${texts[0]}"`;
+        }
+      }, 1400);
+    }
+  </script>
+</body>
+</html>

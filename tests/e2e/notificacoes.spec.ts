@@ -30,7 +30,7 @@ test.describe("Notificações", () => {
     await esperarNavegacao(page, "home");
 
     await page.click('.nav-item[data-view="notificacoes"]');
-    await page.waitForURL("**/#/notificacoes");
+    await page.waitForURL(/\/notificacoes/);
     await esperarNavegacao(page, "notificacoes");
 
     await expect(page.locator(".not-card")).toHaveCount(2, { timeout: 10000 });

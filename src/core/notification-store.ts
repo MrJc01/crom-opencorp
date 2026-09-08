@@ -7,6 +7,15 @@ import { eventBus } from "./event-bus.js";
 
 export type TipoNotificacao = "resumo" | "aviso" | "erro" | "info";
 
+export interface AcaoNotificacao {
+  label: string;
+  tipo?: "link" | "api" | "hitl";
+  url?: string;
+  endpoint?: string;
+  metodo?: "GET" | "POST";
+  corpo?: Record<string, unknown>;
+}
+
 export interface Notificacao {
   id: string;
   titulo: string;
@@ -15,6 +24,9 @@ export interface Notificacao {
   origem: string;
   lida: boolean;
   criado_em: string;
+  atualizado_em?: string;
+  acoes?: AcaoNotificacao[];
+  repeticoes?: number;
 }
 
 export interface EntradaNotificacao {
@@ -22,6 +34,7 @@ export interface EntradaNotificacao {
   corpo: string;
   tipo?: TipoNotificacao;
   origem?: string;
+  acoes?: AcaoNotificacao[];
 }
 
 export interface OpcoesNotificacaoStore {
@@ -87,14 +100,38 @@ export class NotificationStore {
       throw new NotificationError(`tipo inválido: "${String(tipo)}" — use resumo|aviso|erro|info`, { status: 422 });
     }
     const lista = this.ler(wsPath);
+    const agoraStr = this.agora().toISOString();
+    const origem = String(entrada.origem ?? "painel");
+
+    // Deduplicação inteligente: Se a última notificação tiver o mesmo título e mesma origem nos últimos 10min
+    const repetida = lista.slice(-5).reverse().find((item) => item.titulo === titulo && item.origem === origem);
+    if (repetida) {
+      repetida.repeticoes = (repetida.repeticoes ?? 1) + 1;
+      repetida.corpo = corpo;
+      repetida.atualizado_em = agoraStr;
+      repetida.lida = false; // Reabre como não lida
+      if (entrada.acoes) repetida.acoes = entrada.acoes;
+      await this.salvar(wsPath, lista);
+      eventBus.emit("notificacao.nova", {
+        id: repetida.id,
+        titulo: repetida.titulo,
+        tipo: repetida.tipo,
+        origem: repetida.origem,
+        workspace: wsPath,
+      });
+      return repetida;
+    }
+
     const n: Notificacao = {
       id: `not-${Date.now().toString(36)}${randomBytes(3).toString("hex")}`,
       titulo,
       corpo,
       tipo,
-      origem: String(entrada.origem ?? "painel"),
+      origem,
       lida: false,
-      criado_em: this.agora().toISOString(),
+      criado_em: agoraStr,
+      ...(entrada.acoes && entrada.acoes.length > 0 ? { acoes: entrada.acoes } : {}),
+      repeticoes: 1,
     };
     lista.push(n);
     // FIFO: estourou o cap → descarta as mais antigas

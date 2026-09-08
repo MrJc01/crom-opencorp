@@ -1,0 +1,52 @@
+[
+  {
+    "id": "tsk-setup-radar-01-criterios",
+    "titulo": "[SETUP] Definição dos Critérios de Filtro e ICP",
+    "descricao": "Estabelecer palavras-chave prioritárias (ex: IA Generativa, Cloud, Contratos Públicos, Leads B2B) e filtros de exclusão em registries/criterios.json.",
+    "coluna": "backlog",
+    "pos": 1,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "radar", "filtros"],
+    "responsavel": "agente:analista-radar"
+  },
+  {
+    "id": "tsk-setup-radar-02-fontes-dados",
+    "titulo": "[SETUP] Mapeamento de Fontes Confiáveis e APIs Públicas",
+    "descricao": "Cadastrar URLs públicas, feeds RSS e portais abertos de dados para mineração contínua sem necessidade de contas pagas.",
+    "coluna": "backlog",
+    "pos": 2,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "fontes", "mineracao"],
+    "responsavel": "agente:minerador-dados"
+  },
+  {
+    "id": "tsk-setup-radar-03-scoring-regras",
+    "titulo": "[SETUP] Matriz de Pontuação e Relevância (Score 0 a 100)",
+    "descricao": "Criar a fórmula de pontuação de oportunidades em docs/matriz_scoring.md baseada em margem estimada, aderência técnica e prazo de resposta.",
+    "coluna": "backlog",
+    "pos": 3,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "scoring", "qualidade"],
+    "responsavel": "agente:curador-qualidade"
+  },
+  {
+    "id": "tsk-setup-radar-04-banco-inicial",
+    "titulo": "[SETUP] Banco Inicial de 30 Oportunidades Mapeadas",
+    "descricao": "Registrar em registries/oportunidades.json as primeiras 30 oportunidades pré-classificadas com score e status de triagem.",
+    "coluna": "backlog",
+    "pos": 4,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "oportunidades", "banco-dados"],
+    "responsavel": "agente:analista-radar"
+  },
+  {
+    "id": "tsk-setup-radar-05-painel-radar",
+    "titulo": "[SETUP] Calibração da Tabela e Exportação CSV",
+    "descricao": "Configurar o Mini-App interativo (apps/radar-oportunidades/index.html) para triagem rápida e download direto em formato CSV/JSON.",
+    "coluna": "backlog",
+    "pos": 5,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "mini-app", "exportacao"],
+    "responsavel": "agente:analista-radar"
+  }
+]

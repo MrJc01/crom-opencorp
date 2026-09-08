@@ -1,0 +1,52 @@
+[
+  {
+    "id": "tsk-setup-portal-01-editorial",
+    "titulo": "[SETUP] Definição da Linha Editorial e Tom de Voz",
+    "descricao": "Definir público-alvo, premissas de clareza, tom de voz (jornalístico, prático e fundamentado) e limites éticos para geração de artigos. Salvar em registries/editorial.json.",
+    "coluna": "backlog",
+    "pos": 1,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "editorial", "portal"],
+    "responsavel": "agente:pautador-editorial"
+  },
+  {
+    "id": "tsk-setup-portal-02-taxonomia",
+    "titulo": "[SETUP] Estruturação das Categorias e Taxonomia",
+    "descricao": "Mapear as 5 editorias centrais (ex: Inteligência Artificial, Engenharia de Software, Open Source, Infraestrutura e Casos Reais) e criar as regras de tags.",
+    "coluna": "backlog",
+    "pos": 2,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "taxonomia", "seo"],
+    "responsavel": "agente:pautador-editorial"
+  },
+  {
+    "id": "tsk-setup-portal-03-manual-qualidade",
+    "titulo": "[SETUP] Manual de Redação e Fact-Checking",
+    "descricao": "Elaborar o manual de redação (docs/manual_redacao.md) contendo exigência de métricas quantitativas, obrigatoriedade de links de fontes confiáveis e proibição de clichês.",
+    "coluna": "backlog",
+    "pos": 3,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "redacao", "qualidade"],
+    "responsavel": "agente:auditor-factcheck"
+  },
+  {
+    "id": "tsk-setup-portal-04-banco-pautas",
+    "titulo": "[SETUP] Banco Inicial de 30 Pautas Editoriais",
+    "descricao": "Pesquisar e registrar em registries/pautas.json os primeiros 30 temas de matérias estruturados com tese central, perguntas a responder e fontes primárias recomendadas.",
+    "coluna": "backlog",
+    "pos": 4,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "pautas", "banco-conteudo"],
+    "responsavel": "agente:pautador-editorial"
+  },
+  {
+    "id": "tsk-setup-portal-05-analytics-local",
+    "titulo": "[SETUP] Configuração do Analytics Local Embutido (Zero GA4)",
+    "descricao": "Estruturar o banco SQLite de telemetria local (registries/analytics.db) para contabilizar visualizações, tempo de leitura e cliques por artigo sem depender de contas externas.",
+    "coluna": "backlog",
+    "pos": 5,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "analytics", "sqlite"],
+    "responsavel": "agente:redator-artigo"
+  }
+]

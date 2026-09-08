@@ -1,7 +1,8 @@
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
 import { z } from "zod";
 import { AgentStore, type AgenteResumo } from "./agent-store.js";
 import { WorkspaceError } from "./errors.js";
@@ -213,8 +214,8 @@ export class WorkspaceManager {
     }
     const template = opts.template ?? "default";
     const templateDir = this.resolverTemplateDir(template);
-    const ehPacote =
-      existsSync(join(templateDir, "template.json")) || existsSync(join(templateDir, "agents"));
+    const temOpencorp = existsSync(join(templateDir, ".opencorp"));
+    const ehPacote = !temOpencorp && (existsSync(join(templateDir, "template.json")) || existsSync(join(templateDir, "agents")));
     const skeletonDir = ehPacote ? join(this.templatesDir, "default") : templateDir;
     const estado = await this.lerEstado();
     if (estado.workspaces.some((w) => w.id === id)) {
@@ -278,8 +279,89 @@ export class WorkspaceManager {
       if (ehPacote) {
         await this.aplicarPacote(destino, templateDir);
       }
+
+      // Garante resolução de dependências compartilhadas (ex: better-sqlite3) criando symlink para node_modules da raiz
+      const repoNodeModules = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "node_modules");
+      const destNodeModules = join(destino, "node_modules");
+      if (existsSync(repoNodeModules) && !existsSync(destNodeModules)) {
+        try {
+          symlinkSync(repoNodeModules, destNodeModules, "junction");
+        } catch {
+          // Permissão ou filesystem não suporta symlink
+        }
+      }
+
       await this.registros.garantirCategorias(destino);
       await this.registros.reindexar(destino);
+
+      // Se houver tarefas_iniciais.json no destino, popula automaticamente no tasks.db
+      const tarefasJsonPath = join(destino, "tarefas_iniciais.json");
+      if (existsSync(tarefasJsonPath)) {
+        try {
+          const raw = readFileSync(tarefasJsonPath, "utf8");
+          const tarefas = JSON.parse(raw);
+          if (Array.isArray(tarefas) && tarefas.length > 0) {
+            const dbDir = join(destino, ".opencorp");
+            mkdirSync(dbDir, { recursive: true });
+            const db = new Database(join(dbDir, "tasks.db"));
+            db.pragma("journal_mode = WAL");
+            db.exec(`
+              CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                titulo TEXT NOT NULL,
+                descricao TEXT NOT NULL DEFAULT '',
+                coluna TEXT NOT NULL DEFAULT 'backlog',
+                pos REAL NOT NULL DEFAULT 0,
+                prioridade TEXT NOT NULL DEFAULT 'media',
+                labels TEXT NOT NULL DEFAULT '',
+                responsavel TEXT NOT NULL DEFAULT '',
+                due TEXT,
+                task_pai TEXT,
+                bloqueado_por TEXT NOT NULL DEFAULT '',
+                lock_por TEXT,
+                lock_expira TEXT,
+                criado_por TEXT NOT NULL DEFAULT 'sistema:template',
+                criado_em TEXT NOT NULL,
+                atualizado_em TEXT NOT NULL
+              );
+            `);
+            const insert = db.prepare(`
+              INSERT OR IGNORE INTO tasks (
+                id, titulo, descricao, coluna, pos, prioridade, labels, responsavel,
+                due, task_pai, bloqueado_por, lock_por, lock_expira, criado_por, criado_em, atualizado_em
+              ) VALUES (
+                @id, @titulo, @descricao, @coluna, @pos, @prioridade, @labels, @responsavel,
+                @due, @task_pai, @bloqueado_por, @lock_por, @lock_expira, @criado_por, @criado_em, @atualizado_em
+              )
+            `);
+            const agora = new Date().toISOString();
+            for (const t of tarefas) {
+              insert.run({
+                id: t.id || `tsk-setup-${randomUUID()}`,
+                titulo: t.titulo || "Tarefa Inicial de Setup",
+                descricao: t.descricao || "",
+                coluna: t.coluna || "backlog",
+                pos: t.pos ?? 10,
+                prioridade: t.prioridade || "alta",
+                labels: Array.isArray(t.labels) ? t.labels.join(",") : (t.labels || "setup-inicial"),
+                responsavel: t.responsavel || "agente:executor-padrao",
+                due: t.due || null,
+                task_pai: t.task_pai || null,
+                bloqueado_por: Array.isArray(t.bloqueado_por) ? t.bloqueado_por.join(",") : "",
+                lock_por: null,
+                lock_expira: null,
+                criado_por: "sistema:template",
+                criado_em: agora,
+                atualizado_em: agora,
+              });
+            }
+            db.close();
+          }
+        } catch {
+          // Não bloqueia a criação do workspace caso o json esteja corrompido
+        }
+      }
+
       await this.gravarEstado({
         version: 1,
         ativo,
@@ -318,13 +400,25 @@ export class WorkspaceManager {
   private async aplicarPacote(destino: string, pkgDir: string): Promise<void> {
     const origemAgents = join(pkgDir, "agents");
     const origemRegistries = join(pkgDir, "registries");
+    const origemScripts = join(pkgDir, "scripts");
+    const origemApps = join(pkgDir, "apps");
+    const origemTarefas = join(pkgDir, "tarefas_iniciais.json");
     if (existsSync(origemAgents)) {
       cpSync(origemAgents, join(destino, ".opencorp", "agents"), { recursive: true });
     }
     if (existsSync(origemRegistries)) {
       cpSync(origemRegistries, join(destino, ".opencorp", "registries"), { recursive: true });
     }
-    for (const arquivo of ["config.json", "security_policy.json"]) {
+    if (existsSync(origemScripts)) {
+      cpSync(origemScripts, join(destino, "scripts"), { recursive: true });
+    }
+    if (existsSync(origemApps)) {
+      cpSync(origemApps, join(destino, "apps"), { recursive: true });
+    }
+    if (existsSync(origemTarefas)) {
+      copyFileSync(origemTarefas, join(destino, "tarefas_iniciais.json"));
+    }
+    for (const arquivo of ["config.json", "security_policy.json", "budget.json"]) {
       const origem = join(pkgDir, arquivo);
       if (existsSync(origem)) {
         copyFileSync(origem, join(destino, ".opencorp", arquivo));

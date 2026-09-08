@@ -1,0 +1,52 @@
+[
+  {
+    "id": "tsk-setup-saas-01-catalogo",
+    "titulo": "[SETUP] Mapeamento dos Endpoints e Serviços Alvo",
+    "descricao": "Cadastrar a lista inicial de URLs, portas locais e serviços a serem monitorados em registries/servicos_alvo.json com método HTTP e intervalo de verificação.",
+    "coluna": "backlog",
+    "pos": 1,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "sre", "monitoramento"],
+    "responsavel": "agente:arquiteto-sre"
+  },
+  {
+    "id": "tsk-setup-saas-02-slas-thresholds",
+    "titulo": "[SETUP] Definição de SLAs e Limiares de Alerta",
+    "descricao": "Configurar thresholds de latência tolerável (< 500ms normal, > 1500ms aviso, timeout > 5000ms crítico) e taxa de uptime mínima de 99.9%.",
+    "coluna": "backlog",
+    "pos": 2,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "slas", "alertas"],
+    "responsavel": "agente:sentinela-uptime"
+  },
+  {
+    "id": "tsk-setup-saas-03-banco-telemetria",
+    "titulo": "[SETUP] Inicialização da Base SQLite de Telemetria",
+    "descricao": "Criar as tabelas de pings, incidentes e métricas agregadas em registries/telemetria.db com modo WAL ativado para alta concorrência.",
+    "coluna": "backlog",
+    "pos": 3,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "sqlite", "dados"],
+    "responsavel": "agente:analista-metricas"
+  },
+  {
+    "id": "tsk-setup-saas-04-dashboard-app",
+    "titulo": "[SETUP] Configuração do Status Page Público",
+    "descricao": "Calibrar o Mini-App do dashboard (apps/uptime-pulse/index.html) para exibir métricas em tempo real e status verde/amarelo/vermelho sem dependência de SaaS pago.",
+    "coluna": "backlog",
+    "pos": 4,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "mini-app", "ui"],
+    "responsavel": "agente:arquiteto-sre"
+  },
+  {
+    "id": "tsk-setup-saas-05-regras-contingencia",
+    "titulo": "[SETUP] Regras de Self-Healing e Contingência",
+    "descricao": "Mapear procedimentos de recuperação automática (reiniciar processo, limpar conexões presas) em docs/contingencia.md.",
+    "coluna": "backlog",
+    "pos": 5,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "self-healing", "sre"],
+    "responsavel": "agente:arquiteto-sre"
+  }
+]

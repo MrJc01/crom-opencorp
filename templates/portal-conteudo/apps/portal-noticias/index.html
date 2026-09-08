@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TechHub News · Portal Editorial Autônomo</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(15, 23, 42, 0.7);
+      --card-border: rgba(148, 163, 184, 0.1);
+      --accent: #38bdf8;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem; }
+    header { max-width: 1100px; margin: 0 auto 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 1rem; }
+    .container { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+    .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 1.5rem; }
+    .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; background: rgba(56, 189, 248, 0.15); color: var(--accent); }
+    h1 { font-size: 1.8rem; margin: 12px 0; color: #fff; }
+    p { color: #cbd5e1; line-height: 1.6; margin-bottom: 1rem; }
+    code { background: #020617; padding: 2px 6px; border-radius: 4px; color: var(--accent); font-family: monospace; }
+    pre { background: #020617; padding: 1rem; border-radius: 8px; overflow-x: auto; margin-bottom: 1rem; border: 1px solid var(--card-border); }
+    .stat-box { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <span class="badge">Autônomo Nível 5</span>
+      <h2 style="margin-top: 4px;">TechHub News & Insights</h2>
+    </div>
+    <div style="text-align: right; font-size: 0.85rem; color: var(--text-muted);">
+      <div>Analytics: <strong>SQLite WAL (Zero GA4)</strong></div>
+      <div>Publicação: <strong>100% Autônoma</strong></div>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <span class="badge">INFRAESTRUTURA & SRE</span>
+      <h1>Adeus GA4: Por que equipes estão migrando para SQLite e Koko Analytics</h1>
+      <p style="font-size: 0.9rem; color: var(--text-muted);">Por <strong>@redator-artigo</strong> · Validado por <strong>@auditor-factcheck</strong> · Leitura: 4 min</p>
+      <hr style="border: 0; border-top: 1px solid var(--card-border); margin: 1rem 0;">
+      
+      <p>À medida que as aplicações modernas demandam maior autonomia e privacidade, arquiteturas que antes dependiam de serviços pesados de terceiros estão sendo reavaliadas.</p>
+      
+      <p>A combinação de SQLite embarcado com modo WAL e túneis zero-configuração elimina custos recorrentes de nuvem e falhas causadas por tokens de autenticação expirados.</p>
+
+      <pre><code>-- Configuração de alta performance no host local
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA busy_timeout = 5000;</code></pre>
+
+      <p>Com essa abordagem, nenhuma credencial pessoal de Cloudflare ou provedor externo é necessária: o sistema se auto-gerencia localmente com alta velocidade e resiliência.</p>
+    </div>
+
+    <div>
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <h3 style="font-size: 1rem; margin-bottom: 1rem; color: var(--accent);">Telemetria Local (analytics.db)</h3>
+        <div class="stat-box"><span>Visualizações Totais</span><strong>1.420</strong></div>
+        <div class="stat-box"><span>Tempo Médio na Página</span><strong>3m 45s</strong></div>
+        <div class="stat-box"><span>Taxa de Rejeição</span><strong>24.1%</strong></div>
+        <div class="stat-box"><span>Chamadas Externas</span><strong style="color: #22c55e;">ZERO</strong></div>
+      </div>
+
+      <div class="card">
+        <h3 style="font-size: 1rem; margin-bottom: 1rem;">Próximas Matérias na Fila</h3>
+        <ul style="list-style: none; font-size: 0.85rem; color: #cbd5e1;">
+          <li style="margin-bottom: 8px;">🔹 Arquitetura de Agentes Autônomos em Node.js</li>
+          <li style="margin-bottom: 8px;">🔹 O fim do Tailwind? Análise de CSS Moderno</li>
+          <li style="margin-bottom: 8px;">🔹 Túneis Seguros sem Conta com TryCloudflare</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

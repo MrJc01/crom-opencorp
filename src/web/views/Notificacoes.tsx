@@ -103,7 +103,7 @@ export const NotificacoesView: Component = () => {
   };
 
   return (
-    <div class="flex flex-col h-full w-full overflow-hidden p-6 space-y-4 bg-zinc-950">
+    <div id="view-notificacoes" class="flex flex-col h-full w-full overflow-hidden p-6 space-y-4 bg-zinc-950">
       {/* Header */}
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-zinc-800">
         <div>
@@ -124,6 +124,7 @@ export const NotificacoesView: Component = () => {
           {/* Tabs Filtro com URL State */}
           <div class="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-0.5 text-xs">
             <button
+              id="not-filtro-todas"
               onClick={() => setSearchParams({ filtro: "todas" })}
               class={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
                 filtroAba() === "todas" ? "bg-zinc-800 text-zinc-100 font-semibold" : "text-zinc-400 hover:text-zinc-200"
@@ -132,6 +133,7 @@ export const NotificacoesView: Component = () => {
               Todas ({notificacoes().length})
             </button>
             <button
+              id="not-filtro-nao-lidas"
               onClick={() => setSearchParams({ filtro: "nao_lidas" })}
               class={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
                 filtroAba() === "nao_lidas" ? "bg-zinc-800 text-zinc-100 font-semibold" : "text-zinc-400 hover:text-zinc-200"
@@ -152,7 +154,7 @@ export const NotificacoesView: Component = () => {
             onClick={marcarTodasLidas}
             title="Marcar todas as mensagens como lidas"
           >
-            <CheckCheck size={14} class="mr-1.5" /> Marcar lidas
+            <CheckCheck size={14} class="mr-1.5" /> Marcar todas como lidas
           </Button>
 
           <IconButton
@@ -186,10 +188,11 @@ export const NotificacoesView: Component = () => {
 
               return (
                 <div
-                  class={`p-4 rounded-xl border flex items-start justify-between gap-4 transition-all shadow-xs ${
+                  data-not-id={n.id}
+                  class={`not-card p-4 rounded-xl border flex items-start justify-between gap-4 transition-all shadow-xs ${
                     naoLida
-                      ? "bg-zinc-900/90 border-emerald-500/30 hover:border-emerald-500/50"
-                      : "bg-zinc-950/40 border-zinc-900 opacity-70 hover:opacity-90"
+                      ? "nao-lida bg-zinc-900/90 border-emerald-500/30 hover:border-emerald-500/50"
+                      : "lida bg-zinc-950/40 border-zinc-900 opacity-70 hover:opacity-90"
                   }`}
                 >
                   <div class="flex items-start gap-3.5 min-w-0">
@@ -198,6 +201,11 @@ export const NotificacoesView: Component = () => {
                     <div class="space-y-1.5 min-w-0">
                       <div class="flex items-center gap-2 flex-wrap">
                         <span class="font-bold text-xs text-zinc-100">{n.titulo}</span>
+                        <Show when={n.repeticoes && n.repeticoes > 1}>
+                          <span class="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded text-[10px] font-bold">
+                            x{n.repeticoes}
+                          </span>
+                        </Show>
                         <Show when={naoLida}>
                           <span class="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                         </Show>
@@ -209,6 +217,36 @@ export const NotificacoesView: Component = () => {
                       <p class="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap font-sans">
                         {n.corpo || n.mensagem || n.resumo}
                       </p>
+
+                      <Show when={n.acoes && n.acoes.length > 0}>
+                        <div class="flex items-center gap-2 pt-1 flex-wrap">
+                          <For each={n.acoes}>
+                            {(acao: any) => (
+                              <button
+                                type="button"
+                                class="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-medium border border-zinc-700/80 transition-colors cursor-pointer flex items-center gap-1"
+                                onClick={async () => {
+                                  if (acao.url) {
+                                    window.open(acao.url, "_blank");
+                                  } else if (acao.endpoint) {
+                                    try {
+                                      await fetchApi(acao.endpoint, {
+                                        method: acao.metodo || "POST",
+                                        body: acao.corpo ? JSON.stringify(acao.corpo) : undefined,
+                                      });
+                                      showToast(`Ação "${acao.label}" executada com sucesso!`, "sucesso");
+                                    } catch (err: any) {
+                                      showToast(`Erro na ação: ${err.message}`, "erro");
+                                    }
+                                  }
+                                }}
+                              >
+                                {acao.label}
+                              </button>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
 
                       <div class="text-[10px] text-zinc-500 font-mono">
                         {n.criado_em ? new Date(n.criado_em).toLocaleString("pt-BR") : ""}
@@ -224,7 +262,7 @@ export const NotificacoesView: Component = () => {
                       onClick={() => marcarLida(n.id)}
                       title="Marcar como lida"
                     >
-                      <Check size={13} class="mr-1" /> Lido
+                      <Check size={13} class="mr-1" /> Marcar lida
                     </Button>
                   </Show>
                 </div>
