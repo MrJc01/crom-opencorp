@@ -97,6 +97,24 @@ opencorp approvals approve <id>
 opencorp approvals reject <id> --motivo "..."
 ```
 
+## app (Mini-Apps declarativos)
+
+```bash
+oc app list                                               # lista os mini-apps do workspace
+oc app novo <id> [--titulo "Nome"] [--descricao "Texto"]  # cria app com template index.html inicial
+oc app open <id>                                          # abre o app no navegador padrão
+oc app delete <id>                                        # exclui mini-app e arquivos
+```
+
+## secret (Segredos & Credenciais)
+
+```bash
+oc secret set <chave> <valor> [--scope global|workspace]  # grava credencial protegida
+oc secret get <chave>                                     # lê o valor do segredo (somente local)
+oc secret list [--scope global|workspace]                 # lista chaves e origens (valores nunca expostos)
+oc secret delete <chave> [--scope global|workspace]       # remove um segredo
+```
+
 ## budget
 
 ```bash

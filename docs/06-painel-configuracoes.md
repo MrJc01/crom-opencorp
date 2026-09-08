@@ -105,8 +105,10 @@ O painel (`opencorp serve` → navegador) organiza a empresa em views, todas com
 | Automação | **Fluxos** | Os 4 templates — Pipeline, Fanout, Review, Debate — num editor único. Criar, executar, editar (linear), excluir. Times legados aparecem aqui com botão **Migrar todos para fluxos**. |
 | Automação | **Hooks** | Webhooks de entrada: criar, copiar cURL (token só no detalhe), excluir. |
 | Código | **Workspace** | Árvore de arquivos estilo VS Code + tabs com 3 modos (**Editor**, **Preview** — padrão p/ .md, **Lado a lado**) e **terminais em tabs** (até 4, whitelist). Right-click: abrir, `@` contexto, copiar. |
+| Automação | **Apps** | Mini-apps declarativos do workspace (`apps/<id>/index.html`) com 3 modos de visualização via IA: **Só App** (iframe full com chat oculto), **Só Chat** (conversa IA em tela cheia) e **Os Dois** (split view 50/50 lado a lado). |
+| Sistema | **Segredos** | Cofre protegido de credenciais (`/secrets`) com templates prontos (WordPress, VPS, Provedores LLM, GitHub, Mercado Pago) e isolamento por escopos Workspace × Global (Merge automático). |
+| Sistema | **Documentação**| Visualizador de documentação integrado (`/docs`) com Markdown rico, busca rápida, navegação por capítulos e diagramas Mermaid em tempo real. |
 | Dados | **Histórico** | Timeline unificada (execuções, tasks, rotinas, conversas). |
-| Dados | **Apps** | Mini-apps declarativos do workspace + aba **Configurar apps** (perfis de secrets: VPS, WordPress, MercadoPago, cartão, custom — valores nunca voltam à tela). |
 | Sistema | **Notificações** | Feed de avisos dos agentes (tool `notificar`): não lidas em destaque, marcar como lida, **badge no navbar** atualizado via SSE. |
 | Sistema | **Config** | As mesmas chaves do `settings` CLI, editáveis por campo com **badge de origem** (global × workspace) e toggle de escopo respeitado na leitura e na escrita. |
 

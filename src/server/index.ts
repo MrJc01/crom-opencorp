@@ -1494,6 +1494,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             { slug: "06-painel", titulo: "06. Painel e Configurações", arquivo: "06-painel-configuracoes.md", categoria: "Interface" },
             { slug: "07-seguranca", titulo: "07. Segurança e Orçamento", arquivo: "07-seguranca-custos.md", categoria: "Governança" },
             { slug: "08-cli", titulo: "08. Referência do CLI e oc", arquivo: "08-cli-referencia.md", categoria: "Referência" },
+            { slug: "17-mini-apps-segredos", titulo: "17. Mini-Apps e Segredos", arquivo: "17-mini-apps-e-segredos.md", categoria: "Aplicações & Segurança" },
             { slug: "capacidades", titulo: "Capacidades da Empresa", arquivo: "CAPACIDADES-EMPRESA.md", categoria: "Referência" },
           ];
           enviar(res, 200, itens);
@@ -1512,6 +1513,9 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             "06-painel": { titulo: "06. Painel e Configurações", arquivo: "06-painel-configuracoes.md", categoria: "Interface" },
             "07-seguranca": { titulo: "07. Segurança e Orçamento", arquivo: "07-seguranca-custos.md", categoria: "Governança" },
             "08-cli": { titulo: "08. Referência do CLI e oc", arquivo: "08-cli-referencia.md", categoria: "Referência" },
+            "17-mini-apps-segredos": { titulo: "17. Mini-Apps e Segredos", arquivo: "17-mini-apps-e-segredos.md", categoria: "Aplicações & Segurança" },
+            "apps": { slug: "17-mini-apps-segredos", titulo: "17. Mini-Apps e Segredos", arquivo: "17-mini-apps-e-segredos.md", categoria: "Aplicações & Segurança" },
+            "secrets": { slug: "17-mini-apps-segredos", titulo: "17. Mini-Apps e Segredos", arquivo: "17-mini-apps-e-segredos.md", categoria: "Aplicações & Segurança" },
             "capacidades": { titulo: "Capacidades da Empresa", arquivo: "CAPACIDADES-EMPRESA.md", categoria: "Referência" },
             "secretario": { slug: "04-agentes", titulo: "04. Agentes e Papéis (Secretário Executivo)", arquivo: "04-agentes.md", categoria: "Operação" },
             "agentes": { slug: "04-agentes", titulo: "04. Agentes e Papéis", arquivo: "04-agentes.md", categoria: "Operação" },
