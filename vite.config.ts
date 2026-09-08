@@ -16,7 +16,7 @@ export default defineConfig({
   },
   build: {
     outDir: resolve(__dirname, 'web-dist'),
-    emptyOutDir: false,
+    emptyOutDir: true,
     rollupOptions: {
       output: {
         entryFileNames: 'assets/app.js',

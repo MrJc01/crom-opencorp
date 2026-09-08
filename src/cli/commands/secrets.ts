@@ -45,6 +45,7 @@ export function registerSecretsCommand(program: Command): void {
 
   const grupo = program
     .command("secrets")
+    .alias("secret")
     .description("segredos do workspace (listagem segura — valores mascarados por padrão)");
 
   // ── list ──────────────────────────────────────────────────────────────
@@ -53,11 +54,17 @@ export function registerSecretsCommand(program: Command): void {
     .alias("ls")
     .description("lista segredos disponíveis (merge workspace + global por padrão)")
     .option("--scope <escopo>", "global | workspace (sem flag: merge de ambos)")
+    .option("--global", "lista apenas segredos globais")
     .option("--json", "saída em JSON")
     .option("--workspace <id>", "workspace alvo")
-    .action(async (opts: { scope?: string; json?: boolean; workspace?: string }) => {
-      const escopo = opts.scope ? escopoValido(opts.scope) : undefined;
-      if (opts.scope && !escopo) return; // erro já impresso
+    .action(async (opts: { scope?: string; global?: boolean; json?: boolean; workspace?: string }) => {
+      let escopo: SecretOrigem | undefined = undefined;
+      if (opts.global) {
+        escopo = "global";
+      } else if (opts.scope) {
+        escopo = escopoValido(opts.scope);
+        if (!escopo) return;
+      }
 
       const wsPath = await resolverWsPath(program, opts);
 
@@ -73,7 +80,7 @@ export function registerSecretsCommand(program: Command): void {
       if (lista.length === 0) {
         console.log("nenhum segredo configurado");
         if (wsPath) {
-          console.log(`\ndica: use "oc secrets set <nome> <valor>" para adicionar um segredo ao workspace`);
+          console.log(`\ndica: use "oc secret set <nome> <valor>" para adicionar um segredo ao workspace`);
         }
         return;
       }
@@ -97,7 +104,7 @@ export function registerSecretsCommand(program: Command): void {
       console.log("  como usar nas ordens:");
       console.log("    perfis de app  → referencie: OPENCORP_SECRET app:<tipo>:<id>");
       console.log("    chaves simples → referencie: OPENCORP_SECRET <nome>");
-      console.log("    valor direto   → oc secrets get <nome>");
+      console.log("    valor direto   → oc secret get <nome>");
       console.log("");
     });
 
@@ -107,12 +114,17 @@ export function registerSecretsCommand(program: Command): void {
     .argument("<nome>", "nome do segredo")
     .description("obtém o VALOR de um segredo (stdout, para scripting/agente)")
     .option("--workspace <id>", "workspace alvo")
-    .action(async (nome: string, opts: { workspace?: string }) => {
+    .option("--json", "saída em JSON com metadados")
+    .action(async (nome: string, opts: { workspace?: string; json?: boolean }) => {
       const wsPath = await resolverWsPath(program, opts);
       const resultado = store.obterValor(nome, wsPath);
       if (!resultado) {
         console.error(`erro: segredo "${nome}" não encontrado`);
         process.exitCode = 1;
+        return;
+      }
+      if (opts.json) {
+        console.log(JSON.stringify({ nome, valor: resultado.valor, origem: resultado.origem }, null, 2));
         return;
       }
       // Saída limpa em stdout para pipes
@@ -122,17 +134,26 @@ export function registerSecretsCommand(program: Command): void {
   // ── set ────────────────────────────────────────────────────────────────
   grupo
     .command("set")
+    .alias("add")
+    .alias("put")
+    .alias("edit")
     .argument("<nome>", "nome do segredo (ex: minha_api_key, app:vps:servidor-1)")
     .argument("<valor>", "valor do segredo")
     .description("define ou atualiza um segredo")
     .option("--scope <escopo>", "global | workspace (padrão: workspace se houver workspace ativo)", "workspace")
+    .option("--global", "salva no escopo global (~/.opencorp/secrets.json)")
     .option("--workspace <id>", "workspace alvo")
-    .action(async (nome: string, valor: string, opts: { scope?: string; workspace?: string }) => {
-      const escopo = escopoValido(opts.scope) ?? "workspace";
+    .action(async (nome: string, valor: string, opts: { scope?: string; global?: boolean; workspace?: string }) => {
+      let escopo: SecretOrigem = "workspace";
+      if (opts.global) {
+        escopo = "global";
+      } else if (opts.scope) {
+        escopo = escopoValido(opts.scope) ?? "workspace";
+      }
       const wsPath = await resolverWsPath(program, opts);
 
       if (escopo === "workspace" && !wsPath) {
-        console.error("erro: nenhum workspace ativo — use --scope global ou passe --workspace <id>");
+        console.error("erro: nenhum workspace ativo — use --global ou passe --workspace <id>");
         process.exitCode = 1;
         return;
       }
@@ -152,16 +173,23 @@ export function registerSecretsCommand(program: Command): void {
   grupo
     .command("delete")
     .alias("rm")
+    .alias("del")
     .argument("<nome>", "nome do segredo")
     .description("remove um segredo")
     .option("--scope <escopo>", "global | workspace (padrão: workspace)", "workspace")
+    .option("--global", "remove do escopo global")
     .option("--workspace <id>", "workspace alvo")
-    .action(async (nome: string, opts: { scope?: string; workspace?: string }) => {
-      const escopo = escopoValido(opts.scope) ?? "workspace";
+    .action(async (nome: string, opts: { scope?: string; global?: boolean; workspace?: string }) => {
+      let escopo: SecretOrigem = "workspace";
+      if (opts.global) {
+        escopo = "global";
+      } else if (opts.scope) {
+        escopo = escopoValido(opts.scope) ?? "workspace";
+      }
       const wsPath = await resolverWsPath(program, opts);
 
       if (escopo === "workspace" && !wsPath) {
-        console.error("erro: nenhum workspace ativo — use --scope global ou passe --workspace <id>");
+        console.error("erro: nenhum workspace ativo — use --global ou passe --workspace <id>");
         process.exitCode = 1;
         return;
       }

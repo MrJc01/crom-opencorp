@@ -6,7 +6,7 @@
  * listas, blockquote, hr, links e quebras de linha.
  */
 
-import { escapeHtml } from "./format.js";
+import { escapeHtml } from "./lib/format.js";
 
 /** Instala (uma vez) o global de copy dos code fences e toggle do mermaid */
 export function garantirCopyGlobal(): void {

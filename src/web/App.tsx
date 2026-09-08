@@ -18,6 +18,7 @@ import { AgendaView } from "./views/Agenda";
 import { FluxosView } from "./views/Fluxos";
 import { HooksView } from "./views/Hooks";
 import { AppsView } from "./views/Apps";
+import { SecretsView } from "./views/Secrets";
 import { HistoricoView } from "./views/Historico";
 import { NotificacoesView } from "./views/Notificacoes";
 import { ConfigView } from "./views/Config";
@@ -36,7 +37,7 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
   createEffect(() => {
     const ws = wsAtivo();
     const rota = location.pathname;
-    const rotasGlobais = ["/", "/home", "/docs", "/config"];
+    const rotasGlobais = ["/", "/home", "/docs", "/config", "/secrets"];
     if (!ws && !rotasGlobais.some((r) => rota === r || rota.startsWith(r + "/"))) {
       navigate("/home", { replace: true });
     }
@@ -85,6 +86,7 @@ export const App: Component = () => {
       <Route path="/fluxos" component={FluxosView} />
       <Route path="/hooks" component={HooksView} />
       <Route path="/apps" component={AppsView} />
+      <Route path="/secrets" component={SecretsView} />
       <Route path="/historico" component={HistoricoView} />
       <Route path="/notificacoes" component={NotificacoesView} />
       <Route path="/docs" component={DocsView} />

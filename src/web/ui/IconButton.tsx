@@ -1,12 +1,25 @@
-import { type Component, type JSX, splitProps } from "solid-js";
+import { type Component, type JSX, splitProps, Show } from "solid-js";
+import { Dynamic } from "solid-js/web";
 
 export interface IconButtonProps extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "ghost" | "danger";
   size?: "xs" | "sm" | "md" | "lg";
+  icon?: any;
+  titulo?: string;
+  iconSize?: number;
 }
 
 export const IconButton: Component<IconButtonProps> = (props) => {
-  const [local, rest] = splitProps(props, ["variant", "size", "children", "class", "disabled"]);
+  const [local, rest] = splitProps(props, [
+    "variant",
+    "size",
+    "children",
+    "class",
+    "disabled",
+    "icon",
+    "titulo",
+    "iconSize",
+  ]);
 
   const variantClasses = () => ({
     primary: "bg-zinc-100 text-zinc-900 hover:bg-white active:bg-zinc-200",
@@ -22,13 +35,27 @@ export const IconButton: Component<IconButtonProps> = (props) => {
     lg: "h-9 w-9 text-base rounded-lg",
   }[local.size ?? "md"]);
 
+  const defaultIconSize = () => {
+    if (local.iconSize) return local.iconSize;
+    switch (local.size) {
+      case "xs": return 12;
+      case "sm": return 13;
+      case "lg": return 17;
+      default: return 15;
+    }
+  };
+
   return (
     <button
       {...rest}
+      title={local.titulo ?? rest.title}
+      aria-label={local.titulo ?? rest["aria-label"] ?? rest.title}
       disabled={local.disabled}
       class={`inline-flex items-center justify-center transition-colors select-none disabled:opacity-40 disabled:pointer-events-none cursor-pointer flex-shrink-0 ${variantClasses()} ${sizeClasses()} ${local.class ?? ""}`}
     >
-      {local.children}
+      <Show when={local.icon} fallback={local.children}>
+        {(IconComp) => <Dynamic component={IconComp()} size={defaultIconSize()} />}
+      </Show>
     </button>
   );
 };

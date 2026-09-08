@@ -10,6 +10,7 @@ import {
   Calendar,
   GitBranch,
   Webhook,
+  Layout,
   KeyRound,
   History,
   Settings,
@@ -65,13 +66,14 @@ export const Sidebar: Component = () => {
         { href: "/agenda", label: "Agenda", icone: Calendar },
         { href: "/fluxos", label: "Fluxos", icone: GitBranch, badgeTag: "Alfa" },
         { href: "/hooks", label: "Hooks", icone: Webhook, badgeTag: "Alfa" },
+        { href: "/apps", label: "Apps", icone: Layout, badgeTag: "Alfa" },
       ],
     },
   ];
 
-  // Itens fixos na base da sidebar (apenas ícones: Apps&Secrets, Histórico, Documentação, Configurações)
+  // Itens fixos na base da sidebar (apenas ícones: Secrets, Histórico, Documentação, Configurações)
   const itensFixosInferiores = [
-    { href: "/apps", label: "Apps & Secrets", icone: KeyRound },
+    { href: "/secrets", label: "Segredos & Senhas", icone: KeyRound },
     { href: "/historico", label: "Histórico", icone: History },
     { href: "/docs", label: "Documentação", icone: BookOpen },
     { href: "/config", label: "Configurações", icone: Settings },

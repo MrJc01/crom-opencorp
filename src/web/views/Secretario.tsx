@@ -16,8 +16,9 @@ import {
   Settings2,
 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
-import { SessionTurn, type ChatMensagem } from "../components/chat/SessionTurn";
-import { PromptInput, type Anexo } from "../components/chat/PromptInput";
+import { UniversalChat } from "../components/chat/UniversalChat";
+import type { ChatMensagem } from "../components/chat/types";
+import type { Anexo } from "../components/chat/PromptInput";
 import { HistoricoModal, type SessaoResumo } from "../components/chat/HistoricoModal";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -244,11 +245,9 @@ export const SecretarioView: Component = () => {
     }
   };
 
-  let feedRef!: HTMLDivElement;
   let textareaRef: HTMLTextAreaElement | undefined;
   let abortController: AbortController | null = null;
   let timerInterval: any = null;
-  let deveAutoScroll = true;
 
   const SUGESTOES = [
     "O que aconteceu hoje?",
@@ -257,25 +256,8 @@ export const SecretarioView: Component = () => {
     "Rodar auditoria rápida do site",
   ];
 
-  const checarScrollUsuario = () => {
-    if (!feedRef) return;
-    const distDoFundo = feedRef.scrollHeight - feedRef.scrollTop - feedRef.clientHeight;
-    // Se o usuário rolou para cima (>80px do fundo), pausa o auto-scroll
-    const pertoDoFundo = distDoFundo < 80;
-    deveAutoScroll = pertoDoFundo;
-    setMostrarBotaoFim(!pertoDoFundo && carregando());
-  };
+  const scrollFim = (_forcar = false) => {};
 
-  const scrollFim = (forcar = false) => {
-    if (!feedRef) return;
-    if (forcar || deveAutoScroll) {
-      feedRef.scrollTop = feedRef.scrollHeight;
-      if (forcar) {
-        deveAutoScroll = true;
-        setMostrarBotaoFim(false);
-      }
-    }
-  };
 
   const carregarSessoes = async () => {
     try {
@@ -796,124 +778,35 @@ export const SecretarioView: Component = () => {
   };
 
   return (
-    <div class="flex flex-col h-full w-full overflow-hidden bg-zinc-950">
-      {/* Subheader do Chat */}
-      <div class="h-10 px-4 border-b border-zinc-800/80 bg-zinc-900/40 flex items-center justify-between text-xs select-none">
-        <div class="flex items-center gap-2">
-          <Bot size={15} class="text-emerald-400" />
-          <span class="font-medium text-zinc-200">
-            {sessaoAtivaId() ? `Sessão ${sessaoAtivaId()?.slice(0, 10)}...` : "Nova Conversa"}
-          </span>
-          <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-800/50 text-emerald-400 font-mono">
-            @{agente()}
-          </span>
-        </div>
-
-        <div class="flex items-center gap-1.5">
-          <Button size="xs" variant="ghost" onClick={novaConversa} title="Nova conversa">
-            <Plus size={14} class="mr-1" /> Nova
-          </Button>
-          <Button size="xs" variant="secondary" onClick={() => setHistoricoAberto(true)} title="Ver conversas anteriores">
-            <History size={13} class="mr-1" /> Histórico
-          </Button>
-          <Button size="xs" variant="secondary" onClick={() => navigate("/reunioes")} title="Reuniões Multi-Agente">
-            <Users size={13} class="mr-1" /> Reuniões
-          </Button>
-          <Button
-            size="xs"
-            variant="secondary"
-            onClick={abrirPainelLateral}
-            title="Configurar qual agente, motor e modelo utilizar"
-            data-testid="btn-motor-modelo"
-          >
-            <Cpu size={13} class="mr-1 text-emerald-400" /> Motor & Modelo
-          </Button>
-        </div>
-      </div>
-
-      {/* Feed de Mensagens */}
-      <div
-        ref={feedRef}
-        onScroll={checarScrollUsuario}
-        class="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin relative"
-      >
-        <div class="max-w-3xl mx-auto w-full space-y-4">
-          <Show
-            when={mensagens().length > 0}
-            fallback={
-              <div class="py-16 text-center max-w-md mx-auto">
-                <div class="h-12 w-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-emerald-400 mx-auto mb-4 shadow-lg">
-                  <Sparkles size={24} />
-                </div>
-                <h2 class="text-lg font-semibold text-zinc-100 mb-1">Secretário Executivo</h2>
-                <p class="text-xs text-zinc-400 mb-6 leading-relaxed">
-                  Coordene sua empresa, execute comandos, consulte tarefas e acione agentes autônomos.
-                </p>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
-                  <For each={SUGESTOES}>
-                    {(sug) => (
-                      <button
-                        onClick={() => {
-                          setInputValor(sug);
-                          enviarMensagem();
-                        }}
-                        class="p-2.5 rounded-lg bg-zinc-900/60 border border-zinc-800/80 hover:bg-zinc-800/60 hover:border-zinc-700 text-xs text-zinc-300 transition-all cursor-pointer text-left"
-                      >
-                        {sug}
-                      </button>
-                    )}
-                  </For>
-                </div>
-              </div>
-            }
-          >
-            <For each={mensagens()}>
-              {(m, idx) => (
-                <SessionTurn
-                  mensagem={m}
-                  indice={idx()}
-                  decorridoFmt={decorridoFmt()}
-                  onEditarPrompt={editarPrompt}
-                  onAprovarHitl={aprovarHitl}
-                  onRejeitarHitl={rejeitarHitl}
-                />
-              )}
-            </For>
-          </Show>
-        </div>
-
-        {/* Botão Flutuante de Scroll para o Fim */}
-        <Show when={mostrarBotaoFim()}>
-          <button
-            type="button"
-            onClick={() => scrollFim(true)}
-            class="sticky bottom-4 ml-auto mr-4 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800/95 border border-zinc-700 text-xs text-zinc-200 shadow-xl hover:bg-zinc-700 transition-all cursor-pointer backdrop-blur-xs animate-bounce"
-            title="Rolar para a mensagem mais recente"
-          >
-            <ArrowDown size={13} class="text-emerald-400" />
-            <span class="font-medium">Mais recente</span>
-          </button>
-        </Show>
-      </div>
-
-      {/* Composer Fixo na Base */}
-      <div class="p-3 border-t border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md">
-        <PromptInput
-          valor={inputValor()}
-          onInput={setInputValor}
-          onEnviar={enviarMensagem}
-          onParar={pararStream}
-          carregando={carregando()}
-          anexos={anexos()}
-          onAdicionarAnexo={(a) => setAnexos((prev) => [...prev, a])}
-          onRemoverAnexo={(idx) => setAnexos((prev) => prev.filter((_, i) => i !== idx))}
-          agenteSelecionado={agente()}
-          onMudarAgente={setAgente}
-          agentesLista={listaAgentes()}
-          refTextarea={(el) => (textareaRef = el)}
-        />
-      </div>
+    <div class="flex flex-col h-full w-full overflow-hidden bg-zinc-950 relative">
+      <UniversalChat
+        mensagens={mensagens()}
+        carregando={carregando()}
+        agente={{
+          id: agente(),
+          nome: agente(),
+          modelo: modeloConfig() || "opencode-go/glm-5.3-flash",
+          status: carregando() ? "executando" : undefined,
+        }}
+        decorridoFmt={decorridoFmt()}
+        podeEnviarPrompt={true}
+        onEnviarPrompt={async (texto, anexosRecebidos) => {
+          if (anexosRecebidos) setAnexos(anexosRecebidos);
+          setInputValor(texto);
+          await enviarMensagem();
+        }}
+        onEditarPrompt={editarPrompt}
+        onAprovarHitl={aprovarHitl}
+        onRejeitarHitl={rejeitarHitl}
+        onNovaSessao={novaConversa}
+        onAbrirHistorico={() => setHistoricoAberto(true)}
+        onAbrirConfiguracoes={abrirPainelLateral}
+        sugestoesRapidas={SUGESTOES.map((s) => ({ rotulo: s, prompt: s }))}
+        iframeConfig={{
+          habilitado: true,
+          aberto: false,
+        }}
+      />
 
       {/* Modal Popup de Histórico */}
       <HistoricoModal

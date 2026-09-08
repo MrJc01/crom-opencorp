@@ -43,9 +43,26 @@ export type Widget = z.infer<typeof widgetSchema>;
 export type PaginaApp = z.infer<typeof paginaSchema>;
 export type AppSpec = z.infer<typeof appSchema>;
 
+export interface MiniAppInfo {
+  id: string;
+  titulo: string;
+  descricao?: string;
+  icone?: string;
+  categoria?: string;
+  tipo: "miniapp" | "spec";
+  entryUrl: string;
+  widgets?: number;
+  modificadoEm?: string;
+  padrao?: "app" | "chat";
+}
+
 export class AppStore {
   dir(wsPath: string): string {
     return join(wsPath, ".opencorp", "apps");
+  }
+
+  dirWorkspaceApps(wsPath: string): string {
+    return join(wsPath, "apps");
   }
 
   caminho(wsPath: string, id: string): string {
@@ -84,24 +101,160 @@ export class AppStore {
     eventBus.emit("app.salvo", { app: valido.id });
   }
 
-  listar(wsPath: string): { id: string; titulo: string; widgets: number }[] {
-    const dir = this.dir(wsPath);
-    if (!existsSync(dir)) return [];
-    const saida: { id: string; titulo: string; widgets: number }[] = [];
-    for (const f of readdirSync(dir).filter((x) => x.endsWith(".json"))) {
+  /**
+   * Lista todos os mini-apps do workspace (<workspace>/apps/) e specs declarativos (.opencorp/apps/)
+   */
+  listar(wsPath: string): MiniAppInfo[] {
+    const saida: MiniAppInfo[] = [];
+
+    // 1. Mini-apps dentro de <workspace>/apps/<id>/
+    const wsAppsDir = this.dirWorkspaceApps(wsPath);
+    if (existsSync(wsAppsDir)) {
       try {
-        const app = this.validarTexto(readFileSync(join(dir, f), "utf8"), f);
-        saida.push({
-          id: app.id,
-          titulo: app.titulo,
-          widgets: app.paginas.reduce((n, p) => n + p.widgets.length, 0),
-        });
-      } catch {
-        continue;
+        const pastas = readdirSync(wsAppsDir, { withFileTypes: true }).filter((d) => d.isDirectory());
+        for (const p of pastas) {
+          const appId = p.name;
+          const pastaApp = join(wsAppsDir, appId);
+          const metaPath = join(pastaApp, "app.json");
+          const indexPath = join(pastaApp, "index.html");
+
+          if (existsSync(indexPath) || existsSync(metaPath)) {
+            let meta: any = {};
+            if (existsSync(metaPath)) {
+              try {
+                meta = JSON.parse(readFileSync(metaPath, "utf8"));
+              } catch {}
+            }
+
+            saida.push({
+              id: appId,
+              titulo: meta.titulo || appId.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+              descricao: meta.descricao || "Mini-aplicação autônoma do workspace",
+              icone: meta.icone || "Layout",
+              categoria: meta.categoria || "Ferramenta",
+              tipo: "miniapp",
+              entryUrl: `/api/apps/${encodeURIComponent(appId)}/view`,
+              padrao: meta.padrao === "chat" ? "chat" : "app",
+            });
+          }
+        }
+      } catch {}
+    }
+
+    // 2. Specs declarativos legados em .opencorp/apps/*.json
+    const dir = this.dir(wsPath);
+    if (existsSync(dir)) {
+      for (const f of readdirSync(dir).filter((x) => x.endsWith(".json"))) {
+        try {
+          const app = this.validarTexto(readFileSync(join(dir, f), "utf8"), f);
+          if (!saida.some((x) => x.id === app.id)) {
+            saida.push({
+              id: app.id,
+              titulo: app.titulo,
+              descricao: `Painel declarativo com ${app.paginas.reduce((n, p) => n + p.widgets.length, 0)} widgets`,
+              icone: "BarChart2",
+              categoria: "Painel",
+              tipo: "spec",
+              entryUrl: `/apps/${encodeURIComponent(app.id)}`,
+              padrao: "app",
+            });
+          }
+        } catch {
+          continue;
+        }
       }
     }
+
     return saida.sort((a, b) => a.id.localeCompare(b.id));
   }
+
+  /**
+   * Cria um novo mini-app com arquivos reais dentro de <workspace>/apps/<id>/
+   */
+  async criarMiniApp(
+    wsPath: string,
+    id: string,
+    titulo: string,
+    descricao?: string,
+    htmlInicial?: string
+  ): Promise<MiniAppInfo> {
+    const wsAppsDir = this.dirWorkspaceApps(wsPath);
+    const pastaApp = join(wsAppsDir, id);
+    await mkdirRecursive(pastaApp);
+
+    const meta = {
+      id,
+      titulo,
+      descricao: descricao || "Mini-aplicação criada por IA",
+      icone: "Layout",
+      categoria: "Workspace",
+      entry: "index.html",
+      padrao: "app",
+      criadoEm: new Date().toISOString(),
+    };
+
+    await writeFileAtomic(join(pastaApp, "app.json"), `${JSON.stringify(meta, null, 2)}\n`);
+
+    const htmlPadrao = htmlInicial || `<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${titulo}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen p-6 font-sans">
+  <div class="max-w-4xl mx-auto space-y-6">
+    <header class="border-b border-zinc-800 pb-4 flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight text-white">${titulo}</h1>
+        <p class="text-xs text-zinc-400 mt-1">${descricao || "Painel autônomo conectado ao workspace"}</p>
+      </div>
+      <span class="px-2.5 py-1 rounded-full text-xs font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+        ● Online
+      </span>
+    </header>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="cards-metricas">
+      <div class="p-4 rounded-xl bg-zinc-900 border border-zinc-800">
+        <span class="text-xs text-zinc-400">Status do Workspace</span>
+        <div class="text-xl font-bold text-emerald-400 mt-1">Operacional</div>
+      </div>
+      <div class="p-4 rounded-xl bg-zinc-900 border border-zinc-800">
+        <span class="text-xs text-zinc-400">App ID</span>
+        <div class="text-base font-mono text-zinc-200 mt-1 truncate">${id}</div>
+      </div>
+      <div class="p-4 rounded-xl bg-zinc-900 border border-zinc-800">
+        <span class="text-xs text-zinc-400">Edição com IA</span>
+        <div class="text-sm text-zinc-300 mt-1">Disponível no chat ao lado</div>
+      </div>
+    </div>
+
+    <div class="p-5 rounded-2xl bg-zinc-900/60 border border-zinc-800/80">
+      <h2 class="text-sm font-semibold text-zinc-200 mb-2">Instruções para o Assistente de IA:</h2>
+      <p class="text-xs text-zinc-400 leading-relaxed">
+        Você pode pedir para a IA modificar este arquivo (<code>apps/${id}/index.html</code>) a qualquer momento no chat de edição. Adicione tabelas, gráficos, formulários de consulta ou integrações diretas com os endpoints do OpenCorp!
+      </p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    await writeFileAtomic(join(pastaApp, "index.html"), htmlPadrao);
+    eventBus.emit("app.salvo", { app: id });
+
+    return {
+      id,
+      titulo,
+      descricao: meta.descricao,
+      icone: meta.icone,
+      categoria: meta.categoria,
+      tipo: "miniapp",
+      entryUrl: `/api/apps/${encodeURIComponent(id)}/view`,
+      padrao: "app",
+    };
+  }
+
 
   obter(wsPath: string, id: string): AppSpec {
     const path = this.caminho(wsPath, id);

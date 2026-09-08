@@ -1,61 +1,62 @@
-import { type Component, createSignal, createEffect, For, Show } from "solid-js";
-import { Copy, Check, Edit3, ShieldAlert, CheckCircle, XCircle, Terminal, Brain } from "lucide-solid";
+import { type Component, createSignal, createEffect, createMemo, For, Show } from "solid-js";
+import {
+  Copy,
+  Check,
+  Edit3,
+  ShieldAlert,
+  CheckCircle,
+  XCircle,
+  Terminal,
+  Brain,
+  Globe,
+} from "lucide-solid";
 import { IconButton } from "../../ui/IconButton";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
 import { renderMarkdown, processarDiagramasMermaid } from "../../md.js";
+import type { ChatMensagem, TurnoPasso, AcaoItem } from "./types";
 
-export interface AcaoItem {
-  ferramenta?: string;
-  resumo?: string;
-  sucesso?: boolean;
-}
-
-export type TurnoPasso =
-  | { tipo: "pensamento"; texto: string }
-  | { tipo: "acao"; ferramenta: string; resumo?: string; sucesso?: boolean }
-  | { tipo: "texto"; texto: string };
-
-export interface ChatMensagem {
-  role: "user" | "assistant" | "system";
-  content: string;
-  passos?: TurnoPasso[];
-  pensamento?: string;
-  concluida?: boolean;
-  acoes?: AcaoItem[];
-  imagens?: string[];
-  terminal?: string;
-  hitl?: {
-    id: string;
-    agente: string;
-    ordem: string;
-    motivo_guard: string;
-  };
-}
+export type { ChatMensagem, TurnoPasso, AcaoItem };
 
 export interface SessionTurnProps {
   mensagem: ChatMensagem;
   indice: number;
   decorridoFmt?: string;
-  onEditarPrompt: (indice: number) => void;
+  onEditarPrompt?: (indice: number) => void;
   onAprovarHitl?: (id: string) => void;
   onRejeitarHitl?: (id: string, motivo: string) => void;
+  mostrarPensamento?: boolean;
+  mostrarAcoes?: boolean;
+  mostrarTerminal?: boolean;
+  onAbrirIframeUrl?: (url: string) => void;
 }
 
 export const SessionTurn: Component<SessionTurnProps> = (props) => {
   const [copiado, setCopiado] = createSignal(false);
   const m = () => props.mensagem;
 
+  // Detecta primeira URL no conteúdo para sugestão de preview lateral
+  const urlDetectada = createMemo(() => {
+    if (m().iframeUrl) return m().iframeUrl;
+    const match = m().content?.match(/(https?:\/\/[^\s"'<>)]+)/i);
+    return match ? match[1] : null;
+  });
+
   const copiar = async () => {
     const texto = m().content || "";
-    if (!texto) { showToast("Nada para copiar", "aviso"); return; }
+    if (!texto) {
+      showToast("Nada para copiar", "aviso");
+      return;
+    }
     let ok = false;
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(texto);
         ok = true;
       }
-    } catch { /* fallback abaixo */ }
+    } catch {
+      /* fallback abaixo */
+    }
     if (!ok) {
       try {
         const ta = document.createElement("textarea");
@@ -65,7 +66,9 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
         ta.select();
         ok = document.execCommand("copy");
         document.body.removeChild(ta);
-      } catch { /* nada */ }
+      } catch {
+        /* nada */
+      }
     }
     if (ok) {
       setCopiado(true);
@@ -79,7 +82,6 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
   let turnRef: HTMLDivElement | undefined;
 
   createEffect(() => {
-    // Dispara renderização de fluxogramas/diagramas Mermaid apenas no elemento deste turno
     m().content;
     m().passos;
     if (turnRef) {
@@ -98,22 +100,16 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
           : "bg-transparent mr-auto max-w-full w-full"
       }`}
     >
-      {/* Cabeçalho */}
-      <div class="flex items-center justify-between gap-2 mb-1 select-none">
-        <span class="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-          {m().role === "user" ? "Você" : "Secretário Executivo"}
-        </span>
-      </div>
-
-      {/* Imagens Anexadas no Prompt do Usuário */}
+      {/* Imagens Anexadas ao Turno */}
       <Show when={m().imagens && m().imagens!.length > 0}>
         <div class="flex flex-wrap gap-2 mb-2">
           <For each={m().imagens}>
-            {(img) => (
+            {(src) => (
               <img
-                src={img}
-                alt="Anexo"
-                class="max-h-48 max-w-xs rounded-lg border border-zinc-700 object-cover shadow-sm"
+                src={src}
+                alt="Anexo de prompt"
+                class="max-w-xs max-h-48 rounded-lg border border-zinc-700 object-cover shadow-sm cursor-zoom-in"
+                onClick={() => window.open(src, "_blank")}
               />
             )}
           </For>
@@ -154,14 +150,22 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
       </Show>
 
       {/* Saída de Terminal Direto */}
-      <Show when={m().terminal !== undefined}>
+      <Show when={props.mostrarTerminal !== false && m().terminal !== undefined}>
         <pre class="p-3 bg-zinc-950 border border-zinc-800 rounded-lg text-xs font-mono text-emerald-400 overflow-x-auto my-1 scrollbar-thin">
           <code>{m().terminal}</code>
         </pre>
       </Show>
 
       {/* Indicador de Raciocínio ao Vivo quando ainda não há passos prontos */}
-      <Show when={m().concluida === false && (!m().passos || m().passos!.length === 0) && !m().content && !m().pensamento}>
+      <Show
+        when={
+          props.mostrarPensamento !== false &&
+          m().concluida === false &&
+          (!m().passos || m().passos!.length === 0) &&
+          !m().content &&
+          !m().pensamento
+        }
+      >
         <div class="flex items-center gap-2 text-xs font-mono text-purple-300 py-2 px-3 rounded-xl bg-purple-950/40 border border-purple-800/50 animate-pulse my-1.5">
           <span class="animate-spin text-purple-400">⚡</span>
           <span>Iniciando raciocínio ao vivo...</span>
@@ -172,7 +176,13 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
       </Show>
 
       {/* Pensamento Autônomo se não estiver presente nos passos */}
-      <Show when={m().pensamento && (!m().passos || !m().passos!.some((p) => p.tipo === "pensamento" && p.texto))}>
+      <Show
+        when={
+          props.mostrarPensamento !== false &&
+          m().pensamento &&
+          (!m().passos || !m().passos!.some((p) => p.tipo === "pensamento" && p.texto))
+        }
+      >
         <For each={m().pensamento!.split("\n\n---\n\n").filter(Boolean)}>
           {(pensamentoItem, pIdx) => (
             <details
@@ -181,8 +191,14 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
             >
               <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
                 <span class="flex items-center gap-1.5">
-                  <span>💭</span>
-                  <span class={m().concluida === false ? "text-purple-300 animate-pulse font-semibold" : "text-zinc-300 font-medium"}>
+                  <Brain size={13} class="text-purple-400" />
+                  <span
+                    class={
+                      m().concluida === false
+                        ? "text-purple-300 animate-pulse font-semibold"
+                        : "text-zinc-300 font-medium"
+                    }
+                  >
                     {m().concluida === false ? "Pensando…" : `Raciocínio (${pIdx() + 1})`}
                   </span>
                 </span>
@@ -205,7 +221,7 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
         fallback={
           <>
             {/* Fallback Legado: Ações / Ferramentas em Andamento */}
-            <Show when={m().acoes && m().acoes!.length > 0}>
+            <Show when={props.mostrarAcoes !== false && m().acoes && m().acoes!.length > 0}>
               <div class="space-y-1 mb-2">
                 <For each={m().acoes}>
                   {(acao) => (
@@ -221,7 +237,7 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
               </div>
             </Show>
 
-            {/* Fallback Legado: Conteúdo Principal da Mensagem com Markdown Rico */}
+            {/* Conteúdo Principal da Mensagem com Markdown Rico */}
             <Show when={m().content}>
               <div
                 class="text-sm text-zinc-100 leading-relaxed font-sans break-words select-text my-1"
@@ -236,7 +252,7 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
             {(passo, idx) => (
               <>
                 {/* Passo: Pensamento Separado */}
-                <Show when={passo.tipo === "pensamento" && passo.texto}>
+                <Show when={props.mostrarPensamento !== false && passo.tipo === "pensamento" && passo.texto}>
                   <details
                     class="rounded-xl bg-zinc-950/70 border border-zinc-800/80 overflow-hidden text-xs my-1.5"
                     open={m().concluida === false}
@@ -244,7 +260,13 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
                     <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
                       <span class="flex items-center gap-1.5">
                         <Brain size={13} class="text-purple-400" />
-                        <span class={m().concluida === false ? "text-purple-300 animate-pulse font-semibold" : "text-zinc-300 font-medium"}>
+                        <span
+                          class={
+                            m().concluida === false
+                              ? "text-purple-300 animate-pulse font-semibold"
+                              : "text-zinc-300 font-medium"
+                          }
+                        >
                           {m().concluida === false ? "Pensando…" : `Raciocínio (${idx() + 1})`}
                         </span>
                       </span>
@@ -260,7 +282,7 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
                 </Show>
 
                 {/* Passo: Ação / Tool (Bash, Comandos, Leitura) */}
-                <Show when={passo.tipo === "acao"}>
+                <Show when={props.mostrarAcoes !== false && passo.tipo === "acao"}>
                   <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-950/85 border border-zinc-800 text-xs font-mono text-zinc-300 my-1.5">
                     <Terminal size={13} class="text-amber-400 flex-shrink-0" />
                     <span class="text-amber-300/90 font-bold">{passo.ferramenta}:</span>
@@ -280,7 +302,7 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
                 {/* Passo: Resposta de Texto com Markdown Rico */}
                 <Show when={passo.tipo === "texto" && passo.texto}>
                   <div
-                    class="text-sm text-zinc-100 leading-relaxed font-sans break-words my-1.5 select-text"
+                    class="text-sm text-zinc-100 leading-relaxed font-sans break-words select-text my-1"
                     innerHTML={renderMarkdown(passo.texto)}
                   />
                 </Show>
@@ -293,15 +315,17 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
       {/* Ações Discretas na Base do Balão do Usuário (Editar / Copiar) */}
       <Show when={m().role === "user"}>
         <div class="flex items-center justify-end gap-1 pt-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            type="button"
-            onClick={() => props.onEditarPrompt(props.indice)}
-            class="p-1 rounded-md bg-transparent text-zinc-500 hover:text-amber-300 hover:bg-zinc-800/80 transition-colors cursor-pointer"
-            title="Editar prompt"
-            aria-label="Editar prompt"
-          >
-            <Edit3 size={13} />
-          </button>
+          <Show when={props.onEditarPrompt}>
+            <button
+              type="button"
+              onClick={() => props.onEditarPrompt?.(props.indice)}
+              class="p-1 rounded-md bg-transparent text-zinc-500 hover:text-amber-300 hover:bg-zinc-800/80 transition-colors cursor-pointer"
+              title="Editar prompt"
+              aria-label="Editar prompt"
+            >
+              <Edit3 size={13} />
+            </button>
+          </Show>
           <button
             type="button"
             onClick={copiar}
@@ -316,13 +340,23 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
         </div>
       </Show>
 
-      {/* Ação Discreta de Copiar na Base da Resposta do Assistente */}
-      <Show when={m().role === "assistant" && m().content && m().concluida !== false}>
-        <div class="flex items-center justify-end pt-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* Ação Discreta na Base da Resposta do Assistente (Abrir Preview / Copiar) */}
+      <Show when={m().role === "assistant" && m().concluida !== false}>
+        <div class="flex items-center justify-end gap-2 pt-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Show when={urlDetectada() && props.onAbrirIframeUrl}>
+            <button
+              type="button"
+              onClick={() => props.onAbrirIframeUrl?.(urlDetectada()!)}
+              class="px-2 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-300 hover:bg-blue-500/25 text-[11px] font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
+              title="Abrir no Preview Lateral"
+            >
+              <Globe size={11} /> Abrir Preview
+            </button>
+          </Show>
           <button
             type="button"
             onClick={copiar}
-            class="p-1 rounded-md bg-transparent text-zinc-500 hover:text-zinc-200 hover:bg-zinc-850/80 transition-colors cursor-pointer"
+            class="p-1 rounded-md bg-transparent text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80 transition-colors cursor-pointer"
             title="Copiar resposta"
             aria-label="Copiar resposta"
           >

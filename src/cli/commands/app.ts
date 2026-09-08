@@ -59,7 +59,7 @@ export function registerAppCommand(program: Command): void {
           console.log('nenhum app — crie com: opencorp app create <id> --titulo "..." ou use "opencorp app seed painel-tarefas"');
           return;
         }
-        for (const a of lista) console.log(`${a.id.padEnd(20)}${String(a.widgets).padEnd(4)}${a.titulo}`);
+        for (const a of lista) console.log(`${a.id.padEnd(20)}${String(a.widgets ?? "-").padEnd(4)}${a.titulo}`);
       }),
     );
 

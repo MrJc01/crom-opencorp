@@ -1,4 +1,4 @@
-import { escapeHtml } from "../format";
+import { escapeHtml } from "./format";
 
 function inline(texto: string): string {
   let r = escapeHtml(texto);

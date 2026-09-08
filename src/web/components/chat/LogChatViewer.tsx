@@ -1,6 +1,7 @@
 import { type Component, createMemo, For, Show } from "solid-js";
 import { Bot, Sparkles, Check, X, Clock } from "lucide-solid";
 import { SessionTurn, type ChatMensagem, type TurnoPasso } from "./SessionTurn";
+import { UniversalChat } from "./UniversalChat";
 
 // ─── Types ────────────────────────────────────────────────────────────
 export interface LogStepAction {
@@ -307,86 +308,25 @@ export const LogChatViewer: Component<LogChatViewerProps> = (props) => {
   });
 
   // No-op para edição de prompt (logs são read-only)
-  const noopEdit = (_indice: number) => {};
-
   return (
-    <div class="flex flex-col space-y-2 p-1">
-      {/* Header do agente (meta info) */}
-      <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-900/50 border border-zinc-800/60 text-xs select-none">
-        <div class="h-7 w-7 rounded-lg bg-gradient-to-br from-emerald-500/20 to-blue-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0">
-          <Bot size={14} />
-        </div>
-        <div class="flex items-center gap-2 flex-wrap min-w-0">
-          <span class="font-semibold text-zinc-100 font-mono">
-            @{agenteNome()}
-          </span>
-          <Show when={modeloNome()}>
-            <span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-800 text-zinc-400 border border-zinc-700/60 truncate max-w-xs">
-              {modeloNome()}
-            </span>
-          </Show>
-          <Show when={props.status === "executando"}>
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse">
-              ● AO VIVO
-            </span>
-          </Show>
-          <Show when={props.status === "concluido"}>
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-1">
-              <Check size={10} /> Concluído
-            </span>
-          </Show>
-          <Show when={props.status === "falhou"}>
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono text-rose-400 bg-rose-500/10 border border-rose-500/20 flex items-center gap-1">
-              <X size={10} /> Falhou
-            </span>
-          </Show>
-          <Show when={duracaoFmt()}>
-            <span class="text-[10px] text-zinc-500 font-mono ml-auto flex items-center gap-1">
-              <Clock size={10} /> {duracaoFmt()}
-            </span>
-          </Show>
-        </div>
-      </div>
-
-      {/* Feed sequencial de mensagens — mesmo padrão do Secretário */}
-      <div class="max-w-3xl mx-auto w-full space-y-3">
-        <Show
-          when={mensagens().length > 0}
-          fallback={
-            <div class="py-12 text-center">
-              <div class="h-10 w-10 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mx-auto mb-3">
-                <Sparkles size={20} />
-              </div>
-              <p class="text-xs text-zinc-500">
-                {props.status === "executando"
-                  ? "Aguardando primeiras saídas do agente..."
-                  : "Nenhuma saída de log capturada para esta execução."}
-              </p>
-            </div>
-          }
-        >
-          <For each={mensagens()}>
-            {(m, idx) => (
-              <SessionTurn
-                mensagem={m}
-                indice={idx()}
-                decorridoFmt={props.status === "executando" ? duracaoFmt() : undefined}
-                onEditarPrompt={noopEdit}
-              />
-            )}
-          </For>
-        </Show>
-      </div>
-
-      {/* Indicador de streaming ao vivo */}
-      <Show when={props.status === "executando"}>
-        <div class="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-950/20 border border-emerald-800/40 text-xs text-emerald-300 mx-auto max-w-3xl w-full">
-          <span class="h-2 w-2 rounded-full bg-emerald-400 animate-ping flex-shrink-0" />
-          <span class="font-medium">
-            Agente trabalhando ao vivo... (polling a cada 2.5s)
-          </span>
-        </div>
-      </Show>
+    <div class="h-full w-full flex flex-col min-h-0">
+      <UniversalChat
+        modo="leitura"
+        podeEnviarPrompt={false}
+        mensagens={mensagens()}
+        agente={{
+          id: agenteNome(),
+          nome: agenteNome(),
+          modelo: modeloNome(),
+          status: props.status,
+        }}
+        decorridoFmt={duracaoFmt()}
+        iframeConfig={{
+          habilitado: true,
+          aberto: false,
+        }}
+      />
     </div>
   );
 };
+

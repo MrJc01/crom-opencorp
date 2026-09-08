@@ -39,17 +39,17 @@ export interface AutocompleteItem {
 }
 
 export interface PromptInputProps {
-  valor: string;
-  onInput: (v: string) => void;
-  onEnviar: () => void;
+  valor?: string;
+  onInput?: (v: string) => void;
+  onEnviar?: () => void;
   onParar?: () => void;
-  carregando: boolean;
-  anexos: Anexo[];
-  onAdicionarAnexo: (a: Anexo) => void;
-  onRemoverAnexo: (index: number) => void;
+  carregando?: boolean;
+  anexos?: Anexo[];
+  onAdicionarAnexo?: (a: Anexo) => void;
+  onRemoverAnexo?: (index: number) => void;
   placeholder?: string;
-  agenteSelecionado: string;
-  onMudarAgente: (ag: any) => void;
+  agenteSelecionado?: string;
+  onMudarAgente?: (ag: any) => void;
   agentesLista?: Array<{ id: string; role?: string }>;
   refTextarea?: (el: HTMLTextAreaElement) => void;
 }
@@ -67,6 +67,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const [listaTasks, setListaTasks] = createSignal<any[]>([]);
   const [listaAgentes, setListaAgentes] = createSignal<any[]>([]);
 
+  const valorTexto = () => props.valor || "";
+  const listaAnexos = () => props.anexos || [];
+
   const autoResize = () => {
     if (!textareaRef) return;
     textareaRef.style.height = "auto";
@@ -75,7 +78,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   // Monitora limpeza do valor para colapsar o textarea de volta à altura padrão
   createEffect(() => {
-    const val = props.valor;
+    const val = valorTexto();
     if (!val || val.trim() === "") {
       if (textareaRef) {
         textareaRef.style.height = "auto";
@@ -462,8 +465,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   };
 
   const dispararEnvio = () => {
-    if (!props.carregando && (props.valor.trim() || props.anexos.length > 0)) {
-      props.onEnviar();
+    if (!props.carregando && (valorTexto().trim() || listaAnexos().length > 0)) {
+      props.onEnviar?.();
       if (textareaRef) {
         textareaRef.style.height = "auto";
       }
@@ -482,7 +485,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         if (file) {
           const reader = new FileReader();
           reader.onload = () => {
-            props.onAdicionarAnexo({
+            props.onAdicionarAnexo?.({
               nome: `imagem-colada-${Date.now()}.png`,
               mime: file.type,
               url: reader.result as string,
@@ -503,7 +506,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       const file = files[i];
       const reader = new FileReader();
       reader.onload = () => {
-        props.onAdicionarAnexo({
+        props.onAdicionarAnexo?.({
           nome: file.name,
           mime: file.type,
           url: reader.result as string,
@@ -599,9 +602,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       </Show>
 
       {/* Visualização de Anexos Pendentes */}
-      <Show when={props.anexos.length > 0}>
+      <Show when={listaAnexos().length > 0}>
         <div class="flex flex-wrap gap-2 px-1 pb-2 border-b border-zinc-800/80 mb-2">
-          <For each={props.anexos}>
+          <For each={listaAnexos()}>
             {(anexo, idx) => (
               <div class="relative group flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700 text-xs text-zinc-200">
                 <Show when={anexo.mime.startsWith("image/")} fallback={<Paperclip size={12} class="text-zinc-400" />}>
@@ -609,7 +612,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 </Show>
                 <span class="max-w-[120px] truncate text-[11px] font-medium">{anexo.nome}</span>
                 <button
-                  onClick={() => props.onRemoverAnexo(idx())}
+                  onClick={() => props.onRemoverAnexo?.(idx())}
                   class="text-zinc-400 hover:text-rose-400 p-0.5 rounded transition-colors cursor-pointer"
                   title="Remover anexo"
                 >
@@ -625,10 +628,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       <textarea
         ref={textareaRef}
         rows={1}
-        value={props.valor}
+        value={valorTexto()}
         onInput={(e) => {
           const val = e.currentTarget.value;
-          props.onInput(val);
+          props.onInput?.(val);
           verificarGatilhos(val);
           autoResize();
         }}
@@ -644,8 +647,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           {/* Seletor de Agente Secretário / Secretário Executivo */}
           <select
             class="bg-zinc-800 border border-zinc-700/80 rounded-md px-2 py-1 text-xs text-zinc-200 focus:outline-none cursor-pointer hover:bg-zinc-700/80 transition-colors max-w-[200px] truncate"
-            value={props.agenteSelecionado}
-            onChange={(e) => props.onMudarAgente(e.currentTarget.value)}
+            value={props.agenteSelecionado || "secretario-exec"}
+            onChange={(e) => props.onMudarAgente?.(e.currentTarget.value)}
           >
             <For
               each={
@@ -738,7 +741,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             fallback={
               <button
                 onClick={dispararEnvio}
-                disabled={!props.valor.trim() && props.anexos.length === 0}
+                disabled={!valorTexto().trim() && listaAnexos().length === 0}
                 class="flex items-center justify-center h-8 w-8 rounded-full bg-zinc-100 text-zinc-950 font-bold transition-all disabled:opacity-30 disabled:pointer-events-none hover:bg-white active:scale-95 shadow-md cursor-pointer"
                 title="Enviar mensagem (Enter)"
                 aria-label="Enviar mensagem"

@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
-import { join, resolve, relative, isAbsolute, dirname } from "node:path";
+import { join, resolve, relative, isAbsolute, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stat, readdir, readFile, realpath, open, mkdir, rename, rm, unlink } from "node:fs/promises";
 import { existsSync, rmSync, statSync, readFileSync, writeFileSync } from "node:fs";
@@ -836,10 +836,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
       }
-      // SPA fallback para URLs limpas (/secretario, /workspace, /docs...) — history API sem # (só para navegação, não para API JSON)
+      // SPA fallback para URLs limpas (/secretario, /workspace, /docs, /secrets...) — history API sem # (só para navegação, não para API JSON)
       const accept = String(req.headers.accept || "");
       const querHtml = accept.includes("text/html");
-      if (req.method === "GET" && querHtml && /^\/(home|tasks|agentes|secretario|workspace|agenda|fluxos|hooks|apps|historico|notificacoes|docs|config|app)(\/.*)?$/.test(rota)) {
+      if (req.method === "GET" && querHtml && /^\/(home|tasks|agentes|secretario|workspace|agenda|fluxos|hooks|apps|secrets|reunioes|historico|notificacoes|docs|config|app)(\/.*)?$/.test(rota)) {
         const index = servirEstatico("/");
         if (index) {
           res.writeHead(200, { "content-type": index.tipo, "access-control-allow-origin": "*", "cache-control": "no-cache" });
@@ -3002,11 +3002,67 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           }
         }
 
-        if (rota === "/apps" && req.method === "GET") {
+        if ((rota === "/apps" || rota === "/api/apps") && req.method === "GET") {
           const ws = await resolverWs(url);
           enviar(res, 200, apps.listar(ws.path));
           return;
         }
+
+        // ── POST /api/apps/novo — cria mini-app com arquivos reais no workspace ──
+        if (rota === "/api/apps/novo" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { id?: string; titulo?: string; descricao?: string; htmlInicial?: string };
+          if (!corpo.id || !corpo.titulo) {
+            enviar(res, 400, { erro: "id e titulo são obrigatórios para criar um mini-app" });
+            return;
+          }
+          const appCriado = await apps.criarMiniApp(ws.path, corpo.id, corpo.titulo, corpo.descricao, corpo.htmlInicial);
+          enviar(res, 201, appCriado);
+          return;
+        }
+
+        // ── GET /api/apps/:id/view (ou sub-rota) — serve arquivos estáticos do mini-app ──
+        const mAppView = /^\/api\/apps\/([^/]+)\/view(?:\/(.*))?$/.exec(rota);
+        if (mAppView && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const appId = decodeURIComponent(mAppView[1]!);
+          const subPath = mAppView[2] ? decodeURIComponent(mAppView[2]) : "index.html";
+          const appDir = join(ws.path, "apps", appId);
+          const filePath = join(appDir, subPath);
+
+          if (!filePath.startsWith(appDir)) {
+            enviar(res, 403, { erro: "Acesso fora da pasta do app proibido" });
+            return;
+          }
+
+          if (!existsSync(filePath)) {
+            enviar(res, 404, { erro: `Arquivo "${subPath}" do mini-app "${appId}" não encontrado` });
+            return;
+          }
+
+          const ext = extname(filePath).toLowerCase();
+          const mimes: Record<string, string> = {
+            ".html": "text/html; charset=utf-8",
+            ".js": "application/javascript; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".json": "application/json; charset=utf-8",
+            ".png": "image/png",
+            ".svg": "image/svg+xml",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".ico": "image/x-icon",
+          };
+          const mime = mimes[ext] || "application/octet-stream";
+          const buf = await readFile(filePath);
+          res.writeHead(200, {
+            "Content-Type": mime,
+            "Content-Length": buf.length,
+            "Cache-Control": "no-cache",
+          });
+          res.end(buf);
+          return;
+        }
+
         const mApp = /^\/apps\/([^/]+)\/spec$/.exec(rota);
         if (mApp && req.method === "GET") {
           const ws = await resolverWs(url);
