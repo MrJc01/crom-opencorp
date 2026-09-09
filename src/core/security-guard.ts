@@ -100,6 +100,20 @@ function pedeExecucao(comando: string): boolean {
   return false;
 }
 
+const INFRA_BLOCKLIST = [
+  "oc daemon *",
+  "opencorp daemon *",
+  "oc scheduler stop",
+  "opencorp scheduler stop",
+  "systemctl *",
+  "crontab *",
+  "shutdown",
+  "reboot",
+  "poweroff",
+  "init 0",
+  "init 6",
+];
+
 export function avaliar(
   comando: string,
   policy: SecurityPolicy,
@@ -111,6 +125,15 @@ export function avaliar(
       motivo: `agente level-1 (leitura) não executa comandos — pedido: ${comando.slice(0, 120)}`,
       padrao: "level-1",
     };
+  }
+  for (const padrao of INFRA_BLOCKLIST) {
+    if (casaPadrao(padrao, comando)) {
+      return {
+        acao: "bloqueado",
+        motivo: `comando de infraestrutura global do host bloqueado para agentes ("${padrao}") — o scheduler recarrega dinamicamente a cada tick e a infraestrutura é gerida pelo operador`,
+        padrao,
+      };
+    }
   }
   for (const padrao of policy.blocklist) {
     if (casaPadrao(padrao, comando)) {
