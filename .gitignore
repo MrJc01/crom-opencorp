@@ -58,6 +58,8 @@ secrets.json
 .env.*
 !.env.example
 auth.json
+SAVE_INFRA*
+*INFRA*.md
 *.pem
 *.key
 *.cert
