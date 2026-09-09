@@ -18,16 +18,21 @@ console.log("      INICIANDO TÚNEL PÚBLICO ZERO-CONTA (TRYCLOUDFLARE)         
 console.log("==================================================================");
 console.log(`Alvo local: ${targetUrl}`);
 
-// 1. Verificar se cloudflared está disponível
-let temCloudflared = false;
-try {
-  execSync("cloudflared --version", { stdio: "ignore" });
-  temCloudflared = true;
-} catch {
-  temCloudflared = false;
+// 1. Verificar se cloudflared está disponível no PATH ou em ~/.opencorp/bin/cloudflared
+const binLocal = path.join(process.env.HOME || "/home/j", ".opencorp", "bin", "cloudflared");
+let cmdBin = "cloudflared";
+
+if (fs.existsSync(binLocal)) {
+  cmdBin = binLocal;
+} else {
+  try {
+    execSync("cloudflared --version", { stdio: "ignore" });
+  } catch {
+    cmdBin = null;
+  }
 }
 
-if (!temCloudflared) {
+if (!cmdBin) {
   console.log("\n[AVISO]: Binário 'cloudflared' não encontrado localmente.");
   console.log("Para instalar o Quick Tunnel sem conta no Linux:");
   console.log("  curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && sudo dpkg -i cloudflared.deb");
@@ -37,8 +42,9 @@ if (!temCloudflared) {
   process.exit(0);
 }
 
+console.log(`Usando binário: ${cmdBin}`);
 console.log("Conectando à rede global da Cloudflare (Modo Anônimo / Quick Tunnel)...");
-const child = spawn("cloudflared", ["tunnel", "--url", targetUrl], {
+const child = spawn(cmdBin, ["tunnel", "--url", targetUrl], {
   stdio: ["ignore", "pipe", "pipe"],
 });
 

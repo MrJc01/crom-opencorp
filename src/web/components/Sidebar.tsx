@@ -104,8 +104,8 @@ export const Sidebar: Component = () => {
         {/* Cabeçalho do App / Logo */}
         <div class="h-14 flex items-center justify-between px-3 border-b border-zinc-800/80">
           <div class="flex items-center gap-2.5 overflow-hidden">
-            <div class="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0 font-mono font-bold text-xs shadow-xs">
-              OC
+            <div class="h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden p-0.5">
+              <img src="/logo.png" alt="OpenCorp" class="h-full w-full object-contain" />
             </div>
             <Show when={!colapsado() || sidebarMobileAberta()}>
               <div class="flex flex-col min-w-0">

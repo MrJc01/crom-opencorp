@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "tipo": "automacao-radar-oportunidades",
+  "score_minimo_aprovacao": 70,
+  "itens_por_ciclo": 10
+}

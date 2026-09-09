@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "tipo": "micro-saas-monitor",
+  "intervalo_ping_segundos": 60,
+  "timeout_ms": 4000
+}

@@ -19,9 +19,14 @@ console.log("=================================================================="
 
 const catalogoBenchmark = [
   { id: "yt-factory-01", template: "youtube-video-factory", rotulo: "Canal YouTube Autônomo" },
-  { id: "tech-portal-01", template: "portal-conteudo", rotulo: "Portal Editorial de Notícias" },
-  { id: "uptime-pulse-01", template: "micro-saas", rotulo: "Micro-SaaS & Monitor de Uptime" },
-  { id: "radar-leads-01", template: "automacao-radar", rotulo: "Radar de Oportunidades e Leads" },
+  { id: "tech-hub-news", template: "portal-conteudo", rotulo: "Portal Editorial de Notícias Tech" },
+  { id: "uptime-pulse", template: "micro-saas", rotulo: "Micro-SaaS & Monitor de Uptime" },
+  { id: "prompt-vault", template: "portal-conteudo", rotulo: "Diretório & Curadoria de Prompts IA" },
+  { id: "ofertas-radar", template: "automacao-radar", rotulo: "Radar & Vitrine de Ofertas" },
+  { id: "leadhunter-b2b", template: "automacao-radar", rotulo: "Prospecção B2B & Inteligência de Mercado" },
+  { id: "cryptobrief-news", template: "portal-conteudo", rotulo: "Boletim Cripto & Web3" },
+  { id: "sre-watchdog", template: "micro-saas", rotulo: "Guardião de Infraestrutura & SRE" },
+  { id: "licitacoes-diario", template: "automacao-radar", rotulo: "Radar & Triagem de Editais" },
 ];
 
 console.log(`Workspaces selecionados para criação inicial: ${catalogoBenchmark.length}\n`);
@@ -33,13 +38,13 @@ for (const w of catalogoBenchmark) {
 
   try {
     // 1. Criar via CLI do OpenCorp com o template correto
-    const outCriar = execSync(`node "${binOpenCorp}" workspace create "${w.id}" --template "${w.template}"`, {
+    execSync(`node "${binOpenCorp}" workspace create "${w.id}" --template "${w.template}"`, {
       encoding: "utf8",
       stdio: "pipe",
     });
     console.log(`    ✔ Workspace criado com sucesso.`);
   } catch (err) {
-    if (err.message.includes("já existe")) {
+    if (err.message && err.message.includes("já existe")) {
       console.log(`    ℹ Workspace "${w.id}" já existia.`);
     } else {
       console.error(`    ✖ Erro ao criar workspace:`, err.message);
@@ -49,8 +54,6 @@ for (const w of catalogoBenchmark) {
 
   // 2. Executar ciclo de setup inicial do workspace se houver o script
   try {
-    const wsInfoRaw = execSync(`node "${binOpenCorp}" workspace list`, { encoding: "utf8" });
-    // Localiza a pasta do workspace
     const wsHome = path.join(process.env.HOME || "/home/j", ".opencorp", "workspaces", w.id);
     const setupScript = path.join(wsHome, "scripts", "setup_inicial.mjs");
     
@@ -63,8 +66,20 @@ for (const w of catalogoBenchmark) {
       });
       console.log(`    ✔ Setup Inicial concluído e tasks de Day 0 registradas no Kanban!`);
     }
+
+    // 3. Executar o ciclo inicial de auto-evolução
+    const autoEvolucaoScript = path.join(wsHome, "scripts", "auto_evolucao.mjs");
+    if (fs.existsSync(autoEvolucaoScript)) {
+      console.log(`    ⚙ Inicializando motor de Auto-Evolução em ${w.id}...`);
+      execSync(`node "${autoEvolucaoScript}"`, {
+        cwd: wsHome,
+        env: { ...process.env, OPENCORP_WORKSPACE: wsHome },
+        stdio: "pipe",
+      });
+      console.log(`    ✔ Ciclo de Auto-Evolução inicial registrado com sucesso.`);
+    }
   } catch (err) {
-    console.log(`    Nota sobre setup inicial: ${err.message}`);
+    console.log(`    Nota sobre ciclo inicial: ${err.message}`);
   }
 }
 

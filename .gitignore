@@ -1,18 +1,90 @@
+# Dependências
 node_modules/
+.pnp/
+.pnp.js
+
+# Compilação e Build
 dist/
 web-dist/app/
-workspaces/
-.opencorp/
-*.log
-!templates/default/.opencorp/
-test-results/
-report.*.json
 web-dist/src/
 
-# Segurança — nunca comitar segredos, chaves ou credenciais
+# OpenCorp Runtime e Workspaces
+workspaces/
+.opencorp/
+!templates/**/.opencorp/
+!templates/default/.opencorp/
+.opencode/
+
+# Workspaces de benchmark/testes locais na raiz
+pulso-diario/
+yt-factory-01/
+tech-hub-news/
+uptime-pulse/
+prompt-vault/
+ofertas-radar/
+leadhunter-b2b/
+cryptobrief-news/
+sre-watchdog/
+licitacoes-diario/
+
+# Bancos de dados locais, SQLite e journals
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Logs e diagnósticos
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Testes e cobertura
+test-results/
+playwright-report/
+blob-report/
+coverage/
+*.lcov
+report.*.json
+.nyc_output/
+
+# Segurança — nunca comitar segredos, chaves, credenciais ou tokens
 secrets.json
 .env
 .env.*
+!.env.example
 auth.json
 *.pem
 *.key
+*.cert
+*.crt
+id_rsa*
+id_ed25519*
+
+# Mídias e exportações pesadas
+exports/
+*.mp4
+*.webm
+*.mp3
+*.wav
+
+# Sistema Operacional e Editores
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+*~
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Arquivos temporários e caches
+*.tmp
+*.temp
+.parcel-cache/
+.turbo/

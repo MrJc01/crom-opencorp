@@ -1,9 +1,15 @@
-# 🏢 OpenCorp — Sistema Operacional de Empresas Autônomas
+<div align="center">
+  <img src="docs/assets/logo.png" alt="OpenCorp Logo" width="180" />
+  <h1>OpenCorp</h1>
+  <p><strong>Sistema Operacional de Empresas Autônomas Movidas por Agentes de IA</strong></p>
 
-[![Licença MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-green.svg)](https://nodejs.org)
-[![TypeScript](https://img.shields.io/badge/typescript-5.x-blue.svg)](https://www.typescriptlang.org)
-[![OpenCode](https://img.shields.io/badge/engine-OpenCode%20%7C%20Claude%20Code%20%7C%20Antigravity-orange.svg)](https://opencode.ai)
+  <p>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/licen%C3%A7a-MIT-blue.svg" alt="Licença MIT" /></a>
+    <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D20.0.0-green.svg" alt="Node.js" /></a>
+    <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/typescript-5.x-blue.svg" alt="TypeScript" /></a>
+    <a href="https://opencode.ai"><img src="https://img.shields.io/badge/engine-OpenCode%20%7C%20Claude%20Code%20%7C%20Antigravity-orange.svg" alt="OpenCode" /></a>
+  </p>
+</div>
 
 O **OpenCorp** é um sistema operacional distribuído para governar empresas autônomas movidas por agentes de IA. Ele orquestra sessões de modelos de linguagem sobre múltiplos harnesses ([OpenCode](https://opencode.ai), [Claude Code](https://claude.ai), [Antigravity](https://github.com)), mantendo cada empresa (workspace) isolada com seu próprio banco de dados SQLite, sistema de segredos, arquivos de tarefas, registros e auditoria.
 

@@ -1,0 +1,7 @@
+{
+  "level": "standard",
+  "blocklist": ["rm -rf", "shutdown", "reboot", "curl * | bash", "git push --force"],
+  "allowlist_extra": ["node", "npm", "curl", "python3"],
+  "network_allowlist": ["*"],
+  "hitl_patterns": ["git push", "DROP ", "DELETE FROM"]
+}

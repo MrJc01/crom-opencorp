@@ -104,7 +104,7 @@ export class AppStore {
   /**
    * Lista todos os mini-apps do workspace (<workspace>/apps/) e specs declarativos (.opencorp/apps/)
    */
-  listar(wsPath: string): MiniAppInfo[] {
+  listar(wsPath: string, wsId?: string): MiniAppInfo[] {
     const saida: MiniAppInfo[] = [];
 
     // 1. Mini-apps dentro de <workspace>/apps/<id>/
@@ -126,6 +126,7 @@ export class AppStore {
               } catch {}
             }
 
+            const wsQuery = wsId ? `?workspace=${encodeURIComponent(wsId)}` : "";
             saida.push({
               id: appId,
               titulo: meta.titulo || appId.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
@@ -133,7 +134,7 @@ export class AppStore {
               icone: meta.icone || "Layout",
               categoria: meta.categoria || "Ferramenta",
               tipo: "miniapp",
-              entryUrl: `/api/apps/${encodeURIComponent(appId)}/view`,
+              entryUrl: `/api/apps/${encodeURIComponent(appId)}/view${wsQuery}`,
               padrao: meta.padrao === "chat" ? "chat" : "app",
             });
           }

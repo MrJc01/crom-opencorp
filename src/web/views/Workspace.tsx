@@ -29,11 +29,18 @@ import {
   FilePlus,
   Copy,
   AlertTriangle,
+  Video,
+  Image,
+  Music,
+  Download,
+  ExternalLink,
+  Sparkles,
+  FileCode,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
-import { fetchApi } from "../lib/context";
+import { fetchApi, wsAtivo, setWsAtivo } from "../lib/context";
 import { renderDocMarkdown } from "../lib/doc-renderer";
 
 export interface NoArvoreWeb {
@@ -49,7 +56,12 @@ export interface TabArquivo {
   nome: string;
   original: string;
   editado: string;
-  modo: "editor" | "preview" | "split";
+  modo: "editor" | "preview" | "split" | "media";
+  binario?: boolean;
+  rawUrl?: string;
+  tamanho?: number;
+  mime?: string;
+  tipoMidia?: "video" | "imagem" | "audio" | "outro";
 }
 
 export interface TabTerminal {
@@ -147,6 +159,16 @@ export const WorkspaceView: Component = () => {
     setExpandidos(s);
   };
 
+  const isVideo = (c: string) => /\.(mp4|webm|ogg|mov|mkv)$/i.test(c);
+  const isImage = (c: string) => /\.(png|jpg|jpeg|gif|webp|svg|ico|avif|bmp)$/i.test(c);
+  const isAudio = (c: string) => /\.(mp3|wav|ogg|m4a|aac)$/i.test(c);
+  const formatarBytes = (bytes?: number) => {
+    if (!bytes || bytes <= 0) return "0 B";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
   const abrirArquivo = async (caminho: string) => {
     if (!caminho) return;
 
@@ -160,16 +182,37 @@ export const WorkspaceView: Component = () => {
 
     try {
       const resp = await fetchApi<any>(`/files?path=${encodeURIComponent(caminho)}`);
+
+      if (resp && resp.workspace && resp.workspace !== wsAtivo()) {
+        setWsAtivo(resp.workspace);
+      }
+
+      const ehVid = isVideo(caminho) || (resp?.mime && String(resp.mime).startsWith("video/"));
+      const ehImg = isImage(caminho) || (resp?.mime && String(resp.mime).startsWith("image/"));
+      const ehAud = isAudio(caminho) || (resp?.mime && String(resp.mime).startsWith("audio/"));
+      const ehMid = ehVid || ehImg || ehAud || Boolean(resp?.binario);
+
       let conteudoStr = "";
       if (typeof resp === "string") {
         conteudoStr = resp;
       } else if (resp && typeof resp.conteudo === "string") {
         conteudoStr = resp.conteudo;
+      } else if (ehMid) {
+        conteudoStr = "";
       } else {
         conteudoStr = JSON.stringify(resp, null, 2);
       }
+
       const nome = caminho.split("/").pop() ?? caminho;
-      const modoPadrao = caminho.endsWith(".md") ? "preview" : "editor";
+      let modoPadrao: "editor" | "preview" | "split" | "media" = "editor";
+      if (ehMid) {
+        modoPadrao = "media";
+      } else if (caminho.endsWith(".md")) {
+        modoPadrao = "preview";
+      }
+
+      const wsAtual = resp?.workspace || wsAtivo();
+      const rawUrl = resp?.urlRaw || `/files/raw?path=${encodeURIComponent(caminho)}&workspace=${encodeURIComponent(wsAtual)}`;
 
       const novaTab: TabArquivo = {
         caminho,
@@ -177,6 +220,11 @@ export const WorkspaceView: Component = () => {
         original: conteudoStr,
         editado: conteudoStr,
         modo: modoPadrao,
+        binario: ehMid,
+        rawUrl,
+        tamanho: resp?.tamanho,
+        mime: resp?.mime,
+        tipoMidia: ehVid ? "video" : (ehImg ? "imagem" : (ehAud ? "audio" : "outro")),
       };
 
       setTabs((prev) => [...prev, novaTab]);
@@ -215,7 +263,7 @@ export const WorkspaceView: Component = () => {
     );
   };
 
-  const alternarModoTab = (modo: "editor" | "preview" | "split") => {
+  const alternarModoTab = (modo: "editor" | "preview" | "split" | "media") => {
     const ativa = tabAtiva();
     if (!ativa) return;
     setTabs((prev) =>
@@ -547,6 +595,11 @@ export const WorkspaceView: Component = () => {
     document.addEventListener("keydown", onKeyDownGlobal);
     document.addEventListener("click", fecharMenuContexto);
 
+    const urlWs = searchParams.workspace as string | undefined;
+    if (urlWs && urlWs !== wsAtivo()) {
+      setWsAtivo(urlWs);
+    }
+
     const urlFile = searchParams.file as string | undefined;
     if (urlFile) {
       void abrirArquivo(urlFile);
@@ -659,7 +712,26 @@ export const WorkspaceView: Component = () => {
                       : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50"
                   }`}
                 >
-                  <FileText size={12} class={ativa() ? "text-orange-400" : "text-zinc-500"} />
+                  <Show
+                    when={t.tipoMidia === "video" || isVideo(t.caminho)}
+                    fallback={
+                      <Show
+                        when={t.tipoMidia === "imagem" || isImage(t.caminho)}
+                        fallback={
+                          <Show
+                            when={t.tipoMidia === "audio" || isAudio(t.caminho)}
+                            fallback={<FileText size={12} class={ativa() ? "text-orange-400" : "text-zinc-500"} />}
+                          >
+                            <Music size={12} class="text-emerald-400 flex-shrink-0" />
+                          </Show>
+                        }
+                      >
+                        <Image size={12} class="text-sky-400 flex-shrink-0" />
+                      </Show>
+                    }
+                  >
+                    <Video size={12} class="text-purple-400 flex-shrink-0" />
+                  </Show>
                   <span class="truncate max-w-[140px]">{t.nome}</span>
                   <Show when={suja()}>
                     <span class="h-2 w-2 rounded-full bg-orange-500 flex-shrink-0" title="Não salvo" />
@@ -677,7 +749,7 @@ export const WorkspaceView: Component = () => {
           </For>
         </div>
 
-        {/* Sub-header da Tab Ativa: Breadcrumb + Modo (Editor / Preview / Split) + Salvar */}
+        {/* Sub-header da Tab Ativa: Breadcrumb + Modo (Editor / Preview / Split / Mídia) + Ações */}
         <Show when={tabAtual()}>
           <div class="h-9 px-4 border-b border-zinc-800/60 bg-zinc-950/60 flex items-center justify-between text-xs">
             <div class="flex items-center gap-1.5 text-zinc-400 font-mono text-[11px] truncate">
@@ -689,51 +761,86 @@ export const WorkspaceView: Component = () => {
             </div>
 
             <div class="flex items-center gap-3">
-              {/* Seletor de Modo se for Markdown */}
-              <Show when={tabAtual()!.caminho.endsWith(".md")}>
-                <div class="flex items-center bg-zinc-900 rounded p-0.5 border border-zinc-800 text-[10px] font-mono">
-                  <button
-                    onClick={() => alternarModoTab("editor")}
-                    class={`px-2 py-0.5 rounded transition-colors ${
-                      tabAtual()!.modo === "editor" ? "bg-zinc-800 text-zinc-100 font-bold" : "text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    Editor
-                  </button>
-                  <button
-                    onClick={() => alternarModoTab("preview")}
-                    class={`px-2 py-0.5 rounded transition-colors ${
-                      tabAtual()!.modo === "preview" ? "bg-zinc-800 text-zinc-100 font-bold" : "text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    Preview
-                  </button>
-                  <button
-                    onClick={() => alternarModoTab("split")}
-                    class={`px-2 py-0.5 rounded transition-colors ${
-                      tabAtual()!.modo === "split" ? "bg-zinc-800 text-zinc-100 font-bold" : "text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    Split
-                  </button>
+              <Show
+                when={tabAtual()!.modo === "media"}
+                fallback={
+                  <>
+                    {/* Seletor de Modo se for Markdown */}
+                    <Show when={tabAtual()!.caminho.endsWith(".md")}>
+                      <div class="flex items-center bg-zinc-900 rounded p-0.5 border border-zinc-800 text-[10px] font-mono">
+                        <button
+                          onClick={() => alternarModoTab("editor")}
+                          class={`px-2 py-0.5 rounded transition-colors ${
+                            tabAtual()!.modo === "editor" ? "bg-zinc-800 text-zinc-100 font-bold" : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          Editor
+                        </button>
+                        <button
+                          onClick={() => alternarModoTab("preview")}
+                          class={`px-2 py-0.5 rounded transition-colors ${
+                            tabAtual()!.modo === "preview" ? "bg-zinc-800 text-zinc-100 font-bold" : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          Preview
+                        </button>
+                        <button
+                          onClick={() => alternarModoTab("split")}
+                          class={`px-2 py-0.5 rounded transition-colors ${
+                            tabAtual()!.modo === "split" ? "bg-zinc-800 text-zinc-100 font-bold" : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          Split
+                        </button>
+                      </div>
+                    </Show>
+
+                    <Button
+                      size="xs"
+                      variant="primary"
+                      loading={salvando()}
+                      onClick={salvarTabAtiva}
+                      disabled={tabAtual()!.editado === tabAtual()!.original}
+                      class="text-[11px] bg-orange-600 hover:bg-orange-500 text-white font-bold"
+                    >
+                      <Save size={12} class="mr-1" /> Salvar (Ctrl+S)
+                    </Button>
+                  </>
+                }
+              >
+                {/* Toolbar de Mídia */}
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-800 text-zinc-300">
+                    {formatarBytes(tabAtual()!.tamanho)}
+                  </span>
+                  <Show when={tabAtual()!.rawUrl}>
+                    <a
+                      href={tabAtual()!.rawUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      class="flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-850 hover:bg-zinc-800 text-zinc-200 text-[11px] border border-zinc-700/60 transition-colors"
+                      title="Abrir em Nova Aba"
+                    >
+                      <ExternalLink size={12} />
+                      <span>Abrir</span>
+                    </a>
+                    <a
+                      href={tabAtual()!.rawUrl}
+                      download={tabAtual()!.nome}
+                      class="flex items-center gap-1 px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-semibold transition-colors"
+                      title="Baixar Arquivo"
+                    >
+                      <Download size={12} />
+                      <span>Baixar</span>
+                    </a>
+                  </Show>
                 </div>
               </Show>
-
-              <Button
-                size="xs"
-                variant="primary"
-                loading={salvando()}
-                onClick={salvarTabAtiva}
-                disabled={tabAtual()!.editado === tabAtual()!.original}
-                class="text-[11px] bg-orange-600 hover:bg-orange-500 text-white font-bold"
-              >
-                <Save size={12} class="mr-1" /> Salvar (Ctrl+S)
-              </Button>
             </div>
           </div>
         </Show>
 
-        {/* Corpo do Arquivo (Editor / Preview / Split) */}
+        {/* Corpo do Arquivo (Editor / Preview / Split / Mídia) */}
         <div class="flex-1 overflow-hidden relative bg-zinc-950">
           <Show
             when={tabAtual()}
@@ -748,40 +855,200 @@ export const WorkspaceView: Component = () => {
             }
           >
             <Show
-              when={tabAtual()!.modo === "split"}
+              when={tabAtual()!.modo === "media"}
               fallback={
                 <Show
-                  when={tabAtual()!.modo === "editor"}
+                  when={tabAtual()!.modo === "split"}
                   fallback={
-                    /* MODO PREVIEW COM FORMATAÇÃO MARKDOWN RICA */
-                    <div
-                      class="p-6 sm:p-8 overflow-y-auto h-full text-zinc-200 leading-relaxed font-sans select-text scrollbar-thin max-w-4xl mx-auto"
-                      innerHTML={renderDocMarkdown(tabAtual()!.editado)}
-                    />
+                    <Show
+                      when={tabAtual()!.modo === "editor"}
+                      fallback={
+                        /* MODO PREVIEW COM FORMATAÇÃO MARKDOWN RICA */
+                        <div
+                          class="p-6 sm:p-8 overflow-y-auto h-full text-zinc-200 leading-relaxed font-sans select-text scrollbar-thin max-w-4xl mx-auto"
+                          innerHTML={renderDocMarkdown(tabAtual()!.editado)}
+                        />
+                      }
+                    >
+                      <textarea
+                        value={tabAtual()!.editado}
+                        onInput={(e) => atualizarConteudo(e.currentTarget.value)}
+                        class="w-full h-full bg-zinc-950 p-4 text-xs font-mono text-zinc-200 resize-none focus:outline-none scrollbar-thin leading-relaxed"
+                        spellcheck={false}
+                      />
+                    </Show>
                   }
                 >
-                  <textarea
-                    value={tabAtual()!.editado}
-                    onInput={(e) => atualizarConteudo(e.currentTarget.value)}
-                    class="w-full h-full bg-zinc-950 p-4 text-xs font-mono text-zinc-200 resize-none focus:outline-none scrollbar-thin leading-relaxed"
-                    spellcheck={false}
-                  />
+                  {/* Modo Split (Lado a Lado: Editor + Preview Rico) */}
+                  <div class="grid grid-cols-2 h-full w-full divide-x divide-zinc-800">
+                    <textarea
+                      value={tabAtual()!.editado}
+                      onInput={(e) => atualizarConteudo(e.currentTarget.value)}
+                      class="w-full h-full bg-zinc-950 p-4 text-xs font-mono text-zinc-200 resize-none focus:outline-none scrollbar-thin leading-relaxed"
+                      spellcheck={false}
+                    />
+                    <div
+                      class="p-6 overflow-y-auto h-full text-zinc-200 leading-relaxed font-sans select-text scrollbar-thin bg-zinc-900/10"
+                      innerHTML={renderDocMarkdown(tabAtual()!.editado)}
+                    />
+                  </div>
                 </Show>
               }
             >
-              {/* Modo Split (Lado a Lado: Editor + Preview Rico) */}
-              <div class="grid grid-cols-2 h-full w-full divide-x divide-zinc-800">
-                <textarea
-                  value={tabAtual()!.editado}
-                  onInput={(e) => atualizarConteudo(e.currentTarget.value)}
-                  class="w-full h-full bg-zinc-950 p-4 text-xs font-mono text-zinc-200 resize-none focus:outline-none scrollbar-thin leading-relaxed"
-                  spellcheck={false}
-                />
-                <div
-                  class="p-6 overflow-y-auto h-full text-zinc-200 leading-relaxed font-sans select-text scrollbar-thin bg-zinc-900/10"
-                  innerHTML={renderDocMarkdown(tabAtual()!.editado)}
-                />
-              </div>
+              {/* ─────────────────────────────────────────────────────────────
+                  VISUALIZADOR DE MÍDIA RICO (VÍDEO / IMAGEM / ÁUDIO)
+                 ───────────────────────────────────────────────────────────── */}
+              <Show
+                when={tabAtual()!.tipoMidia === "video"}
+                fallback={
+                  <Show
+                    when={tabAtual()!.tipoMidia === "imagem"}
+                    fallback={
+                      <Show
+                        when={tabAtual()!.tipoMidia === "audio"}
+                        fallback={
+                          <div class="flex flex-col items-center justify-center h-full text-zinc-400 space-y-3 p-6">
+                            <FileCode size={36} class="text-zinc-600" />
+                            <p class="text-xs">Arquivo binário ({tabAtual()!.mime || "desconhecido"}).</p>
+                            <Show when={tabAtual()!.rawUrl}>
+                              <a
+                                href={tabAtual()!.rawUrl}
+                                download={tabAtual()!.nome}
+                                class="px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                              >
+                                <Download size={13} />
+                                Baixar Arquivo
+                              </a>
+                            </Show>
+                          </div>
+                        }
+                      >
+                        {/* Player de Áudio */}
+                        <div class="flex flex-col items-center justify-center h-full w-full p-6 bg-zinc-950 overflow-y-auto">
+                          <div class="w-full max-w-md flex flex-col items-center bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 shadow-2xl">
+                            <div class="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mb-3">
+                              <Music size={24} />
+                            </div>
+                            <h3 class="text-sm font-bold text-zinc-100 truncate max-w-full mb-1">{tabAtual()!.nome}</h3>
+                            <span class="text-xs text-zinc-400 font-mono mb-4">{formatarBytes(tabAtual()!.tamanho)}</span>
+                            <audio controls src={tabAtual()!.rawUrl} class="w-full" />
+                          </div>
+                        </div>
+                      </Show>
+                    }
+                  >
+                    {/* Visualizador de Imagem */}
+                    <div class="flex flex-col items-center justify-start h-full w-full p-4 sm:p-8 bg-zinc-950/90 overflow-y-auto">
+                      <div class="w-full max-w-4xl flex flex-col items-center bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-5 shadow-2xl backdrop-blur-md">
+                        <div class="w-full flex items-center justify-between pb-3.5 mb-4 border-b border-zinc-800/80">
+                          <div class="flex items-center gap-2.5 min-w-0">
+                            <div class="p-1.5 rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                              <Image size={18} />
+                            </div>
+                            <div class="min-w-0">
+                              <h3 class="text-sm font-bold text-zinc-100 truncate">{tabAtual()!.nome}</h3>
+                              <p class="text-[11px] text-zinc-400 font-mono truncate">{tabAtual()!.caminho}</p>
+                            </div>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <span class="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                              {tabAtual()!.mime || "Imagem"}
+                            </span>
+                            <span class="px-2.5 py-1 rounded-full text-[10px] font-mono bg-zinc-800 text-zinc-300">
+                              {formatarBytes(tabAtual()!.tamanho)}
+                            </span>
+                          </div>
+                        </div>
+                        <div class="relative flex items-center justify-center bg-zinc-950/90 rounded-xl p-3 overflow-hidden border border-zinc-800 shadow-2xl max-h-[65vh] w-full">
+                          <img
+                            src={tabAtual()!.rawUrl}
+                            alt={tabAtual()!.nome}
+                            class="max-h-[60vh] max-w-full object-contain rounded shadow"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </Show>
+                }
+              >
+                {/* Visualizador de Vídeo Moderno */}
+                <div class="flex flex-col items-center justify-start h-full w-full p-4 sm:p-6 bg-zinc-950/90 overflow-y-auto">
+                  <div class="w-full max-w-3xl flex flex-col items-center bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-5 shadow-2xl backdrop-blur-md">
+                    {/* Header do Player */}
+                    <div class="w-full flex items-center justify-between pb-3.5 mb-4 border-b border-zinc-800/80">
+                      <div class="flex items-center gap-2.5 min-w-0">
+                        <div class="p-2 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                          <Video size={18} />
+                        </div>
+                        <div class="min-w-0">
+                          <h3 class="text-sm font-bold text-zinc-100 truncate">{tabAtual()!.nome}</h3>
+                          <p class="text-[11px] text-zinc-400 font-mono truncate">{tabAtual()!.caminho}</p>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                          Vertical Shorts (9:16)
+                        </span>
+                        <span class="px-2.5 py-1 rounded-full text-[10px] font-mono bg-zinc-800 text-zinc-300">
+                          {formatarBytes(tabAtual()!.tamanho)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Container do Vídeo */}
+                    <div class="relative flex items-center justify-center bg-black/90 rounded-xl overflow-hidden border border-zinc-800 shadow-2xl w-full max-h-[60vh] py-2">
+                      <video
+                        src={tabAtual()!.rawUrl}
+                        controls
+                        autoplay
+                        playsinline
+                        class="max-h-[58vh] max-w-full rounded-lg shadow-inner object-contain focus:outline-none"
+                      >
+                        Seu navegador não suporta reprodução deste vídeo.
+                      </video>
+                    </div>
+
+                    {/* Navegador de Arquivos do Pacote de Vídeo */}
+                    <Show when={tabAtual()!.caminho.includes("exports/videos/")}>
+                      <div class="w-full mt-4 pt-3.5 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span class="text-zinc-400 text-[11px] font-medium flex items-center gap-1.5">
+                          <Sparkles size={13} class="text-amber-400" />
+                          Pacote da Produção:
+                        </span>
+                        <div class="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              const pasta = tabAtual()!.caminho.substring(0, tabAtual()!.caminho.lastIndexOf("/"));
+                              void abrirArquivo(`${pasta}/roteiro.json`);
+                            }}
+                            class="px-2.5 py-1 rounded text-[11px] bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 font-mono transition-colors"
+                          >
+                            roteiro.json
+                          </button>
+                          <button
+                            onClick={() => {
+                              const pasta = tabAtual()!.caminho.substring(0, tabAtual()!.caminho.lastIndexOf("/"));
+                              void abrirArquivo(`${pasta}/legendas.srt`);
+                            }}
+                            class="px-2.5 py-1 rounded text-[11px] bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 font-mono transition-colors"
+                          >
+                            legendas.srt
+                          </button>
+                          <button
+                            onClick={() => {
+                              const pasta = tabAtual()!.caminho.substring(0, tabAtual()!.caminho.lastIndexOf("/"));
+                              void abrirArquivo(`${pasta}/metadados_publicacao.json`);
+                            }}
+                            class="px-2.5 py-1 rounded text-[11px] bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 font-mono transition-colors"
+                          >
+                            metadados_publicacao.json
+                          </button>
+                        </div>
+                      </div>
+                    </Show>
+                  </div>
+                </div>
+              </Show>
             </Show>
           </Show>
         </div>
@@ -1152,7 +1419,42 @@ const RenderNoArvore: Component<{
       >
         <Show
           when={isDir()}
-          fallback={<FileText size={13} class="text-zinc-500 flex-shrink-0" />}
+          fallback={
+            <Show
+              when={/\.(mp4|webm|ogg|mov|mkv)$/i.test(props.no.nome)}
+              fallback={
+                <Show
+                  when={/\.(png|jpg|jpeg|gif|webp|svg|ico|avif|bmp)$/i.test(props.no.nome)}
+                  fallback={
+                    <Show
+                      when={/\.(mp3|wav|ogg|m4a|aac)$/i.test(props.no.nome)}
+                      fallback={
+                        <Show
+                          when={props.no.nome.endsWith(".md")}
+                          fallback={
+                            <Show
+                              when={/\.(json|js|ts|tsx|jsx|css|html|sh|py|mjs)$/i.test(props.no.nome)}
+                              fallback={<FileText size={13} class="text-zinc-500 flex-shrink-0" />}
+                            >
+                              <FileCode size={13} class="text-amber-400 flex-shrink-0" />
+                            </Show>
+                          }
+                        >
+                          <FileText size={13} class="text-orange-400 flex-shrink-0" />
+                        </Show>
+                      }
+                    >
+                      <Music size={13} class="text-emerald-400 flex-shrink-0" />
+                    </Show>
+                  }
+                >
+                  <Image size={13} class="text-sky-400 flex-shrink-0" />
+                </Show>
+              }
+            >
+              <Video size={13} class="text-purple-400 flex-shrink-0" />
+            </Show>
+          }
         >
           <span class="text-zinc-500">
             {aberto() ? <ChevronDown size={12} /> : <ChevronRight size={12} />}

@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { spawn } from "node:child_process";
 import { mkdirRecursive } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { openSync } from "node:fs";
 import { SchedulerError } from "./errors.js";
 import { SettingsStore } from "./settings-store.js";
@@ -489,8 +489,17 @@ export class Scheduler {
     const logDir = join(this.homeDir, "logs");
     await mkdirRecursive(logDir);
     const logFd = openSync(join(logDir, `job-${job.id}.log`), "a");
-    const filho = spawn(process.execPath, [bin, ...final], {
-      env: { ...process.env, OPENCORP_HOME: this.homeDir },
+
+    const execPath = job.args[0] === "node" ? process.execPath : process.execPath;
+    const cmdArgs = job.args[0] === "node" ? job.args.slice(1) : [bin, ...final];
+
+    const wsDir = isAbsolute(job.workspace)
+      ? job.workspace
+      : join(this.homeDir, "workspaces", job.workspace);
+
+    const filho = spawn(execPath, cmdArgs, {
+      cwd: wsDir,
+      env: { ...process.env, OPENCORP_HOME: this.homeDir, OPENCORP_WORKSPACE: wsDir },
       detached: true,
       stdio: ["ignore", logFd, logFd],
     });

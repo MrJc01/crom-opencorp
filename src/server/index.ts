@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve, relative, isAbsolute, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stat, readdir, readFile, realpath, open, mkdir, rename, rm, unlink } from "node:fs/promises";
-import { existsSync, rmSync, statSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, statSync, readFileSync, writeFileSync, createReadStream } from "node:fs";
 import { WorkspaceManager } from "../core/workspace-manager.js";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
@@ -125,6 +125,7 @@ const ROUTES: DefinicaoRota[] = [
   { method: "POST", path: "/meetings/:id/stop", descricao: "Solicita interrupção de reunião ativa (404 se desconhecida)" },
   { method: "GET", path: "/events", descricao: "Stream SSE de eventos do servidor" },
   { method: "GET", path: "/files", descricao: "Lista diretório ou lê arquivo do workspace", publico: false },
+  { method: "GET", path: "/files/raw", descricao: "Stream de arquivo binário/mídia com suporte a Range", publico: false },
   { method: "GET", path: "/files/tree", descricao: "Árvore recursiva de arquivos do workspace (query: workspace, profundidade máx 6 default 4; cap 800 nós)", publico: false },
   { method: "PUT", path: "/files", descricao: "Salva conteúdo de arquivo EXISTENTE do workspace (query: workspace, path) — corpo { conteudo }, cap 1MB, não cria paths novos", corpo: true },
   { method: "POST", path: "/terminal", descricao: "Executa comando opencorp whitelistado (composer !) — corpo { comando }, retorna { saida, codigo }", corpo: true },
@@ -277,18 +278,73 @@ async function resolverCaminhoWorkspace(wsPath: string, pathParam: string): Prom
   return alvo;
 }
 
-/** Lê arquivo com limite de 512KB, retorna {tipo, conteudo} ou {tipo, conteudo: null, motivo}.
- *  realpath no alvo: symlink dentro do workspace apontando para FORA é bloqueado.
- *  Qualquer arquivo de texto abre (sem whitelist de extensão): binário é detectado
- *  por sniffing de byte NUL nos primeiros 8KB — cobre .ts/.js/.css/.sh/.yml etc. */
-async function lerArquivoWorkspace(alvo: string, base: string): Promise<{ tipo: "arquivo"; conteudo: string | null; motivo?: string }> {
+function obterMimeType(caminho: string): string {
+  const ext = caminho.split(".").pop()?.toLowerCase() ?? "";
+  const mapa: Record<string, string> = {
+    mp4: "video/mp4",
+    webm: "video/webm",
+    ogg: "video/ogg",
+    mov: "video/quicktime",
+    mkv: "video/x-matroska",
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    m4a: "audio/mp4",
+    aac: "audio/aac",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+    ico: "image/x-icon",
+    avif: "image/avif",
+    bmp: "image/bmp",
+    pdf: "application/pdf",
+    json: "application/json",
+    txt: "text/plain; charset=utf-8",
+    md: "text/markdown; charset=utf-8",
+    html: "text/html; charset=utf-8",
+    css: "text/css",
+    js: "text/javascript",
+    ts: "text/typescript",
+  };
+  return mapa[ext] || "application/octet-stream";
+}
+
+function ehMidia(caminho: string): boolean {
+  const mime = obterMimeType(caminho);
+  return mime.startsWith("video/") || mime.startsWith("image/") || mime.startsWith("audio/") || mime === "application/pdf";
+}
+
+export interface ResultadoLerArquivo {
+  tipo: "arquivo";
+  conteudo: string | null;
+  motivo?: string;
+  binario?: boolean;
+  tamanho?: number;
+  mime?: string;
+}
+
+/** Lê arquivo com limite de 512KB para texto; para mídia e binários retorna metadados e URL de stream */
+async function lerArquivoWorkspace(alvo: string, base: string): Promise<ResultadoLerArquivo> {
   const real = await realpath(alvo).catch(() => null);
   if (!real || (!isAbsolute(base) ? false : relative(resolve(base), real).startsWith(".."))) {
     return { tipo: "arquivo", conteudo: null, motivo: "symlink fora do workspace (bloqueado)" };
   }
   const info = await stat(alvo);
+  if (ehMidia(alvo)) {
+    const mime = obterMimeType(alvo);
+    return {
+      tipo: "arquivo",
+      conteudo: null,
+      binario: true,
+      tamanho: info.size,
+      mime,
+      motivo: `Mídia (${mime})`,
+    };
+  }
   if (info.size > 512 * 1024) {
-    return { tipo: "arquivo", conteudo: null, motivo: "arquivo excede 512KB" };
+    return { tipo: "arquivo", conteudo: null, motivo: "arquivo excede 512KB", binario: true, tamanho: info.size, mime: obterMimeType(alvo) };
   }
   if (info.size > 0) {
     const fd = await open(alvo, "r");
@@ -296,14 +352,14 @@ async function lerArquivoWorkspace(alvo: string, base: string): Promise<{ tipo: 
       const sniff = Buffer.alloc(Math.min(info.size, 8 * 1024));
       await fd.read(sniff, 0, sniff.length, 0);
       if (sniff.includes(0)) {
-        return { tipo: "arquivo", conteudo: null, motivo: "binário (abertura só para texto)" };
+        return { tipo: "arquivo", conteudo: null, motivo: "binário", binario: true, tamanho: info.size, mime: obterMimeType(alvo) };
       }
     } finally {
       await fd.close();
     }
   }
   const conteudo = await readFile(alvo, "utf8");
-  return { tipo: "arquivo", conteudo };
+  return { tipo: "arquivo", conteudo, binario: false, tamanho: info.size, mime: obterMimeType(alvo) };
 }
 
 /** Nó da árvore de arquivos (GET /files/tree — PLANO-PAINEL-V2 Etapa 3.1) */
@@ -2596,7 +2652,32 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const ws = await resolverWs(url);
           const pathParam = url.searchParams.get("path") ?? "";
           try {
-            const alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+            let alvo = "";
+            let wsAlvo = ws;
+            try {
+              alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+              await stat(alvo);
+            } catch (e: any) {
+              if (pathParam && (e?.code === "ENOENT" || e instanceof WorkspaceError)) {
+                let achou = false;
+                const todos = await workspaces.listar().catch(() => []);
+                for (const outro of todos) {
+                  if (outro.id === ws.id || !outro.path) continue;
+                  try {
+                    const testAlvo = await resolverCaminhoWorkspace(outro.path, pathParam);
+                    await stat(testAlvo);
+                    alvo = testAlvo;
+                    wsAlvo = outro as any;
+                    achou = true;
+                    break;
+                  } catch {}
+                }
+                if (!achou) throw e;
+              } else {
+                throw e;
+              }
+            }
+
             const info = await stat(alvo);
             if (info.isDirectory()) {
               const entradas = await readdir(alvo, { withFileTypes: true });
@@ -2613,14 +2694,118 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               );
               enviar(res, 200, { tipo: "dir", itens: itensComTamanho });
             } else {
-              const resultado = await lerArquivoWorkspace(alvo, ws.path);
-              enviar(res, 200, resultado);
+              const resultado = await lerArquivoWorkspace(alvo, wsAlvo.path);
+              const urlRaw = `/files/raw?path=${encodeURIComponent(pathParam)}&workspace=${encodeURIComponent(wsAlvo.id)}`;
+              enviar(res, 200, {
+                ...resultado,
+                workspace: wsAlvo.id,
+                caminho: pathParam,
+                urlRaw,
+              });
             }
           } catch (erro) {
             if (erro instanceof WorkspaceError && erro.exitCode === 3) {
               enviar(res, 403, { erro: "caminho fora do workspace (path traversal bloqueado)" });
             } else if ((erro as NodeJS.ErrnoException).code === "ENOENT") {
               enviar(res, 404, { erro: "arquivo ou diretório não encontrado" });
+            } else {
+              throw erro;
+            }
+          }
+          return;
+        }
+
+        // ── GET/HEAD /files/raw — stream binário direto com suporte a Range (vídeos, imagens, áudios)
+        if (rota === "/files/raw" && (req.method === "GET" || req.method === "HEAD")) {
+          const ws = await resolverWs(url);
+          const pathParam = url.searchParams.get("path") ?? "";
+          if (!pathParam) {
+            enviar(res, 400, { erro: "parâmetro 'path' é obrigatório" });
+            return;
+          }
+          try {
+            let alvo = "";
+            try {
+              alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+              await stat(alvo);
+            } catch (e: any) {
+              if (e?.code === "ENOENT" || e instanceof WorkspaceError) {
+                let achou = false;
+                const todos = await workspaces.listar().catch(() => []);
+                for (const outro of todos) {
+                  if (outro.id === ws.id || !outro.path) continue;
+                  try {
+                    const testAlvo = await resolverCaminhoWorkspace(outro.path, pathParam);
+                    await stat(testAlvo);
+                    alvo = testAlvo;
+                    achou = true;
+                    break;
+                  } catch {}
+                }
+                if (!achou) throw e;
+              } else {
+                throw e;
+              }
+            }
+
+            const info = await stat(alvo);
+            if (info.isDirectory()) {
+              enviar(res, 400, { erro: "o caminho aponta para um diretório, não um arquivo" });
+              return;
+            }
+
+            const mime = obterMimeType(alvo);
+            const range = req.headers.range;
+
+            if (range && range.startsWith("bytes=")) {
+              const partes = range.replace(/bytes=/, "").split("-");
+              const start = parseInt(partes[0], 10);
+              const end = partes[1] ? parseInt(partes[1], 10) : info.size - 1;
+
+              if (isNaN(start) || start >= info.size || (end && end >= info.size)) {
+                res.writeHead(416, {
+                  "Content-Range": `bytes */${info.size}`,
+                  "Access-Control-Allow-Origin": "*",
+                });
+                res.end();
+                return;
+              }
+
+              const chunkSize = end - start + 1;
+              res.writeHead(206, {
+                "Content-Range": `bytes ${start}-${end}/${info.size}`,
+                "Accept-Ranges": "bytes",
+                "Content-Length": chunkSize,
+                "Content-Type": mime,
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "public, max-age=3600",
+              });
+              if (req.method === "HEAD") {
+                res.end();
+                return;
+              }
+              const stream = createReadStream(alvo, { start, end });
+              stream.pipe(res);
+            } else {
+              res.writeHead(200, {
+                "Content-Length": info.size,
+                "Content-Type": mime,
+                "Accept-Ranges": "bytes",
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "public, max-age=3600",
+              });
+              if (req.method === "HEAD") {
+                res.end();
+                return;
+              }
+              const stream = createReadStream(alvo);
+              stream.pipe(res);
+            }
+          } catch (erro) {
+            if (erro instanceof WorkspaceError && erro.exitCode === 3) {
+              enviar(res, 403, { erro: "caminho fora do workspace (path traversal bloqueado)" });
+            } else if ((erro as NodeJS.ErrnoException).code === "ENOENT") {
+              enviar(res, 404, { erro: "arquivo não encontrado" });
             } else {
               throw erro;
             }
@@ -3008,7 +3193,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
 
         if ((rota === "/apps" || rota === "/api/apps") && req.method === "GET") {
           const ws = await resolverWs(url);
-          enviar(res, 200, apps.listar(ws.path));
+          enviar(res, 200, apps.listar(ws.path, ws.id));
           return;
         }
 
@@ -3028,11 +3213,25 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         // ── GET /api/apps/:id/view (ou sub-rota) — serve arquivos estáticos do mini-app ──
         const mAppView = /^\/api\/apps\/([^/]+)\/view(?:\/(.*))?$/.exec(rota);
         if (mAppView && req.method === "GET") {
-          const ws = await resolverWs(url);
+          let ws = await resolverWs(url);
           const appId = decodeURIComponent(mAppView[1]!);
           const subPath = mAppView[2] ? decodeURIComponent(mAppView[2]) : "index.html";
-          const appDir = join(ws.path, "apps", appId);
-          const filePath = join(appDir, subPath);
+          let appDir = join(ws.path, "apps", appId);
+          let filePath = join(appDir, subPath);
+
+          // Se não encontrou no workspace atual, busca em outros workspaces que contenham este appId
+          if (!existsSync(filePath)) {
+            const todos = await workspaces.listar();
+            for (const outroWs of todos) {
+              const outroAppDir = join(outroWs.path, "apps", appId);
+              const outroPath = join(outroAppDir, subPath);
+              if (outroPath.startsWith(outroAppDir) && existsSync(outroPath)) {
+                appDir = outroAppDir;
+                filePath = outroPath;
+                break;
+              }
+            }
+          }
 
           if (!filePath.startsWith(appDir)) {
             enviar(res, 403, { erro: "Acesso fora da pasta do app proibido" });
@@ -4037,6 +4236,12 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             const extrair = (m: { parts?: Array<{ type: string; text?: string }> }): string =>
               (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim();
 
+            // Injeção de contexto estrito para isolamento de workspaces
+            const wsPrefixo = wsParaCfg
+              ? `[WORKSPACE ATIVO: "${wsParaCfg.id}" | CAMINHO: ${wsParaCfg.path}]\n(Atenção Secretário: O usuário está operando estritamente no workspace "${wsParaCfg.id}". Ao rodar comandos 'oc', use SEMPRE a flag '--workspace ${wsParaCfg.id}'. Suas análises, listagens e tarefas devem ser restritas exclusivamente a este workspace. Não consulte outros workspaces.)\n\n`
+              : "";
+            const mensagemComWs = `${wsPrefixo}${mensagem}`;
+
             for (let mIdx = 0; mIdx < modelosFallbackConv.length; mIdx++) {
               const mod = modelosFallbackConv[mIdx]!;
               if (mIdx > 0) {
@@ -4054,7 +4259,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                     sessionID: sessaoId,
                     agent: corpo.agente ?? "secretario",
                     parts: [
-                      { type: "text", text: mensagem },
+                      { type: "text", text: mensagemComWs },
                       ...imagens.map((i) => ({ type: "file", mime: i.mime ?? "image/png", url: i.url! })),
                     ],
                   }),
@@ -4249,6 +4454,12 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 await sleep(200);
               }
 
+              // Injeção de contexto estrito para isolamento de workspaces
+              const wsPrefixoStream = wsParaCfgStream
+                ? `[WORKSPACE ATIVO: "${wsParaCfgStream.id}" | CAMINHO: ${wsParaCfgStream.path}]\n(Atenção Secretário: O usuário está operando estritamente no workspace "${wsParaCfgStream.id}". Ao rodar comandos 'oc', use SEMPRE a flag '--workspace ${wsParaCfgStream.id}'. Suas análises, listagens e tarefas devem ser restritas exclusivamente a este workspace. Não consulte outros workspaces.)\n\n`
+                : "";
+              const mensagemStreamComWs = `${wsPrefixoStream}${mensagem}`;
+
               // POST em voo: responde só ao concluir; a geração reflete no GET /session em tempo real.
               let postConcluido = false;
               let postErro: string | null = null;
@@ -4259,7 +4470,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   sessionID: sessaoId,
                   agent: agente,
                   parts: [
-                    { type: "text", text: mensagem },
+                    { type: "text", text: mensagemStreamComWs },
                     ...imagens.map((i) => ({ type: "file", mime: i.mime ?? "image/png", url: i.url! })),
                   ],
                 }),

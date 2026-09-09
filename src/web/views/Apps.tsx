@@ -25,7 +25,7 @@ import {
   Type,
   FileText,
 } from "lucide-solid";
-import { fetchApi } from "../lib/context";
+import { fetchApi, wsAtivo } from "../lib/context";
 import { showToast } from "../ui/Toast";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -73,14 +73,24 @@ export const AppsView: Component = () => {
     }
   };
 
+  const getIframeUrl = (appItem: any) => {
+    let url = appItem.entryUrl || `/api/apps/${encodeURIComponent(appItem.id)}/view`;
+    const ws = wsAtivo();
+    if (ws && !url.includes("workspace=")) {
+      url += (url.includes("?") ? "&" : "?") + "workspace=" + encodeURIComponent(ws);
+    }
+    return url;
+  };
+
   const abrirApp = (app: any, modo: ModoVisualizacaoApp = "app") => {
     setAppSelecionado(app);
     setModoVisualizacao(modo);
+    const iframeUrl = getIframeUrl(app);
     setMensagensApp([
       {
         role: "assistant",
-        content: `👋 Olá! Estou pronto para ajudar você a customizar e evoluir a aplicação **${app.titulo}**.\n\nCódigo-fonte: \`apps/${app.id}/index.html\`\nPreview: [${app.entryUrl || `/api/apps/${app.id}/view`}](${app.entryUrl || `/api/apps/${app.id}/view`})\n\nO que você gostaria de ajustar no layout, nas regras de negócio ou na consulta de APIs?`,
-        iframeUrl: app.entryUrl,
+        content: `👋 Olá! Estou pronto para ajudar você a customizar e evoluir a aplicação **${app.titulo}**.\n\nCódigo-fonte: \`apps/${app.id}/index.html\`\nPreview: [${iframeUrl}](${iframeUrl})\n\nO que você gostaria de ajustar no layout, nas regras de negócio ou na consulta de APIs?`,
+        iframeUrl,
       },
     ]);
   };
@@ -253,7 +263,7 @@ export const AppsView: Component = () => {
                 iframeConfig={{
                   habilitado: true,
                   aberto: true,
-                  url: app().entryUrl,
+                  url: getIframeUrl(app()),
                   titulo: app().titulo,
                 }}
               />
