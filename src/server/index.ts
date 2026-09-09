@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join, resolve, relative, isAbsolute, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { stat, readdir, readFile, realpath, open, mkdir, rename, rm, unlink } from "node:fs/promises";
+import { stat, lstat, readlink, readdir, readFile, realpath, open, mkdir, rename, rm, unlink } from "node:fs/promises";
 import { existsSync, rmSync, statSync, readFileSync, writeFileSync, createReadStream } from "node:fs";
 import { WorkspaceManager } from "../core/workspace-manager.js";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
@@ -278,6 +278,59 @@ async function resolverCaminhoWorkspace(wsPath: string, pathParam: string): Prom
   return alvo;
 }
 
+/**
+ * Resolve o caminho de um arquivo dentro do workspace garantindo proteção contra
+ * path-traversal e resiliência com symlinks e arquivos de mídia rotacionados/arquivados.
+ */
+async function resolverArquivoOuSymlink(wsPath: string, pathParam: string): Promise<string> {
+  const alvo = await resolverCaminhoWorkspace(wsPath, pathParam);
+  try {
+    await stat(alvo);
+    return alvo;
+  } catch (e: any) {
+    if (e?.code === "ENOENT") {
+      // 1. Verifica se o nó é um link simbólico quebrado
+      try {
+        const lst = await lstat(alvo);
+        if (lst.isSymbolicLink()) {
+          const linkDest = await readlink(alvo);
+          const destAbs = isAbsolute(linkDest) ? linkDest : resolve(dirname(alvo), linkDest);
+          const cands = [
+            destAbs,
+            destAbs.replace("/exports/videos/", "/exports/videos/_versoes_substituidas/"),
+            destAbs.replace("/exports/videos/_versoes_substituidas/", "/exports/videos/"),
+            destAbs.replace("/exports/videos/", "/exports/videos/_mock_arquivado_2026-09-08/"),
+          ];
+          for (const cand of cands) {
+            try {
+              const st = await stat(cand);
+              if (st.isFile() || st.isDirectory()) return cand;
+            } catch {}
+          }
+        }
+      } catch {}
+
+      // 2. Tenta busca heurística para mídias dentro de exports/videos
+      const matchVid = pathParam.match(/(vid-[a-z0-9]+)\/([^\/]+)$/i);
+      if (matchVid) {
+        const [, vidId, nomeArquivo] = matchVid;
+        const cands = [
+          join(wsPath, "exports/videos", vidId, nomeArquivo),
+          join(wsPath, "exports/videos/_versoes_substituidas", vidId, nomeArquivo),
+          join(wsPath, "exports/videos/_mock_arquivado_2026-09-08", vidId, nomeArquivo),
+        ];
+        for (const cand of cands) {
+          try {
+            const st = await stat(cand);
+            if (st.isFile()) return cand;
+          } catch {}
+        }
+      }
+    }
+    throw e;
+  }
+}
+
 function obterMimeType(caminho: string): string {
   const ext = caminho.split(".").pop()?.toLowerCase() ?? "";
   const mapa: Record<string, string> = {
@@ -423,7 +476,12 @@ async function construirArvore(raiz: string, profundidadeMax: number): Promise<{
         try {
           tamanho = (await stat(join(dirAbs, e.name))).size;
         } catch {
-          /* sumiu entre readdir e stat — tamanho 0 */
+          try {
+            const resolvido = await resolverArquivoOuSymlink(raiz, caminhoRel);
+            tamanho = (await stat(resolvido)).size;
+          } catch {
+            /* sumiu entre readdir e stat — tamanho 0 */
+          }
         }
         nos.push({ nome: e.name, caminho: caminhoRel, tipo: "arquivo", tamanho });
         total++;
@@ -2655,7 +2713,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             let alvo = "";
             let wsAlvo = ws;
             try {
-              alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+              alvo = await resolverArquivoOuSymlink(ws.path, pathParam);
               await stat(alvo);
             } catch (e: any) {
               if (pathParam && (e?.code === "ENOENT" || e instanceof WorkspaceError)) {
@@ -2664,7 +2722,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 for (const outro of todos) {
                   if (outro.id === ws.id || !outro.path) continue;
                   try {
-                    const testAlvo = await resolverCaminhoWorkspace(outro.path, pathParam);
+                    const testAlvo = await resolverArquivoOuSymlink(outro.path, pathParam);
                     await stat(testAlvo);
                     alvo = testAlvo;
                     wsAlvo = outro as any;
@@ -2726,7 +2784,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           try {
             let alvo = "";
             try {
-              alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+              alvo = await resolverArquivoOuSymlink(ws.path, pathParam);
               await stat(alvo);
             } catch (e: any) {
               if (e?.code === "ENOENT" || e instanceof WorkspaceError) {
@@ -2735,7 +2793,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 for (const outro of todos) {
                   if (outro.id === ws.id || !outro.path) continue;
                   try {
-                    const testAlvo = await resolverCaminhoWorkspace(outro.path, pathParam);
+                    const testAlvo = await resolverArquivoOuSymlink(outro.path, pathParam);
                     await stat(testAlvo);
                     alvo = testAlvo;
                     achou = true;

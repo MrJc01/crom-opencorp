@@ -181,7 +181,7 @@ export const WorkspaceView: Component = () => {
     }
 
     try {
-      const resp = await fetchApi<any>(`/files?path=${encodeURIComponent(caminho)}`);
+      const resp = await fetchApi<any>(`/files?path=${encodeURIComponent(caminho)}${wsAtivo() ? `&workspace=${encodeURIComponent(wsAtivo())}` : ""}`);
 
       if (resp && resp.workspace && resp.workspace !== wsAtivo()) {
         setWsAtivo(resp.workspace);
