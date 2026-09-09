@@ -9,14 +9,20 @@ import {
   Terminal,
   Brain,
   Globe,
+  Sparkles,
+  HelpCircle,
+  ChevronRight,
+  ChevronLeft,
+  Send,
+  CornerDownLeft,
 } from "lucide-solid";
 import { IconButton } from "../../ui/IconButton";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
 import { renderMarkdown, processarDiagramasMermaid } from "../../md.js";
-import type { ChatMensagem, TurnoPasso, AcaoItem } from "./types";
+import type { ChatMensagem, TurnoPasso, AcaoItem, ItemPergunta } from "./types";
 
-export type { ChatMensagem, TurnoPasso, AcaoItem };
+export type { ChatMensagem, TurnoPasso, AcaoItem, ItemPergunta };
 
 export interface SessionTurnProps {
   mensagem: ChatMensagem;
@@ -29,6 +35,9 @@ export interface SessionTurnProps {
   mostrarAcoes?: boolean;
   mostrarTerminal?: boolean;
   onAbrirIframeUrl?: (url: string) => void;
+  onSelecionarOpcao?: (opcao: string) => void;
+  /** Se true, o usuário já respondeu a esta mensagem (há uma msg do user após ela) — oculta o card de opções */
+  jaRespondida?: boolean;
 }
 
 /** Componente dedicado para o corpo de pensamento: auto-scroll para baixo durante geração ao vivo e preservação de rolagem manual sem saltos para o topo */
@@ -69,9 +78,335 @@ const PensamentoCorpo: Component<{ texto: string }> = (props) => {
   );
 };
 
+/**
+ * Detecta se um texto do assistente apresenta opções de escolha para o usuário
+ * (ex: listas numeradas "1. ...", "2. ...", ou com bullets após uma pergunta).
+ */
+/**
+ * Extrai todas as perguntas com opções de escolha contidas no texto do assistente
+ * (suporta múltiplas perguntas, blocos inline "(a)... (b)...", listas numeradas e tópicos).
+ */
+export function extrairPerguntasDeTexto(texto?: string): ItemPergunta[] {
+  if (!texto || typeof texto !== "string") return [];
+  const perguntas: ItemPergunta[] = [];
+  const linhas = texto.split("\n").map((l) => l.trim());
+
+  let i = 0;
+  while (i < linhas.length) {
+    const l = linhas[i];
+
+    // 1.1 Linha inline com (a)... (b)...
+    if (/\(a\)/i.test(l) && /\(b\)/i.test(l)) {
+      const partes = l.split(/(?=\([a-d]\))/i);
+      const opcoes: string[] = [];
+      let perguntaTexto = "";
+      let header: string | undefined;
+
+      const matchHeader = /^([^:\n]{2,35}):/i.exec(partes[0] || "");
+      if (matchHeader) {
+        header = matchHeader[1].trim();
+      }
+
+      for (const p of partes) {
+        const m = /^\(([a-d])\)\s*(.+)$/i.exec(p.trim());
+        if (m) {
+          let conteudo = m[2].trim();
+          const qMatch = /^(.*?)(?:\s+(?:qual|o que|como|deseja|prefere).*?\?|\s*\?)/i.exec(conteudo);
+          if (qMatch && qMatch[1].length > 5) {
+            conteudo = qMatch[1].trim();
+          }
+          opcoes.push(conteudo.replace(/;$/, "").trim());
+        } else if (!perguntaTexto) {
+          perguntaTexto = p.replace(/^.*?(?:opções|escolha|opção)[:\s]*/i, "").trim();
+        }
+      }
+
+      if (opcoes.length >= 2 && opcoes.length <= 6) {
+        if (!perguntaTexto || perguntaTexto.length < 5) {
+          perguntaTexto = header ? `${header}: Escolha uma opção` : "Escolha uma opção:";
+        }
+        perguntas.push({
+          id: `q_${perguntas.length + 1}`,
+          header,
+          pergunta: perguntaTexto,
+          opcoes,
+          permiteCustom: true,
+        });
+        i++;
+        continue;
+      }
+    }
+
+    // 1.2 Bloco vertical de opções numeradas ou com letras
+    const matchNum = /^(?:(?:\d+[\.\)]|\[\d+\]|[a-d][\.\)])\s+)(.+)$/i.exec(l);
+    if (matchNum) {
+      const possiveisOpcoes = [matchNum[1].trim()];
+      let j = i + 1;
+      while (j < linhas.length) {
+        const prox = linhas[j];
+        if (!prox) { j++; continue; }
+        const mProx = /^(?:(?:\d+[\.\)]|\[\d+\]|[a-d][\.\)])\s+)(.+)$/i.exec(prox);
+        if (mProx) {
+          possiveisOpcoes.push(mProx[1].trim());
+          j++;
+        } else {
+          break;
+        }
+      }
+
+      if (possiveisOpcoes.length >= 2 && possiveisOpcoes.length <= 6) {
+        const saoMuitoLongas = possiveisOpcoes.some((o) => o.length > 130 || o.startsWith("##") || o.includes("\n"));
+        if (!saoMuitoLongas) {
+          let perguntaEncontrada: string | undefined;
+          let headerEncontrado: string | undefined;
+          for (let k = i - 1; k >= Math.max(0, i - 4); k--) {
+            const anterior = linhas[k];
+            if (!anterior) continue;
+            if (anterior.includes("?") || /escolha|opç|qual|deseja|selecione/i.test(anterior)) {
+              perguntaEncontrada = anterior.replace(/^[#*>\s]+/, "").trim();
+              const mH = /^([^:\n]{2,35}):/i.exec(perguntaEncontrada);
+              if (mH) headerEncontrado = mH[1].trim();
+              break;
+            }
+          }
+          perguntas.push({
+            id: `q_${perguntas.length + 1}`,
+            header: headerEncontrado,
+            pergunta: perguntaEncontrada || "Escolha uma opção:",
+            opcoes: possiveisOpcoes,
+            permiteCustom: true,
+          });
+          i = j;
+          continue;
+        }
+      }
+    }
+
+    // 1.3 Seção ou parágrafo que faz pergunta explícita no formato "Tópico: pergunta? Ou alternativa?"
+    const matchTopicoPergunta = /^(\*{0,2})([A-ZÀ-Ú][^:\n—(]{2,35})(?:\s*\([^)]*\))?\1(?:\s*:\s*|\s+[—\-]\s+)(.+)$/i.exec(l);
+    if (matchTopicoPergunta) {
+      const topico = matchTopicoPergunta[2].trim();
+      const resto = matchTopicoPergunta[3].trim();
+
+      const jaProcessado = perguntas.some((p) => p.header?.toLowerCase() === topico.toLowerCase());
+      if (!jaProcessado) {
+        // Alternativas explícitas com "Ou X?"
+        const matchOu = /(?:posso|quer|deseja|prefere)?\s*([^?]+)\?\s*Ou\s+(.*?)(?:\s+é\s+aceitável)?\?/i.exec(resto);
+        if (matchOu) {
+          let opt1 = matchOu[1].replace(/^.*?—\s*/, "").replace(/^[—\s]+/, "").trim();
+          let opt2 = matchOu[2].trim();
+          opt1 = opt1.replace(/^(?:posso|devo|quer)\s+/i, "");
+          opt1 = opt1.charAt(0).toUpperCase() + opt1.slice(1);
+          opt2 = opt2.charAt(0).toUpperCase() + opt2.slice(1);
+          if (opt1.length > 3 && opt2.length > 3) {
+            perguntas.push({
+              id: `q_${perguntas.length + 1}`,
+              header: topico,
+              pergunta: `${topico}: ${resto}`,
+              opcoes: [opt1, opt2],
+              permiteCustom: true,
+            });
+            i++;
+            continue;
+          }
+        }
+
+        // Pergunta de confirmação "quer X?" ou "posso X?"
+        const matchSimNao = /(?:quer|deseja|posso|devo)\s+([^?]+)\?/i.exec(resto);
+        if (matchSimNao && resto.includes("?")) {
+          const acao = matchSimNao[1].trim();
+          const acaoCurta = acao.length > 40 ? `${acao.slice(0, 37)}...` : acao;
+          perguntas.push({
+            id: `q_${perguntas.length + 1}`,
+            header: topico,
+            pergunta: `${topico}: ${resto}`,
+            opcoes: [`Sim, ${acaoCurta}`, "Não, deixar para depois"],
+            permiteCustom: true,
+          });
+          i++;
+          continue;
+        }
+
+        // Afirmação com proposição "posso montar via X já"
+        const matchProposicao = /(?:posso|podemos|devo)\s+([^.\n]+)/i.exec(resto);
+        if (matchProposicao && !resto.includes("não")) {
+          const acao = matchProposicao[1].trim();
+          const acaoCurta = acao.length > 40 ? `${acao.slice(0, 37)}...` : acao;
+          perguntas.push({
+            id: `q_${perguntas.length + 1}`,
+            header: topico,
+            pergunta: `${topico}: ${resto}`,
+            opcoes: [`Sim, pode ${acaoCurta}`, "Ainda não, aguardar"],
+            permiteCustom: true,
+          });
+          i++;
+          continue;
+        }
+      }
+    }
+
+    i++;
+  }
+
+  return perguntas;
+}
+
+/** Wrapper para compatibilidade com código que espera uma única pergunta/opções */
+export function extrairOpcoesDeTexto(texto?: string): { pergunta?: string; opcoes: string[] } | null {
+  const lista = extrairPerguntasDeTexto(texto);
+  if (lista.length === 0) return null;
+  return {
+    pergunta: lista[0].pergunta,
+    opcoes: lista[0].opcoes,
+  };
+}
+
 export const SessionTurn: Component<SessionTurnProps> = (props) => {
   const [copiado, setCopiado] = createSignal(false);
+  const [opcaoEscolhida, setOpcaoEscolhida] = createSignal<string | null>(null);
+  const [abaPerguntaAtiva, setAbaPerguntaAtiva] = createSignal(0);
+  const [respostasPorPergunta, setRespostasPorPergunta] = createSignal<Record<string, string>>({});
+  const [customInputAberto, setCustomInputAberto] = createSignal<Record<string, boolean>>({});
+  const [customTextoPorPergunta, setCustomTextoPorPergunta] = createSignal<Record<string, string>>({});
   const m = () => props.mensagem;
+
+  // Consolidação de perguntas estruturadas (via tool ask_question ou via texto)
+  const dadosPerguntas = createMemo((): ItemPergunta[] => {
+    const mVal = m();
+    if (mVal.role !== "assistant") return [];
+
+    // 1. Múltiplas perguntas diretas na mensagem
+    if (mVal.perguntas && mVal.perguntas.length > 0) {
+      return mVal.perguntas;
+    }
+
+    // 2. Opções diretas singulares na mensagem
+    if (mVal.opcoes && mVal.opcoes.length > 0) {
+      return [
+        {
+          id: "q_root",
+          pergunta: mVal.pergunta || "Escolha uma opção:",
+          opcoes: mVal.opcoes,
+          permiteCustom: true,
+        },
+      ];
+    }
+
+    // 3. Perguntas ou opções vindas de passos (tool call ask_question)
+    if (mVal.passos) {
+      for (const p of mVal.passos) {
+        if (p.perguntas && p.perguntas.length > 0) {
+          return p.perguntas;
+        }
+        if (p.tipo === "pergunta" && p.opcoes && p.opcoes.length > 0) {
+          return [
+            {
+              id: "q_passo",
+              pergunta: p.pergunta,
+              opcoes: p.opcoes,
+              permiteCustom: true,
+            },
+          ];
+        }
+        if (p.tipo === "acao" && p.opcoes && p.opcoes.length > 0) {
+          return [
+            {
+              id: "q_acao",
+              pergunta: p.pergunta || p.resumo || "Escolha uma opção:",
+              opcoes: p.opcoes,
+              permiteCustom: true,
+            },
+          ];
+        }
+      }
+    }
+
+    // 4. Detecção inteligente no texto da mensagem
+    return extrairPerguntasDeTexto(mVal.content);
+  });
+
+  const totalPerguntas = () => dadosPerguntas().length;
+  const abaAtual = () => Math.min(abaPerguntaAtiva(), Math.max(0, totalPerguntas() - 1));
+  const perguntaAtual = () => dadosPerguntas()[abaAtual()];
+  const qKey = (q: ItemPergunta, idx: number) => q.id || `q_${idx}`;
+  const keyAtual = () => {
+    const q = perguntaAtual();
+    return q ? qKey(q, abaAtual()) : "";
+  };
+
+  const respostaAtual = () => respostasPorPergunta()[keyAtual()] || "";
+  const isCustomAberto = () => !!customInputAberto()[keyAtual()];
+  const textoCustomAtual = () => customTextoPorPergunta()[keyAtual()] || "";
+
+  const responderOpcao = (opcao: string) => {
+    const total = totalPerguntas();
+    if (total <= 1) {
+      setOpcaoEscolhida(opcao);
+      props.onSelecionarOpcao?.(opcao);
+      return;
+    }
+    const k = keyAtual();
+    setRespostasPorPergunta((prev) => ({ ...prev, [k]: opcao }));
+    // Se não for a última pergunta, avança automaticamente para agilizar a resposta
+    if (abaAtual() < total - 1) {
+      setAbaPerguntaAtiva(abaAtual() + 1);
+    }
+  };
+
+  const enviarCustom = () => {
+    const txt = textoCustomAtual().trim();
+    if (!txt) return;
+    const total = totalPerguntas();
+    if (total <= 1) {
+      setOpcaoEscolhida(txt);
+      props.onSelecionarOpcao?.(txt);
+      return;
+    }
+    const k = keyAtual();
+    setRespostasPorPergunta((prev) => ({ ...prev, [k]: txt }));
+    if (abaAtual() < total - 1) {
+      setAbaPerguntaAtiva(abaAtual() + 1);
+    }
+  };
+
+  const pularPergunta = () => {
+    const total = totalPerguntas();
+    if (total <= 1) {
+      props.onSelecionarOpcao?.("Pular / sem preferência");
+      return;
+    }
+    const k = keyAtual();
+    setRespostasPorPergunta((prev) => ({ ...prev, [k]: "(Ignorado)" }));
+    if (abaAtual() < total - 1) {
+      setAbaPerguntaAtiva(abaAtual() + 1);
+    }
+  };
+
+  const totalRespondidas = () => {
+    const resps = respostasPorPergunta();
+    const lista = dadosPerguntas();
+    return lista.filter((q, idx) => {
+      const k = qKey(q, idx);
+      return !!resps[k];
+    }).length;
+  };
+
+  const enviarTodasRespostas = () => {
+    const lista = dadosPerguntas();
+    const resps = respostasPorPergunta();
+    const linhas: string[] = [];
+    lista.forEach((q, idx) => {
+      const k = qKey(q, idx);
+      const r = resps[k];
+      if (r && r !== "(Ignorado)") {
+        const titulo = q.header || q.pergunta || `Pergunta ${idx + 1}`;
+        linhas.push(`${titulo}: ${r}`);
+      }
+    });
+    if (linhas.length > 0) {
+      props.onSelecionarOpcao?.(linhas.join("\n"));
+    }
+  };
 
   // Só pulsa se este passo for o ÚLTIMO passo e ainda não houver resposta final emitida
   const isPassoPensandoAtivo = (idx: number) => {
@@ -147,10 +482,11 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
   return (
     <div
       ref={turnRef}
+      data-role={m().role}
       class={`group relative flex flex-col py-3 px-4 rounded-xl transition-colors ${
         m().role === "user"
-          ? "bg-zinc-900/60 border border-zinc-800/80 ml-auto max-w-[85%]"
-          : "bg-transparent mr-auto max-w-full w-full"
+          ? "oc-user bg-zinc-900/60 border border-zinc-800/80 ml-auto max-w-[85%]"
+          : "oc-assistant bg-transparent mr-auto max-w-full w-full"
       }`}
     >
       {/* Imagens Anexadas ao Turno */}
@@ -380,6 +716,243 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
             )}
           </For>
         </div>
+      </Show>
+
+      {/* Bloco de Escolhas / Opções Interativas da IA — só aparece se o usuário ainda não respondeu */}
+      <Show when={dadosPerguntas().length > 0 && !props.jaRespondida}>
+        {() => {
+          const q = () => perguntaAtual();
+          const opcoes = () => q()?.opcoes || [];
+          const saoCurtas = () => opcoes().every((o) => o.length < 35);
+          const total = () => totalPerguntas();
+          const permiteCustom = () => q()?.permiteCustom !== false;
+
+          return (
+            <div class="my-3 p-3.5 rounded-xl bg-gradient-to-br from-purple-950/40 via-zinc-950/70 to-zinc-900/60 border border-purple-800/40 text-xs shadow-lg backdrop-blur-sm chat-pergunta-card">
+              {/* Cabeçalho de Navegação de Múltiplas Perguntas */}
+              <Show when={total() > 1}>
+                <div class="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-purple-900/30">
+                  <div class="flex items-center gap-1.5 font-medium text-purple-300 text-[11px]">
+                    <Sparkles size={13} class="text-purple-400 shrink-0" />
+                    <span>Pergunta {abaAtual() + 1} de {total()}</span>
+                  </div>
+                  {/* Pills de Navegação por Pergunta */}
+                  <div class="flex items-center gap-1">
+                    <For each={dadosPerguntas()}>
+                      {(item, idx) => {
+                        const ativa = () => abaAtual() === idx();
+                        const k = qKey(item, idx());
+                        const respondida = () => !!respostasPorPergunta()[k];
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => setAbaPerguntaAtiva(idx())}
+                            class={`h-5 min-w-5 px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center transition-all cursor-pointer ${
+                              ativa()
+                                ? "bg-purple-600 text-white shadow-sm shadow-purple-500/30"
+                                : respondida()
+                                ? "bg-purple-950/80 text-purple-300 border border-purple-700/50"
+                                : "bg-zinc-800/70 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+                            }`}
+                            title={item.header || item.pergunta}
+                          >
+                            <Show when={respondida() && !ativa()} fallback={idx() + 1}>
+                              <Check size={10} class="text-emerald-400" />
+                            </Show>
+                          </button>
+                        );
+                      }}
+                    </For>
+                  </div>
+                </div>
+              </Show>
+
+              {/* Título da Pergunta Atual */}
+              <div class="flex items-start gap-2 font-semibold text-purple-300 mb-2 select-none">
+                <Show when={total() <= 1}>
+                  <Sparkles size={15} class="text-purple-400 shrink-0 mt-0.5 animate-pulse" />
+                </Show>
+                <div class="flex-1 min-w-0">
+                  <Show when={q()?.header}>
+                    <span class="inline-block px-1.5 py-0.5 mb-1 rounded bg-purple-900/60 border border-purple-700/40 text-[10px] font-medium text-purple-200 mr-1.5">
+                      {q()?.header}
+                    </span>
+                  </Show>
+                  <span class="break-words leading-snug">{q()?.pergunta || "A IA solicitou sua escolha:"}</span>
+                </div>
+              </div>
+
+              {/* Lista de Opções */}
+              <div class={saoCurtas() ? "grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2" : "flex flex-col gap-2 mt-2"}>
+                <For each={opcoes()}>
+                  {(opcao, opcIdx) => {
+                    const selecionada = () =>
+                      total() > 1
+                        ? respostaAtual() === opcao
+                        : opcaoEscolhida() === opcao;
+                    return (
+                      <button
+                        type="button"
+                        data-testid="chat-opcao-btn"
+                        data-opcao={opcao}
+                        onClick={() => responderOpcao(opcao)}
+                        class={`group flex items-start sm:items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-left text-xs font-medium transition-all duration-200 border cursor-pointer w-full min-w-0 overflow-hidden box-border chat-opcao-btn ${
+                          selecionada()
+                            ? "bg-purple-900/50 text-purple-200 border-purple-500 shadow-sm shadow-purple-500/20"
+                            : "bg-zinc-900/80 hover:bg-purple-950/30 text-zinc-300 hover:text-purple-200 border-zinc-800/80 hover:border-purple-600/50 hover:shadow-sm"
+                        }`}
+                      >
+                        <span
+                          class={`h-5 w-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5 sm:mt-0 transition-colors ${
+                            selecionada()
+                              ? "bg-purple-500 text-white"
+                              : "bg-zinc-800 text-zinc-400 group-hover:bg-purple-900/60 group-hover:text-purple-300"
+                          }`}
+                        >
+                          {opcIdx() + 1}
+                        </span>
+                        <span class="flex-1 min-w-0 leading-relaxed break-words overflow-hidden">{opcao}</span>
+                        <Show when={selecionada()}>
+                          <span class="text-[10px] text-emerald-400 font-semibold shrink-0 flex items-center gap-1">
+                            <Check size={11} /> Selecionado
+                          </span>
+                        </Show>
+                      </button>
+                    );
+                  }}
+                </For>
+              </div>
+
+              {/* Opção Customizada / Digitar Resposta Própria (se habilitado) */}
+              <Show when={permiteCustom()}>
+                <div class="mt-2 pt-2 border-t border-purple-900/30">
+                  <Show
+                    when={isCustomAberto()}
+                    fallback={
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCustomInputAberto((prev) => ({
+                            ...prev,
+                            [keyAtual()]: true,
+                          }))
+                        }
+                        class="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-medium text-purple-300 hover:text-purple-200 bg-purple-950/20 hover:bg-purple-900/30 border border-purple-800/30 transition-colors cursor-pointer"
+                      >
+                        <Edit3 size={12} />
+                        <span>Outro: digitar resposta personalizada...</span>
+                      </button>
+                    }
+                  >
+                    <div class="flex items-center gap-1.5 mt-1">
+                      <input
+                        type="text"
+                        placeholder="Digite sua resposta personalizada..."
+                        value={textoCustomAtual()}
+                        onInput={(e) => {
+                          const val = e.currentTarget.value;
+                          setCustomTextoPorPergunta((prev) => ({
+                            ...prev,
+                            [keyAtual()]: val,
+                          }));
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            enviarCustom();
+                          }
+                        }}
+                        class="flex-1 px-3 py-1.5 rounded-lg bg-zinc-950 border border-purple-700/60 text-zinc-100 text-xs focus:outline-none focus:border-purple-400 placeholder-zinc-500"
+                        autofocus
+                      />
+                      <button
+                        type="button"
+                        onClick={enviarCustom}
+                        disabled={!textoCustomAtual().trim()}
+                        class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                      >
+                        <Send size={11} />
+                        <span>Enviar</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCustomInputAberto((prev) => ({
+                            ...prev,
+                            [keyAtual()]: false,
+                          }))
+                        }
+                        class="px-2 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs transition-colors cursor-pointer"
+                        title="Cancelar"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </Show>
+                </div>
+              </Show>
+
+              {/* Rodapé com Navegação / Envio para Múltiplas Perguntas */}
+              <Show when={total() > 1}>
+                <div class="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-purple-900/30">
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={abaAtual() === 0}
+                      onClick={() => setAbaPerguntaAtiva(abaAtual() - 1)}
+                      class="px-2.5 py-1 rounded-md bg-zinc-900 hover:bg-zinc-800 disabled:opacity-30 text-zinc-300 text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <ChevronLeft size={13} />
+                      <span>Anterior</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={pularPergunta}
+                      class="px-2 py-1 rounded-md text-zinc-400 hover:text-zinc-200 text-[11px] transition-colors cursor-pointer"
+                    >
+                      Pular
+                    </button>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <Show when={abaAtual() < total() - 1}>
+                      <button
+                        type="button"
+                        onClick={() => setAbaPerguntaAtiva(abaAtual() + 1)}
+                        class="px-2.5 py-1 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <span>Próxima</span>
+                        <ChevronRight size={13} />
+                      </button>
+                    </Show>
+                    <Show when={totalRespondidas() > 0 || abaAtual() === total() - 1}>
+                      <button
+                        type="button"
+                        onClick={enviarTodasRespostas}
+                        class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-purple-500/20 transition-colors cursor-pointer"
+                      >
+                        <span>Enviar respostas ({totalRespondidas()}/{total()})</span>
+                        <CornerDownLeft size={12} />
+                      </button>
+                    </Show>
+                  </div>
+                </div>
+              </Show>
+
+              {/* Botão de Pular para Pergunta Única Opcional */}
+              <Show when={total() <= 1 && q()?.opcional}>
+                <div class="flex justify-end mt-2 pt-1.5">
+                  <button
+                    type="button"
+                    onClick={pularPergunta}
+                    class="text-zinc-400 hover:text-zinc-200 text-[11px] underline cursor-pointer"
+                  >
+                    Pular esta pergunta
+                  </button>
+                </div>
+              </Show>
+            </div>
+          );
+        }}
       </Show>
 
       {/* Ações Discretas na Base do Balão do Usuário (Editar / Copiar) */}

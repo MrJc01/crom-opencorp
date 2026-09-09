@@ -37,7 +37,7 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
   createEffect(() => {
     const ws = wsAtivo();
     const rota = location.pathname;
-    const rotasGlobais = ["/", "/home", "/docs", "/config", "/secrets"];
+    const rotasGlobais = ["/", "/home", "/secretario", "/docs", "/config", "/secrets"];
     if (!ws && !rotasGlobais.some((r) => rota === r || rota.startsWith(r + "/"))) {
       navigate("/home", { replace: true });
     }

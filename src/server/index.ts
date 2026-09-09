@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
-import { join, resolve, relative, isAbsolute, dirname, extname } from "node:path";
+import { join, resolve, relative, isAbsolute, dirname, extname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stat, lstat, readlink, readdir, readFile, realpath, open, mkdir, rename, rm, unlink } from "node:fs/promises";
 import { existsSync, rmSync, statSync, readFileSync, writeFileSync, createReadStream } from "node:fs";
@@ -31,7 +31,7 @@ import { OrquestradorDeTeams } from "../core/team-orchestrator.js";
 import { instalarMencoes } from "../core/mention-runner.js";
 import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError, NotificationError, AgentError, OpencorpError, RegistryError, WorkspaceError, FlowError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
-import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, limparPrefixoWorkspace, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc } from "../core/opencode-server.js";
+import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, limparPrefixoWorkspace, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc, type PassoChat } from "../core/opencode-server.js";
 import { taskCreateSchema } from "../schemas/task.js";
 import { SecretsStore, type SecretOrigem } from "../core/secrets-store.js";
 import { completarChatDirect, testarModeloDirect, listarProvedoresStatus } from "../core/llm-client.js";
@@ -1957,6 +1957,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               scope: corpo.scope === "workspace" ? "workspace" : "global",
               workspaceDir: (await resolverWs(url)).path,
             });
+            await opencodeServer.atualizarModeloSecretario();
             enviar(res, 200, r);
             return;
           }
@@ -1964,6 +1965,15 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             scope: corpo.scope === "workspace" ? "workspace" : "global",
             workspaceDir: (await resolverWs(url)).path,
           });
+          if (chave === "secretary.model") {
+            try {
+              // Também garante no escopo global para o supervisor
+              await settings.set(chave, String(corpo.valor), { scope: "global" }).catch(() => null);
+              await opencodeServer.atualizarModeloSecretario(valorRaw);
+            } catch (err) {
+              console.warn("[settings] aviso ao sincronizar modelo do secretário:", err);
+            }
+          }
           enviar(res, 200, r);
           return;
         }
@@ -3267,9 +3277,9 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
-        // ── GET /api/apps/:id/view (ou sub-rota) — serve arquivos estáticos do mini-app ──
+        // ── GET/HEAD /api/apps/:id/view (ou sub-rota) — serve arquivos estáticos do mini-app ──
         const mAppView = /^\/api\/apps\/([^/]+)\/view(?:\/(.*))?$/.exec(rota);
-        if (mAppView && req.method === "GET") {
+        if (mAppView && (req.method === "GET" || req.method === "HEAD")) {
           let ws = await resolverWs(url);
           const appId = decodeURIComponent(mAppView[1]!);
           const subPath = mAppView[2] ? decodeURIComponent(mAppView[2]) : "index.html";
@@ -3311,15 +3321,62 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             ".jpg": "image/jpeg",
             ".jpeg": "image/jpeg",
             ".ico": "image/x-icon",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+            ".mp4": "video/mp4",
+            ".webm": "video/webm",
+            ".srt": "text/plain; charset=utf-8",
+            ".txt": "text/plain; charset=utf-8",
+            ".wav": "audio/wav",
+            ".mp3": "audio/mpeg",
           };
           const mime = mimes[ext] || "application/octet-stream";
-          const buf = await readFile(filePath);
-          res.writeHead(200, {
+
+          const fileStat = await stat(filePath);
+          const total = fileStat.size;
+          const rangeHeader = req.headers.range;
+          const querDownload = url.searchParams.has("download");
+
+          const headers: Record<string, string | number> = {
             "Content-Type": mime,
-            "Content-Length": buf.length,
+            "Accept-Ranges": "bytes",
             "Cache-Control": "no-cache",
-          });
-          res.end(buf);
+            "Access-Control-Allow-Origin": "*",
+          };
+
+          if (querDownload) {
+            const nomeArquivo = basename(filePath);
+            headers["Content-Disposition"] = `attachment; filename="${encodeURIComponent(nomeArquivo)}"`;
+          }
+
+          if (rangeHeader && !querDownload) {
+            const partes = rangeHeader.replace(/bytes=/, "").split("-");
+            const inicio = parseInt(partes[0]!, 10);
+            const fim = partes[1] ? parseInt(partes[1]!, 10) : total - 1;
+            if (isNaN(inicio) || inicio >= total || fim >= total) {
+              res.writeHead(416, { "Content-Range": `bytes */${total}` });
+              res.end();
+              return;
+            }
+            const chunkSize = fim - inicio + 1;
+            headers["Content-Range"] = `bytes ${inicio}-${fim}/${total}`;
+            headers["Content-Length"] = chunkSize;
+            res.writeHead(206, headers);
+            if (req.method === "HEAD") {
+              res.end();
+              return;
+            }
+            createReadStream(filePath, { start: inicio, end: fim }).pipe(res);
+            return;
+          }
+
+          headers["Content-Length"] = total;
+          res.writeHead(200, headers);
+          if (req.method === "HEAD") {
+            res.end();
+            return;
+          }
+          createReadStream(filePath).pipe(res);
           return;
         }
 
@@ -3849,21 +3906,35 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             const sessionId = decodeURIComponent(mMensagens[1]!);
             // opencode ≥1.18: mensagens em GET /session/:id/message ([{info:{role,time},parts}])
             const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}/message`;
-            const resOpencode = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
+            const [resOpencode, resStatus] = await Promise.all([
+              fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) }),
+              fetch(`http://127.0.0.1:${porta}/session/status`, { signal: AbortSignal.timeout(3000) }).catch(() => null),
+            ]);
             if (!resOpencode.ok) {
               enviar(res, resOpencode.status === 404 ? 404 : 502, { erro: resOpencode.status === 404 ? "sessão não encontrada" : `opencode respondeu ${resOpencode.status}` });
               return;
             }
+            let isSessaoBusy = false;
+            if (resStatus && resStatus.ok) {
+              try {
+                const statusMap = (await resStatus.json()) as Record<string, { type?: string }>;
+                isSessaoBusy = statusMap[sessionId]?.type === "busy";
+              } catch {}
+            }
             const rawMsgs = ((await resOpencode.json()) as MensagemOc[]) ?? [];
             const mensagens: Array<{
+              id?: string;
+              indice_global?: number;
               role: string;
               content: string;
-              passos?: Array<{ tipo: "pensamento" | "acao" | "texto"; texto?: string; ferramenta?: string; resumo?: string; saida?: string; sucesso?: boolean; status?: string }>;
+              passos?: PassoChat[];
               pensamento?: string;
               criado_em?: string;
               concluida: boolean;
               acoes?: Array<{ ferramenta?: string; resumo?: string; sucesso?: boolean }>;
               imagens?: string[];
+              pergunta?: string;
+              opcoes?: string[];
             }> = [];
 
             for (const m of rawMsgs) {
@@ -3874,6 +3945,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 const content = limparPrefixoWorkspace(rawContent);
                 const imagens = parts.filter((p: any) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p: any) => p.url);
                 mensagens.push({
+                  id: m.info?.id,
                   role: "user",
                   content,
                   criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
@@ -3894,8 +3966,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
 
                 const agora = Date.now();
                 const criadoEmMs = m.info?.time?.created ?? 0;
-                // Se não tiver time.completed mas foi criada há mais de 90s, considera concluída/expirada
-                const expirou = !m.info?.time?.completed && criadoEmMs > 0 && agora - criadoEmMs > 90_000;
+                // Não expira se a sessão estiver ativamente executando (busy) no daemon
+                const expirou = !isSessaoBusy && !m.info?.time?.completed && criadoEmMs > 0 && agora - criadoEmMs > 600_000;
                 const isCompleted = (!!m.info?.time?.completed || expirou) && (m.info as any)?.finish !== "tool-calls";
                 const textoFinal = content || (expirou ? "(geração anterior interrompida ou expirada)" : "");
 
@@ -3914,13 +3986,20 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   if (tools.length > 0) {
                     ult.acoes = [...(ult.acoes ?? []), ...tools];
                   }
-                  if (isCompleted) {
-                    ult.concluida = true;
+                  const passoComPergunta = passos.find((p) => (p as any).perguntas || p.pergunta);
+                  if (passoComPergunta) {
+                    if ((passoComPergunta as any).perguntas) (ult as any).perguntas = (passoComPergunta as any).perguntas;
+                    if (passoComPergunta.pergunta) ult.pergunta = passoComPergunta.pergunta;
+                    if (passoComPergunta.opcoes) ult.opcoes = passoComPergunta.opcoes;
                   }
+                  // O status concluida reflete o último passo processado no turno
+                  ult.concluida = isCompleted;
                 } else {
                   const temAlgo = Boolean(textoFinal || passos.length > 0 || pensamento || tools.length > 0);
                   if (temAlgo || !isCompleted) {
+                    const passoComPergunta = passos.find((p) => (p as any).perguntas || p.pergunta);
                     mensagens.push({
+                      id: m.info?.id,
                       role: "assistant",
                       content: textoFinal,
                       passos: passos.length > 0 ? passos : undefined,
@@ -3928,10 +4007,18 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                       criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
                       concluida: isCompleted,
                       acoes: tools.length > 0 ? tools : undefined,
-                    });
+                      pergunta: passoComPergunta?.pergunta,
+                      opcoes: passoComPergunta?.opcoes,
+                      perguntas: (passoComPergunta as any)?.perguntas,
+                    } as any);
                   }
                 }
               }
+            }
+
+            // Se a sessão estiver ocupada (busy) no opencode daemon, a última mensagem do assistente ainda está em curso
+            if (isSessaoBusy && mensagens.length > 0 && mensagens[mensagens.length - 1].role === "assistant") {
+              mensagens[mensagens.length - 1].concluida = false;
             }
 
             // Filtra mensagens fantasmas do assistente que ficaram 100% vazias
@@ -3947,7 +4034,68 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               return true;
             });
 
-            enviar(res, 200, mensagensValidas);
+            const mensagensComIndice = mensagensValidas.map((msg, i) => ({
+              ...msg,
+              indice_global: i,
+            }));
+
+            const turnosParam = url.searchParams.get("turnos");
+            const antesDoIndiceParam = url.searchParams.get("antes_do_indice");
+
+            if (turnosParam) {
+              const qtdTurnos = Math.max(1, parseInt(turnosParam, 10) || 2);
+              const antesDoIndice = antesDoIndiceParam !== null ? parseInt(antesDoIndiceParam, 10) : null;
+
+              const turnos: Array<{ inicio: number; fim: number }> = [];
+              let inicioAtual = 0;
+              for (let i = 0; i < mensagensComIndice.length; i++) {
+                if (mensagensComIndice[i].role === "user" && i > 0 && i > inicioAtual) {
+                  turnos.push({ inicio: inicioAtual, fim: i });
+                  inicioAtual = i;
+                }
+              }
+              if (mensagensComIndice.length > 0) {
+                turnos.push({ inicio: inicioAtual, fim: mensagensComIndice.length });
+              }
+
+              const turnosCandidatos = antesDoIndice !== null
+                ? turnos.filter((t) => t.fim <= antesDoIndice)
+                : turnos;
+
+              if (turnosCandidatos.length === 0) {
+                enviar(res, 200, {
+                  mensagens: [],
+                  paginacao: {
+                    total_mensagens: mensagensComIndice.length,
+                    total_turnos: turnos.length,
+                    primeiro_indice: 0,
+                    ultimo_indice: 0,
+                    tem_mais: false,
+                  },
+                });
+                return;
+              }
+
+              const turnosSelecionados = turnosCandidatos.slice(-qtdTurnos);
+              const idxInicio = turnosSelecionados[0].inicio;
+              const idxFim = turnosSelecionados[turnosSelecionados.length - 1].fim;
+              const fatia = mensagensComIndice.slice(idxInicio, idxFim);
+              const temMais = idxInicio > 0;
+
+              enviar(res, 200, {
+                mensagens: fatia,
+                paginacao: {
+                  total_mensagens: mensagensComIndice.length,
+                  total_turnos: turnos.length,
+                  primeiro_indice: idxInicio,
+                  ultimo_indice: idxFim,
+                  tem_mais: temMais,
+                },
+              });
+              return;
+            }
+
+            enviar(res, 200, mensagensComIndice);
           } catch (erro) {
             if (erro instanceof SecretarioError) {
               enviar(res, erro.status ?? 409, { erro: erro.message });
@@ -4492,11 +4640,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               cfgResolvidoStream?.settings.secretary?.model,
               cfgResolvidoStream?.settings.default_model,
               ...(cfgResolvidoStream?.settings.tests?.rotation || []),
-              "openrouter/minimax/minimax-m3:free",
-              "openrouter/nvidia/nemotron-3.5-lightning:free",
-              "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
             ].filter(Boolean) as string[];
-            const modelosFallback = [...new Set(rotaModelos)];
+            const modelosFallback = rotaModelos.length > 0 ? [...new Set(rotaModelos)] : ["opencode-go/glm-5.3-flash"];
 
             let modeloIdx = 0;
             let concluida = false;
@@ -4567,7 +4712,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               });
 
               let inicioTentativa = Date.now();
-              const tentativaTimeoutMs = 180_000;
+              const tentativaTimeoutMs = 600_000;
               let vazioDesde: number | null = null;
               let tentouFallback = false;
 
@@ -4647,42 +4792,27 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                     const temToolEmCurso = assistentesNovas.some((m) =>
                       (m.parts ?? []).some((p) => (p.type === "tool" || p.type === "tool-call" || p.type === "tool-invocation") && p.state?.status !== "completed")
                     );
-                    if (temToolEmCurso) {
-                      // Ferramenta em execução ativa (ex: sleep, compilação, render) — renova o relógio de inatividade
+                    const temProgresso = textoAcumulado.length > 0 ||
+                      pensamentoAcumulado.length > 0 ||
+                      novas > 0 ||
+                      passosEmTempoReal.length > 0 ||
+                      temToolEmCurso;
+
+                    if (temProgresso) {
                       inicioTentativa = Date.now();
                       vazioDesde = null;
                     }
-                    const temAtividade = textoAcumulado.length > 0 || pensamentoAcumulado.length > 0 || temToolEmCurso;
-                    if (!temAtividade) {
-                      if (vazioDesde === null) vazioDesde = Date.now();
-                      else if (Date.now() - vazioDesde > 22_000) {
-                        // 22s sem atividade de tokens/pensamento/ferramenta: fallback automático!
-                        if (modeloIdx < modelosFallback.length - 1) {
-                          const proximo = modelosFallback[modeloIdx + 1];
-                          console.warn(`[secretario] Modelo ${modeloAtual} sem resposta por >22s. Alternando para ${proximo}...`);
-                          sse("status", {
-                            tipo: "fallback_modelo",
-                            modelo: proximo,
-                            aviso: `⚠️ O modelo ${modeloAtual} não respondeu em 22s. Alternando automaticamente para ${proximo}...`,
-                          });
-                          tentouFallback = true;
-                          break;
-                        }
-                      }
-                    } else {
-                      vazioDesde = null;
-                    }
                   } else {
-                    // Nenhuma mensagem assistente iniciada após 20s
+                    // Nenhuma mensagem assistente iniciada após 45s
                     if (vazioDesde === null) vazioDesde = Date.now();
-                    else if (Date.now() - vazioDesde > 20_000) {
+                    else if (Date.now() - vazioDesde > 45_000) {
                       if (modeloIdx < modelosFallback.length - 1) {
                         const proximo = modelosFallback[modeloIdx + 1];
-                        console.warn(`[secretario] Modelo ${modeloAtual} não iniciou após 20s. Alternando para ${proximo}...`);
+                        console.warn(`[secretario] Modelo ${modeloAtual} não iniciou após 45s. Alternando para ${proximo}...`);
                         sse("status", {
                           tipo: "fallback_modelo",
                           modelo: proximo,
-                          aviso: `⚠️ O modelo ${modeloAtual} demorou mais de 20s para iniciar. Alternando automaticamente para ${proximo}...`,
+                          aviso: `⚠️ O modelo ${modeloAtual} demorou mais de 45s para iniciar. Alternando automaticamente para ${proximo}...`,
                         });
                         tentouFallback = true;
                         break;

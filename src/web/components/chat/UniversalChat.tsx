@@ -18,6 +18,8 @@ import {
   Settings2,
   Sparkles,
   ArrowDown,
+  ArrowUp,
+  Loader2,
   Trash2,
   Eye,
   EyeOff,
@@ -52,8 +54,15 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
   const [abaMobile, setAbaMobile] = createSignal<"chat" | "preview">("chat");
 
   // Estado local do Prompt (texto e anexos)
-  const [localPrompt, setLocalPrompt] = createSignal("");
+  const [localPrompt, setLocalPrompt] = createSignal(props.valorPrompt || "");
   const [localAnexos, setLocalAnexos] = createSignal<Anexo[]>([]);
+
+  // Sincroniza valor externo do prompt (ex: restaurar ao editar)
+  createEffect(() => {
+    if (props.valorPrompt !== undefined) {
+      setLocalPrompt(props.valorPrompt);
+    }
+  });
 
   // Sincroniza props de iframe quando mudarem externamente
   createEffect(() => {
@@ -84,6 +93,7 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
   let scrollContainerRef: HTMLDivElement | undefined;
   let usuarioRolouManual = false;
   const [mostrarBotaoFim, setMostrarBotaoFim] = createSignal(false);
+  let carregandoAnterioresEmAndamento = false;
 
   const rolarParaFim = (suave = true) => {
     if (!scrollContainerRef) return;
@@ -95,6 +105,36 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
     setMostrarBotaoFim(false);
   };
 
+  const carregarAnterioresPreservandoScroll = async () => {
+    if (
+      !scrollContainerRef ||
+      !props.onCarregarAnteriores ||
+      props.carregandoAnteriores ||
+      carregandoAnterioresEmAndamento ||
+      !props.temMaisMensagensAnteriores
+    ) {
+      return;
+    }
+    carregandoAnterioresEmAndamento = true;
+    const alturaAnterior = scrollContainerRef.scrollHeight;
+    const topoAnterior = scrollContainerRef.scrollTop;
+
+    try {
+      await props.onCarregarAnteriores();
+      // Ajusta o scroll imediatamente para manter o foco relativo
+      requestAnimationFrame(() => {
+        if (scrollContainerRef) {
+          const diferenca = scrollContainerRef.scrollHeight - alturaAnterior;
+          scrollContainerRef.scrollTop = topoAnterior + diferenca;
+        }
+      });
+    } finally {
+      setTimeout(() => {
+        carregandoAnterioresEmAndamento = false;
+      }, 250);
+    }
+  };
+
   const onScroll = () => {
     if (!scrollContainerRef) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef;
@@ -102,6 +142,11 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
     const rolouParaCima = distanciaFim > 80;
     usuarioRolouManual = rolouParaCima;
     setMostrarBotaoFim(rolouParaCima);
+
+    // Infinite scroll para cima: ao chegar a menos de 100px do topo, carrega automaticamente mensagens anteriores
+    if (scrollTop < 100 && props.temMaisMensagensAnteriores && !props.carregandoAnteriores && !carregandoAnterioresEmAndamento) {
+      void carregarAnterioresPreservandoScroll();
+    }
   };
 
   createEffect(() => {
@@ -255,6 +300,7 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
 
           <Show when={props.onNovaSessao}>
             <IconButton
+              data-testid="btn-nova-conversa"
               icon={Plus}
               titulo="Nova Conversa"
               onClick={props.onNovaSessao!}
@@ -279,6 +325,7 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
             <IconButton
               icon={Settings2}
               titulo="Configurar Agente / Motor"
+              data-testid="btn-configurar-motor"
               onClick={props.onAbrirConfiguracoes!}
               class="h-8 w-8 text-zinc-400 hover:text-zinc-200"
             >
@@ -344,21 +391,74 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
               }
             >
               <div class="max-w-3xl mx-auto w-full space-y-3">
+                {/* Indicador de Mensagens Anteriores / Início da Conversa */}
+                <Show when={props.temMaisMensagensAnteriores}>
+                  <div class="flex justify-center py-2">
+                    <Show
+                      when={props.carregandoAnteriores}
+                      fallback={
+                        <button
+                          type="button"
+                          onClick={carregarAnterioresPreservandoScroll}
+                          class="text-xs px-3.5 py-1.5 rounded-full bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/60 text-zinc-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-md hover:scale-102 active:scale-98"
+                          title="Carregar mensagens anteriores desta conversa"
+                        >
+                          <ArrowUp size={13} class="text-emerald-400" />
+                          <span>
+                            Carregar mensagens anteriores
+                            {props.totalMensagens && props.totalMensagens > props.mensagens.length
+                              ? ` (${props.totalMensagens - props.mensagens.length} restantes)`
+                              : ""}
+                          </span>
+                        </button>
+                      }
+                    >
+                      <div class="text-xs px-3.5 py-1.5 rounded-full bg-zinc-900/90 border border-emerald-500/30 text-emerald-400 flex items-center gap-2 shadow-sm animate-pulse">
+                        <Loader2 size={13} class="animate-spin text-emerald-400" />
+                        <span>Carregando mensagens anteriores...</span>
+                      </div>
+                    </Show>
+                  </div>
+                </Show>
+                <Show when={!props.temMaisMensagensAnteriores && (props.totalMensagens || 0) > 2}>
+                  <div class="text-center py-2 text-[11px] text-zinc-600 flex items-center justify-center gap-2 select-none">
+                    <span class="h-px w-12 bg-zinc-800/80"></span>
+                    <span>Início do histórico da conversa</span>
+                    <span class="h-px w-12 bg-zinc-800/80"></span>
+                  </div>
+                </Show>
+
                 <For each={props.mensagens}>
-                  {(msg, idx) => (
-                    <SessionTurn
-                      mensagem={msg}
-                      indice={idx()}
-                      decorridoFmt={props.decorridoFmt}
-                      mostrarPensamento={mostrarPensamento()}
-                      mostrarAcoes={mostrarAcoes()}
-                      mostrarTerminal={props.mostrarTerminalPadrao !== false}
-                      onEditarPrompt={props.onEditarPrompt}
-                      onAprovarHitl={props.onAprovarHitl}
-                      onRejeitarHitl={props.onRejeitarHitl}
-                      onAbrirIframeUrl={abrirIframeComUrl}
-                    />
-                  )}
+                  {(msg, idx) => {
+                    // Verifica se há uma mensagem do usuário APÓS esta mensagem do assistente
+                    const jaRespondida = () => {
+                      if (msg.role !== "assistant") return false;
+                      const proximas = props.mensagens.slice(idx() + 1);
+                      return proximas.some((m) => m.role === "user");
+                    };
+                    return (
+                      <SessionTurn
+                        mensagem={msg}
+                        indice={idx()}
+                        decorridoFmt={props.decorridoFmt}
+                        mostrarPensamento={mostrarPensamento()}
+                        mostrarAcoes={mostrarAcoes()}
+                        mostrarTerminal={props.mostrarTerminalPadrao !== false}
+                        onEditarPrompt={props.onEditarPrompt}
+                        onAprovarHitl={props.onAprovarHitl}
+                        onRejeitarHitl={props.onRejeitarHitl}
+                        onAbrirIframeUrl={abrirIframeComUrl}
+                        jaRespondida={jaRespondida()}
+                        onSelecionarOpcao={(opcao) => {
+                          if (props.onSelecionarOpcao) {
+                            props.onSelecionarOpcao(opcao);
+                          } else {
+                            void props.onEnviarPrompt?.(opcao);
+                          }
+                        }}
+                      />
+                    );
+                  }}
                 </For>
               </div>
             </Show>
@@ -380,8 +480,12 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
             <div class="p-3 bg-zinc-950 border-t border-zinc-800/80 flex-shrink-0">
               <div class="max-w-3xl mx-auto w-full">
                 <PromptInput
-                  valor={localPrompt()}
-                  onInput={setLocalPrompt}
+                  valor={props.valorPrompt !== undefined ? props.valorPrompt : localPrompt()}
+                  onInput={(v) => {
+                    setLocalPrompt(v);
+                    props.onValorPromptChange?.(v);
+                  }}
+                  refTextarea={props.refTextarea}
                   anexos={localAnexos()}
                   onAdicionarAnexo={(a) => setLocalAnexos((prev) => [...prev, a])}
                   onRemoverAnexo={(idx) => setLocalAnexos((prev) => prev.filter((_, i) => i !== idx))}
@@ -393,10 +497,11 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
                   agenteSelecionado={agenteId()}
                   onMudarAgente={() => {}}
                   onEnviar={() => {
-                    const txt = localPrompt();
+                    const txt = props.valorPrompt !== undefined ? props.valorPrompt : localPrompt();
                     const att = localAnexos();
                     if (!txt.trim() && att.length === 0) return;
                     setLocalPrompt("");
+                    props.onValorPromptChange?.("");
                     setLocalAnexos([]);
                     if (props.onEnviarPrompt) {
                       void props.onEnviarPrompt(txt, att);

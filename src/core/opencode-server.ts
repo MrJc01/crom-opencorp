@@ -297,7 +297,7 @@ async function garantirOpencodeConfig(homeDir: string, homeOpencorp: string): Pr
 }
 
 /** Agentes do secretário: home isolado (cwd do serve) + sync por workspace via bridge */
-async function garantirAgentesSecretario(homeDir: string): Promise<AgentesConfig> {
+async function garantirAgentesSecretario(homeDir: string, modeloForcado?: string): Promise<AgentesConfig> {
   const manager = new WorkspaceManager({ homeDir });
   const workspaces = await manager.listar();
   const templateDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "templates", "default", ".opencorp", "agents");
@@ -306,11 +306,24 @@ async function garantirAgentesSecretario(homeDir: string): Promise<AgentesConfig
   const wsNomes: string[] = [];
 
   // override opcional do modelo via settings (secretary.model) — default: o do template
-  let modeloOverride: string | undefined;
-  try {
-    const resolucao = await new SettingsStore({ homeDir }).resolve();
-    modeloOverride = resolucao.settings?.secretary?.model;
-  } catch { /* settings ausente/inválida → usa o do template */ }
+  let modeloOverride: string | undefined = modeloForcado;
+  if (!modeloOverride) {
+    try {
+      const store = new SettingsStore({ homeDir });
+      const resolucao = await store.resolve();
+      modeloOverride = resolucao.settings?.secretary?.model;
+      if (!modeloOverride) {
+        for (const ws of workspaces) {
+          if (!ws.existe) continue;
+          const resWs = await store.resolve({ workspaceDir: ws.path }).catch(() => null);
+          if (resWs?.settings?.secretary?.model) {
+            modeloOverride = resWs.settings.secretary.model;
+            break;
+          }
+        }
+      }
+    } catch { /* settings ausente/inválida → usa o do template */ }
+  }
 
   const agentDir = join(dirOpencodeHome(homeDir), ".opencode", "agent");
   mkdirSync(agentDir, { recursive: true });
@@ -417,14 +430,27 @@ export function extrairAcoesMensagens(
   return { total, itens };
 }
 
+export interface ItemPergunta {
+  id?: string;
+  header?: string;
+  pergunta: string;
+  opcoes: string[];
+  multiplo?: boolean;
+  permiteCustom?: boolean;
+  opcional?: boolean;
+}
+
 export interface PassoChat {
-  tipo: "pensamento" | "acao" | "texto";
+  tipo: "pensamento" | "acao" | "texto" | "pergunta";
   texto?: string;
   ferramenta?: string;
   resumo?: string;
   saida?: string;
   sucesso?: boolean;
   status?: string;
+  pergunta?: string;
+  opcoes?: string[];
+  perguntas?: ItemPergunta[];
 }
 
 /**
@@ -473,6 +499,58 @@ export function extrairPassosMensagens(novasMsgs: MensagemOc[]): PassoChat[] {
         const status = p.state?.status ?? (p as any).status;
         const outputBruto = (p.state as any)?.output ?? (p.state as any)?.metadata?.output ?? (p as any).output ?? (p as any).result ?? "";
         const saida = typeof outputBruto === "string" ? outputBruto.trim() : (outputBruto ? JSON.stringify(outputBruto, null, 2) : undefined);
+        const inputObj = p.state?.input ?? (p as any).input;
+        let perguntaDetectada: string | undefined;
+        let opcoesDetectadas: string[] | undefined;
+        let perguntasDetectadas: ItemPergunta[] | undefined;
+
+        if (inputObj && typeof inputObj === "object") {
+          // Se for formato SDK v2 do OpenCode com array questions: [...]
+          if (Array.isArray((inputObj as any).questions) && (inputObj as any).questions.length > 0) {
+            perguntasDetectadas = (inputObj as any).questions.map((q: any, idx: number) => {
+              const rawQ = typeof q === "string" ? q : (q?.question ?? q?.pergunta ?? `Pergunta ${idx + 1}`);
+              const rawOpts = q?.options ?? q?.opcoes ?? [];
+              const opts = Array.isArray(rawOpts)
+                ? rawOpts.map((o: any) => (typeof o === "string" ? o : (o?.label ?? o?.text ?? String(o)))).filter(Boolean)
+                : [];
+              return {
+                id: q?.id || `q_${idx + 1}`,
+                header: q?.header ? String(q.header).trim() : undefined,
+                pergunta: String(rawQ).trim(),
+                opcoes: opts,
+                multiplo: Boolean(q?.multiple || q?.multiplo),
+                permiteCustom: q?.custom !== false,
+                opcional: Boolean(q?.optional || q?.opcional),
+              };
+            });
+            if (perguntasDetectadas && perguntasDetectadas.length > 0) {
+              perguntaDetectada = perguntasDetectadas[0].pergunta;
+              opcoesDetectadas = perguntasDetectadas[0].opcoes;
+            }
+          } else {
+            const rawPergunta = (inputObj as any).question ?? (inputObj as any).pergunta ?? (inputObj as any).prompt;
+            if (typeof rawPergunta === "string" && rawPergunta.trim()) {
+              perguntaDetectada = rawPergunta.trim();
+            }
+            const rawOpcoes = (inputObj as any).options ?? (inputObj as any).opcoes ?? (inputObj as any).choices;
+            if (Array.isArray(rawOpcoes)) {
+              opcoesDetectadas = rawOpcoes
+                .map((o) => (typeof o === "string" ? o : (o?.text ?? o?.label ?? String(o))))
+                .filter(Boolean);
+            }
+            if (perguntaDetectada || (opcoesDetectadas && opcoesDetectadas.length > 0)) {
+              perguntasDetectadas = [
+                {
+                  id: "q_1",
+                  pergunta: perguntaDetectada || "Escolha uma opção:",
+                  opcoes: opcoesDetectadas || [],
+                  permiteCustom: true,
+                },
+              ];
+            }
+          }
+        }
+
         passos.push({
           tipo: "acao",
           ferramenta: toolNome,
@@ -480,6 +558,9 @@ export function extrairPassosMensagens(novasMsgs: MensagemOc[]): PassoChat[] {
           saida: saida || undefined,
           sucesso: status !== "error" && status !== "failed",
           status: status || "completed",
+          pergunta: perguntaDetectada,
+          opcoes: opcoesDetectadas && opcoesDetectadas.length > 0 ? opcoesDetectadas : undefined,
+          perguntas: perguntasDetectadas && perguntasDetectadas.length > 0 ? perguntasDetectadas : undefined,
         });
       } else if (p.type === "text") {
         let bruto = p.text ?? "";
@@ -647,6 +728,10 @@ export class OpencodeServerManager {
   async configurado(): Promise<boolean> {
     const configPath = join(dirOpencodeHome(this.homeDir), "opencode.json");
     return existsSync(configPath);
+  }
+
+  async atualizarModeloSecretario(novoModelo?: string): Promise<void> {
+    await garantirAgentesSecretario(this.homeDir, novoModelo);
   }
 }
 

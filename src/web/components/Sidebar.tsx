@@ -205,8 +205,9 @@ export const Sidebar: Component = () => {
                   return (
                     <A
                       href={item.href}
+                      data-view={item.href.replace(/^\//, "")}
                       onClick={() => setSidebarMobileAberta(false)}
-                      class={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-medium transition-all ${
+                      class={`nav-item flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-medium transition-all ${
                         ativo()
                           ? "bg-zinc-900 text-zinc-100 font-semibold border border-zinc-800/90 shadow-xs"
                           : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40"

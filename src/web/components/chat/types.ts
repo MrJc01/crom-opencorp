@@ -4,27 +4,62 @@ export interface AcaoItem {
   sucesso?: boolean;
 }
 
+export interface ItemPergunta {
+  id?: string;
+  header?: string;
+  pergunta: string;
+  opcoes: string[];
+  multiplo?: boolean;
+  permiteCustom?: boolean; // Permite digitação livre (Outro / Custom write-in) - padrão: true
+  opcional?: boolean;      // Permite pular
+}
+
 export type TurnoPasso =
   | { tipo: "pensamento"; texto: string }
-  | { tipo: "acao"; ferramenta: string; resumo?: string; saida?: string; sucesso?: boolean; status?: string }
+  | {
+      tipo: "acao";
+      ferramenta: string;
+      resumo?: string;
+      saida?: string;
+      sucesso?: boolean;
+      status?: string;
+      pergunta?: string;
+      opcoes?: string[];
+      perguntas?: ItemPergunta[];
+    }
+  | { tipo: "pergunta"; pergunta: string; opcoes: string[]; perguntas?: ItemPergunta[] }
   | { tipo: "texto"; texto: string };
 
 export interface ChatMensagem {
+  id?: string;
+  indice_global?: number;
   role: "user" | "assistant" | "system";
   content: string;
   passos?: TurnoPasso[];
   pensamento?: string;
+  criado_em?: string;
   concluida?: boolean;
   acoes?: AcaoItem[];
   imagens?: string[];
   terminal?: string;
   iframeUrl?: string;
+  pergunta?: string;
+  opcoes?: string[];
+  perguntas?: ItemPergunta[];
   hitl?: {
     id: string;
     agente: string;
     ordem: string;
     motivo_guard: string;
   };
+}
+
+export interface PaginacaoMensagens {
+  total_mensagens: number;
+  total_turnos: number;
+  primeiro_indice: number;
+  ultimo_indice: number;
+  tem_mais: boolean;
 }
 
 export interface IframeEmbedConfig {
@@ -71,8 +106,18 @@ export interface UniversalChatProps {
   onAbrirHistorico?: () => void;
   onAbrirConfiguracoes?: () => void;
   onParar?: () => void;
+  onSelecionarOpcao?: (opcao: string) => void;
 
   decorridoFmt?: string;
   placeholder?: string;
   sugestoesRapidas?: Array<{ rotulo: string; prompt: string }>;
+  valorPrompt?: string;
+  onValorPromptChange?: (v: string) => void;
+  refTextarea?: (el: HTMLTextAreaElement) => void;
+
+  // Infinite Scroll para cima (histórico paginado)
+  temMaisMensagensAnteriores?: boolean;
+  carregandoAnteriores?: boolean;
+  onCarregarAnteriores?: () => Promise<void> | void;
+  totalMensagens?: number;
 }

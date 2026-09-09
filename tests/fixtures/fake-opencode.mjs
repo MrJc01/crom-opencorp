@@ -161,17 +161,75 @@ const server = createServer(async (req, res) => {
     // evento "acao" do stream: itens com tool/status/resumo)
     const textoUsuario = parts?.[0]?.text ?? "mensagem";
     const pedeAcao = /^crie/i.test(textoUsuario.trim());
-    const respostaParts = pedeAcao
-      ? [
-          {
-            type: "tool",
-            tool: "opencorp_task_create",
-            callID: "call-e2e-1",
-            state: { status: "completed", title: "", input: { titulo: "Task criada pelo e2e" } },
+    const pedePerguntaTool = /pergunta.*tool/i.test(textoUsuario.trim());
+    const pedePerguntaMultipla = /pergunta.*multi/i.test(textoUsuario.trim());
+    const pedePerguntaTexto = /pergunta.*texto/i.test(textoUsuario.trim());
+
+    let respostaParts;
+    if (pedePerguntaMultipla) {
+      respostaParts = [
+        {
+          type: "tool",
+          tool: "ask_question",
+          callID: "call-question-multi-e2e",
+          state: {
+            status: "completed",
+            title: "Configurações de Lançamento",
+            input: {
+              questions: [
+                {
+                  header: "Ambiente",
+                  question: "Qual ambiente de destino?",
+                  options: ["Produção", "Homologação"],
+                },
+                {
+                  header: "Estratégia",
+                  question: "Qual o método de entrega?",
+                  options: ["Instantâneo", "Gradual (Canary)"],
+                },
+              ],
+            },
           },
-          { type: "text", text: `Task criada com ID: tsk-e2e-1` },
-        ]
-      : [{ type: "text", text: `Resposta do assistant para: ${textoUsuario}` }];
+        },
+        { type: "text", text: "Por favor configure as etapas acima para prosseguir." },
+      ];
+    } else if (pedePerguntaTool) {
+      respostaParts = [
+        {
+          type: "tool",
+          tool: "ask_question",
+          callID: "call-question-e2e",
+          state: {
+            status: "completed",
+            title: "Qual ambiente você deseja implantar?",
+            input: {
+              question: "Qual ambiente você deseja implantar?",
+              options: ["Produção", "Staging", "Desenvolvimento"],
+            },
+          },
+        },
+        { type: "text", text: "Por favor selecione uma das opções acima para continuar o deploy." },
+      ];
+    } else if (pedePerguntaTexto) {
+      respostaParts = [
+        {
+          type: "text",
+          text: "Como você deseja prosseguir com o vídeo?\n\n1. Publicar agora no YouTube\n2. Agendar para amanhã\n3. Descartar rascunho",
+        },
+      ];
+    } else if (pedeAcao) {
+      respostaParts = [
+        {
+          type: "tool",
+          tool: "opencorp_task_create",
+          callID: "call-e2e-1",
+          state: { status: "completed", title: "", input: { titulo: "Task criada pelo e2e" } },
+        },
+        { type: "text", text: `Task criada com ID: tsk-e2e-1` },
+      ];
+    } else {
+      respostaParts = [{ type: "text", text: `Resposta do assistant para: ${textoUsuario}` }];
+    }
     const assistantMsg = {
       role: "assistant",
       parts: respostaParts,

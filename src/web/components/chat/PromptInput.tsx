@@ -626,6 +626,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
       {/* Input de Texto */}
       <textarea
+        id="chat-input"
+        data-testid="chat-input"
         ref={textareaRef}
         rows={1}
         value={valorTexto()}
@@ -740,6 +742,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             when={props.carregando}
             fallback={
               <button
+                id="btn-enviar"
+                data-testid="btn-enviar"
                 onClick={dispararEnvio}
                 disabled={!valorTexto().trim() && listaAnexos().length === 0}
                 class="flex items-center justify-center h-8 w-8 rounded-full bg-zinc-100 text-zinc-950 font-bold transition-all disabled:opacity-30 disabled:pointer-events-none hover:bg-white active:scale-95 shadow-md cursor-pointer"

@@ -115,6 +115,8 @@ export const SecretarioView: Component = () => {
       "github/o3-mini",
     ],
     opencode: [
+      "opencode-go/glm-5.3-flash",
+      "opencode-go/glm-5.3",
       "opencode/nemotron-3-ultra-free",
       "opencode/nemotron-3.5-lightning-free",
       "opencode/big-pickle",
@@ -186,21 +188,43 @@ export const SecretarioView: Component = () => {
     setResultadoTeste(null);
     const t0 = Date.now();
     try {
-      await fetchApi(`/agents/${encodeURIComponent(agenteConfig())}/run?workspace=${encodeURIComponent(wsAtivo())}`, {
-        method: "POST",
-        body: JSON.stringify({
-          ordem: "ping de verificação de motor",
-          engine: motorConfig(),
-          model: modeloConfig().trim() || undefined,
-        }),
-      });
-      const t = Date.now() - t0;
-      setResultadoTeste({
-        ok: true,
-        msg: `Motor "${motorConfig()}" ativo e respondendo (${t}ms).`,
-        latencyMs: t,
-      });
-      showToast(`Motor ${motorConfig()} verificado com sucesso!`, "sucesso");
+      const agId = agenteConfig();
+      const motId = motorConfig();
+      if (agId === "secretario-exec" || agId === "secretario") {
+        const [motorRes, statusRes] = await Promise.all([
+          fetchApi<any>(`/api/motores/${encodeURIComponent(motId)}/test`, { method: "POST" }).catch(() => null),
+          fetchApi<{ rodando?: boolean; porta?: number }>("/secretario/status").catch(() => null),
+        ]);
+        const t = Date.now() - t0;
+        const motorOk = motorRes?.ok || motorRes?.health?.healthy;
+        const secOk = statusRes?.rodando;
+        if (motorOk && secOk) {
+          const statusTxt = motorRes?.health?.statusText || "OK";
+          setResultadoTeste({ ok: true, msg: `Motor "${motId}" ativo (${statusTxt}) · Secretário rodando na porta ${statusRes.porta} (${t}ms).`, latencyMs: t });
+          showToast(`Motor ${motId} verificado com sucesso!`, "sucesso");
+        } else {
+          const partes: string[] = [];
+          if (!motorOk) partes.push(`Motor "${motId}" não respondeu`);
+          if (!secOk) partes.push("Secretário (OpenCode) não está rodando");
+          setResultadoTeste({ ok: false, msg: partes.join(" · ") + ` (${t}ms)`, latencyMs: t });
+        }
+      } else {
+        await fetchApi(`/agents/${encodeURIComponent(agId)}/run?workspace=${encodeURIComponent(wsAtivo())}`, {
+          method: "POST",
+          body: JSON.stringify({
+            ordem: "ping de verificação de motor",
+            engine: motId,
+            model: modeloConfig().trim() || undefined,
+          }),
+        });
+        const t = Date.now() - t0;
+        setResultadoTeste({
+          ok: true,
+          msg: `Motor "${motId}" ativo e respondendo (${t}ms).`,
+          latencyMs: t,
+        });
+        showToast(`Motor ${motId} verificado com sucesso!`, "sucesso");
+      }
     } catch (e: any) {
       setResultadoTeste({
         ok: false,
@@ -288,6 +312,7 @@ export const SecretarioView: Component = () => {
   };
 
   let monitorTimeout: any = null;
+  let streamingAtivo = false;
 
   const pararMonitoramento = () => {
     if (monitorTimeout) {
@@ -318,8 +343,16 @@ export const SecretarioView: Component = () => {
         }
         return;
       }
+      if (streamingAtivo) {
+        monitorTimeout = setTimeout(tick, 1000);
+        return;
+      }
       try {
         const msgs = await fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(sessaoId)}/mensagens`);
+        if (streamingAtivo) {
+          monitorTimeout = setTimeout(tick, 1000);
+          return;
+        }
         if (!Array.isArray(msgs)) {
           monitorTimeout = setTimeout(tick, 1000);
           return;
@@ -348,7 +381,13 @@ export const SecretarioView: Component = () => {
           return;
         }
 
-        if (tentativasSemMudanca > 240) { // ~4 minutos sem atividade
+        if (tentativasSemMudanca > 300) { // ~5 minutos sem atividade
+          const sessaoOcupada = sessoes().find((s) => s.id === sessaoId && (s as any).executando);
+          if (sessaoOcupada) {
+            tentativasSemMudanca = 0;
+            monitorTimeout = setTimeout(tick, 1500);
+            return;
+          }
           setMensagens((prev) => {
             const u = prev[prev.length - 1];
             if (u && u.role === "assistant") {
@@ -533,6 +572,7 @@ export const SecretarioView: Component = () => {
     setInputValor("");
     setAnexos([]);
     setCarregando(true);
+    streamingAtivo = true;
     setDecorridoSegundos(0);
 
     setTimeout(scrollFim, 30);
@@ -731,11 +771,7 @@ export const SecretarioView: Component = () => {
         });
       }
     } finally {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
-      }
-      setCarregando(false);
+      streamingAtivo = false;
       abortController = null;
       void carregarSessoes();
       const sidFinal = sessaoAtivaId();
@@ -744,9 +780,31 @@ export const SecretarioView: Component = () => {
           .then((msgsFinais) => {
             if (Array.isArray(msgsFinais) && msgsFinais.length > 0) {
               setMensagens((prev) => reconciliarMensagens(prev, msgsFinais));
+              const ult = msgsFinais[msgsFinais.length - 1];
+              if (ult && (ult.concluida === false || ult.role === "user")) {
+                retomarMonitoramento(sidFinal);
+                return;
+              }
             }
+            if (timerInterval) {
+              clearInterval(timerInterval);
+              timerInterval = null;
+            }
+            setCarregando(false);
           })
-          .catch(() => null);
+          .catch(() => {
+            if (timerInterval) {
+              clearInterval(timerInterval);
+              timerInterval = null;
+            }
+            setCarregando(false);
+          });
+      } else {
+        if (timerInterval) {
+          clearInterval(timerInterval);
+          timerInterval = null;
+        }
+        setCarregando(false);
       }
     }
   };

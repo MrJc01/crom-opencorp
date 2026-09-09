@@ -1,0 +1,254 @@
+import { test, expect } from "@playwright/test";
+import { logado, seederEmpresaBasica, api } from "./helpers.js";
+
+test.describe("Perguntas da IA com Opções Interativas e Configuração de Modelo no Chat", () => {
+  test.beforeEach(async ({ page }) => {
+    logado(page, "test-e2e");
+    await seederEmpresaBasica(api(page), "test-e2e");
+    await page.goto("/secretario");
+    await page.waitForSelector("#chat-input", { timeout: 20000 });
+  });
+
+  test.afterAll(async ({ request }) => {
+    await request.post("/secretario/stop", { headers: { authorization: "Bearer test-e2e" } }).catch(() => {});
+  });
+
+  test("menu lateral carrega configurações do secretário e atualizar modelo reflete imediatamente no chat", async ({ page }) => {
+    // 1. Abre o menu lateral de configuração clicando no botão de configurações (engrenagem)
+    const btnConfig = page.locator('[data-testid="btn-configurar-motor"]').first();
+    await btnConfig.click();
+
+    const drawer = page.locator("[data-testid='drawer-lateral-config']");
+    await expect(drawer).toBeVisible({ timeout: 5000 });
+
+    // 2. Verifica que o select de agentes puxa o secretário executivo e não está vazio
+    const selectAgente = drawer.locator("select").first();
+    await expect(selectAgente).toBeVisible();
+    await expect(selectAgente.locator("option")).not.toHaveCount(0);
+
+    // 3. Preenche novo modelo no campo de Modelo Principal
+    const inputModelo = drawer.locator("input[placeholder*='ex.:']");
+    await expect(inputModelo).toBeVisible();
+    await inputModelo.fill("google/gemini-3.8-flash-high");
+
+    // 4. Clica em "Salvar no Agente"
+    const btnSalvar = drawer.locator("button:has-text('Salvar no Agente')");
+    await btnSalvar.click();
+
+    // 5. Verifica que o drawer fecha e o cabeçalho do chat exibe o novo modelo
+    await expect(drawer).not.toBeVisible({ timeout: 5000 });
+    const cabecalhoModelo = page.locator(".font-mono:has-text('gemini-3.8-flash-high')");
+    await expect(cabecalhoModelo).toBeVisible({ timeout: 5000 });
+  });
+
+  test("IA pergunta usando tool ask_question com opções → botões clicáveis são renderizados e o clique envia a resposta", async ({ page }) => {
+    const btnNova = page.locator("[data-testid='btn-nova-conversa']");
+    if (await btnNova.isVisible().catch(() => false)) {
+      await btnNova.click();
+      await page.waitForTimeout(300);
+    }
+
+    const input = page.locator("#chat-input");
+    await expect(input).toBeVisible();
+
+    // Envia ordem para disparar a pergunta com opções via tool
+    await input.fill("teste pergunta tool");
+    await page.click("#btn-enviar");
+
+    // Aguarda o card de perguntas com opções interativas aparecer no layout
+    const cardOpcoes = page.locator(".chat-pergunta-card").last();
+    await expect(cardOpcoes).toBeVisible({ timeout: 15000 });
+
+    // Verifica que o título da pergunta é renderizado
+    await expect(cardOpcoes).toContainText("Qual ambiente você deseja implantar?");
+
+    // Verifica que há exatamente 3 botões de opções
+    const botoesOpcoes = cardOpcoes.locator("button[data-testid='chat-opcao-btn']");
+    await expect(botoesOpcoes).toHaveCount(3);
+    await expect(botoesOpcoes.nth(0)).toContainText("Produção");
+    await expect(botoesOpcoes.nth(1)).toContainText("Staging");
+    await expect(botoesOpcoes.nth(2)).toContainText("Desenvolvimento");
+
+    // Clica na opção "Staging"
+    const btnStaging = cardOpcoes.locator("button[data-opcao='Staging']");
+    await expect(btnStaging).toBeVisible();
+    await btnStaging.click();
+
+    // Verifica que a escolha "Staging" foi enviada no chat como resposta do usuário
+    await expect(page.locator(".oc-user, [data-role='user']").last()).toContainText("Staging", { timeout: 10000 });
+  });
+
+  test("IA pergunta em formato texto com opções numeradas → detecta e renderiza botões de escolha rápida", async ({ page }) => {
+    const btnNova = page.locator("[data-testid='btn-nova-conversa']");
+    if (await btnNova.isVisible().catch(() => false)) {
+      await btnNova.click();
+      await page.waitForTimeout(300);
+    }
+
+    const input = page.locator("#chat-input");
+    await expect(input).toBeVisible();
+
+    // Envia ordem para disparar pergunta em formato texto com lista de opções
+    await input.fill("teste pergunta texto");
+    await page.click("#btn-enviar");
+
+    // Aguarda o card de perguntas com opções interativas aparecer no layout
+    const cardOpcoes = page.locator(".chat-pergunta-card").last();
+    await expect(cardOpcoes).toBeVisible({ timeout: 15000 });
+
+    // Verifica que os 3 botões com as opções do texto foram criados
+    const botoesOpcoes = cardOpcoes.locator("button[data-testid='chat-opcao-btn']");
+    await expect(botoesOpcoes).toHaveCount(3);
+    await expect(botoesOpcoes.nth(0)).toContainText("Publicar agora no YouTube");
+    await expect(botoesOpcoes.nth(1)).toContainText("Agendar para amanhã");
+    await expect(botoesOpcoes.nth(2)).toContainText("Descartar rascunho");
+
+    // Clica na primeira opção "Publicar agora no YouTube"
+    await botoesOpcoes.first().click();
+
+    // Verifica que a mensagem foi enviada ao chat com a opção escolhida
+    await expect(page.locator(".oc-user, [data-role='user']").last()).toContainText("Publicar agora no YouTube", { timeout: 10000 });
+
+    // Após resposta, o card de opções deve ser ocultado
+    await expect(cardOpcoes).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test("múltiplas perguntas: exibe navegação por abas/pills, opção customizada e oculta card após resposta", async ({ page }) => {
+    const btnNova = page.locator("[data-testid='btn-nova-conversa']");
+    if (await btnNova.isVisible().catch(() => false)) {
+      await btnNova.click();
+      await page.waitForTimeout(300);
+    }
+
+    const input = page.locator("#chat-input");
+    await expect(input).toBeVisible();
+
+    // Dispara pergunta múltipla
+    await input.fill("teste pergunta multipla");
+    await page.click("#btn-enviar");
+
+    // Aguarda card aparecer
+    const cardOpcoes = page.locator(".chat-pergunta-card").last();
+    await expect(cardOpcoes).toBeVisible({ timeout: 15000 });
+
+    // Verifica navegação de abas (Pergunta 1 de 2)
+    await expect(cardOpcoes).toContainText("Pergunta 1 de 2");
+    await expect(cardOpcoes).toContainText("Qual ambiente de destino?");
+
+    // Verifica botão customizado presente
+    const btnCustom = cardOpcoes.locator("button:has-text('Outro: digitar resposta personalizada')");
+    await expect(btnCustom).toBeVisible();
+
+    // Seleciona primeira opção da pergunta 1 ("Produção") -> deve avançar automaticamente para Pergunta 2
+    const btnProd = cardOpcoes.locator("button[data-opcao='Produção']");
+    await btnProd.click();
+
+    // Verifica que avançou para a pergunta 2
+    await expect(cardOpcoes).toContainText("Pergunta 2 de 2");
+    await expect(cardOpcoes).toContainText("Qual o método de entrega?");
+
+    // Na pergunta 2, clica em "Gradual (Canary)"
+    const btnCanary = cardOpcoes.locator("button[data-opcao='Gradual (Canary)']");
+    await btnCanary.click();
+
+    // Clica no botão de envio consolidado "Enviar respostas (2/2)"
+    const btnEnviarRespostas = cardOpcoes.locator("button:has-text('Enviar respostas')");
+    await expect(btnEnviarRespostas).toBeVisible();
+    await btnEnviarRespostas.click();
+
+    // Aguarda a resposta do usuário aparecer no chat contendo as respostas
+    const ultimoUserMsg = page.locator(".oc-user, [data-role='user']").last();
+    await expect(ultimoUserMsg).toBeVisible({ timeout: 10000 });
+    await expect(ultimoUserMsg).toContainText("Produção");
+    await expect(ultimoUserMsg).toContainText("Gradual (Canary)");
+
+    // Como já foi respondida, o card de opções deve sumir da tela!
+    await expect(cardOpcoes).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test("pergunta com resposta personalizada: abre campo de digitação, envia texto customizado e oculta card", async ({ page }) => {
+    const btnNova = page.locator("[data-testid='btn-nova-conversa']");
+    if (await btnNova.isVisible().catch(() => false)) {
+      await btnNova.click();
+      await page.waitForTimeout(300);
+    }
+
+    const input = page.locator("#chat-input");
+    await expect(input).toBeVisible();
+
+    await input.fill("teste pergunta tool");
+    await page.click("#btn-enviar");
+
+    const cardOpcoes = page.locator(".chat-pergunta-card").last();
+    await expect(cardOpcoes).toBeVisible({ timeout: 15000 });
+
+    // Clica no botão "Outro: digitar resposta personalizada..."
+    const btnCustom = cardOpcoes.locator("button:has-text('Outro: digitar resposta personalizada')");
+    await expect(btnCustom).toBeVisible();
+    await btnCustom.click();
+
+    // Preenche a resposta personalizada no input
+    const inputCustom = cardOpcoes.locator("input[placeholder*='resposta personalizada']");
+    await expect(inputCustom).toBeVisible();
+    await inputCustom.fill("Deploy no cluster Kubernetes local");
+
+    // Clica em Enviar
+    const btnEnviarCustom = cardOpcoes.locator("button:has-text('Enviar')");
+    await btnEnviarCustom.click();
+
+    // Verifica que o texto customizado foi enviado como mensagem do usuário
+    const ultimoUser = page.locator(".oc-user, [data-role='user']").last();
+    await expect(ultimoUser).toContainText("Deploy no cluster Kubernetes local", { timeout: 10000 });
+
+    // O card deve sumir após ser respondido
+    await expect(cardOpcoes).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test("carregamento paginado: exibe inicialmente últimos 2 turnos e scroll infinito para cima carrega anteriores", async ({ page }) => {
+    const btnNova = page.locator("[data-testid='btn-nova-conversa']");
+    if (await btnNova.isVisible().catch(() => false)) {
+      await btnNova.click();
+      await page.waitForTimeout(300);
+    }
+
+    const input = page.locator("#chat-input");
+    await expect(input).toBeVisible();
+
+    // Envia 4 turnos sequenciais
+    const prompts = ["Turno alfa inicial", "Turno beta intermediario", "Turno gama recente", "Turno delta final"];
+    for (const p of prompts) {
+      await input.fill(p);
+      await page.click("#btn-enviar");
+      // Aguarda o balão do usuário correspondente aparecer
+      await expect(page.locator(`.oc-user:has-text("${p}"), [data-role='user']:has-text("${p}")`)).toBeVisible({ timeout: 10000 });
+      // Aguarda resposta do assistente ser concluída
+      await expect(page.locator(".oc-assistant").last()).toBeVisible({ timeout: 10000 });
+      await page.waitForTimeout(200);
+    }
+
+    // Recarrega a página para testar o carregamento inicial da sessão
+    await page.reload();
+    await page.waitForSelector("#chat-input", { timeout: 20000 });
+
+    // 1. Inicialmente deve exibir apenas os últimos 2 turnos (gama recente e delta final)
+    await expect(page.locator(".oc-user:has-text('Turno delta final')")).toBeVisible({ timeout: 8000 });
+    await expect(page.locator(".oc-user:has-text('Turno gama recente')")).toBeVisible({ timeout: 8000 });
+
+    // O primeiro turno ainda NÃO deve estar visível no DOM
+    await expect(page.locator(".oc-user:has-text('Turno alfa inicial')")).not.toBeVisible();
+
+    // 2. O botão de carregar anteriores deve estar visível no topo
+    const btnCarregarAnteriores = page.locator("button:has-text('Carregar mensagens anteriores')");
+    await expect(btnCarregarAnteriores).toBeVisible();
+
+    // 3. Clica para carregar mensagens anteriores
+    await btnCarregarAnteriores.click();
+
+    // 4. Agora os turnos anteriores devem aparecer no chat
+    await expect(page.locator(".oc-user:has-text('Turno alfa inicial')")).toBeVisible({ timeout: 8000 });
+    await expect(page.locator(".oc-user:has-text('Turno beta intermediario')")).toBeVisible({ timeout: 8000 });
+
+    // 5. Como chegou ao início, o indicador "Início do histórico da conversa" deve ser exibido
+    await expect(page.locator("text=Início do histórico da conversa")).toBeVisible({ timeout: 5000 });
+  });
+});
