@@ -31,9 +31,62 @@ export interface SessionTurnProps {
   onAbrirIframeUrl?: (url: string) => void;
 }
 
+/** Componente dedicado para o corpo de pensamento: auto-scroll para baixo durante geração ao vivo e preservação de rolagem manual sem saltos para o topo */
+const PensamentoCorpo: Component<{ texto: string }> = (props) => {
+  let containerRef: HTMLDivElement | undefined;
+  let usuarioRolouParaCima = false;
+
+  const onScroll = () => {
+    if (!containerRef) return;
+    const distFim = containerRef.scrollHeight - containerRef.scrollTop - containerRef.clientHeight;
+    usuarioRolouParaCima = distFim > 45;
+  };
+
+  createEffect(() => {
+    // Monitora alterações no texto do pensamento
+    const _t = props.texto;
+    if (!containerRef) return;
+    const scrollAnterior = containerRef.scrollTop;
+    queueMicrotask(() => {
+      if (!containerRef) return;
+      if (!usuarioRolouParaCima) {
+        // Auto-scroll para baixo acompanhando o raciocínio em tempo real
+        containerRef.scrollTop = containerRef.scrollHeight;
+      } else {
+        // Preserva a posição que o usuário escolheu, sem resetar para 0
+        containerRef.scrollTop = scrollAnterior;
+      }
+    });
+  });
+
+  return (
+    <div
+      ref={containerRef}
+      onScroll={onScroll}
+      class="p-3 text-zinc-300 leading-relaxed font-sans border-t border-zinc-800/60 bg-zinc-950/40 max-h-64 overflow-y-auto scrollbar-thin select-text text-xs"
+      innerHTML={renderMarkdown(props.texto)}
+    />
+  );
+};
+
 export const SessionTurn: Component<SessionTurnProps> = (props) => {
   const [copiado, setCopiado] = createSignal(false);
   const m = () => props.mensagem;
+
+  // Só pulsa se este passo for o ÚLTIMO passo e ainda não houver resposta final emitida
+  const isPassoPensandoAtivo = (idx: number) => {
+    if (m().concluida !== false) return false;
+    const passos = m().passos;
+    if (!passos || passos.length === 0) return false;
+    const isUltimo = idx === passos.length - 1;
+    const ultPasso = passos[passos.length - 1];
+    return isUltimo && ultPasso?.tipo === "pensamento" && !m().content;
+  };
+
+  const isPensandoAutonomoAtivo = (pIdx: number, total: number) => {
+    if (m().concluida !== false) return false;
+    return pIdx === total - 1 && !m().content;
+  };
 
   // Detecta primeira URL no conteúdo para sugestão de preview lateral
   const urlDetectada = createMemo(() => {
@@ -184,34 +237,35 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
         }
       >
         <For each={m().pensamento!.split("\n\n---\n\n").filter(Boolean)}>
-          {(pensamentoItem, pIdx) => (
-            <details
-              class="mb-2 rounded-xl bg-zinc-950/70 border border-zinc-800/80 overflow-hidden text-xs"
-              open={m().concluida === false}
-            >
-              <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
-                <span class="flex items-center gap-1.5">
-                  <Brain size={13} class="text-purple-400" />
-                  <span
-                    class={
-                      m().concluida === false
-                        ? "text-purple-300 animate-pulse font-semibold"
-                        : "text-zinc-300 font-medium"
-                    }
-                  >
-                    {m().concluida === false ? "Pensando…" : `Raciocínio (${pIdx() + 1})`}
+          {(pensamentoItem, pIdx) => {
+            const itens = m().pensamento!.split("\n\n---\n\n").filter(Boolean);
+            const ativo = () => isPensandoAutonomoAtivo(pIdx(), itens.length);
+            return (
+              <details
+                class="mb-2 rounded-xl bg-zinc-950/70 border border-zinc-800/80 overflow-hidden text-xs"
+                open={m().concluida === false}
+              >
+                <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
+                  <span class="flex items-center gap-1.5">
+                    <Brain size={13} class={ativo() ? "text-purple-400" : "text-zinc-400"} />
+                    <span
+                      class={
+                        ativo()
+                          ? "text-purple-300 animate-pulse font-semibold"
+                          : "text-zinc-300 font-medium"
+                      }
+                    >
+                      {ativo() ? "Pensando…" : `Raciocínio (${pIdx() + 1})`}
+                    </span>
                   </span>
-                </span>
-                <span class="text-[10px] text-zinc-500 font-mono">
-                  {m().concluida === false ? (props.decorridoFmt || "ao vivo") : "ver detalhes"}
-                </span>
-              </summary>
-              <div
-                class="p-3 text-zinc-300 leading-relaxed font-sans border-t border-zinc-800/60 bg-zinc-950/40 max-h-64 overflow-y-auto scrollbar-thin select-text text-xs"
-                innerHTML={renderMarkdown(pensamentoItem)}
-              />
-            </details>
-          )}
+                  <span class="text-[10px] text-zinc-500 font-mono">
+                    {ativo() ? (props.decorridoFmt || "ao vivo") : "concluído"}
+                  </span>
+                </summary>
+                <PensamentoCorpo texto={pensamentoItem} />
+              </details>
+            );
+          }}
         </For>
       </Show>
 
@@ -259,44 +313,60 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
                   >
                     <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
                       <span class="flex items-center gap-1.5">
-                        <Brain size={13} class="text-purple-400" />
+                        <Brain size={13} class={isPassoPensandoAtivo(idx()) ? "text-purple-400" : "text-zinc-400"} />
                         <span
                           class={
-                            m().concluida === false
+                            isPassoPensandoAtivo(idx())
                               ? "text-purple-300 animate-pulse font-semibold"
                               : "text-zinc-300 font-medium"
                           }
                         >
-                          {m().concluida === false ? "Pensando…" : `Raciocínio (${idx() + 1})`}
+                          {isPassoPensandoAtivo(idx()) ? "Pensando…" : `Raciocínio (${idx() + 1})`}
                         </span>
                       </span>
                       <span class="text-[10px] text-zinc-500 font-mono">
-                        {m().concluida === false ? (props.decorridoFmt || "ao vivo") : "ver detalhes"}
+                        {isPassoPensandoAtivo(idx()) ? (props.decorridoFmt || "ao vivo") : "concluído"}
                       </span>
                     </summary>
-                    <div
-                      class="p-3 text-zinc-300 leading-relaxed font-sans border-t border-zinc-800/60 bg-zinc-950/40 max-h-64 overflow-y-auto scrollbar-thin select-text text-xs"
-                      innerHTML={renderMarkdown(passo.texto)}
-                    />
+                    <PensamentoCorpo texto={passo.texto} />
                   </details>
                 </Show>
 
-                {/* Passo: Ação / Tool (Bash, Comandos, Leitura) */}
+                {/* Passo: Ação / Tool (Bash, Comandos, Leitura) com Saída e Status */}
                 <Show when={props.mostrarAcoes !== false && passo.tipo === "acao"}>
-                  <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-950/85 border border-zinc-800 text-xs font-mono text-zinc-300 my-1.5">
-                    <Terminal size={13} class="text-amber-400 flex-shrink-0" />
-                    <span class="text-amber-300/90 font-bold">{passo.ferramenta}:</span>
-                    <span class="truncate flex-1 text-zinc-300">{passo.resumo || "executado"}</span>
-                    <span
-                      class={`text-[10px] ml-auto flex-shrink-0 font-bold px-1.5 py-0.2 rounded border ${
-                        passo.sucesso !== false
-                          ? "bg-emerald-950/60 text-emerald-300 border-emerald-800/60"
-                          : "bg-rose-950/60 text-rose-300 border-rose-800/60"
-                      }`}
-                    >
-                      {passo.sucesso !== false ? "✓ ok" : "✗ falhou"}
-                    </span>
-                  </div>
+                  <details
+                    class="rounded-xl bg-zinc-950/85 border border-zinc-800 text-xs font-mono text-zinc-300 my-1.5 overflow-hidden group"
+                    open={Boolean(passo.saida && (passo.sucesso === false || (passo.saida.length < 500 && !m().content)))}
+                  >
+                    <summary class="flex items-center gap-2 px-3 py-2 cursor-pointer select-none hover:bg-zinc-900/50 transition-colors">
+                      <Terminal size={13} class="text-amber-400 flex-shrink-0" />
+                      <span class="text-amber-300/90 font-bold">{passo.ferramenta}:</span>
+                      <span class="truncate flex-1 text-zinc-300">{passo.resumo || "executado"}</span>
+                      <Show
+                        when={passo.status !== "running"}
+                        fallback={
+                          <span class="text-[10px] ml-auto flex-shrink-0 font-bold px-1.5 py-0.2 rounded border bg-amber-950/60 text-amber-300 border-amber-800/60 animate-pulse flex items-center gap-1">
+                            <span class="animate-spin text-[8px]">⏳</span> em execução...
+                          </span>
+                        }
+                      >
+                        <span
+                          class={`text-[10px] ml-auto flex-shrink-0 font-bold px-1.5 py-0.2 rounded border ${
+                            passo.sucesso !== false
+                              ? "bg-emerald-950/60 text-emerald-300 border-emerald-800/60"
+                              : "bg-rose-950/60 text-rose-300 border-rose-800/60"
+                          }`}
+                        >
+                          {passo.sucesso !== false ? "✓ ok" : "✗ falhou"}
+                        </span>
+                      </Show>
+                    </summary>
+                    <Show when={passo.saida}>
+                      <div class="px-3 py-2 bg-black/60 border-t border-zinc-800/60 text-zinc-300 text-[11px] leading-relaxed max-h-56 overflow-y-auto font-mono whitespace-pre-wrap select-text scrollbar-thin">
+                        {passo.saida}
+                      </div>
+                    </Show>
+                  </details>
                 </Show>
 
                 {/* Passo: Resposta de Texto com Markdown Rico */}

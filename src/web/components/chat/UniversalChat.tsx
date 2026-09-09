@@ -25,6 +25,7 @@ import {
   X,
   Clock,
   ExternalLink,
+  Square,
 } from "lucide-solid";
 import { SessionTurn } from "./SessionTurn";
 import { PromptInput, type Anexo } from "./PromptInput";
@@ -153,6 +154,17 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
                   <span class="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                   AO VIVO
                 </span>
+                <Show when={props.onParar}>
+                  <button
+                    type="button"
+                    onClick={() => props.onParar?.()}
+                    class="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30 hover:border-rose-500/60 active:scale-95 transition-all flex items-center gap-1 cursor-pointer"
+                    title="Interromper agente"
+                  >
+                    <Square size={9} fill="currentColor" />
+                    Parar
+                  </button>
+                </Show>
               </Show>
             </div>
           </div>
@@ -377,6 +389,7 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
                     props.placeholder || `Envie uma ordem ou mensagem para @${agenteNome()}...`
                   }
                   carregando={props.carregando || false}
+                  onParar={props.onParar}
                   agenteSelecionado={agenteId()}
                   onMudarAgente={() => {}}
                   onEnviar={() => {

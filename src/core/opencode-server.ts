@@ -422,12 +422,27 @@ export interface PassoChat {
   texto?: string;
   ferramenta?: string;
   resumo?: string;
+  saida?: string;
   sucesso?: boolean;
+  status?: string;
+}
+
+/**
+ * Remove qualquer preâmbulo de isolamento de workspace injetado automaticamente
+ * na mensagem do usuário, garantindo que o usuário veja apenas o que digitou.
+ */
+export function limparPrefixoWorkspace(texto: string): string {
+  if (!texto) return "";
+  let t = texto;
+  while (/^\[WORKSPACE ATIVO:[^\]]+\]\s*\([^\)]+\)\s*/i.test(t)) {
+    t = t.replace(/^\[WORKSPACE ATIVO:[^\]]+\]\s*\([^\)]+\)\s*/i, "").trim();
+  }
+  return t;
 }
 
 /**
  * Extrai a sequência cronológica exata de passos (pensamentos, ações e textos)
- * de uma lista de mensagens do assistente.
+ * de uma lista de mensagens do assistente, incluindo a saída de execução das ferramentas.
  */
 export function extrairPassosMensagens(novasMsgs: MensagemOc[]): PassoChat[] {
   const passos: PassoChat[] = [];
@@ -450,12 +465,21 @@ export function extrairPassosMensagens(novasMsgs: MensagemOc[]): PassoChat[] {
             passos.push({ tipo: "pensamento", texto: txt });
           }
         }
-      } else if (p.type === "tool" && p.tool) {
+      } else if (
+        (p.type === "tool" || p.type === "tool-call" || p.type === "tool-invocation") &&
+        (p.tool || (p as any).name)
+      ) {
+        const toolNome = p.tool || (p as any).name;
+        const status = p.state?.status ?? (p as any).status;
+        const outputBruto = (p.state as any)?.output ?? (p.state as any)?.metadata?.output ?? (p as any).output ?? (p as any).result ?? "";
+        const saida = typeof outputBruto === "string" ? outputBruto.trim() : (outputBruto ? JSON.stringify(outputBruto, null, 2) : undefined);
         passos.push({
           tipo: "acao",
-          ferramenta: p.tool,
-          resumo: resumoDeInput(p.state?.input, p.state?.title),
-          sucesso: p.state?.status !== "error",
+          ferramenta: toolNome,
+          resumo: resumoDeInput(p.state?.input ?? (p as any).input, p.state?.title ?? (p as any).title),
+          saida: saida || undefined,
+          sucesso: status !== "error" && status !== "failed",
+          status: status || "completed",
         });
       } else if (p.type === "text") {
         let bruto = p.text ?? "";

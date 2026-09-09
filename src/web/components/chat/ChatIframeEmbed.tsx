@@ -161,7 +161,7 @@ export const ChatIframeEmbed: Component<ChatIframeEmbedProps> = (props) => {
               src={props.url}
               title={props.titulo || "Preview Embutido"}
               class="w-full h-full border-none bg-white dark:bg-zinc-950"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
               onLoad={() => setCarregando(false)}
             />
           </Show>

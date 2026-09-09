@@ -6,7 +6,7 @@ export interface AcaoItem {
 
 export type TurnoPasso =
   | { tipo: "pensamento"; texto: string }
-  | { tipo: "acao"; ferramenta: string; resumo?: string; sucesso?: boolean }
+  | { tipo: "acao"; ferramenta: string; resumo?: string; saida?: string; sucesso?: boolean; status?: string }
   | { tipo: "texto"; texto: string };
 
 export interface ChatMensagem {
@@ -70,6 +70,7 @@ export interface UniversalChatProps {
   onNovaSessao?: () => void;
   onAbrirHistorico?: () => void;
   onAbrirConfiguracoes?: () => void;
+  onParar?: () => void;
 
   decorridoFmt?: string;
   placeholder?: string;

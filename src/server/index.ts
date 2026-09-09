@@ -29,10 +29,9 @@ import { AppStore } from "../core/app-store.js";
 import { TeamStore } from "../core/team-store.js";
 import { OrquestradorDeTeams } from "../core/team-orchestrator.js";
 import { instalarMencoes } from "../core/mention-runner.js";
-import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError, NotificationError, AgentError, OpencorpError, RegistryError, WorkspaceError } from "../core/errors.js";
-import { FlowError } from "../core/errors.js";
+import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError, NotificationError, AgentError, OpencorpError, RegistryError, WorkspaceError, FlowError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
-import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc } from "../core/opencode-server.js";
+import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, limparPrefixoWorkspace, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc } from "../core/opencode-server.js";
 import { taskCreateSchema } from "../schemas/task.js";
 import { SecretsStore, type SecretOrigem } from "../core/secrets-store.js";
 import { completarChatDirect, testarModeloDirect, listarProvedoresStatus } from "../core/llm-client.js";
@@ -3859,7 +3858,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             const mensagens: Array<{
               role: string;
               content: string;
-              passos?: Array<{ tipo: "pensamento" | "acao" | "texto"; texto?: string; ferramenta?: string; resumo?: string; sucesso?: boolean }>;
+              passos?: Array<{ tipo: "pensamento" | "acao" | "texto"; texto?: string; ferramenta?: string; resumo?: string; saida?: string; sucesso?: boolean; status?: string }>;
               pensamento?: string;
               criado_em?: string;
               concluida: boolean;
@@ -3871,7 +3870,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               const role = m.info?.role;
               if (role === "user") {
                 const parts = m.parts ?? [];
-                const content = parts.filter((p: ParteOc) => p.type === "text").map((p: ParteOc) => p.text ?? "").join("\n").trim();
+                const rawContent = parts.filter((p: ParteOc) => p.type === "text").map((p: ParteOc) => p.text ?? "").join("\n").trim();
+                const content = limparPrefixoWorkspace(rawContent);
                 const imagens = parts.filter((p: any) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p: any) => p.url);
                 mensagens.push({
                   role: "user",
@@ -3914,21 +3914,40 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   if (tools.length > 0) {
                     ult.acoes = [...(ult.acoes ?? []), ...tools];
                   }
-                  ult.concluida = isCompleted;
+                  if (isCompleted) {
+                    ult.concluida = true;
+                  }
                 } else {
-                  mensagens.push({
-                    role: "assistant",
-                    content: textoFinal,
-                    passos: passos.length > 0 ? passos : undefined,
-                    pensamento: pensamento || undefined,
-                    criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
-                    concluida: isCompleted,
-                    acoes: tools.length > 0 ? tools : undefined,
-                  });
+                  const temAlgo = Boolean(textoFinal || passos.length > 0 || pensamento || tools.length > 0);
+                  if (temAlgo || !isCompleted) {
+                    mensagens.push({
+                      role: "assistant",
+                      content: textoFinal,
+                      passos: passos.length > 0 ? passos : undefined,
+                      pensamento: pensamento || undefined,
+                      criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
+                      concluida: isCompleted,
+                      acoes: tools.length > 0 ? tools : undefined,
+                    });
+                  }
                 }
               }
             }
-            enviar(res, 200, mensagens);
+
+            // Filtra mensagens fantasmas do assistente que ficaram 100% vazias
+            const mensagensValidas = mensagens.filter((msg, idx) => {
+              if (msg.role === "assistant") {
+                const temTxt = Boolean(msg.content && msg.content.trim().length > 0);
+                const temAcoes = Boolean(msg.acoes && msg.acoes.length > 0);
+                const temPensamento = Boolean(msg.pensamento && msg.pensamento.trim().length > 0);
+                const temPassos = Boolean(msg.passos && msg.passos.length > 0);
+                if (!msg.concluida && idx === mensagens.length - 1) return true;
+                return temTxt || temAcoes || temPensamento || temPassos;
+              }
+              return true;
+            });
+
+            enviar(res, 200, mensagensValidas);
           } catch (erro) {
             if (erro instanceof SecretarioError) {
               enviar(res, erro.status ?? 409, { erro: erro.message });
@@ -4236,7 +4255,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           try {
             const porta = await portaOpencodeOuErro();
             const corpo = (await lerCorpo(req)) as { mensagem: string; sessao_id?: string; agente?: string; imagens?: Array<{ nome?: string; mime?: string; url?: string }>; contexto?: string[] };
-            const mensagemBruta = corpo.mensagem?.trim();
+            const mensagemBruta = limparPrefixoWorkspace(corpo.mensagem?.trim() || "");
             const imagens = (corpo.imagens ?? []).filter((i) => i && typeof i.url === "string" && i.url.startsWith("data:image/")).slice(0, 4);
             if (!mensagemBruta && imagens.length === 0) {
               enviar(res, 400, { erro: "mensagem obrigatória" });
@@ -4391,7 +4410,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           try {
             const porta = await portaOpencodeOuErro();
             const corpo = (await lerCorpo(req)) as { mensagem?: string; prompt?: string; sessao_id?: string; agente?: string; imagens?: Array<{ nome?: string; mime?: string; url?: string }>; contexto?: string[] };
-            const mensagemBruta = (corpo.mensagem ?? corpo.prompt ?? "").trim();
+            const mensagemBruta = limparPrefixoWorkspace((corpo.mensagem ?? corpo.prompt ?? "").trim());
             const imagens = (corpo.imagens ?? []).filter((i) => i && typeof i.url === "string" && i.url.startsWith("data:image/")).slice(0, 4);
             if (!mensagemBruta && imagens.length === 0) {
               enviar(res, 400, { erro: "mensagem obrigatória" });
@@ -4532,7 +4551,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                     ...imagens.map((i) => ({ type: "file", mime: i.mime ?? "image/png", url: i.url! })),
                   ],
                 }),
-                signal: AbortSignal.timeout(180_000),
+                signal: AbortSignal.timeout(600_000),
               }).then(async (r) => {
                 if (!r.ok) {
                   postErro = `opencode /message respondeu HTTP ${r.status}`;
@@ -4547,15 +4566,18 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 postConcluido = true;
               });
 
-              const inicioTentativa = Date.now();
-              const tentativaTimeoutMs = 60_000;
+              let inicioTentativa = Date.now();
+              const tentativaTimeoutMs = 180_000;
               let vazioDesde: number | null = null;
               let tentouFallback = false;
 
               while (Date.now() - inicioTentativa < tentativaTimeoutMs) {
                 await sleep(700);
                 // o check de desconexão do cliente é no response (write side)
-                if (res.destroyed || res.writableEnded) return;
+                if (res.destroyed || res.writableEnded) {
+                  void fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+                  return;
+                }
 
                 if (postErro && !concluida) {
                   if (modeloIdx < modelosFallback.length - 1) {
@@ -4622,8 +4644,14 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                       eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "delta" });
                     }
 
-                    const ultAssistant = assistentesNovas[assistentesNovas.length - 1];
-                    const temToolEmCurso = (ultAssistant?.parts ?? []).some((p) => p.type === "tool" && p.state?.status !== "completed");
+                    const temToolEmCurso = assistentesNovas.some((m) =>
+                      (m.parts ?? []).some((p) => (p.type === "tool" || p.type === "tool-call" || p.type === "tool-invocation") && p.state?.status !== "completed")
+                    );
+                    if (temToolEmCurso) {
+                      // Ferramenta em execução ativa (ex: sleep, compilação, render) — renova o relógio de inatividade
+                      inicioTentativa = Date.now();
+                      vazioDesde = null;
+                    }
                     const temAtividade = textoAcumulado.length > 0 || pensamentoAcumulado.length > 0 || temToolEmCurso;
                     if (!temAtividade) {
                       if (vazioDesde === null) vazioDesde = Date.now();

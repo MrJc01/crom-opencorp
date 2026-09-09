@@ -442,6 +442,10 @@ export const SecretarioView: Component = () => {
   };
 
   const pararStream = () => {
+    const sid = sessaoAtivaId();
+    if (sid) {
+      void fetchApi(`/sessions/${encodeURIComponent(sid)}/abort`, { method: "POST" }).catch(() => null);
+    }
     pararMonitoramento();
     if (abortController) {
       abortController.abort();
@@ -456,7 +460,7 @@ export const SecretarioView: Component = () => {
       }
       return prev;
     });
-    showToast("Geração interrompida", "aviso");
+    showToast("Agente interrompido com sucesso", "aviso");
   };
 
   const editarPrompt = async (indice: number) => {
@@ -622,11 +626,15 @@ export const SecretarioView: Component = () => {
                   assistente.passos = passos;
                 }
               } else if (evtType === "passos" && Array.isArray(payload.passos)) {
-                const temPensamentoNosPassos = payload.passos.some((p: any) => p.tipo === "pensamento");
-                if (!temPensamentoNosPassos && assistente.pensamento) {
-                  assistente.passos = [{ tipo: "pensamento", texto: assistente.pensamento }, ...payload.passos];
-                } else {
-                  assistente.passos = payload.passos;
+                // payload.passos é a ordem cronológica fiel gerada pelo backend (pensamento -> acao -> pensamento -> texto)
+                assistente.passos = payload.passos;
+
+                const textoPassos = payload.passos
+                  .filter((p: any) => p.tipo === "texto")
+                  .map((p: any) => p.texto || "")
+                  .join("\n\n");
+                if (textoPassos) {
+                  assistente.content = textoPassos;
                 }
               } else if (evtType === "delta") {
                 let deltaTxt = payload.delta || payload.texto || "";
@@ -638,26 +646,35 @@ export const SecretarioView: Component = () => {
                     deltaTxt = deltaTxt.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "");
                   }
                 }
-                assistente.content += deltaTxt;
-                const passos = [...(assistente.passos || [])];
-                const ultP = passos[passos.length - 1];
-                if (ultP && ultP.tipo === "texto") {
-                  ultP.texto = (ultP.texto || "") + deltaTxt;
-                } else if (deltaTxt) {
-                  passos.push({ tipo: "texto", texto: deltaTxt });
+                if (deltaTxt) {
+                  assistente.content += deltaTxt;
+                  const passos = [...(assistente.passos || [])];
+                  const ultP = passos[passos.length - 1];
+                  if (ultP && ultP.tipo === "texto") {
+                    if (!ultP.texto?.endsWith(deltaTxt)) {
+                      ultP.texto = (ultP.texto || "") + deltaTxt;
+                    }
+                  } else {
+                    passos.push({ tipo: "texto", texto: deltaTxt });
+                  }
+                  assistente.passos = passos;
                 }
-                assistente.passos = passos;
               } else if (evtType === "pensamento") {
                 const deltaTxt = payload.delta || payload.pensamento || payload.texto || "";
-                assistente.pensamento = (assistente.pensamento || "") + deltaTxt;
-                const passos = [...(assistente.passos || [])];
-                const primeiroP = passos[0];
-                if (primeiroP && primeiroP.tipo === "pensamento") {
-                  primeiroP.texto = (primeiroP.texto || "") + deltaTxt;
-                } else if (deltaTxt) {
-                  passos.unshift({ tipo: "pensamento", texto: deltaTxt });
+                if (deltaTxt) {
+                  assistente.pensamento = (assistente.pensamento || "") + deltaTxt;
+                  const passos = [...(assistente.passos || [])];
+                  const ultP = passos[passos.length - 1];
+                  // Anexa ao ÚLTIMO passo de pensamento ativo, ou cria novo passo sem agrupar tudo no primeiro
+                  if (ultP && ultP.tipo === "pensamento") {
+                    if (!ultP.texto?.endsWith(deltaTxt)) {
+                      ultP.texto = (ultP.texto || "") + deltaTxt;
+                    }
+                  } else {
+                    passos.push({ tipo: "pensamento", texto: deltaTxt });
+                  }
+                  assistente.passos = passos;
                 }
-                assistente.passos = passos;
               } else if (evtType === "acao") {
                 const passos = [...(assistente.passos || [])];
                 if (Array.isArray(payload.itens) && payload.itens.length > 0) {
@@ -801,6 +818,7 @@ export const SecretarioView: Component = () => {
         onNovaSessao={novaConversa}
         onAbrirHistorico={() => setHistoricoAberto(true)}
         onAbrirConfiguracoes={abrirPainelLateral}
+        onParar={pararStream}
         sugestoesRapidas={SUGESTOES.map((s) => ({ rotulo: s, prompt: s }))}
         iframeConfig={{
           habilitado: true,
