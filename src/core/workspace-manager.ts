@@ -166,16 +166,28 @@ export class WorkspaceManager {
 
   async resolver(id?: string): Promise<InfoWorkspace> {
     const estado = await this.lerEstado();
+    const raiz = await this.raiz();
     let registro: RegistroWorkspace | undefined;
-    const idAlvo = (id !== undefined && id.length > 0)
+    let idAlvo = (id !== undefined && id.length > 0)
       ? id
       : (process.env.OPENCORP_WORKSPACE && process.env.OPENCORP_WORKSPACE.trim() ? process.env.OPENCORP_WORKSPACE.trim() : undefined);
+
+    // Detecção contextual automática a partir do diretório atual (cwd)
+    if (!idAlvo) {
+      const wsPeloCwd = estado.workspaces.find((w) => {
+        const p = this.pathDe(raiz, w);
+        return this.cwd === p || this.cwd.startsWith(p + "/") || this.cwd.startsWith(p + "\\");
+      });
+      if (wsPeloCwd) {
+        idAlvo = wsPeloCwd.id;
+      }
+    }
 
     if (idAlvo !== undefined && idAlvo.length > 0) {
       registro = estado.workspaces.find((w) => w.id === idAlvo);
       if (!registro) {
         throw new WorkspaceError(
-          `workspace "${idAlvo}" não encontrado — veja "opencorp workspace list" ou crie com "opencorp workspace create ${idAlvo}"`,
+          `workspace "${idAlvo}" não encontrado — veja "oc -t <id> status" ou "opencorp workspace list"`,
         );
       }
     } else if (estado.ativo) {
@@ -187,22 +199,33 @@ export class WorkspaceManager {
       }
     } else {
       throw new WorkspaceError(
-        'nenhum workspace ativo — use "opencorp use <id>" ou passe --workspace <id>',
+        'nenhum workspace ativo ou detectado no diretório atual — navegue até a pasta do workspace ou use "oc -t <id> <comando>"',
       );
     }
-    const raiz = await this.raiz();
     return this.infoDe(estado, registro, this.pathDe(raiz, registro));
   }
 
   async atual(): Promise<InfoWorkspace | null> {
     const estado = await this.lerEstado();
-    const idAtivo = (process.env.OPENCORP_WORKSPACE && process.env.OPENCORP_WORKSPACE.trim())
+    const raiz = await this.raiz();
+    let idAtivo = (process.env.OPENCORP_WORKSPACE && process.env.OPENCORP_WORKSPACE.trim())
       ? process.env.OPENCORP_WORKSPACE.trim()
-      : estado.ativo;
+      : undefined;
+
+    if (!idAtivo) {
+      const wsPeloCwd = estado.workspaces.find((w) => {
+        const p = this.pathDe(raiz, w);
+        return this.cwd === p || this.cwd.startsWith(p + "/") || this.cwd.startsWith(p + "\\");
+      });
+      if (wsPeloCwd) {
+        idAtivo = wsPeloCwd.id;
+      }
+    }
+
+    if (!idAtivo) idAtivo = estado.ativo ?? undefined;
     if (!idAtivo) return null;
     const registro = estado.workspaces.find((w) => w.id === idAtivo);
     if (!registro) return null;
-    const raiz = await this.raiz();
     return this.infoDe(estado, registro, this.pathDe(raiz, registro));
   }
 

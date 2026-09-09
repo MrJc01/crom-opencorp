@@ -11,7 +11,7 @@
   "main": "dist/cli/index.js",
   "bin": {
     "opencorp": "./bin/opencorp.mjs",
-    "oc": "./bin/opencorp.mjs"
+    "oc": "./bin/oc.mjs"
   },
   "engines": {
     "node": ">=22"

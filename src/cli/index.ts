@@ -53,51 +53,55 @@ export function resolveVersion(): string {
   }
 }
 
-export function buildProgram(): Command {
+export function isModoOc(argv: string[] = process.argv): boolean {
+  if (process.env.OPENCORP_CLI_MODE === "oc") return true;
+  const invocado = argv[1] || "";
+  const nome = invocado.split("/").pop() ?? "";
+  return nome === "oc" || nome.startsWith("oc.") || nome.startsWith("oc-");
+}
+
+export function buildProgram(isOc: boolean = isModoOc()): Command {
   const program = new Command();
-  program
-    .name("opencorp")
-    .description(
-      "Sistema Operacional de Empresas Autônomas — orquestra sessões OpenCode em workspaces governados",
-    )
-    .version(resolveVersion(), "--version", "imprime a versão do opencorp")
-    .helpOption("-h, --help", "mostra a ajuda do comando")
-    .option("--workspace <id>", "opera no workspace indicado em vez do ativo");
+  if (isOc) {
+    program
+      .name("oc")
+      .description(
+        "oc — CLI Operacional de Workspaces da OpenCorp (tarefas, agentes, rotinas, apps e governança local)",
+      )
+      .version(resolveVersion(), "--version", "imprime a versão do oc")
+      .helpOption("-h, --help", "mostra a ajuda do comando")
+      .option("-t, --target <id>", "workspace alvo da operação (padrão: auto-detectado pelo diretório atual)")
+      .option("-w, --workspace <id>", "alias para --target");
+  } else {
+    program
+      .name("opencorp")
+      .description(
+        "OpenCorp — Sistema Operacional de Empresas Autônomas (governança, daemons e infraestrutura global)",
+      )
+      .version(resolveVersion(), "--version", "imprime a versão do opencorp")
+      .helpOption("-h, --help", "mostra a ajuda do comando")
+      .option("-t, --target <id>", "workspace alvo para comandos de workspace (alias: -w, --workspace)")
+      .option("-w, --workspace <id>", "workspace alvo da operação");
+  }
 
-  program
-    .command("init")
-    .argument("[dir]", "diretório alvo (padrão: .)")
-    .description("prepara um repositório: estrutura, settings global e template default")
-    .action(notImplementedAction("opencorp init"));
+  program.hook("preAction", (thisCommand) => {
+    const opts = thisCommand.opts<{ target?: string; workspace?: string }>();
+    const alvo = opts.target || opts.workspace;
+    if (alvo && alvo.trim()) {
+      process.env.OPENCORP_WORKSPACE = alvo.trim();
+      process.env.OPENCORP_ACTIVE_WS = alvo.trim();
+    }
+  });
 
-  registerRunCommand(program);
-
-  registerSettingsCommand(program);
-
-  registerWorkspaceCommands(program);
-
-  registerOpenCommand(program);
-
+  // Comandos de Workspace (disponíveis tanto em oc quanto em opencorp)
+  registerTaskCommand(program);
   registerAgentCommand(program);
-
-  registerSessionCommand(program);
-
-  registerRegistryCommand(program);
-
-  registerApprovalsCommand(program);
-
-  registerBudgetCommand(program);
-
-  registerMeetingCommand(program);
-
-  registerTemplateCommand(program);
-
-  registerSubcorpCommand(program);
-
-  registerSupervisorCommand(program);
-
-  registerMonitorCommand(program);
-
+  registerScheduleCommands(program);
+  registerAppCommand(program);
+  registerFlowCommand(program);
+  registerSecretsCommand(program);
+  registerTokensCommand(program);
+  registerMotoresCommand(program);
   registerStatusCommand(program);
   registerContextCommand(program);
   registerHistoricoCommand(program);
@@ -105,51 +109,92 @@ export function buildProgram(): Command {
   registerSaudeCommand(program);
   registerRelatorioCommand(program);
   registerLogsCommand(program);
-  registerSecretsCommand(program);
-  registerTokensCommand(program);
-  registerMotoresCommand(program);
-
-  registerFlowCommand(program);
-
-  registerTaskCommand(program);
-
-  registerScheduleCommands(program);
-
-  registerHookCommands(program);
-
-  registerToolCommands(program);
-
-  registerAppCommand(program);
-
+  registerRegistryCommand(program);
+  registerBudgetCommand(program);
+  registerApprovalsCommand(program);
+  registerMeetingCommand(program);
   registerTeamCommand(program);
-
-  registerDaemonCommand(program);
-  registerServeCommand(program);
-
-  registerWebCommand(program);
-
+  registerHookCommands(program);
+  registerToolCommands(program);
+  registerMonitorCommand(program);
   registerTestCommand(program);
+  registerOpenCommand(program);
+  registerRunCommand(program);
+  registerSessionCommand(program);
+  registerSupervisorCommand(program);
 
-  const cloud = program.command("cloud").description("backup/sync (opcional)");
-  cloud
-    .command("configure")
-    .description("wizard de perfis (backup-local | backup-nuvem | mirror-remoto)")
-    .action(notImplementedAction("opencorp cloud configure"));
-  cloud
-    .command("backup")
-    .description("executa o backup agora")
-    .action(notImplementedAction("opencorp cloud backup"));
-  cloud
-    .command("sync")
-    .option("--dry-run", "simula sem alterar nada")
-    .description("sincroniza os alvos do perfil")
-    .action(notImplementedAction("opencorp cloud sync"));
-  cloud
-    .command("status")
-    .description("último backup, diffs pendentes, saúde dos remotos")
-    .action(notImplementedAction("opencorp cloud status"));
+  if (isOc) {
+    // No modo "oc", comandos de infraestrutura global exibem erro educativo e explicativo
+    const comandosGlobaisBloqueados = [
+      {
+        cmd: "daemon",
+        desc: "supervisor do sistema operacional (systemd / daemons)",
+        dica: 'Para gerenciar daemons ou serviços do host, use: "opencorp daemon ..."',
+      },
+      {
+        cmd: "serve",
+        desc: "servidor HTTP da API global e web-dist",
+        dica: 'O servidor atende a todos os workspaces em segundo plano. Para subir manualmente, use: "opencorp serve ..."',
+      },
+      {
+        cmd: "init",
+        desc: "inicialização global da plataforma",
+        dica: 'Para inicializar um repositório como plataforma, use: "opencorp init ..."',
+      },
+    ];
 
-  registerDoctorCommand(program);
+    for (const { cmd, desc, dica } of comandosGlobaisBloqueados) {
+      program
+        .command(`${cmd} [args...]`)
+        .description(`(Infraestrutura Global) ${desc}`)
+        .allowUnknownOption()
+        .allowExcessArguments(true)
+        .helpOption(false)
+        .action(() => {
+          console.error(`\x1b[31merro:\x1b[0m o comando "${cmd}" é de infraestrutura global da plataforma.`);
+          console.error(`O CLI "oc" é restrito ao contexto operacional de workspaces.`);
+          console.error(`\x1b[36m${dica}\x1b[0m\n`);
+          process.exit(1);
+        });
+    }
+  } else {
+    // No modo "opencorp", registra comandos de infraestrutura e governança da plataforma
+    program
+      .command("init")
+      .argument("[dir]", "diretório alvo (padrão: .)")
+      .description("prepara um repositório: estrutura, settings global e template default")
+      .action(notImplementedAction("opencorp init"));
+
+    registerSettingsCommand(program);
+    registerWorkspaceCommands(program);
+    registerTemplateCommand(program);
+    registerSubcorpCommand(program);
+    registerDaemonCommand(program);
+    registerServeCommand(program);
+    registerWebCommand(program);
+
+    const cloud = program.command("cloud").description("backup/sync (opcional)");
+    cloud
+      .command("configure")
+      .description("wizard de perfis (backup-local | backup-nuvem | mirror-remoto)")
+      .action(notImplementedAction("opencorp cloud configure"));
+    cloud
+      .command("backup")
+      .description("executa o backup agora")
+      .action(notImplementedAction("opencorp cloud backup"));
+    cloud
+      .command("sync")
+      .option("--dry-run", "simula sem alterar nada")
+      .description("sincroniza os alvos do perfil")
+      .action(notImplementedAction("opencorp cloud sync"));
+    cloud
+      .command("status")
+      .description("último backup, diffs pendentes, saúde dos remotos")
+      .action(notImplementedAction("opencorp cloud status"));
+
+    registerDoctorCommand(program);
+  }
+
   return program;
 }
 
@@ -158,7 +203,8 @@ function primeiraCitacao(mensagem: string): string | undefined {
   return m?.[1];
 }
 
-function handleCommanderError(err: CommanderError): void {
+function handleCommanderError(err: CommanderError, isOc: boolean = isModoOc()): void {
+  const binName = isOc ? "oc" : "opencorp";
   switch (err.code) {
     case "commander.version":
     case "commander.helpDisplayed":
@@ -166,12 +212,12 @@ function handleCommanderError(err: CommanderError): void {
       process.exitCode = err.exitCode;
       return;
     case "commander.unknownCommand": {
-      console.error('Dica: rode "opencorp --help" para listar os comandos disponíveis.');
+      console.error(`Dica: rode "${binName} --help" para listar os comandos disponíveis.`);
       process.exitCode = 1;
       return;
     }
     case "commander.unknownOption": {
-      console.error('Dica: use "opencorp <comando> --help" para ver as opções válidas.');
+      console.error(`Dica: use "${binName} <comando> --help" para ver as opções válidas.`);
       process.exitCode = 1;
       return;
     }
@@ -179,13 +225,13 @@ function handleCommanderError(err: CommanderError): void {
     case "commander.missingMandatoryParameterValue": {
       const nome = primeiraCitacao(err.message);
       console.error(
-        `erro: argumento obrigatório ausente${nome ? ` (${nome})` : ""} — use "opencorp <comando> --help" para ver o uso.`,
+        `erro: argumento obrigatório ausente${nome ? ` (${nome})` : ""} — use "${binName} <comando> --help" para ver o uso.`,
       );
       process.exitCode = 1;
       return;
     }
     default: {
-      console.error('Dica: rode "opencorp --help" para ajuda.');
+      console.error(`Dica: rode "${binName} --help" para ajuda.`);
       process.exitCode = err.exitCode || 1;
     }
   }
@@ -194,14 +240,15 @@ function handleCommanderError(err: CommanderError): void {
 export async function main(argv: string[] = process.argv): Promise<void> {
   instalarTriggers();
   instalarMencoes();
-  const program = buildProgram();
+  const isOc = isModoOc(argv);
+  const program = buildProgram(isOc);
   program.exitOverride();
   try {
     await program.parseAsync(argv);
     await Promise.allSettled([...pendentesTriggers(), ...pendentesMencoes()]);
   } catch (err) {
     if (err instanceof CommanderError) {
-      handleCommanderError(err);
+      handleCommanderError(err, isOc);
       return;
     }
     console.error(`erro inesperado: ${err instanceof Error ? err.message : String(err)}`);

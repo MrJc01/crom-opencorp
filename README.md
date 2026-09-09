@@ -61,14 +61,17 @@ Se preferir não usar `npm link`, utilize o executável direto: `./bin/oc`.
 
 ### 1. Iniciar o Servidor API e Painel Web
 
-Inicie o daemon em background com o comando `serve`:
+Inicie o serviço de plataforma em background com o comando `opencorp serve` ou via supervisor `opencorp daemon`:
 
 ```bash
-# Inicia a API e a interface web na porta 4100
-oc serve --port 4100
+# Inicia a API e a interface web na porta 4100 (Host/Plataforma Global)
+opencorp serve --port 4100
 
 # Ou em foreground com logs ao vivo
-oc serve start --foreground --port 4100
+opencorp serve start --foreground --port 4100
+
+# Ou instale como serviço permanente systemd à prova de reboot
+opencorp daemon install
 ```
 
 Abra no navegador: **`http://localhost:4100`** para acessar o painel de controle.
@@ -131,24 +134,43 @@ Abra no navegador: **`http://localhost:4100`** para acessar o painel de controle
 
 ---
 
-## 💻 Referência Completa de Comandos da CLI (`opencorp` & `oc`)
+## 💻 Referência Completa de Comandos da CLI (`oc` & `opencorp`)
 
-> [!NOTE]
-> **Dois comandos disponíveis:** O sistema instala e suporta tanto o comando completo **`opencorp`** quanto o atalho ágil **`oc`**. Ambos executam exatamente as mesmas funções:
-> - `opencorp <comando>`: Nome oficial completo da plataforma.
-> - `oc <comando>`: Atalho conciso recomendado para humanos e agentes no terminal.
->
-> Qualquer comando executado sem a flag `--workspace` opera automaticamente no workspace ativo ou na pasta onde foi invocado.
+O ecossistema OpenCorp adota uma arquitetura em duas camadas operacionais:
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      opencorp (Infraestrutura Global)                   │
+│  - Supervisor de Daemons (systemd)  - Servidor HTTP API / Web Dist     │
+│  - Inicialização de Plataforma      - Clusters, Backup e Sincronização  │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          oc (Operação de Workspaces)                    │
+│  - Tasks & Kanban                  - Agentes e Equipes                  │
+│  - Rotinas (Scheduler) & Workflows - Segredos (chmod 600) e HITL        │
+│  - Diagnóstico, Logs e Auditoria   - Conversação com Secretário         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+> [!TIP]
+> **Como escolher o comando certo:**
+> - **`oc <comando>`**: CLI ágil voltada para o trabalho cotidiano em workspaces e para agentes de IA autônomos.
+>   - **Detecção Automática por Pasta (`cwd`):** Se executado dentro da pasta de qualquer workspace (ou suas subpastas), o `oc` detecta e opera nele automaticamente, sem necessidade de passar parâmetros.
+>   - **Alvo Explícito:** Se executado de fora, use `-t, --target <workspace>` (ou `-w, --workspace <workspace>`) para direcionar o comando (ex: `oc -t yt-factory-01 status`).
+>   - **Guardrails de Proteção:** Comandos de infraestrutura global (`daemon`, `serve`, `init`) são bloqueados no `oc` com mensagens instrutivas para impedir que agentes de IA interfiram no host do sistema operacional.
+> - **`opencorp <comando>`**: CLI administrativa global da plataforma. Deve ser usada para gerenciar o supervisor de processos em segundo plano, subir o servidor central e governar o host.
 
 ### 1. ⚡ Execução & Interação com Agentes
-| Comando Completo | Atalho Rápido | Descrição | Exemplo de Uso |
+| Comando Operacional (`oc`) | Comando Global (`opencorp`) | Descrição | Exemplo de Uso |
 |---|---|---|---|
-| `opencorp run <ordem>` | `oc run <ordem>` | Dispara uma ordem para o agente executor padrão (ou especificado) | `opencorp run "Auditar rascunhos" --agent corretor-site` |
-| `opencorp open [workspace]` | `oc open [workspace]` | Abre a TUI interativa do OpenCode com o ambiente isolado | `oc open` *(digite `/quit` para sair)* |
-| `opencorp secretario "<msg>"` | `oc secretario "<msg>"` | Conversa com o Secretário Executivo direto pelo terminal | `oc secretario "Como está a saúde das rondas de hoje?"` |
-| `opencorp session list` | `oc session list` | Lista as sessões ativas e recentes do OpenCode | `opencorp session list` |
-| `opencorp session log <id>` | `oc session log <id>` | Exibe os logs brutos capturados de uma sessão | `oc session log ses_123` |
-| `opencorp session kill <id>` | `oc session kill <id>` | Encerra forçadamente um processo de agente em execução | `oc session kill ses_123` |
+| `oc run <ordem>` | `opencorp run <ordem>` | Dispara uma ordem para o agente executor padrão (ou especificado) | `oc run "Auditar rascunhos" -t yt-factory-01` |
+| `oc open [workspace]` | `opencorp open [workspace]` | Abre a TUI interativa do OpenCode com o ambiente isolado | `oc open` *(digite `/quit` para sair)* |
+| `oc secretario "<msg>"` | `opencorp secretario "<msg>"` | Conversa com o Secretário Executivo direto pelo terminal | `oc secretario "Como está a saúde das tarefas de hoje?"` |
+| `oc session list` | `opencorp session list` | Lista as sessões ativas e recentes dos agentes | `oc session list` |
+| `oc session log <id>` | `opencorp session log <id>` | Exibe os logs brutos capturados de uma sessão | `oc session log ses_123` |
+| `oc session kill <id>` | `opencorp session kill <id>` | Encerra forçadamente um processo de agente em execução | `oc session kill ses_123` |
 
 ---
 
@@ -273,13 +295,18 @@ O OpenCorp conta com hierarquia segura de resolução (`Workspace` com override 
 
 ---
 
-### 11. 🌐 Servidores e Daemons de Fundo
-| Comando Completo | Atalho Rápido | Descrição | Exemplo de Uso |
+### 11. 🌐 Infraestrutura Global do Host & Daemons (`opencorp`)
+> [!IMPORTANT]
+> Os comandos abaixo gerenciam os daemons do sistema operacional e o servidor HTTP global. Eles são exclusivos do binário **`opencorp`**. Invocações acidentais via `oc` são bloqueadas por padrão para segurança dos agentes e isolamento dos processos.
+
+| Comando Global (`opencorp`) | Escopo | Descrição | Exemplo de Uso |
 |---|---|---|---|
-| `opencorp serve` | `oc serve` | Inicia o servidor daemon da API REST + SSE em background | `opencorp serve --host 0.0.0.0 --port 4100` |
-| `opencorp serve stop` | `oc serve stop` | Encerra com segurança o servidor API em execução | `opencorp serve stop` |
-| `opencorp web` | `oc web` | Inicia a API, a interface web e abre o navegador automaticamente | `opencorp web --port 4100` |
-| `opencorp daemon start / stop` | `oc daemon start / stop` | Gerencia o supervisor permanente de processos à prova de reboot | `opencorp daemon start` |
+| `opencorp serve` | Host Global | Inicia o servidor daemon da API REST + SSE em background | `opencorp serve --host 0.0.0.0 --port 4100` |
+| `opencorp serve stop` | Host Global | Encerra com segurança o servidor API em execução | `opencorp serve stop` |
+| `opencorp web` | Host Global | Inicia a API, a interface web e abre o navegador automaticamente | `opencorp web --port 4100` |
+| `opencorp daemon install` | Systemd Host | Registra e ativa o serviço persistente `opencorp-daemon` no systemd do usuário | `opencorp daemon install` |
+| `opencorp daemon start / stop` | Systemd Host | Gerencia o supervisor permanente de processos à prova de reboot | `opencorp daemon start` |
+| `opencorp daemon status` | Systemd Host | Inspeciona a saúde do supervisor e dos processos filhos monitorados | `opencorp daemon status` |
 
 ---
 
