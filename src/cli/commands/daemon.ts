@@ -99,8 +99,7 @@ async function loopSupervisor(home: string, comServe: boolean, host?: string): P
         const apiInfo = await lerJson<{ pid?: number }>(join(home, ".opencorp", "api.pid"));
         if (!apiInfo?.pid || !(await pidVivo(apiInfo.pid))) {
           log("serve morto — reiniciando");
-          const serveArgs = [process.argv[1] ?? "opencorp", "serve"];
-          if (host) serveArgs.push("--host", host);
+          const serveArgs = [process.argv[1] ?? "opencorp", "serve", "--host", host ?? "0.0.0.0"];
           spawn(process.execPath, serveArgs, {
             detached: true,
             stdio: "ignore",
@@ -154,12 +153,16 @@ export function registerDaemonCommand(program: Command): void {
   daemon
     .command("install")
     .option("--com-serve", "também supervisiona a API/serve (padrão no serviço)")
-    .option("--host <host>", "interface de escuta do serve (ex: 0.0.0.0 para rede local)")
+    .option("--host <host>", "interface de escuta do serve (padrão 0.0.0.0)", "0.0.0.0")
     .description("instala e ativa serviço systemd do usuário — sobrevive a reboot/logout")
     .action((opts: { comServe?: boolean; host?: string }) =>
       (async () => {
         const home = opencorpHome();
-        const bin = process.argv[1] || resolve(import.meta.dirname ?? ".", "..", "..", "..", "bin", "opencorp.mjs");
+        const repoPath = resolve(home, "Documentos/GitHub/crom-worker-opencode");
+        const workDir = existsSync(repoPath) ? repoPath : home;
+        const bin = existsSync(join(workDir, "bin", "opencorp.mjs"))
+          ? join(workDir, "bin", "opencorp.mjs")
+          : (process.argv[1] || resolve(import.meta.dirname ?? ".", "..", "..", "..", "bin", "opencorp.mjs"));
         const unitDir = join(home, ".config", "systemd", "user");
         const unitPath = join(unitDir, "opencorp-daemon.service");
         await mkdirRecursive(unitDir);
@@ -178,7 +181,7 @@ export function registerDaemonCommand(program: Command): void {
 
         const args = ["daemon", "start", "--foreground"];
         if (opts.comServe !== false) args.push("--com-serve");
-        if (opts.host) args.push("--host", opts.host);
+        args.push("--host", opts.host ?? "0.0.0.0");
         // PATH do processo que instala (inclui ~/.opencode/bin e node) — sem isso o scheduler
         // sob o systemd não encontra o binário `opencode` e todo agente falha em ~28ms (ENOENT)
         const pathDoAmbiente = process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin";
@@ -190,7 +193,7 @@ After=network-online.target
 [Service]
 Type=simple
 ExecStart=${process.execPath} ${bin} ${args.join(" ")}
-WorkingDirectory=${process.cwd()}
+WorkingDirectory=${workDir}
 Environment=OPENCORP_HOME=${home}
 Environment=PATH=${pathDoAmbiente}
 Restart=on-failure
