@@ -23,7 +23,7 @@ import {
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
-import { fetchApi } from "../lib/context";
+import { fetchApi, wsAtivo } from "../lib/context";
 
 export interface MensagemTask {
   id: string;
@@ -309,6 +309,11 @@ export const TasksView: Component = () => {
   };
 
   onMount(() => {
+    void carregarTasks();
+  });
+
+  createEffect(() => {
+    void wsAtivo();
     void carregarTasks();
   });
 

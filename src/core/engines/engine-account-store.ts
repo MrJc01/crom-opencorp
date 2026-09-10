@@ -37,50 +37,50 @@ export interface EngineLimitsConfig {
 
 export const LIMITES_PADRAO_MOTORES: Record<string, EngineLimitsConfig> = {
   opencode: {
-    timeout_min: 20,
-    max_turns: 50,
-    rate_limit_rpm: 60,
-    daily_cost_usd: 10.0,
+    timeout_min: 120,
+    max_turns: 0, // 0 = ilimitado
+    rate_limit_rpm: 120,
+    daily_cost_usd: 100.0,
     status_cota: "normal",
     fallback_action: "rotate",
   },
   antigravity: {
-    timeout_min: 15,
-    max_turns: 40,
-    rate_limit_rpm: 30,
-    daily_cost_usd: 15.0,
+    timeout_min: 120,
+    max_turns: 0, // 0 = ilimitado
+    rate_limit_rpm: 60,
+    daily_cost_usd: 100.0,
     status_cota: "normal",
     fallback_action: "rotate",
   },
   copilot: {
-    timeout_min: 15,
-    max_turns: 30,
-    rate_limit_rpm: 30,
-    daily_cost_usd: 10.0,
+    timeout_min: 120,
+    max_turns: 0, // 0 = ilimitado
+    rate_limit_rpm: 60,
+    daily_cost_usd: 100.0,
     status_cota: "normal",
     fallback_action: "rotate",
   },
   "claude-code": {
-    timeout_min: 25,
-    max_turns: 50,
-    rate_limit_rpm: 20,
-    daily_cost_usd: 25.0,
+    timeout_min: 120,
+    max_turns: 0, // 0 = ilimitado
+    rate_limit_rpm: 60,
+    daily_cost_usd: 100.0,
     status_cota: "normal",
     fallback_action: "rotate",
   },
   cursor: {
-    timeout_min: 20,
-    max_turns: 40,
-    rate_limit_rpm: 30,
-    daily_cost_usd: 15.0,
+    timeout_min: 120,
+    max_turns: 0, // 0 = ilimitado
+    rate_limit_rpm: 60,
+    daily_cost_usd: 100.0,
     status_cota: "normal",
     fallback_action: "rotate",
   },
   "crom-agente": {
-    timeout_min: 30,
-    max_turns: 60,
-    rate_limit_rpm: 60,
-    daily_cost_usd: 20.0,
+    timeout_min: 120,
+    max_turns: 0, // 0 = ilimitado
+    rate_limit_rpm: 120,
+    daily_cost_usd: 100.0,
     status_cota: "normal",
     fallback_action: "rotate",
   },
@@ -135,10 +135,10 @@ export class EngineAccountStore {
   ): Promise<EngineAccount> {
     const contas = this.lerArquivoContas();
     const padraoMotor = LIMITES_PADRAO_MOTORES[motorId] || {
-      timeout_min: 20,
-      max_turns: 40,
-      rate_limit_rpm: 30,
-      daily_cost_usd: 10.0,
+      timeout_min: 120,
+      max_turns: 0,
+      rate_limit_rpm: 60,
+      daily_cost_usd: 100.0,
       status_cota: "normal",
       fallback_action: "rotate",
     };

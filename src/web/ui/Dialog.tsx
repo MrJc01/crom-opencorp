@@ -23,8 +23,8 @@ export function Modal(props: ModalProps) {
   return (
     <Kobalte open={props.open} onOpenChange={props.onOpenChange}>
       <Kobalte.Portal>
-        <Kobalte.Overlay class="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs transition-opacity data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0" />
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <Kobalte.Overlay class="fixed inset-0 z-[60] bg-black/70 backdrop-blur-xs transition-opacity data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0" />
+        <div class="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <Kobalte.Content class={`w-full ${widthClasses} bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in-0 zoom-in-95 data-[closed]:animate-out data-[closed]:fade-out-0 data-[closed]:zoom-out-95`}>
             <Show when={props.title}>
               <div class="flex items-center justify-between px-4 py-3 border-b border-zinc-800">

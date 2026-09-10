@@ -1926,18 +1926,20 @@ export const ConfigView: Component = () => {
                         <div class="p-2.5 rounded-lg bg-zinc-950/40 border border-zinc-800/60 focus-within:border-emerald-500/50 transition-colors">
                           <label class="flex items-center gap-1.5 text-zinc-400 mb-1.5 text-[11px] font-medium">
                             <RotateCcw size={12} class="text-zinc-500" />
-                            <span>Max Turns (ReAct)</span>
+                            <span>Max Turns (0 = Ilimitado)</span>
                           </label>
                           <input
                             type="number"
-                            min="5"
-                            max="200"
+                            min="0"
+                            max="999999"
+                            placeholder="0 = ilimitado"
                             value={limAtual().max_turns}
                             onInput={(e) => {
-                              const val = Number(e.currentTarget.value) || 40;
+                              const raw = e.currentTarget.value.trim();
+                              const val = raw === "" ? 0 : Number(raw);
                               setLimitesMotores((prev) => ({
                                 ...prev,
-                                [mId]: { ...limAtual(), max_turns: val },
+                                [mId]: { ...limAtual(), max_turns: isNaN(val) ? 0 : val },
                               }));
                             }}
                             class="w-full bg-zinc-900/80 border border-zinc-800 rounded px-2.5 py-1.5 text-zinc-100 font-mono text-xs focus:outline-none focus:border-emerald-500/50"
@@ -2325,18 +2327,20 @@ export const ConfigView: Component = () => {
 
                           <div class="p-2 rounded-lg bg-zinc-950/40 border border-zinc-800/60 focus-within:border-emerald-500/50 transition-colors">
                             <label class="flex items-center gap-1 text-[11px] text-zinc-400 mb-1 font-medium">
-                              <RotateCcw size={11} class="text-zinc-500" /> Max Turns ReAct
+                              <RotateCcw size={11} class="text-zinc-500" /> Max Turns (0 = Ilimitado)
                             </label>
                             <input
                               type="number"
-                              min="5"
-                              max="200"
+                              min="0"
+                              max="999999"
+                              placeholder="0 = ilimitado"
                               value={lim().max_turns}
                               onInput={(e) => {
-                                const val = Number(e.currentTarget.value) || 40;
+                                const raw = e.currentTarget.value.trim();
+                                const val = raw === "" ? 0 : Number(raw);
                                 setLimitesMotores((prev) => ({
                                   ...prev,
-                                  [m.id]: { ...lim(), max_turns: val },
+                                  [m.id]: { ...lim(), max_turns: isNaN(val) ? 0 : val },
                                 }));
                               }}
                               class="w-full bg-zinc-900/80 border border-zinc-800 rounded px-2.5 py-1 text-zinc-100 font-mono text-xs focus:outline-none focus:border-emerald-500/50"

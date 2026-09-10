@@ -31,6 +31,7 @@ import {
 } from "lucide-solid";
 import { SessionTurn } from "./SessionTurn";
 import { PromptInput, type Anexo } from "./PromptInput";
+import { FollowupQueueDock } from "./FollowupQueueDock";
 import { ChatIframeEmbed } from "./ChatIframeEmbed";
 import { IconButton } from "../../ui/IconButton";
 import { Button } from "../../ui/Button";
@@ -479,11 +480,24 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
           <Show when={podeEnviar()}>
             <div class="p-3 bg-zinc-950 border-t border-zinc-800/80 flex-shrink-0">
               <div class="max-w-3xl mx-auto w-full">
+                {/* Dock da Fila de Espera (Prompts agendados/followups) */}
+                <FollowupQueueDock
+                  items={props.filaPrompts || []}
+                  onAdiantar={props.onAdiantarFila}
+                  onEditar={props.onEditarFila}
+                  onRemover={props.onRemoverFila}
+                />
+
                 <PromptInput
                   valor={props.valorPrompt !== undefined ? props.valorPrompt : localPrompt()}
                   onInput={(v) => {
                     setLocalPrompt(v);
                     props.onValorPromptChange?.(v);
+                  }}
+                  onEnfileirar={(txt, att) => {
+                    if (props.onAdicionarFila) {
+                      props.onAdicionarFila(txt, att);
+                    }
                   }}
                   refTextarea={props.refTextarea}
                   anexos={localAnexos()}

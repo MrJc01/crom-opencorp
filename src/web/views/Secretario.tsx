@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, onCleanup, For, Show } from "solid-js";
+import { type Component, createSignal, onMount, onCleanup, createEffect, For, Show } from "solid-js";
 import {
   Plus,
   History,
@@ -17,7 +17,7 @@ import {
 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 import { UniversalChat } from "../components/chat/UniversalChat";
-import type { ChatMensagem } from "../components/chat/types";
+import type { ChatMensagem, PromptFilaItem } from "../components/chat/types";
 import type { Anexo } from "../components/chat/PromptInput";
 import { HistoricoModal, type SessaoResumo } from "../components/chat/HistoricoModal";
 import { Button } from "../ui/Button";
@@ -84,6 +84,8 @@ export const SecretarioView: Component = () => {
   const [mensagens, setMensagens] = createSignal<ChatMensagem[]>([]);
   const [inputValor, setInputValor] = createSignal("");
   const [anexos, setAnexos] = createSignal<Anexo[]>([]);
+  const [filaPrompts, setFilaPrompts] = createSignal<PromptFilaItem[]>([]);
+  let processandoFila = false;
   const [agente, setAgente] = createSignal<string>("secretario-exec");
   const [carregando, setCarregando] = createSignal(false);
   const [historicoAberto, setHistoricoAberto] = createSignal(false);
@@ -381,9 +383,24 @@ export const SecretarioView: Component = () => {
           return;
         }
 
-        if (tentativasSemMudanca > 300) { // ~5 minutos sem atividade
+        // Se o backend não reportar a sessão como executando e a mensagem for do usuário ou já concluída
+        const sessaoOcupadaNoTick = sessoes().find((s) => s.id === sessaoId && (s as any).executando);
+        if (!sessaoOcupadaNoTick && ult && (ult.concluida === true || ult.role === "user")) {
+          tentativasSemMudanca++;
+          if (tentativasSemMudanca >= 2) {
+            pararMonitoramento();
+            setCarregando(false);
+            if (timerInterval) {
+              clearInterval(timerInterval);
+              timerInterval = null;
+            }
+            return;
+          }
+        }
+
+        if (tentativasSemMudanca > 1800) { // ~30 minutos sem nenhuma alteração
           const sessaoOcupada = sessoes().find((s) => s.id === sessaoId && (s as any).executando);
-          if (sessaoOcupada) {
+          if (sessaoOcupada || (ult && ult.role === "assistant" && ult.concluida === false)) {
             tentativasSemMudanca = 0;
             monitorTimeout = setTimeout(tick, 1500);
             return;
@@ -428,7 +445,7 @@ export const SecretarioView: Component = () => {
 
       const ult = lista[lista.length - 1];
       const sessaoOcupada = sessoes().find((s) => s.id === id && (s as any).executando);
-      const emAndamento = Boolean(sessaoOcupada) || (ult && (ult.concluida === false || ult.role === "user"));
+      const emAndamento = Boolean(sessaoOcupada) || (ult && ult.role === "assistant" && ult.concluida === false);
 
       if (emAndamento) {
         setCarregando(true);
@@ -484,13 +501,17 @@ export const SecretarioView: Component = () => {
     const sid = sessaoAtivaId();
     if (sid) {
       void fetchApi(`/sessions/${encodeURIComponent(sid)}/abort`, { method: "POST" }).catch(() => null);
+      void fetchApi(`/secretario/sessoes/${encodeURIComponent(sid)}/abort`, { method: "POST" }).catch(() => null);
     }
     pararMonitoramento();
     if (abortController) {
       abortController.abort();
       abortController = null;
     }
-    if (timerInterval) clearInterval(timerInterval);
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
     setCarregando(false);
     setMensagens((prev) => {
       const ult = prev[prev.length - 1];
@@ -506,34 +527,123 @@ export const SecretarioView: Component = () => {
     const m = mensagens()[indice];
     if (!m || m.role !== "user") return;
 
+    pararMonitoramento();
     if (carregando()) {
       pararStream();
     }
 
+    const textoPrompt = m.content || "";
+    const indiceGlobal = m.indice_global !== undefined ? m.indice_global : indice;
+
+    // 1. Restaura texto no input e foca imediatamente
+    setInputValor(textoPrompt);
+    const elTextarea = textareaRef || (document.getElementById("chat-input") as HTMLTextAreaElement | null);
+    if (elTextarea) {
+      textareaRef = elTextarea;
+      elTextarea.value = textoPrompt;
+      elTextarea.focus();
+      const len = textoPrompt.length;
+      try {
+        elTextarea.setSelectionRange(len, len);
+      } catch {}
+      elTextarea.style.height = "auto";
+      const scrollH = elTextarea.scrollHeight;
+      const novaAltura = Math.max(38, Math.min(scrollH, 220));
+      elTextarea.style.height = `${novaAltura}px`;
+      elTextarea.style.overflowY = scrollH > 220 ? "auto" : "hidden";
+      elTextarea.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    // 2. Trunca no backend se houver sessão ativa usando o índice global correto
     const sid = sessaoAtivaId();
     if (sid) {
       try {
         await fetchApi(`/secretario/sessoes/${encodeURIComponent(sid)}/truncar`, {
           method: "POST",
-          body: JSON.stringify({ manter_ate: indice }),
+          body: JSON.stringify({ manter_ate: indiceGlobal }),
         });
       } catch (err: any) {
         showToast("Falha ao truncar no servidor: " + err.message, "aviso");
       }
     }
 
-    // Trunca mensagens localmente
+    // 3. Trunca mensagens localmente (mantém anteriores a este turno)
+    ultimoHash = "";
     setMensagens((prev) => prev.slice(0, indice));
 
-    // Restaura texto no input
-    setInputValor(m.content);
-    if (textareaRef) {
-      textareaRef.focus();
-      textareaRef.style.height = "auto";
-      textareaRef.style.height = `${Math.min(textareaRef.scrollHeight, 180)}px`;
-    }
     showToast("Prompt restaurado para edição!", "sucesso");
   };
+
+  const adicionarFila = (texto: string, anexosRecebidos?: Anexo[]) => {
+    const item: PromptFilaItem = {
+      id: `flw_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      texto,
+      anexos: anexosRecebidos,
+      criadoEm: Date.now(),
+    };
+    setFilaPrompts((prev) => [...prev, item]);
+  };
+
+  const removerFila = (id: string) => {
+    setFilaPrompts((prev) => prev.filter((i) => i.id !== id));
+    showToast("Prompt removido da fila", "info");
+  };
+
+  const editarFila = (id: string) => {
+    const item = filaPrompts().find((i) => i.id === id);
+    if (!item) return;
+    setFilaPrompts((prev) => prev.filter((i) => i.id !== id));
+    setInputValor(item.texto);
+    if (item.anexos) setAnexos(item.anexos);
+    const elTextarea = textareaRef || (document.getElementById("chat-input") as HTMLTextAreaElement | null);
+    if (elTextarea) {
+      textareaRef = elTextarea;
+      elTextarea.value = item.texto;
+      elTextarea.focus();
+      const len = item.texto.length;
+      try {
+        elTextarea.setSelectionRange(len, len);
+      } catch {}
+      elTextarea.style.height = "auto";
+      const scrollH = elTextarea.scrollHeight;
+      const novaAltura = Math.max(38, Math.min(scrollH, 220));
+      elTextarea.style.height = `${novaAltura}px`;
+      elTextarea.style.overflowY = scrollH > 220 ? "auto" : "hidden";
+      elTextarea.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    showToast("Prompt devolvido para edição!", "sucesso");
+  };
+
+  const adiantarFila = async (id: string) => {
+    const item = filaPrompts().find((i) => i.id === id);
+    if (!item) return;
+    setFilaPrompts((prev) => prev.filter((i) => i.id !== id));
+    if (carregando()) {
+      pararStream();
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    setInputValor(item.texto);
+    if (item.anexos) setAnexos(item.anexos);
+    showToast("Adiantando prompt da fila...", "info");
+    await enviarMensagem();
+  };
+
+  // Disparo sequencial automático quando o turno atual do assistente terminar
+  createEffect(() => {
+    const estaCarregando = carregando();
+    const fila = filaPrompts();
+    if (!estaCarregando && fila.length > 0 && !processandoFila) {
+      processandoFila = true;
+      const proximo = fila[0];
+      setFilaPrompts((prev) => prev.slice(1));
+      setTimeout(async () => {
+        setInputValor(proximo.texto);
+        if (proximo.anexos) setAnexos(proximo.anexos);
+        await enviarMensagem();
+        processandoFila = false;
+      }, 350);
+    }
+  });
 
   const enviarMensagem = async () => {
     pararMonitoramento();
@@ -841,6 +951,12 @@ export const SecretarioView: Component = () => {
     void carregarAgentesEMotores();
   });
 
+  createEffect(() => {
+    void wsAtivo();
+    void carregarSessoes();
+    void carregarAgentesEMotores();
+  });
+
   onCleanup(() => {
     pararMonitoramento();
     if (abortController) abortController.abort();
@@ -865,12 +981,22 @@ export const SecretarioView: Component = () => {
         }}
         decorridoFmt={decorridoFmt()}
         podeEnviarPrompt={true}
+        valorPrompt={inputValor()}
+        onValorPromptChange={setInputValor}
+        refTextarea={(el) => {
+          textareaRef = el;
+        }}
         onEnviarPrompt={async (texto, anexosRecebidos) => {
           if (anexosRecebidos) setAnexos(anexosRecebidos);
           setInputValor(texto);
           await enviarMensagem();
         }}
         onEditarPrompt={editarPrompt}
+        filaPrompts={filaPrompts()}
+        onAdicionarFila={adicionarFila}
+        onRemoverFila={removerFila}
+        onEditarFila={editarFila}
+        onAdiantarFila={adiantarFila}
         onAprovarHitl={aprovarHitl}
         onRejeitarHitl={rejeitarHitl}
         onNovaSessao={novaConversa}

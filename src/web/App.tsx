@@ -5,7 +5,7 @@ import { Topbar } from "./components/Topbar";
 import { GlobalTitlebar } from "./components/GlobalTitlebar";
 import { LoginModal } from "./components/LoginModal";
 import { ToastContainer } from "./ui/Toast";
-import { carregarWorkspaces, conectarSSE, wsAtivo, autenticado } from "./lib/context";
+import { carregarWorkspaces, conectarSSE, wsAtivo, autenticado, sidebarMobileAberta } from "./lib/context";
 
 // Views
 import { SecretarioView } from "./views/Secretario";
@@ -57,25 +57,20 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
       <Show when={!autenticado()}>
         <LoginModal />
       </Show>
-      <Show
-        when={wsAtivo()}
-        fallback={
-          <div class="flex flex-col flex-1 min-w-0 h-full overflow-hidden bg-zinc-950">
-            <GlobalTitlebar />
-            <main class="flex-1 min-h-0 overflow-y-auto relative bg-zinc-950">
-              {props.children}
-            </main>
-          </div>
-        }
-      >
+      
+      {/* Sidebar montada quando há workspace ativo OU quando drawer mobile for aberta */}
+      <Show when={wsAtivo() || sidebarMobileAberta()}>
         <Sidebar />
-        <div class="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
-          <Topbar />
-          <main class="flex-1 min-h-0 overflow-y-auto relative bg-zinc-950">
-            {props.children}
-          </main>
-        </div>
       </Show>
+
+      <div class="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
+        <Show when={wsAtivo()} fallback={<GlobalTitlebar />}>
+          <Topbar />
+        </Show>
+        <main class="flex-1 min-h-0 overflow-y-auto relative bg-zinc-950">
+          {props.children}
+        </main>
+      </div>
       <ToastContainer />
     </div>
   );

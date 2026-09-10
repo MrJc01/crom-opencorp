@@ -6,8 +6,8 @@ model: opencode-go/glm-5.3-flash
 tools: [read, bash, registry]
 permissions: level-1
 budget:
-  daily_usd: 0.50
-  max_turns: 30
+  daily_usd: 100.00
+  max_turns: 0
 memory:
   reads: [documentos, execucoes, custos, agentes, logs]
   writes: []

@@ -1,4 +1,4 @@
-import { type Component, createSignal, For, Show } from "solid-js";
+import { type Component, createSignal, onMount, For, Show } from "solid-js";
 import { A, useLocation } from "@solidjs/router";
 import {
   Home,
@@ -22,7 +22,7 @@ import {
   Plus,
   X,
 } from "lucide-solid";
-import { wsAtivo, setWsAtivo, workspaces, sidebarMobileAberta, setSidebarMobileAberta } from "../lib/context";
+import { wsAtivo, setWsAtivo, workspaces, carregarWorkspaces, sidebarMobileAberta, setSidebarMobileAberta } from "../lib/context";
 import { NovoWorkspaceModal } from "./NovoWorkspaceModal";
 
 interface NavItem {
@@ -42,6 +42,15 @@ export const Sidebar: Component = () => {
   const location = useLocation();
   const [colapsado, setColapsado] = createSignal(localStorage.getItem("oc-sidebar-colapsada") === "1");
   const [modalNovoWs, setModalNovoWs] = createSignal(false);
+
+  // No mobile drawer (sidebarMobileAberta), a sidebar NUNCA deve ficar colapsada
+  const estaColapsado = () => colapsado() && !sidebarMobileAberta();
+
+  onMount(() => {
+    if (workspaces().length === 0) {
+      void carregarWorkspaces();
+    }
+  });
 
   const toggleColapso = () => {
     const novo = !colapsado();
@@ -89,17 +98,19 @@ export const Sidebar: Component = () => {
       {/* Backdrop mobile */}
       <Show when={sidebarMobileAberta()}>
         <div
-          class="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 md:hidden animate-in fade-in duration-150"
+          class="fixed inset-0 bg-black/70 backdrop-blur-xs z-40 md:hidden animate-in fade-in duration-150"
           onClick={() => setSidebarMobileAberta(false)}
         />
       </Show>
 
       <aside
+        id="sidebar-principal"
+        data-testid="sidebar-drawer"
         class={`flex flex-col bg-zinc-950 border-r border-zinc-800/80 transition-all duration-200 select-none z-50 h-full ${
           sidebarMobileAberta()
-            ? "fixed inset-y-0 left-0 w-72 shadow-2xl md:static md:shadow-none md:flex"
+            ? "fixed inset-y-0 left-0 w-72 max-w-[85vw] shadow-2xl z-50 flex flex-col md:static md:shadow-none"
             : "hidden md:flex flex-shrink-0"
-        } ${colapsado() ? "md:w-16" : "md:w-60"}`}
+        } ${estaColapsado() ? "md:w-16" : "md:w-60"}`}
       >
         {/* Cabeçalho do App / Logo */}
         <div class="h-14 flex items-center justify-between px-3 border-b border-zinc-800/80">
@@ -107,7 +118,7 @@ export const Sidebar: Component = () => {
             <div class="h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden p-0.5">
               <img src="/logo.png" alt="OpenCorp" class="h-full w-full object-contain" />
             </div>
-            <Show when={!colapsado() || sidebarMobileAberta()}>
+            <Show when={!estaColapsado()}>
               <div class="flex flex-col min-w-0">
                 <span class="font-bold tracking-tight text-sm text-zinc-100 truncate">opencorp</span>
                 <span class="text-[9px] text-zinc-500 font-mono">v0.7.0</span>
@@ -119,10 +130,10 @@ export const Sidebar: Component = () => {
             <button
               type="button"
               onClick={() => setSidebarMobileAberta(false)}
-              class="md:hidden p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 transition-colors"
+              class="md:hidden p-2 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 transition-colors cursor-pointer"
               title="Fechar menu"
             >
-              <X size={16} />
+              <X size={18} />
             </button>
             {/* Botão colapsar no desktop */}
             <button
@@ -141,44 +152,49 @@ export const Sidebar: Component = () => {
       {/* Workspace Ativo Selector */}
       <div class="px-3 py-2.5 border-b border-zinc-800/60">
         <Show
-          when={!colapsado()}
+          when={!estaColapsado()}
           fallback={
             <div
               class="h-8 w-full rounded-md bg-zinc-900/80 border border-zinc-800/80 flex items-center justify-center text-zinc-300"
-              title={`Workspace: ${wsAtivo()}`}
+              title={`Workspace: ${wsAtivo() || "Nenhum"}`}
             >
               <Building2 size={14} />
             </div>
           }
         >
           <div class="flex items-center gap-1.5">
-            <div class="relative flex-1 flex items-center bg-zinc-900/80 border border-zinc-800 rounded-lg px-2.5 py-1.5 focus-within:border-zinc-700 min-w-0">
-              <Building2 size={13} class="text-emerald-400 flex-shrink-0 mr-2" />
+            <div class="relative flex-1 flex items-center bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 rounded-lg px-2.5 h-10 sm:h-9 min-w-0 transition-colors focus-within:border-emerald-500/60 shadow-xs">
+              <Building2 size={14} class="text-emerald-400 flex-shrink-0 mr-2 pointer-events-none" />
               <select
-                class="w-full bg-transparent text-xs font-medium text-zinc-200 focus:outline-none cursor-pointer appearance-none truncate pr-4"
+                id="select-workspace-sidebar"
+                class="w-full bg-transparent text-sm sm:text-xs font-semibold text-zinc-100 focus:outline-none cursor-pointer appearance-none truncate pr-6 py-2"
                 value={wsAtivo()}
-                onChange={(e) => setWsAtivo(e.currentTarget.value)}
+                onChange={(e) => {
+                  const novo = e.currentTarget.value;
+                  setWsAtivo(novo);
+                  setSidebarMobileAberta(false);
+                }}
               >
                 <option value="" class="bg-zinc-900 text-zinc-400" selected={!wsAtivo()}>
                   {workspaces().length === 0 ? "(Nenhuma empresa)" : "(Início / Sem empresa)"}
                 </option>
                 <For each={workspaces()}>
                   {(w) => (
-                    <option value={w.id} class="bg-zinc-900 text-zinc-200" selected={w.id === wsAtivo()}>
+                    <option value={w.id} class="bg-zinc-900 text-zinc-100" selected={w.id === wsAtivo()}>
                       {w.id}
                     </option>
                   )}
                 </For>
               </select>
-              <ChevronsUpDown size={12} class="text-zinc-500 absolute right-2 pointer-events-none" />
+              <ChevronsUpDown size={13} class="text-zinc-400 absolute right-2.5 pointer-events-none" />
             </div>
             <button
               type="button"
               onClick={() => setModalNovoWs(true)}
-              class="!bg-zinc-900/80 hover:!bg-zinc-800 p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 border border-zinc-800 transition-all cursor-pointer flex-shrink-0"
+              class="!bg-zinc-900/90 hover:!bg-zinc-800 h-10 sm:h-9 w-10 sm:w-9 rounded-lg text-zinc-400 hover:text-emerald-400 border border-zinc-800 transition-all cursor-pointer flex items-center justify-center flex-shrink-0"
               title="Novo Workspace ou Conectar Pasta"
             >
-              <Plus size={14} />
+              <Plus size={15} />
             </button>
           </div>
         </Show>
@@ -191,7 +207,7 @@ export const Sidebar: Component = () => {
         <For each={navGroups}>
           {(grupo) => (
             <div class="space-y-1">
-              <Show when={!colapsado()}>
+              <Show when={!estaColapsado()}>
                 <div class="px-2 pb-1 text-[10px] font-semibold tracking-wider uppercase text-zinc-500">
                   {grupo.titulo}
                 </div>
@@ -211,8 +227,8 @@ export const Sidebar: Component = () => {
                         ativo()
                           ? "bg-zinc-900 text-zinc-100 font-semibold border border-zinc-800/90 shadow-xs"
                           : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40"
-                      } ${colapsado() ? "justify-center px-0" : ""}`}
-                      title={colapsado() ? (item.badgeTag ? `${item.label} (${item.badgeTag})` : item.label) : undefined}
+                      } ${estaColapsado() ? "justify-center px-0" : ""}`}
+                      title={estaColapsado() ? (item.badgeTag ? `${item.label} (${item.badgeTag})` : item.label) : undefined}
                     >
                       <div class="relative flex items-center justify-center">
                         <Icone
@@ -221,7 +237,7 @@ export const Sidebar: Component = () => {
                             ativo() ? "text-emerald-400" : "text-zinc-400"
                           }`}
                         />
-                        <Show when={colapsado() && item.badgeTag}>
+                        <Show when={estaColapsado() && item.badgeTag}>
                           <span
                             class="absolute -top-1.5 -right-2 px-0.5 min-w-[11px] h-2.5 rounded-full text-[7px] font-bold font-mono bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center leading-none"
                             title={item.badgeTag}
@@ -231,7 +247,7 @@ export const Sidebar: Component = () => {
                         </Show>
                       </div>
 
-                      <Show when={!colapsado()}>
+                      <Show when={!estaColapsado()}>
                         <span class="truncate flex-1">{item.label}</span>
                         <Show when={item.badgeTag}>
                           <span class="px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wider uppercase font-mono bg-amber-500/15 text-amber-400 border border-amber-500/30 leading-none">
@@ -257,7 +273,7 @@ export const Sidebar: Component = () => {
       <div class="border-t border-zinc-800/80 bg-zinc-950/95 p-2 flex-shrink-0">
         <div
           class={
-            colapsado()
+            estaColapsado()
               ? "grid grid-cols-2 gap-1.5 justify-items-center"
               : "flex items-center justify-between px-1"
           }

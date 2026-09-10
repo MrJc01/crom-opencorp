@@ -261,13 +261,32 @@ export function extrairOpcoesDeTexto(texto?: string): { pergunta?: string; opcoe
   };
 }
 
+// Armazenamento reativo global/persistente para evitar reset de estado entre ticks de polling ou reconciliação do SolidJS
+const [globalCustomInputAberto, setGlobalCustomInputAberto] = createSignal<Record<string, Record<string, boolean>>>({});
+const [globalCustomTexto, setGlobalCustomTexto] = createSignal<Record<string, Record<string, string>>>({});
+const [globalRespostasMulti, setGlobalRespostasMulti] = createSignal<Record<string, Record<string, string>>>({});
+const [globalAbasAtivas, setGlobalAbasAtivas] = createSignal<Record<string, number>>({});
+
 export const SessionTurn: Component<SessionTurnProps> = (props) => {
   const [copiado, setCopiado] = createSignal(false);
   const [opcaoEscolhida, setOpcaoEscolhida] = createSignal<string | null>(null);
-  const [abaPerguntaAtiva, setAbaPerguntaAtiva] = createSignal(0);
-  const [respostasPorPergunta, setRespostasPorPergunta] = createSignal<Record<string, string>>({});
-  const [customInputAberto, setCustomInputAberto] = createSignal<Record<string, boolean>>({});
-  const [customTextoPorPergunta, setCustomTextoPorPergunta] = createSignal<Record<string, string>>({});
+  const msgKey = () => props.mensagem.id || `idx_${props.indice}`;
+
+  const abaPerguntaAtiva = () => globalAbasAtivas()[msgKey()] || 0;
+  const setAbaPerguntaAtiva = (novaAba: number) => {
+    const k = msgKey();
+    setGlobalAbasAtivas((prev) => ({ ...prev, [k]: novaAba }));
+  };
+
+  const respostasPorPergunta = () => globalRespostasMulti()[msgKey()] || {};
+  const setResposta = (k: string, val: string) => {
+    const mId = msgKey();
+    setGlobalRespostasMulti((prev) => ({
+      ...prev,
+      [mId]: { ...(prev[mId] || {}), [k]: val },
+    }));
+  };
+
   const m = () => props.mensagem;
 
   // Consolidação de perguntas estruturadas (via tool ask_question ou via texto)
@@ -335,8 +354,25 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
   };
 
   const respostaAtual = () => respostasPorPergunta()[keyAtual()] || "";
-  const isCustomAberto = () => !!customInputAberto()[keyAtual()];
-  const textoCustomAtual = () => customTextoPorPergunta()[keyAtual()] || "";
+  const isCustomAberto = () => !!globalCustomInputAberto()[msgKey()]?.[keyAtual()];
+  const setCustomAberto = (aberto: boolean) => {
+    const mId = msgKey();
+    const qk = keyAtual();
+    setGlobalCustomInputAberto((prev) => ({
+      ...prev,
+      [mId]: { ...(prev[mId] || {}), [qk]: aberto },
+    }));
+  };
+
+  const textoCustomAtual = () => globalCustomTexto()[msgKey()]?.[keyAtual()] || "";
+  const setTextoCustom = (val: string) => {
+    const mId = msgKey();
+    const qk = keyAtual();
+    setGlobalCustomTexto((prev) => ({
+      ...prev,
+      [mId]: { ...(prev[mId] || {}), [qk]: val },
+    }));
+  };
 
   const responderOpcao = (opcao: string) => {
     const total = totalPerguntas();
@@ -346,7 +382,7 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
       return;
     }
     const k = keyAtual();
-    setRespostasPorPergunta((prev) => ({ ...prev, [k]: opcao }));
+    setResposta(k, opcao);
     // Se não for a última pergunta, avança automaticamente para agilizar a resposta
     if (abaAtual() < total - 1) {
       setAbaPerguntaAtiva(abaAtual() + 1);
@@ -363,9 +399,11 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
       return;
     }
     const k = keyAtual();
-    setRespostasPorPergunta((prev) => ({ ...prev, [k]: txt }));
+    setResposta(k, txt);
     if (abaAtual() < total - 1) {
       setAbaPerguntaAtiva(abaAtual() + 1);
+    } else {
+      enviarTodasRespostas();
     }
   };
 
@@ -376,9 +414,11 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
       return;
     }
     const k = keyAtual();
-    setRespostasPorPergunta((prev) => ({ ...prev, [k]: "(Ignorado)" }));
+    setResposta(k, "(Ignorado)");
     if (abaAtual() < total - 1) {
       setAbaPerguntaAtiva(abaAtual() + 1);
+    } else {
+      enviarTodasRespostas();
     }
   };
 
@@ -831,12 +871,11 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
                     fallback={
                       <button
                         type="button"
-                        onClick={() =>
-                          setCustomInputAberto((prev) => ({
-                            ...prev,
-                            [keyAtual()]: true,
-                          }))
-                        }
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setCustomAberto(true);
+                        }}
                         class="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-medium text-purple-300 hover:text-purple-200 bg-purple-950/20 hover:bg-purple-900/30 border border-purple-800/30 transition-colors cursor-pointer"
                       >
                         <Edit3 size={12} />
@@ -844,17 +883,13 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
                       </button>
                     }
                   >
-                    <div class="flex items-center gap-1.5 mt-1">
+                    <div class="flex items-center gap-1.5 mt-1" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="text"
                         placeholder="Digite sua resposta personalizada..."
                         value={textoCustomAtual()}
                         onInput={(e) => {
-                          const val = e.currentTarget.value;
-                          setCustomTextoPorPergunta((prev) => ({
-                            ...prev,
-                            [keyAtual()]: val,
-                          }));
+                          setTextoCustom(e.currentTarget.value);
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
@@ -876,12 +911,7 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
                       </button>
                       <button
                         type="button"
-                        onClick={() =>
-                          setCustomInputAberto((prev) => ({
-                            ...prev,
-                            [keyAtual()]: false,
-                          }))
-                        }
+                        onClick={() => setCustomAberto(false)}
                         class="px-2 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs transition-colors cursor-pointer"
                         title="Cancelar"
                       >
@@ -961,7 +991,11 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
           <Show when={props.onEditarPrompt}>
             <button
               type="button"
-              onClick={() => props.onEditarPrompt?.(props.indice)}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                props.onEditarPrompt?.(props.indice);
+              }}
               class="p-1 rounded-md bg-transparent text-zinc-500 hover:text-amber-300 hover:bg-zinc-800/80 transition-colors cursor-pointer"
               title="Editar prompt"
               aria-label="Editar prompt"

@@ -204,6 +204,50 @@ test.describe("Perguntas da IA com Opções Interativas e Configuração de Mode
     await expect(cardOpcoes).not.toBeVisible({ timeout: 5000 });
   });
 
+  test("redimensionamento do input: expande com quebras de linha até o limite, diminui ao perder foco e restaura ao focar", async ({ page }) => {
+    const input = page.locator("#chat-input");
+    await expect(input).toBeVisible();
+
+    // 1. Altura inicial compacta
+    const bboxInicial = await input.boundingBox();
+    expect(bboxInicial).not.toBeNull();
+    expect(bboxInicial!.height).toBeLessThanOrEqual(44);
+
+    // 2. Foca e digita múltiplas linhas
+    await input.focus();
+    await input.fill("Linha 1\nLinha 2\nLinha 3\nLinha 4\nLinha 5");
+    await page.waitForTimeout(150);
+
+    const bboxExpandido = await input.boundingBox();
+    expect(bboxExpandido).not.toBeNull();
+    expect(bboxExpandido!.height).toBeGreaterThan(bboxInicial!.height);
+    expect(bboxExpandido!.height).toBeLessThanOrEqual(225);
+
+    // 3. Tira o foco (blur) clicando fora -> deve diminuir de volta para a altura compacta
+    await page.locator("body").click({ position: { x: 10, y: 10 } });
+    await page.waitForTimeout(250);
+
+    const bboxBlur = await input.boundingBox();
+    expect(bboxBlur).not.toBeNull();
+    expect(bboxBlur!.height).toBeLessThanOrEqual(44);
+
+    // 4. Clica novamente no input (foco) -> restaura a altura expandida
+    await input.focus();
+    await page.waitForTimeout(250);
+
+    const bboxRefocus = await input.boundingBox();
+    expect(bboxRefocus).not.toBeNull();
+    expect(bboxRefocus!.height).toBeGreaterThan(44);
+
+    // 5. Limpa o texto -> volta à altura normal
+    await input.fill("");
+    await page.waitForTimeout(150);
+
+    const bboxLimpo = await input.boundingBox();
+    expect(bboxLimpo).not.toBeNull();
+    expect(bboxLimpo!.height).toBeLessThanOrEqual(44);
+  });
+
   test("carregamento paginado: exibe inicialmente últimos 2 turnos e scroll infinito para cima carrega anteriores", async ({ page }) => {
     const btnNova = page.locator("[data-testid='btn-nova-conversa']");
     if (await btnNova.isVisible().catch(() => false)) {
@@ -250,5 +294,136 @@ test.describe("Perguntas da IA com Opções Interativas e Configuração de Mode
 
     // 5. Como chegou ao início, o indicador "Início do histórico da conversa" deve ser exibido
     await expect(page.locator("text=Início do histórico da conversa")).toBeVisible({ timeout: 5000 });
+  });
+
+  test("editar prompt: clica no botão editar e o texto é restaurado no input para edição", async ({ page }) => {
+    const btnNova = page.locator("[data-testid='btn-nova-conversa']");
+    if (await btnNova.isVisible().catch(() => false)) {
+      await btnNova.click();
+      await page.waitForTimeout(300);
+    }
+
+    const input = page.locator("#chat-input");
+    await expect(input).toBeVisible();
+
+    const textoPromptOriginal = "Prompt de teste para verificar edicao sem sumir";
+    await input.fill(textoPromptOriginal);
+    await page.click("#btn-enviar");
+
+    // Aguarda o balão do usuário aparecer no chat
+    const balaoUsuario = page.locator(`.oc-user:has-text("${textoPromptOriginal}"), [data-role='user']:has-text("${textoPromptOriginal}")`).last();
+    await expect(balaoUsuario).toBeVisible({ timeout: 10000 });
+
+    // O input deve estar limpo após o envio
+    await expect(input).toHaveValue("");
+
+    // Passa o mouse sobre o balão para revelar os botões de ação e clica no botão de editar
+    await balaoUsuario.hover();
+    const btnEditar = balaoUsuario.locator("button[title='Editar prompt']");
+    await expect(btnEditar).toBeVisible({ timeout: 3000 });
+    await btnEditar.click();
+
+    // O texto deve ser restaurado IMEDIATAMENTE no input!
+    await expect(input).toHaveValue(textoPromptOriginal, { timeout: 5000 });
+
+    // O input deve estar focado
+    await expect(input).toBeFocused();
+  });
+
+  test("fila de prompts: enfileira mensagens enquanto o agente roda, exibe no dock, permite editar, excluir e dispara automaticamente ao fim do turno", async ({ page }) => {
+    const btnNova = page.locator("[data-testid='btn-nova-conversa']");
+    if (await btnNova.isVisible().catch(() => false)) {
+      await btnNova.click();
+      await page.waitForTimeout(300);
+    }
+
+    const input = page.locator("#chat-input");
+    await expect(input).toBeVisible();
+
+    // 1. Envia a primeira mensagem
+    await input.fill("teste inicio de execucao longa");
+    await page.click("#btn-enviar");
+
+    // 2. Enquanto o assistente está executando, digita a mensagem seguinte
+    await input.fill("Meu segundo prompt na fila de espera");
+    await page.waitForTimeout(100);
+
+    // O botão + Fila deve estar visível e clicável!
+    const btnFila = page.locator("[data-testid='btn-enfileirar']");
+    await expect(btnFila).toBeVisible();
+    await btnFila.click();
+
+    // O input deve ser limpo e o FollowupQueueDock deve aparecer!
+    await expect(input).toHaveValue("");
+    const dockFila = page.locator("[data-testid='followup-queue-dock']");
+    await expect(dockFila).toBeVisible({ timeout: 5000 });
+    await expect(dockFila).toContainText("Fila de Espera");
+    await expect(dockFila).toContainText("Meu segundo prompt na fila de espera");
+
+    // 3. Testa a ação de EDITAR na fila
+    const btnEditarFila = dockFila.locator("button[title*='Editar prompt']").first();
+    await expect(btnEditarFila).toBeVisible();
+    await btnEditarFila.click();
+
+    // O prompt deve sair da fila e voltar para o input
+    await expect(dockFila).not.toBeVisible();
+    await expect(input).toHaveValue("Meu segundo prompt na fila de espera");
+
+    // 4. Enfileira novamente via teclado (Enter)
+    await input.press("Enter");
+    await expect(input).toHaveValue("");
+    await expect(dockFila).toBeVisible({ timeout: 5000 });
+
+    // 5. Adiciona um item adicional à fila para testar múltiplos itens e exclusão
+    await input.fill("Item para ser excluido");
+    await input.press("Enter");
+    await expect(dockFila).toContainText("2 prompts aguardando");
+
+    // 6. Testa a ação de EXCLUIR um item da fila
+    const btnExcluir = dockFila.locator("button[title*='Excluir da fila']").last();
+    await expect(btnExcluir).toBeVisible();
+    await btnExcluir.click();
+    await expect(dockFila).toContainText("1 prompt aguardando");
+    await expect(dockFila).not.toContainText("Item para ser excluido");
+
+    // 7. Validação do envio automático: quando o turno atual finaliza, a fila é consumida automaticamente
+    // O dock deve sumir e o prompt da fila é disparado como mensagem no chat
+    await expect(dockFila).not.toBeVisible({ timeout: 25000 });
+    const ultimoUser = page.locator(".oc-user, [data-role='user']").last();
+    await expect(ultimoUser).toContainText("Meu segundo prompt na fila de espera", { timeout: 15000 });
+  });
+
+  test("fila de prompts: botão adiantar interrompe execução atual e dispara prompt da fila imediatamente", async ({ page }) => {
+    const btnNova = page.locator("[data-testid='btn-nova-conversa']");
+    if (await btnNova.isVisible().catch(() => false)) {
+      await btnNova.click();
+      await page.waitForTimeout(300);
+    }
+
+    const input = page.locator("#chat-input");
+    await expect(input).toBeVisible();
+
+    // Envia primeira mensagem
+    await input.fill("teste turno longo para adiantar");
+    await page.click("#btn-enviar");
+
+    // Rapidamente enfileira mensagem prioritária
+    await input.fill("Mensagem prioritária adiantada agora");
+    const btnFila = page.locator("[data-testid='btn-enfileirar']");
+    await expect(btnFila).toBeVisible({ timeout: 5000 });
+    await btnFila.click();
+
+    const dockFila = page.locator("[data-testid='followup-queue-dock']");
+    await expect(dockFila).toBeVisible({ timeout: 5000 });
+
+    // Clica imediatamente em Adiantar
+    const btnAdiantar = dockFila.locator("button:has-text('Adiantar')").first();
+    await expect(btnAdiantar).toBeVisible();
+    await btnAdiantar.click();
+
+    // O dock deve fechar e a mensagem deve aparecer enviada
+    await expect(dockFila).not.toBeVisible({ timeout: 5000 });
+    const ultimoUser = page.locator(".oc-user, [data-role='user']").last();
+    await expect(ultimoUser).toContainText("Mensagem prioritária adiantada agora", { timeout: 10000 });
   });
 });

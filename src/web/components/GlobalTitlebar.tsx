@@ -1,7 +1,8 @@
-import { type Component, createSignal } from "solid-js";
+import { type Component, createSignal, For } from "solid-js";
 import { useLocation, useNavigate } from "@solidjs/router";
-import { ArrowLeft } from "lucide-solid";
+import { ArrowLeft, Menu, Building2, ChevronsUpDown } from "lucide-solid";
 import { NovoWorkspaceModal } from "./NovoWorkspaceModal";
+import { wsAtivo, setWsAtivo, workspaces, setSidebarMobileAberta } from "../lib/context";
 
 export const GlobalTitlebar: Component = () => {
   const location = useLocation();
@@ -17,9 +18,19 @@ export const GlobalTitlebar: Component = () => {
   };
 
   return (
-    <header class="h-9 px-3 flex items-center justify-between border-b border-zinc-900/80 bg-zinc-950 text-zinc-300 shrink-0 select-none z-30">
-      {/* Botões Utilitários Top-Left estilo OpenCode (Grid + Plus) */}
+    <header class="h-10 px-3 flex items-center justify-between border-b border-zinc-900/80 bg-zinc-950 text-zinc-300 shrink-0 select-none z-30">
+      {/* Botões Utilitários Top-Left estilo OpenCode (Menu Mobile + Grid + Workspace + Plus) */}
       <div class="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setSidebarMobileAberta(true)}
+          class="md:hidden h-8 w-8 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 border border-zinc-800 transition-colors cursor-pointer active:scale-95 shrink-0"
+          title="Abrir navegação"
+          aria-label="Abrir navegação"
+        >
+          <Menu size={16} />
+        </button>
+
         <button
           type="button"
           onClick={() => navigate("/home")}
@@ -34,6 +45,33 @@ export const GlobalTitlebar: Component = () => {
             <rect width="7" height="7" x="3" y="14" rx="1.5" />
           </svg>
         </button>
+
+        {/* Workspace Dropdown Picker */}
+        <div class="relative flex items-center bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 rounded-md px-2 h-7 min-w-0 transition-colors">
+          <Building2 size={12} class="text-emerald-400 flex-shrink-0 mr-1.5 pointer-events-none" />
+          <select
+            id="select-workspace-global"
+            class="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer appearance-none truncate pr-4 max-w-[130px] sm:max-w-[200px]"
+            value={wsAtivo()}
+            onChange={(e) => {
+              const novo = e.currentTarget.value;
+              setWsAtivo(novo);
+              if (novo) navigate("/home");
+            }}
+          >
+            <option value="" class="bg-zinc-900 text-zinc-400" selected={!wsAtivo()}>
+              {workspaces().length === 0 ? "(Nenhuma empresa)" : "(Selecione a empresa)"}
+            </option>
+            <For each={workspaces()}>
+              {(w) => (
+                <option value={w.id} class="bg-zinc-900 text-zinc-100" selected={w.id === wsAtivo()}>
+                  {w.id}
+                </option>
+              )}
+            </For>
+          </select>
+          <ChevronsUpDown size={11} class="text-zinc-500 absolute right-1.5 pointer-events-none" />
+        </div>
 
         <button
           type="button"
@@ -52,10 +90,10 @@ export const GlobalTitlebar: Component = () => {
           <button
             type="button"
             onClick={() => navigate("/home")}
-            class="ml-2 flex items-center gap-1 px-2 py-0.5 rounded text-[11px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 transition-colors cursor-pointer"
+            class="ml-1 flex items-center gap-1 px-2 py-0.5 rounded text-[11px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 transition-colors cursor-pointer"
           >
             <ArrowLeft size={12} />
-            <span>Início</span>
+            <span class="hidden sm:inline">Início</span>
           </button>
         )}
       </div>

@@ -17,6 +17,7 @@ import {
   Code2,
   CornerDownLeft,
   Search,
+  Clock,
 } from "lucide-solid";
 import { IconButton } from "../../ui/IconButton";
 import { showToast } from "../../ui/Toast";
@@ -42,6 +43,7 @@ export interface PromptInputProps {
   valor?: string;
   onInput?: (v: string) => void;
   onEnviar?: () => void;
+  onEnfileirar?: (texto: string, anexos?: Anexo[]) => void;
   onParar?: () => void;
   carregando?: boolean;
   anexos?: Anexo[];
@@ -70,25 +72,58 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const valorTexto = () => props.valor || "";
   const listaAnexos = () => props.anexos || [];
 
+  const ALTURA_MINIMA = 38;
+  const ALTURA_MAXIMA = 220;
+  const [emFoco, setEmFoco] = createSignal(false);
+
   const autoResize = () => {
     if (!textareaRef) return;
-    textareaRef.style.height = "auto";
-    textareaRef.style.height = `${Math.min(textareaRef.scrollHeight, 180)}px`;
+    const val = textareaRef.value ?? valorTexto() ?? "";
+    const isFocado = emFoco() || (typeof document !== "undefined" && document.activeElement === textareaRef);
+
+    // Se estiver vazio, volta imediatamente à altura mínima padrão (1 linha)
+    if (!val.trim()) {
+      textareaRef.style.height = `${ALTURA_MINIMA}px`;
+      textareaRef.style.overflowY = "hidden";
+      return;
+    }
+
+    // Se o foco estiver fora do input, diminui para a altura compacta inicial
+    if (!isFocado) {
+      textareaRef.style.height = `${ALTURA_MINIMA}px`;
+      textareaRef.style.overflowY = "hidden";
+      return;
+    }
+
+    // Em foco: adapta dinamicamente às linhas puladas respeitando o limite máximo
+    textareaRef.style.height = "0px";
+    const scrollH = textareaRef.scrollHeight;
+    const novaAltura = Math.max(ALTURA_MINIMA, Math.min(scrollH, ALTURA_MAXIMA));
+    textareaRef.style.height = `${novaAltura}px`;
+    textareaRef.style.overflowY = scrollH > ALTURA_MAXIMA ? "auto" : "hidden";
   };
 
-  // Monitora limpeza do valor para colapsar o textarea de volta à altura padrão
+  // Monitora alterações no valor para auto-redimensionar e sincronizar o DOM
   createEffect(() => {
     const val = valorTexto();
-    if (!val || val.trim() === "") {
-      if (textareaRef) {
-        textareaRef.style.height = "auto";
-      }
-    } else {
-      setTimeout(autoResize, 10);
+    if (textareaRef && textareaRef.value !== val) {
+      textareaRef.value = val;
     }
+    setTimeout(autoResize, 10);
   });
 
   onMount(async () => {
+    if (textareaRef) {
+      textareaRef.addEventListener("focus", () => {
+        setEmFoco(true);
+        autoResize();
+      });
+      textareaRef.addEventListener("blur", () => {
+        setEmFoco(false);
+        autoResize();
+      });
+    }
+
     if (props.refTextarea) {
       props.refTextarea(textareaRef);
     }
@@ -465,12 +500,26 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   };
 
   const dispararEnvio = () => {
-    if (!props.carregando && (valorTexto().trim() || listaAnexos().length > 0)) {
-      props.onEnviar?.();
-      if (textareaRef) {
-        textareaRef.style.height = "auto";
+    const txt = valorTexto().trim();
+    const att = listaAnexos();
+    if (!txt && att.length === 0) return;
+
+    if (props.carregando) {
+      if (props.onEnfileirar) {
+        props.onEnfileirar(txt, att);
+      } else {
+        props.onEnviar?.();
       }
+    } else {
+      props.onEnviar?.();
     }
+
+    if (textareaRef) {
+      textareaRef.value = "";
+      textareaRef.style.height = `${ALTURA_MINIMA}px`;
+      textareaRef.style.overflowY = "hidden";
+    }
+    props.onInput?.("");
   };
 
   const handlePaste = (e: ClipboardEvent) => {
@@ -628,19 +677,39 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       <textarea
         id="chat-input"
         data-testid="chat-input"
-        ref={textareaRef}
+        ref={(el) => {
+          textareaRef = el;
+          props.refTextarea?.(el);
+        }}
         rows={1}
+        prop:value={valorTexto()}
         value={valorTexto()}
+        onFocusIn={() => {
+          setEmFoco(true);
+          autoResize();
+        }}
+        onFocusOut={() => {
+          setEmFoco(false);
+          autoResize();
+        }}
         onInput={(e) => {
           const val = e.currentTarget.value;
+          setEmFoco(true);
           props.onInput?.(val);
           verificarGatilhos(val);
           autoResize();
         }}
         onKeyDown={handleKeyDown}
-        onPaste={handlePaste}
+        onPaste={(e) => {
+          handlePaste(e);
+          setTimeout(autoResize, 15);
+        }}
         placeholder={props.placeholder || "Pergunte ao Secretário Executivo… (/ comandos, @ contexto, ! terminal)"}
-        class="w-full bg-transparent text-sm text-zinc-100 placeholder-zinc-500 resize-none focus:outline-none px-2 py-1 leading-relaxed max-h-[180px] scrollbar-thin"
+        class="w-full flex-none bg-transparent text-sm text-zinc-100 placeholder-zinc-500 resize-none focus:outline-none px-2 py-1 leading-relaxed scrollbar-thin"
+        style={{
+          "min-height": `${ALTURA_MINIMA}px`,
+          "max-height": `${ALTURA_MAXIMA}px`,
+        }}
       />
 
       {/* Barra de Ações Inferior */}
@@ -736,31 +805,48 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           </div>
         </div>
 
-        {/* Botão de Envio ou Parar */}
-        <div>
-          <Show
-            when={props.carregando}
-            fallback={
-              <button
-                id="btn-enviar"
-                data-testid="btn-enviar"
-                onClick={dispararEnvio}
-                disabled={!valorTexto().trim() && listaAnexos().length === 0}
-                class="flex items-center justify-center h-8 w-8 rounded-full bg-zinc-100 text-zinc-950 font-bold transition-all disabled:opacity-30 disabled:pointer-events-none hover:bg-white active:scale-95 shadow-md cursor-pointer"
-                title="Enviar mensagem (Enter)"
-                aria-label="Enviar mensagem"
-              >
-                <ArrowUp size={16} stroke-width={2.5} />
-              </button>
-            }
-          >
+        {/* Botão de Envio, Parar ou Enfileirar */}
+        <div class="flex items-center gap-1.5">
+          <Show when={props.carregando}>
             <button
+              type="button"
               onClick={props.onParar}
               class="flex items-center justify-center h-8 w-8 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-bold transition-all active:scale-95 shadow-md cursor-pointer animate-pulse"
-              title="Interromper geração"
-              aria-label="Interromper geração"
+              title="Interromper geração atual"
+              aria-label="Interromper geração atual"
             >
               <Square size={13} fill="currentColor" />
+            </button>
+          </Show>
+
+          <Show
+            when={props.carregando && (valorTexto().trim() || listaAnexos().length > 0)}
+          >
+            <button
+              type="button"
+              id="btn-enfileirar"
+              data-testid="btn-enfileirar"
+              onClick={dispararEnvio}
+              class="flex items-center gap-1.5 px-3 h-8 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-all active:scale-95 shadow-md cursor-pointer text-xs"
+              title="Adicionar prompt à fila de espera (Enter)"
+              aria-label="Adicionar à fila de espera"
+            >
+              <Clock size={13} />
+              <span>+ Fila</span>
+            </button>
+          </Show>
+
+          <Show when={!props.carregando}>
+            <button
+              id="btn-enviar"
+              data-testid="btn-enviar"
+              onClick={dispararEnvio}
+              disabled={!valorTexto().trim() && listaAnexos().length === 0}
+              class="flex items-center justify-center h-8 w-8 rounded-full bg-zinc-100 text-zinc-950 font-bold transition-all disabled:opacity-30 disabled:pointer-events-none hover:bg-white active:scale-95 shadow-md cursor-pointer"
+              title="Enviar mensagem (Enter)"
+              aria-label="Enviar mensagem"
+            >
+              <ArrowUp size={16} stroke-width={2.5} />
             </button>
           </Show>
         </div>

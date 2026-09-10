@@ -120,4 +120,18 @@ export interface UniversalChatProps {
   carregandoAnteriores?: boolean;
   onCarregarAnteriores?: () => Promise<void> | void;
   totalMensagens?: number;
+
+  // Fila de Prompts (Followups / Prompts em espera)
+  filaPrompts?: PromptFilaItem[];
+  onAdicionarFila?: (texto: string, anexos?: any[]) => void;
+  onRemoverFila?: (id: string) => void;
+  onEditarFila?: (id: string) => void;
+  onAdiantarFila?: (id: string) => void;
+}
+
+export interface PromptFilaItem {
+  id: string;
+  texto: string;
+  anexos?: any[];
+  criadoEm?: number;
 }

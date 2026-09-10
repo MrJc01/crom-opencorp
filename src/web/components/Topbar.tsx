@@ -20,8 +20,10 @@ import {
   ArrowRight,
   Terminal,
   Menu,
+  Building2,
+  ChevronsUpDown,
 } from "lucide-solid";
-import { sseConnected, wsAtivo, workspaces, fetchApi, notificacoesNaoLidas, setSidebarMobileAberta } from "../lib/context";
+import { sseConnected, wsAtivo, setWsAtivo, workspaces, fetchApi, notificacoesNaoLidas, setSidebarMobileAberta } from "../lib/context";
 
 interface StatusInfo {
   scheduler?: boolean;
@@ -193,20 +195,46 @@ export const Topbar: Component = () => {
 
   return (
     <header class="h-14 border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur-md px-3 sm:px-6 flex items-center justify-between flex-shrink-0 z-30 select-none">
-      {/* Breadcrumb & Menu Mobile */}
-      <div class="flex items-center gap-2 text-xs">
+      {/* Breadcrumb, Menu Mobile & Seletor Rápido de Workspace */}
+      <div class="flex items-center gap-2 text-xs min-w-0">
         <button
           type="button"
           onClick={() => setSidebarMobileAberta(true)}
-          class="md:hidden p-1.5 -ml-1 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 border border-zinc-800 transition-colors cursor-pointer"
+          class="md:hidden h-9 w-9 -ml-1 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 border border-zinc-800 transition-colors cursor-pointer flex items-center justify-center shrink-0"
           title="Abrir navegação"
           aria-label="Abrir navegação"
         >
-          <Menu size={15} />
+          <Menu size={18} />
         </button>
-        <span class="text-zinc-500 font-medium hidden sm:inline">opencorp</span>
+
+        {/* Seletor Rápido de Workspace no Topbar (Mobile e Desktop) */}
+        <div class="relative flex items-center bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 rounded-lg px-2 h-8 min-w-0 transition-colors focus-within:border-emerald-500/60 shadow-xs shrink-0">
+          <Building2 size={13} class="text-emerald-400 flex-shrink-0 mr-1.5 pointer-events-none" />
+          <select
+            id="select-workspace-topbar"
+            class="bg-transparent text-xs font-semibold text-zinc-100 focus:outline-none cursor-pointer appearance-none truncate pr-4 max-w-[110px] sm:max-w-[170px]"
+            value={wsAtivo()}
+            onChange={(e) => {
+              const novo = e.currentTarget.value;
+              setWsAtivo(novo);
+            }}
+          >
+            <option value="" class="bg-zinc-900 text-zinc-400" selected={!wsAtivo()}>
+              {workspaces().length === 0 ? "(Sem empresa)" : "(Início)"}
+            </option>
+            <For each={workspaces()}>
+              {(w) => (
+                <option value={w.id} class="bg-zinc-900 text-zinc-100" selected={w.id === wsAtivo()}>
+                  {w.id}
+                </option>
+              )}
+            </For>
+          </select>
+          <ChevronsUpDown size={11} class="text-zinc-500 absolute right-1.5 pointer-events-none" />
+        </div>
+
         <span class="text-zinc-600 hidden sm:inline">/</span>
-        <span class="text-zinc-200 font-semibold truncate max-w-[140px] sm:max-w-none">{getBreadcrumb()}</span>
+        <span class="text-zinc-200 font-semibold truncate hidden sm:inline">{getBreadcrumb()}</span>
       </div>
 
       {/* Ações e Controles à Direita */}

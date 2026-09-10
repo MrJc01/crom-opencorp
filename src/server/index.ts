@@ -3716,7 +3716,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         }
 
         // Helper: obtém porta do opencode server ou lança 409 se não iniciado (auto-iniciar opcional)
-        async function portaOpencodeOuErro(autoIniciar = false): Promise<number> {
+        async function portaOpencodeOuErro(autoIniciar = true): Promise<number> {
           let status = await opencodeServer.status();
           if (autoIniciar && (!status.rodando || !status.porta)) {
             try {
@@ -3968,8 +3968,13 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 const criadoEmMs = m.info?.time?.created ?? 0;
                 // Não expira se a sessão estiver ativamente executando (busy) no daemon
                 const expirou = !isSessaoBusy && !m.info?.time?.completed && criadoEmMs > 0 && agora - criadoEmMs > 600_000;
-                const isCompleted = (!!m.info?.time?.completed || expirou) && (m.info as any)?.finish !== "tool-calls";
-                const textoFinal = content || (expirou ? "(geração anterior interrompida ou expirada)" : "");
+                const temErro = Boolean((m.info as any)?.error);
+                const erroDesc = temErro ? (((m.info as any)?.error as any)?.data?.message || ((m.info as any)?.error as any)?.name || "interrompido") : "";
+                // Só consideramos incompleta se a sessão ESTIVER ativamente busy no daemon E finish for "tool-calls"
+                const isCompleted = isSessaoBusy
+                  ? Boolean(m.info?.time?.completed && (m.info as any)?.finish !== "tool-calls")
+                  : Boolean(m.info?.time?.completed || expirou || temErro || !isSessaoBusy);
+                const textoFinal = content || (expirou ? "(geração anterior interrompida ou expirada)" : (temErro && !content ? `(execução interrompida: ${erroDesc})` : ""));
 
                 // Se a mensagem anterior já é do assistente (mesmo turno com múltiplos passos), consolida nela
                 const ult = mensagens[mensagens.length - 1];
@@ -4016,9 +4021,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               }
             }
 
-            // Se a sessão estiver ocupada (busy) no opencode daemon, a última mensagem do assistente ainda está em curso
-            if (isSessaoBusy && mensagens.length > 0 && mensagens[mensagens.length - 1].role === "assistant") {
-              mensagens[mensagens.length - 1].concluida = false;
+            // Se a sessão estiver ocupada (busy) no opencode daemon, a última mensagem do assistente ainda está em curso;
+            // Caso a sessão NÃO esteja ocupada no daemon, ela já encerrou (concluida = true).
+            if (mensagens.length > 0 && mensagens[mensagens.length - 1].role === "assistant") {
+              mensagens[mensagens.length - 1].concluida = isSessaoBusy ? false : true;
             }
 
             // Filtra mensagens fantasmas do assistente que ficaram 100% vazias
@@ -4696,7 +4702,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                     ...imagens.map((i) => ({ type: "file", mime: i.mime ?? "image/png", url: i.url! })),
                   ],
                 }),
-                signal: AbortSignal.timeout(600_000),
+                signal: AbortSignal.timeout(3_600_000),
               }).then(async (r) => {
                 if (!r.ok) {
                   postErro = `opencode /message respondeu HTTP ${r.status}`;
@@ -4712,15 +4718,14 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               });
 
               let inicioTentativa = Date.now();
-              const tentativaTimeoutMs = 600_000;
+              const tentativaTimeoutMs = 3_600_000;
               let vazioDesde: number | null = null;
               let tentouFallback = false;
 
               while (Date.now() - inicioTentativa < tentativaTimeoutMs) {
                 await sleep(700);
-                // o check de desconexão do cliente é no response (write side)
+                // Se o cliente desconectar (refresh de página), encerra apenas o stream SSE sem matar o agente em background
                 if (res.destroyed || res.writableEnded) {
-                  void fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
                   return;
                 }
 
@@ -4803,16 +4808,16 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                       vazioDesde = null;
                     }
                   } else {
-                    // Nenhuma mensagem assistente iniciada após 45s
+                    // Nenhuma mensagem assistente iniciada após 120s
                     if (vazioDesde === null) vazioDesde = Date.now();
-                    else if (Date.now() - vazioDesde > 45_000) {
+                    else if (Date.now() - vazioDesde > 120_000) {
                       if (modeloIdx < modelosFallback.length - 1) {
                         const proximo = modelosFallback[modeloIdx + 1];
-                        console.warn(`[secretario] Modelo ${modeloAtual} não iniciou após 45s. Alternando para ${proximo}...`);
+                        console.warn(`[secretario] Modelo ${modeloAtual} não iniciou após 120s. Alternando para ${proximo}...`);
                         sse("status", {
                           tipo: "fallback_modelo",
                           modelo: proximo,
-                          aviso: `⚠️ O modelo ${modeloAtual} demorou mais de 45s para iniciar. Alternando automaticamente para ${proximo}...`,
+                          aviso: `⚠️ O modelo ${modeloAtual} demorou mais de 120s para iniciar. Alternando automaticamente para ${proximo}...`,
                         });
                         tentouFallback = true;
                         break;

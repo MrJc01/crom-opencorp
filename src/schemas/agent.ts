@@ -14,7 +14,7 @@ export const agentSchema = z.object({
   permissions: z.enum(["level-1", "level-2", "level-3"]),
   budget: z.object({
     daily_usd: z.number().nonnegative(),
-    max_turns: z.number().int().positive(),
+    max_turns: z.number().int().nonnegative().default(0),
   }),
   /** Motor de execução preferido do agente (opencode, claude-code, antigravity, etc.) */
   harness: z.string().optional(),
