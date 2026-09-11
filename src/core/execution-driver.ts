@@ -7,6 +7,10 @@ export type TipoDriver = "sandbox" | "host" | "docker" | "podman";
 export interface LimitesRecursos {
   ramMb?: number;
   cpuPct?: number;
+  /** Quando true, isola a rede do sandbox (bwrap --unshare-net). Padrão: false (rede compartilhada). */
+  redeIsolada?: boolean;
+  /** Domínios permitidos (allowlist lógica; com rede isolada todo tráfego externo é bloqueado). */
+  dominiosPermitidos?: string[];
 }
 
 export interface OpcoesPreparacaoDriver {
@@ -104,6 +108,13 @@ export class SandboxDriver implements ExecutionDriver {
       "--unshare-ipc",
       "--die-with-parent",
     ];
+
+    // Isolamento de rede: allowlist lógica — sem domínios liberados, bloqueia rede via --unshare-net
+    const temAllowlist = (opts.limites?.dominiosPermitidos?.length ?? 0) > 0;
+    const redeIsolada = opts.limites?.redeIsolada ?? false;
+    if (redeIsolada && !temAllowlist) {
+      bwrapArgs.push("--unshare-net");
+    }
 
     if (existsSync("/lib64")) {
       bwrapArgs.unshift("--ro-bind", "/lib64", "/lib64");
@@ -222,6 +233,21 @@ async function checarBinario(bin: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Resolve o driver com precedência: agente > workspace > global.
+ * `container` é alias de `docker` para compatibilidade com frontmatter legado.
+ */
+export function escolherPreferenciaDriver(agentDriver?: string, workspaceDriver?: string, globalDriver = "sandbox"): string {
+  const norm = (v?: string) => (v ?? "").toLowerCase().trim();
+  const a = norm(agentDriver);
+  if (a === "container") return "docker";
+  if (a === "sandbox" || a === "host" || a === "docker" || a === "podman") return a;
+  const w = norm(workspaceDriver);
+  if (w === "container") return "docker";
+  if (w) return w;
+  return norm(globalDriver) || "sandbox";
 }
 
 /**

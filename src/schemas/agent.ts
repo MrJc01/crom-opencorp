@@ -30,6 +30,8 @@ export const agentSchema = z.object({
   model_fallback: z.array(z.string()).optional(),
   /** Etapa 5 — agentes de catálogo nascem desativados; legados sem o campo = ativos */
   ativo: z.boolean().default(true),
+  /** Driver de execução preferido deste agente (sandbox|host|docker|podman). Sobrescreve o global/workspace. */
+  execution_driver: z.enum(["sandbox", "host", "docker", "podman", "container"]).optional(),
   memory: z
     .object({
       reads: z.array(z.string().min(1)).default([]),

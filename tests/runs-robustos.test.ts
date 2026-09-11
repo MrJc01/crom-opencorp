@@ -19,6 +19,19 @@ import { formatarDataExecucao, dataDeExecucao } from "../src/cli/commands/monito
 
 const { execaMock } = vi.hoisted(() => ({ execaMock: vi.fn() }));
 vi.mock("execa", () => ({ execa: execaMock }));
+vi.mock("../src/core/execution-driver.js", () => ({
+  resolverDriverExecucao: async () => ({
+    tipo: "host",
+    disponivel: async () => true,
+    preparar: async (opts: any) => ({
+      driver: "host",
+      binary: opts.binary,
+      args: opts.args,
+      cwd: opts.cwd,
+      env: opts.env,
+    }),
+  }),
+}));
 
 const raizes: string[] = [];
 

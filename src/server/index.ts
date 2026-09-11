@@ -1180,23 +1180,168 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
+        // ── workspace driver info (isolation mode) ─────────────────
+        if (rota === "/workspaces/driver-info" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          try {
+            const { readFile } = await import("node:fs/promises");
+            const { existsSync } = await import("node:fs");
+            const { join } = await import("node:path");
+
+            let driverTipo = "sandbox"; // padrão de fábrica
+            let limites: { ramMb?: number; cpuPct?: number; redeIsolada?: boolean; dominiosPermitidos?: string[] } = {};
+
+            // 1. Config global
+            const globalConfigPath = join(process.env.HOME || "", ".opencorp", "config.json");
+            if (existsSync(globalConfigPath)) {
+              try {
+                const gc = JSON.parse(await readFile(globalConfigPath, "utf8"));
+                if (gc.execution_driver) driverTipo = gc.execution_driver;
+                if (gc.limites) limites = gc.limites;
+              } catch {}
+            }
+
+            // 2. Config do workspace (override)
+            const wsConfigPath = join(ws.path, ".opencorp", "config.json");
+            if (existsSync(wsConfigPath)) {
+              try {
+                const wc = JSON.parse(await readFile(wsConfigPath, "utf8"));
+                if (wc.execution_driver) driverTipo = wc.execution_driver;
+                if (wc.limites) limites = { ...limites, ...wc.limites };
+              } catch {}
+            }
+
+            // 3. Verifica disponibilidade real do driver
+            const { resolverDriverExecucao } = await import("../core/execution-driver.js");
+            const driver = await resolverDriverExecucao(driverTipo);
+
+            enviar(res, 200, {
+              ok: true,
+              workspace: ws.id,
+              driver_configurado: driverTipo,
+              driver_ativo: driver.tipo,
+              limites,
+            });
+          } catch (e: any) {
+            enviar(res, 200, { ok: true, workspace: ws.id, driver_configurado: "sandbox", driver_ativo: "host", limites: {} });
+          }
+          return;
+        }
+
+        if (rota === "/workspaces/driver-config" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as {
+            driver?: string;
+            limites?: { ramMb?: number; cpuPct?: number; redeIsolada?: boolean; dominiosPermitidos?: string[] };
+          };
+
+          try {
+            const { readFile, writeFile, mkdir } = await import("node:fs/promises");
+            const { existsSync } = await import("node:fs");
+            const { join } = await import("node:path");
+
+            const dirConfig = join(ws.path, ".opencorp");
+            if (!existsSync(dirConfig)) {
+              await mkdir(dirConfig, { recursive: true });
+            }
+            const wsConfigPath = join(dirConfig, "config.json");
+            let wc: Record<string, any> = {};
+            if (existsSync(wsConfigPath)) {
+              try {
+                wc = JSON.parse(await readFile(wsConfigPath, "utf8"));
+              } catch {}
+            }
+
+            if (corpo.driver) {
+              wc.execution_driver = corpo.driver;
+            }
+            if (corpo.limites !== undefined) {
+              wc.limites = {
+                ramMb: corpo.limites.ramMb ? Number(corpo.limites.ramMb) : undefined,
+                cpuPct: corpo.limites.cpuPct ? Number(corpo.limites.cpuPct) : undefined,
+                redeIsolada: corpo.limites.redeIsolada === true ? true : undefined,
+                dominiosPermitidos: Array.isArray(corpo.limites.dominiosPermitidos)
+                  ? corpo.limites.dominiosPermitidos.map(String)
+                  : undefined,
+              };
+            }
+
+            await writeFile(wsConfigPath, JSON.stringify(wc, null, 2), "utf8");
+
+            enviar(res, 200, {
+              ok: true,
+              workspace: ws.id,
+              driver_configurado: wc.execution_driver,
+              limites: wc.limites,
+              mensagem: "Configurações de isolamento e limites salvas com sucesso",
+            });
+          } catch (e: any) {
+            enviar(res, 500, { erro: `Falha ao salvar configuração: ${e.message || String(e)}` });
+          }
+          return;
+        }
+
         // ── workspace git ───────────────────────────────────────────
         if (rota === "/workspaces/git/log" && req.method === "GET") {
           const ws = await resolverWs(url);
           const limite = Number(url.searchParams.get("limite") || "30");
+          const arquivo = url.searchParams.get("arquivo") || undefined;
           const { WorkspaceGit } = await import("../core/workspace-git.js");
           const wsGit = new WorkspaceGit();
-          const commits = await wsGit.listarHistorico(ws.path, limite);
-          enviar(res, 200, { ok: true, workspace: ws.id, commits });
+          const commits = await wsGit.listarHistorico(ws.path, limite, arquivo);
+          enviar(res, 200, { ok: true, workspace: ws.id, arquivo, commits });
           return;
         }
         if (rota === "/workspaces/git/diff" && req.method === "GET") {
           const ws = await resolverWs(url);
           const hash = url.searchParams.get("hash") || undefined;
+          const arquivo = url.searchParams.get("arquivo") || undefined;
           const { WorkspaceGit } = await import("../core/workspace-git.js");
           const wsGit = new WorkspaceGit();
-          const diff = await wsGit.obterDiff(ws.path, hash);
-          enviar(res, 200, { ok: true, workspace: ws.id, hash, diff });
+          const diff = await wsGit.obterDiff(ws.path, hash, arquivo);
+          enviar(res, 200, { ok: true, workspace: ws.id, hash, arquivo, diff });
+          return;
+        }
+        if (rota === "/workspaces/git/status" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const status = await wsGit.obterStatusArquivos(ws.path);
+          enviar(res, 200, { ok: true, workspace: ws.id, ...status });
+          return;
+        }
+        if (rota === "/workspaces/git/restore" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { arquivo?: string; commit?: string };
+          if (!corpo.arquivo) {
+            enviar(res, 400, { ok: false, erro: "campo 'arquivo' é obrigatório" });
+            return;
+          }
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const resultado = await wsGit.restaurarArquivo(ws.path, corpo.arquivo, corpo.commit);
+          enviar(res, resultado.sucesso ? 200 : 400, resultado);
+          return;
+        }
+        if (rota === "/workspaces/git/branches" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const info = await wsGit.listarBranches(ws.path);
+          enviar(res, 200, { ok: true, workspace: ws.id, ...info });
+          return;
+        }
+        if (rota === "/workspaces/git/branch" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { nome?: string; criarNova?: boolean };
+          if (!corpo.nome) {
+            enviar(res, 400, { ok: false, erro: "campo 'nome' é obrigatório" });
+            return;
+          }
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const resultado = await wsGit.criarOuAlternarBranch(ws.path, corpo.nome, corpo.criarNova);
+          enviar(res, resultado.sucesso ? 200 : 400, resultado);
           return;
         }
         if (rota === "/workspaces/git/init" && req.method === "POST") {
@@ -1218,6 +1363,63 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const wsGit = new WorkspaceGit();
           const resultado = await wsGit.reverter(ws.path, corpo.alvo);
           enviar(res, resultado.sucesso ? 200 : 400, resultado);
+          return;
+        }
+        if (rota === "/workspaces/git/checkpoints" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const checkpoints = await wsGit.listarCheckpoints(ws.path);
+          enviar(res, 200, { ok: true, workspace: ws.id, checkpoints });
+          return;
+        }
+        if (rota === "/workspaces/git/task-branch" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { tarefa?: string; taskId?: string };
+          const id = corpo.tarefa ?? corpo.taskId;
+          if (!id) {
+            enviar(res, 400, { ok: false, erro: "campo 'tarefa' é obrigatório" });
+            return;
+          }
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const resultado = await wsGit.criarBranchTarefa(ws.path, id);
+          enviar(res, resultado.sucesso ? 200 : 400, { ok: resultado.sucesso, ...resultado });
+          return;
+        }
+        if (rota === "/workspaces/git/worktrees" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const worktrees = await wsGit.listarWorktrees(ws.path);
+          enviar(res, 200, { ok: true, workspace: ws.id, worktrees });
+          return;
+        }
+        if (rota === "/workspaces/git/worktrees" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { branch?: string; caminho?: string };
+          if (!corpo.branch) {
+            enviar(res, 400, { ok: false, erro: "campo 'branch' é obrigatório" });
+            return;
+          }
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const resultado = await wsGit.criarWorktree(ws.path, corpo.branch, corpo.caminho);
+          enviar(res, resultado.sucesso ? 200 : 400, { ok: resultado.sucesso, ...resultado });
+          return;
+        }
+        if (rota === "/workspaces/git/worktrees" && req.method === "DELETE") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { caminho?: string };
+          const caminho = corpo.caminho ?? url.searchParams.get("caminho") ?? undefined;
+          if (!caminho) {
+            enviar(res, 400, { ok: false, erro: "campo 'caminho' é obrigatório" });
+            return;
+          }
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const resultado = await wsGit.removerWorktree(ws.path, caminho);
+          enviar(res, resultado.sucesso ? 200 : 400, { ok: resultado.sucesso, ...resultado });
           return;
         }
 
@@ -1603,6 +1805,117 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             status: "iniciado",
             mensagem: `Execução reenviada como ${novoExecId} (clone de ${idOriginal}${modeloParaExecutar ? ` com modelo ${modeloParaExecutar}` : ""})`,
           });
+          return;
+        }
+
+        // ── /execucoes/:id/diff — retorna o diff e arquivos alterados pela execução ──
+        const mExecDiff = /^\/(?:execucoes|sessions)\/([^/]+)\/diff$/.exec(rota);
+        if (mExecDiff && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const idExec = decodeURIComponent(mExecDiff[1]!);
+          let wsEfetivo = ws;
+
+          try {
+            await registros.lerMeta(ws.path, "execucoes", idExec);
+          } catch {
+            const todosWs = await workspaces.listar();
+            for (const outro of todosWs) {
+              if (outro.path === ws.path) continue;
+              try {
+                await registros.lerMeta(outro.path, "execucoes", idExec);
+                wsEfetivo = { id: outro.id, path: outro.path };
+                break;
+              } catch {}
+            }
+          }
+
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          if (!wsGit.temGit(wsEfetivo.path)) {
+            enviar(res, 200, { ok: true, temGit: false, diff: "", arquivos: [] });
+            return;
+          }
+
+          try {
+            const { execa } = await import("execa");
+            // 1. Tenta achar o commit que contém [idExec] na mensagem
+            const logRes = await execa(
+              "git",
+              ["log", `--grep=[${idExec}]`, "-n", "1", "--format=%H"],
+              { cwd: wsEfetivo.path, reject: false }
+            );
+
+            const commitHash = logRes.stdout.trim();
+
+            if (commitHash) {
+              const diffCommit = await wsGit.obterDiff(wsEfetivo.path, commitHash);
+              const numstat = await execa(
+                "git",
+                ["show", "--numstat", "--format=", commitHash],
+                { cwd: wsEfetivo.path, reject: false }
+              );
+              const arquivos = numstat.stdout
+                .split("\n")
+                .filter(Boolean)
+                .map((linha) => {
+                  const partes = linha.split("\t");
+                  return { caminho: partes[2], adicionadas: partes[0], removidas: partes[1] };
+                });
+              enviar(res, 200, {
+                ok: true,
+                temGit: true,
+                diff: diffCommit,
+                arquivos,
+                commitHash,
+              });
+              return;
+            }
+
+            // 2. Se não achou commit específico, tenta pela tag checkpoint pre-execId
+            const tagRes = await execa(
+              "git",
+              ["tag", "-l", `checkpoint/pre-${idExec}`],
+              { cwd: wsEfetivo.path, reject: false }
+            );
+            if (tagRes.stdout.trim()) {
+              const diffCp = await execa(
+                "git",
+                ["diff", `checkpoint/pre-${idExec}..HEAD`],
+                { cwd: wsEfetivo.path, reject: false }
+              );
+              const numstatCp = await execa(
+                "git",
+                ["diff", "--numstat", `checkpoint/pre-${idExec}..HEAD`],
+                { cwd: wsEfetivo.path, reject: false }
+              );
+              const arquivos = numstatCp.stdout
+                .split("\n")
+                .filter(Boolean)
+                .map((linha) => {
+                  const partes = linha.split("\t");
+                  return { caminho: partes[2], adicionadas: partes[0], removidas: partes[1] };
+                });
+              enviar(res, 200, {
+                ok: true,
+                temGit: true,
+                diff: diffCp.stdout || "",
+                arquivos,
+                checkpoint: `checkpoint/pre-${idExec}`,
+              });
+              return;
+            }
+
+            // 3. Nenhuma alteração registrada
+            enviar(res, 200, {
+              ok: true,
+              temGit: true,
+              diff: "",
+              arquivos: [],
+              mensagem: "Nenhum commit ou alteração registrada para esta execução",
+            });
+          } catch (e: any) {
+            enviar(res, 500, { erro: `Falha ao obter diff da execução: ${e.message || String(e)}` });
+          }
           return;
         }
 
@@ -4760,7 +5073,6 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         // ── /secretario/conversa (proxy POST /session + POST /session/:id/message + poll) ──
         if (rota === "/secretario/conversa" && req.method === "POST") {
           try {
-            const porta = await portaOpencodeOuErro();
             const corpo = (await lerCorpo(req)) as { mensagem: string; sessao_id?: string; agente?: string; imagens?: Array<{ nome?: string; mime?: string; url?: string }>; contexto?: string[] };
             const mensagemBruta = limparPrefixoWorkspace(corpo.mensagem?.trim() || "");
             const imagens = (corpo.imagens ?? []).filter((i) => i && typeof i.url === "string" && i.url.startsWith("data:image/")).slice(0, 4);
@@ -4768,6 +5080,26 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               enviar(res, 400, { erro: "mensagem obrigatória" });
               return;
             }
+
+            // FAST-PATH: Comandos Git Slash (/git status, /git diff, /git restore, /git log)
+            if (/^(\/git|\/restore|\/descartar|\/status-git|\/rollback)/i.test(mensagemBruta)) {
+              const ws = await resolverWs(url);
+              const { processarComandoGitSecretario } = await import("../core/secretario-git-slash.js");
+              const resultadoGit = await processarComandoGitSecretario(mensagemBruta, ws.path, ws.id);
+              if (resultadoGit.tratado) {
+                enviar(res, 200, {
+                  ok: true,
+                  sessao_id: corpo.sessao_id || `sessao-git-${Date.now()}`,
+                  resposta: resultadoGit.mensagem,
+                  content: resultadoGit.mensagem,
+                  gitStatus: resultadoGit.gitStatus,
+                  gitDiff: resultadoGit.gitDiff,
+                });
+                return;
+              }
+            }
+
+            const porta = await portaOpencodeOuErro();
             // Contexto @ do composer (Etapa 2): menciona os alvos; conteúdo dos arquivos na Etapa 3.
             const contexto = (Array.isArray(corpo.contexto) ? corpo.contexto : []).map((c) => String(c).replace(/^@/, "").slice(0, 120)).filter(Boolean).slice(0, 8);
             const mensagem = contexto.length ? `${mensagemBruta}\n\n(Contexto referenciado pelo usuário: ${contexto.map((c) => "@" + c).join(" ")})` : mensagemBruta;
@@ -4922,7 +5254,6 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             res.write(`event: ${evento}\ndata: ${JSON.stringify(data)}\n\n`);
           };
           try {
-            const porta = await portaOpencodeOuErro();
             const corpo = (await lerCorpo(req)) as { mensagem?: string; prompt?: string; sessao_id?: string; agente?: string; imagens?: Array<{ nome?: string; mime?: string; url?: string }>; contexto?: string[] };
             const mensagemBruta = limparPrefixoWorkspace((corpo.mensagem ?? corpo.prompt ?? "").trim());
             const imagens = (corpo.imagens ?? []).filter((i) => i && typeof i.url === "string" && i.url.startsWith("data:image/")).slice(0, 4);
@@ -4930,6 +5261,39 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               enviar(res, 400, { erro: "mensagem obrigatória" });
               return;
             }
+
+            // FAST-PATH: Comandos Git Slash (/git status, /git diff, /git restore, /git log)
+            if (/^(\/git|\/restore|\/descartar|\/status-git|\/rollback)/i.test(mensagemBruta)) {
+              const ws = await resolverWs(url);
+              const { processarComandoGitSecretario } = await import("../core/secretario-git-slash.js");
+              const resultadoGit = await processarComandoGitSecretario(mensagemBruta, ws.path, ws.id);
+              if (resultadoGit.tratado) {
+                res.writeHead(200, {
+                  "content-type": "text/event-stream; charset=utf-8",
+                  "cache-control": "no-cache",
+                  "connection": "keep-alive",
+                  "access-control-allow-origin": "*",
+                  "x-accel-buffering": "no",
+                });
+                const sId = corpo.sessao_id || url.searchParams.get("sessao") || `sessao-git-${Date.now()}`;
+                sse("inicio", { sessao_id: sId });
+                sse("delta", {
+                  delta: resultadoGit.mensagem,
+                  gitStatus: resultadoGit.gitStatus,
+                  gitDiff: resultadoGit.gitDiff,
+                });
+                sse("fim", {
+                  content: resultadoGit.mensagem,
+                  resposta: resultadoGit.mensagem,
+                  gitStatus: resultadoGit.gitStatus,
+                  gitDiff: resultadoGit.gitDiff,
+                });
+                res.end();
+                return;
+              }
+            }
+
+            const porta = await portaOpencodeOuErro();
             // Contexto @ do composer (Etapa 2): menciona os alvos; conteúdo dos arquivos na Etapa 3.
             const contexto = (Array.isArray(corpo.contexto) ? corpo.contexto : []).map((c) => String(c).replace(/^@/, "").slice(0, 120)).filter(Boolean).slice(0, 8);
             const mensagem = contexto.length ? `${mensagemBruta}\n\n(Contexto referenciado pelo usuário: ${contexto.map((c) => "@" + c).join(" ")})` : mensagemBruta;

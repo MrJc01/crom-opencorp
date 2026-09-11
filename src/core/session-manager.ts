@@ -906,21 +906,47 @@ export class SessionManager {
 
       try {
         const { resolverDriverExecucao } = await import("./execution-driver.js");
+        const modDriver = (await import("./execution-driver.js")) as {
+          escolherPreferenciaDriver?: (agente?: string, workspace?: string, global?: string) => string;
+        };
+        const escolher = modDriver.escolherPreferenciaDriver ?? ((_ag?: string, w?: string, g = "sandbox") => w || g);
         let modoDriver = "sandbox";
-        let limites: { ramMb?: number; cpuPct?: number } | undefined;
+        let driverWorkspace: string | undefined;
+        let driverGlobal = "sandbox";
+        let limites: { ramMb?: number; cpuPct?: number; redeIsolada?: boolean; dominiosPermitidos?: string[] } | undefined;
         try {
           const cfgPath = join(ws.path, ".opencorp", "config.json");
           if (existsSync(cfgPath)) {
             const rawCfg = JSON.parse(await readFile(cfgPath, "utf8"));
-            if (rawCfg.runner?.modo) modoDriver = rawCfg.runner.modo;
-            if (rawCfg.runner?.limite_ram_mb || rawCfg.runner?.limite_cpu_pct) {
+            // Formato novo (ModalConfigIsolamento / driver-config)
+            if (rawCfg.execution_driver) driverWorkspace = String(rawCfg.execution_driver);
+            const lim = rawCfg.limites ?? {};
+            // Formato legado (runner.*) mantido por compatibilidade
+            if (rawCfg.runner?.modo && !driverWorkspace) driverWorkspace = rawCfg.runner.modo;
+            const ramMb = lim.ramMb ?? rawCfg.runner?.limite_ram_mb;
+            const cpuPct = lim.cpuPct ?? rawCfg.runner?.limite_cpu_pct;
+            const redeIsolada = lim.redeIsolada ?? rawCfg.runner?.rede_isolada;
+            const dominiosPermitidos = lim.dominiosPermitidos ?? rawCfg.runner?.dominios_permitidos;
+            if (ramMb || cpuPct || redeIsolada !== undefined || dominiosPermitidos) {
               limites = {
-                ramMb: rawCfg.runner.limite_ram_mb,
-                cpuPct: rawCfg.runner.limite_cpu_pct,
+                ramMb,
+                cpuPct,
+                redeIsolada,
+                dominiosPermitidos,
               };
             }
           }
+          try {
+            const gcPath = join(this.homeDir, ".opencorp", "config.json");
+            if (existsSync(gcPath)) {
+              const gc = JSON.parse(await readFile(gcPath, "utf8"));
+              if (gc.execution_driver) driverGlobal = String(gc.execution_driver);
+            }
+          } catch {}
         } catch {}
+        // Precedência: frontmatter do agente > workspace > global
+        const driverAgente = (ag.frontmatter as { execution_driver?: string } | undefined)?.execution_driver;
+        modoDriver = escolher(driverAgente, driverWorkspace, driverGlobal);
 
         const driver = await resolverDriverExecucao(modoDriver);
         const prep = await driver.preparar({

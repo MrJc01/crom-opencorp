@@ -245,6 +245,7 @@ export const FluxosView: Component = () => {
       const f = await fetchApi<FluxoCompleto>(`/flows/${encodeURIComponent(id)}`);
       setFluxoAtivo(f);
       setNoSelecionado(null);
+      definirHistorico([JSON.parse(JSON.stringify(f))], 0);
       setSearchParams({ fluxo: id });
       // Carrega logs de execuções ao abrir um fluxo
       void carregarLogs(id);
@@ -310,18 +311,71 @@ export const FluxosView: Component = () => {
         setMenuContexto((prev) => ({ ...prev, aberto: false }));
       }
     };
+    const atalhoTeclado = (e: KeyboardEvent) => {
+      const alvo = e.target as HTMLElement | null;
+      const digitando = alvo && (alvo.tagName === "INPUT" || alvo.tagName === "TEXTAREA" || alvo.isContentEditable);
+      if (digitando) return;
+      if (!fluxoAtivo()) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        void desfazerFluxo();
+      } else if (mod && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) {
+        e.preventDefault();
+        void refazerFluxo();
+      } else if (mod && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        const sel = noSelecionado();
+        if (sel) void duplicarNodeSelecionado(sel.id);
+      }
+    };
     window.addEventListener("click", fecharMenu);
-    return () => window.removeEventListener("click", fecharMenu);
+    window.addEventListener("keydown", atalhoTeclado);
+    return () => {
+      window.removeEventListener("click", fecharMenu);
+      window.removeEventListener("keydown", atalhoTeclado);
+    };
   });
 
+  // Histórico Undo/Redo do canvas (Ctrl+Z / Ctrl+Y)
+  const historicoFluxo = (): FluxoCompleto[] => (window as unknown as { __histFluxo?: FluxoCompleto[] }).__histFluxo ?? [];
+  const indiceHistorico = (): number => (window as unknown as { __histIdx?: number }).__histIdx ?? -1;
+  const definirHistorico = (lista: FluxoCompleto[], idx: number) => {
+    (window as unknown as { __histFluxo?: FluxoCompleto[]; __histIdx?: number }).__histFluxo = lista;
+    (window as unknown as { __histFluxo?: FluxoCompleto[]; __histIdx?: number }).__histIdx = idx;
+  };
+  const empilharHistorico = (f: FluxoCompleto) => {
+    const lista = historicoFluxo().slice(0, indiceHistorico() + 1);
+    lista.push(JSON.parse(JSON.stringify(f)));
+    if (lista.length > 50) lista.shift();
+    definirHistorico(lista, lista.length - 1);
+  };
+  const desfazerFluxo = async () => {
+    const idx = indiceHistorico();
+    if (idx <= 0) { showToast("Nada a desfazer", "info"); return; }
+    const lista = historicoFluxo();
+    const anterior = lista[idx - 1]!;
+    definirHistorico(lista, idx - 1);
+    await salvarAlteracoesWorkflow(anterior, { semEmpilhar: true });
+  };
+  const refazerFluxo = async () => {
+    const lista = historicoFluxo();
+    const idx = indiceHistorico();
+    if (idx >= lista.length - 1) { showToast("Nada a refazer", "info"); return; }
+    const proximo = lista[idx + 1]!;
+    definirHistorico(lista, idx + 1);
+    await salvarAlteracoesWorkflow(proximo, { semEmpilhar: true });
+  };
+
   // Salvar alterações do Workflow no backend
-  const salvarAlteracoesWorkflow = async (novoFluxo: FluxoCompleto) => {
+  const salvarAlteracoesWorkflow = async (novoFluxo: FluxoCompleto, opts?: { semEmpilhar?: boolean }) => {
     try {
       await fetchApi(`/flows/${encodeURIComponent(novoFluxo.id)}`, {
         method: "PUT",
         body: JSON.stringify(novoFluxo),
       });
       setFluxoAtivo(novoFluxo);
+      if (!opts?.semEmpilhar) empilharHistorico(novoFluxo);
       showToast("Fluxo atualizado!", "sucesso");
     } catch (err: any) {
       showToast(`Erro ao salvar: ${err.message}`, "erro");
@@ -1675,6 +1729,77 @@ export const FluxosView: Component = () => {
                   }}
                 </For>
               </div>
+            </div>
+
+            {/* Minimapa do canvas (canto inferior direito) */}
+            <div class="absolute bottom-3 right-3 z-20 w-[150px] h-[100px] bg-zinc-950/90 border border-zinc-700/70 rounded-lg overflow-hidden shadow-xl backdrop-blur-sm">
+              <div class="px-1.5 py-0.5 text-[8px] font-mono uppercase tracking-wider text-zinc-500 border-b border-zinc-800/60">Minimapa</div>
+              <svg viewBox="0 0 1000 600" class="w-full h-[78px]">
+                <For each={(fluxoAtivo()?.arestas || [])}>
+                  {(a) => {
+                    const nos = fluxoAtivo()?.nos || [];
+                    const de = nos.findIndex((n) => n.id === a.de);
+                    const para = nos.findIndex((n) => n.id === a.para);
+                    if (de < 0 || para < 0) return <g />;
+                    const x1 = 60 + de * 120;
+                    const y1 = 80 + (de % 4) * 120;
+                    const x2 = 60 + para * 120;
+                    const y2 = 80 + (para % 4) * 120;
+                    return <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#f97316" stroke-width="3" opacity="0.7" />;
+                  }}
+                </For>
+                <For each={(fluxoAtivo()?.nos || [])}>
+                  {(n, i) => (
+                    <g
+                      class="cursor-pointer"
+                      onClick={() => {
+                        setPan({ x: 250 - i() * 60 * zoom(), y: 150 });
+                        setNoSelecionado(n);
+                      }}
+                    >
+                      <title>{n.id} ({n.tipo})</title>
+                      <rect
+                        x={50 + i() * 120}
+                        y={60 + (i() % 4) * 120}
+                        width="80"
+                        height="40"
+                        rx="8"
+                        fill={noSelecionado()?.id === n.id ? "#f97316" : "#27272a"}
+                        stroke={noSelecionado()?.id === n.id ? "#fdba74" : "#52525b"}
+                        stroke-width="2"
+                      />
+                    </g>
+                  )}
+                </For>
+              </svg>
+            </div>
+
+            {/* Botões Undo/Redo flutuantes */}
+            <div class="absolute bottom-3 left-3 z-20 flex items-center gap-1 bg-zinc-950/90 border border-zinc-700/70 rounded-lg p-1 shadow-xl backdrop-blur-sm">
+              <button
+                type="button"
+                onClick={() => void desfazerFluxo()}
+                class="px-2 py-1 rounded text-[11px] font-mono text-zinc-300 hover:bg-zinc-800 cursor-pointer"
+                title="Desfazer (Ctrl+Z)"
+              >
+                ↩ Desfazer
+              </button>
+              <button
+                type="button"
+                onClick={() => void refazerFluxo()}
+                class="px-2 py-1 rounded text-[11px] font-mono text-zinc-300 hover:bg-zinc-800 cursor-pointer"
+                title="Refazer (Ctrl+Y)"
+              >
+                ↪ Refazer
+              </button>
+              <button
+                type="button"
+                onClick={() => { const s = noSelecionado(); if (s) void duplicarNodeSelecionado(s.id); }}
+                class="px-2 py-1 rounded text-[11px] font-mono text-zinc-300 hover:bg-zinc-800 cursor-pointer"
+                title="Duplicar nó selecionado (Ctrl+D)"
+              >
+                ⧉ Duplicar
+              </button>
             </div>
 
             {/* ─────────────────────────────────────────────────────────────

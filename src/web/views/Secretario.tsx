@@ -86,6 +86,23 @@ export const SecretarioView: Component = () => {
   const [anexos, setAnexos] = createSignal<Anexo[]>([]);
   const [filaPrompts, setFilaPrompts] = createSignal<PromptFilaItem[]>([]);
   let processandoFila = false;
+  const [alertaFalhas, setAlertaFalhas] = createSignal<string | null>(null);
+
+  const verificarAlertasFalhas = async () => {
+    try {
+      const r = await fetchApi<{ total_acoes: number; total_falhas: number; agentes: Array<{ agente: string; total: number; falhas: number }> }>("/telemetria/resumo").catch(() => null);
+      if (!r || r.total_acoes < 3) { setAlertaFalhas(null); return; }
+      const taxa = r.total_falhas / r.total_acoes;
+      const pior = [...(r.agentes || [])].sort((a, b) => b.falhas - a.falhas)[0];
+      if (r.total_falhas >= 3 && taxa >= 0.3) {
+        setAlertaFalhas(`⚠️ ${r.total_falhas} falhas em ${r.total_acoes} ações (${(taxa * 100).toFixed(0)}%)${pior ? ` — agente @${pior.agente} com ${pior.falhas} falha(s)` : ""}. Considere revisar o prompt ou trocar o modelo.`);
+      } else {
+        setAlertaFalhas(null);
+      }
+    } catch {
+      setAlertaFalhas(null);
+    }
+  };
   const [agente, setAgente] = createSignal<string>("secretario-exec");
   const [carregando, setCarregando] = createSignal(false);
   const [historicoAberto, setHistoricoAberto] = createSignal(false);
@@ -745,6 +762,15 @@ export const SecretarioView: Component = () => {
     const imgs = anexos().map((a) => a.url);
     if (!texto && imgs.length === 0) return;
 
+    // Interceptação rápida do comando /clear na interface
+    if (texto === "/clear") {
+      setMensagens([]);
+      setInputValor("");
+      setAnexos([]);
+      showToast("Histórico de mensagens da tela limpo", "info");
+      return;
+    }
+
     // Se havia mensagem do assistente pendente, fecha antes do novo envio
     setMensagens((prev) => {
       const ult = prev[prev.length - 1];
@@ -864,6 +890,13 @@ export const SecretarioView: Component = () => {
               if (ultIdx < 0) return prev;
               const assistente = { ...prev[ultIdx] };
 
+              if (payload.gitStatus) {
+                assistente.gitStatus = payload.gitStatus;
+              }
+              if (payload.gitDiff) {
+                assistente.gitDiff = payload.gitDiff;
+              }
+
               if (evtType === "status" || evtType === "fallback_modelo") {
                 if (payload.aviso) {
                   showToast(payload.aviso, "aviso");
@@ -950,6 +983,12 @@ export const SecretarioView: Component = () => {
                 assistente.concluida = true;
                 if (payload.resposta && !assistente.content) {
                   assistente.content = payload.resposta;
+                }
+                if (payload.gitStatus) {
+                  assistente.gitStatus = payload.gitStatus;
+                }
+                if (payload.gitDiff) {
+                  assistente.gitDiff = payload.gitDiff;
                 }
               } else if (evtType === "erro") {
                 assistente.concluida = true;
@@ -1049,6 +1088,8 @@ export const SecretarioView: Component = () => {
   onMount(() => {
     void carregarSessoes();
     void carregarAgentesEMotores();
+    void verificarAlertasFalhas();
+    const timerAlertas = setInterval(() => void verificarAlertasFalhas(), 60000);
 
     // Sincronização entre abas gêmeas via BroadcastChannel
     if (syncChannel) {
@@ -1097,6 +1138,7 @@ export const SecretarioView: Component = () => {
     onCleanup(() => {
       window.removeEventListener("focus", onFoco);
       window.removeEventListener("secretario:mensagem", onSseSecretario);
+      clearInterval(timerAlertas);
       if (syncChannel) {
         try { syncChannel.close(); } catch {}
       }
@@ -1122,6 +1164,15 @@ export const SecretarioView: Component = () => {
 
   return (
     <div class="flex flex-col h-full w-full overflow-hidden bg-zinc-950 relative">
+      <Show when={alertaFalhas()}>
+        <div class="mx-3 mt-2 px-3 py-2 rounded-xl bg-amber-950/50 border border-amber-700/50 text-[12px] text-amber-200 flex items-center gap-2">
+          <AlertCircle size={14} class="text-amber-400 flex-shrink-0" />
+          <span class="flex-1">{alertaFalhas()}</span>
+          <button type="button" onClick={() => setAlertaFalhas(null)} class="text-amber-400 hover:text-amber-200 cursor-pointer" title="Dispensar">
+            <X size={13} />
+          </button>
+        </div>
+      </Show>
       <UniversalChat
         mensagens={mensagens()}
         carregando={carregando()}

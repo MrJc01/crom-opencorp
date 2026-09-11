@@ -25,6 +25,8 @@ import {
   ChevronDown,
   ChevronRight,
   Gauge,
+  GitCommit,
+  FileText,
 } from "lucide-solid";
 import { useSearchParams, useNavigate } from "@solidjs/router";
 import { Button } from "../ui/Button";
@@ -87,11 +89,17 @@ export const HistoricoView: Component = () => {
   const [runSelecionado, setRunSelecionado] = createSignal<any | null>(null);
   const [logRun, setLogRun] = createSignal<string>("");
   const [carregandoLog, setCarregandoLog] = createSignal(false);
-  const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal" | "telemetria">("chat");
+  const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal" | "telemetria" | "diff">("chat");
   const [encerrando, setEncerrando] = createSignal(false);
   const [reenviando, setReenviando] = createSignal(false);
   const [tempoRealAtivo, setTempoRealAtivo] = createSignal(true);
   const [ultimaAtualizacao, setUltimaAtualizacao] = createSignal<string>("");
+
+  // Estados de Diff de Arquivos
+  const [diffRun, setDiffRun] = createSignal<string>("");
+  const [arquivosDiff, setArquivosDiff] = createSignal<Array<{ caminho: string; adicionadas: string; removidas: string }>>([]);
+  const [carregandoDiff, setCarregandoDiff] = createSignal(false);
+  const [commitHashDiff, setCommitHashDiff] = createSignal<string | null>(null);
 
   // Estados de Telemetria e Spans
   const [acoesRun, setAcoesRun] = createSignal<AcaoAgente[]>([]);
@@ -278,6 +286,24 @@ export const HistoricoView: Component = () => {
       .catch(() => setAcoesRun([]))
       .finally(() => setCarregandoAcoes(false));
 
+    // Carregar diff de arquivos do Git gerado por esta sessão
+    setCarregandoDiff(true);
+    setDiffRun("");
+    setArquivosDiff([]);
+    setCommitHashDiff(null);
+    fetchApi<{ ok?: boolean; diff?: string; arquivos?: any[]; commitHash?: string }>(
+      `/execucoes/${encodeURIComponent(runId)}/diff`
+    )
+      .then((res) => {
+        if (res && res.ok) {
+          setDiffRun(res.diff || "");
+          setArquivosDiff(res.arquivos || []);
+          setCommitHashDiff(res.commitHash || null);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setCarregandoDiff(false));
+
     if (liveLogInterval) {
       clearInterval(liveLogInterval);
       liveLogInterval = null;
@@ -347,6 +373,61 @@ export const HistoricoView: Component = () => {
     a.download = `${runSelecionado()?.id || "exec"}.log`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const pontosLatenciaCusto = () => {
+    const porModelo = new Map<string, { total: number; somaMs: number; custo: number; falhas: number }>();
+    for (const a of acoesRun()) {
+      const m = a.modelo || "desconhecido";
+      const e = porModelo.get(m) ?? { total: 0, somaMs: 0, custo: 0, falhas: 0 };
+      e.total += 1;
+      e.somaMs += a.duracao_ms ?? 0;
+      e.custo += a.custo_usd ?? 0;
+      if (a.status !== "sucesso") e.falhas += 1;
+      porModelo.set(m, e);
+    }
+    return [...porModelo.entries()].map(([modelo, v]) => ({
+      modelo,
+      total: v.total,
+      mediaMs: v.total ? Math.round(v.somaMs / v.total) : 0,
+      custo: v.custo,
+      falhas: v.falhas,
+    }));
+  };
+
+  const exportarTelemetria = (formato: "csv" | "json") => {
+    const acoes = acoesRun();
+    if (acoes.length === 0) { showToast("Nada a exportar", "aviso"); return; }
+    const nome = `telemetria-${runSelecionado()?.id || "exec"}.${formato}`;
+    let blob: Blob;
+    if (formato === "json") {
+      blob = new Blob([JSON.stringify(acoes, null, 2)], { type: "application/json;charset=utf-8" });
+    } else {
+      const cab = "id;trace_id;span_id;agente;modelo;tipo_acao;ferramenta;status;duracao_ms;custo_usd;erro\n";
+      const linhas = acoes.map((a) =>
+        [a.id, a.trace_id, a.span_id, a.agente, a.modelo, a.tipo_acao, a.ferramenta ?? "", a.status, a.duracao_ms ?? "", a.custo_usd ?? "", (a.erro ?? "").replace(/[\r\n;]+/g, " ")].join(";")
+      );
+      blob = new Blob([cab + linhas.join("\n")], { type: "text/csv;charset=utf-8" });
+    }
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement("a");
+    el.href = url;
+    el.download = nome;
+    el.click();
+    URL.revokeObjectURL(url);
+    showToast(`Telemetria exportada: ${nome}`, "sucesso");
+  };
+
+  const restaurarArquivoDoDiff = async (caminho: string) => {
+    try {
+      const data = await fetchApi<{ sucesso: boolean; mensagem: string }>("/workspaces/git/restore", {
+        method: "POST",
+        body: JSON.stringify({ arquivo: caminho }),
+      });
+      showToast(data.mensagem, data.sucesso ? "sucesso" : "erro");
+    } catch (e: unknown) {
+      showToast(`Erro: ${e instanceof Error ? e.message : String(e)}`, "erro");
+    }
   };
 
   const encerrarExecucao = async () => {
@@ -903,6 +984,18 @@ export const HistoricoView: Component = () => {
                     <Terminal size={13} class="text-emerald-400" />
                     <span>Terminal Raw</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setModoVisualizacao("diff")}
+                    class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                      modoVisualizacao() === "diff"
+                        ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    <GitCommit size={13} class="text-amber-400" />
+                    <span>Diff de Arquivos {arquivosDiff().length > 0 ? `(${arquivosDiff().length})` : ""}</span>
+                  </button>
                 </div>
 
                 <Button size="xs" variant="ghost" onClick={copiarLog} title="Copiar log bruto">
@@ -1030,7 +1123,51 @@ export const HistoricoView: Component = () => {
                             {acoesRun().filter((a) => a.status !== "sucesso").length} falhas
                           </span>
                         </Show>
+                        <button
+                          type="button"
+                          onClick={() => exportarTelemetria("csv")}
+                          class="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono hover:bg-zinc-700 cursor-pointer"
+                          title="Exportar telemetria em CSV"
+                        >
+                          ⬇ CSV
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => exportarTelemetria("json")}
+                          class="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono hover:bg-zinc-700 cursor-pointer"
+                          title="Exportar telemetria em JSON"
+                        >
+                          ⬇ JSON
+                        </button>
                       </div>
+                    </div>
+
+                    {/* Gráfico Latência vs Custo por modelo */}
+                    <div class="bg-zinc-950/70 border border-zinc-800 rounded-xl p-3 text-xs">
+                      <div class="text-[11px] font-semibold text-zinc-300 mb-2">Latência vs Custo por modelo</div>
+                      <svg viewBox="0 0 400 160" class="w-full h-[160px] bg-zinc-900/60 rounded-lg border border-zinc-800/60">
+                        <line x1="30" y1="10" x2="30" y2="140" stroke="#52525b" stroke-width="1" />
+                        <line x1="30" y1="140" x2="390" y2="140" stroke="#52525b" stroke-width="1" />
+                        <text x="6" y="80" fill="#71717a" font-size="9" transform="rotate(-90 6 80)">ms</text>
+                        <text x="330" y="155" fill="#71717a" font-size="9">custo USD →</text>
+                        <For each={pontosLatenciaCusto()}>
+                          {(p) => (
+                            <g>
+                              <title>{`${p.modelo}: ${p.mediaMs}ms médios, $${p.custo.toFixed(4)}`}</title>
+                              <circle
+                                cx={30 + Math.min(p.custo * 4000, 340)}
+                                cy={140 - Math.min(p.mediaMs / 20, 120)}
+                                r={4 + Math.min(p.total, 10)}
+                                fill={p.falhas > 0 ? "#f43f5e" : "#38bdf8"}
+                                opacity="0.85"
+                              />
+                              <text x={36 + Math.min(p.custo * 4000, 340)} y={144 - Math.min(p.mediaMs / 20, 120)} fill="#a1a1aa" font-size="8" font-family="monospace">
+                                {p.modelo.slice(0, 18)}
+                              </text>
+                            </g>
+                          )}
+                        </For>
+                      </svg>
                     </div>
 
                     {/* Timeline de Ações / Spans */}
@@ -1169,6 +1306,103 @@ export const HistoricoView: Component = () => {
                                   </Show>
                                 </div>
                               </Show>
+                            </div>
+                          );
+                        }}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
+              </Show>
+
+              <Show when={modoVisualizacao() === "diff"}>
+                <div class="flex-1 overflow-y-auto scrollbar-thin p-1 flex flex-col space-y-3">
+                  <Show when={carregandoDiff()}>
+                    <div class="py-16 text-center text-xs text-zinc-400">
+                      <RefreshCw size={18} class="animate-spin mx-auto mb-2 text-amber-400" />
+                      Calculando diff de arquivos do Git para esta execução...
+                    </div>
+                  </Show>
+
+                  <Show when={!carregandoDiff() && !diffRun().trim()}>
+                    <div class="py-16 text-center text-xs text-zinc-500 bg-zinc-950/40 rounded-xl border border-zinc-800/80 p-6">
+                      <GitCommit size={28} class="mx-auto mb-2 text-zinc-600 opacity-60" />
+                      <p class="font-medium text-zinc-300">Nenhum arquivo alterado nesta execução</p>
+                      <p class="text-[11px] text-zinc-500 mt-1 max-w-sm mx-auto">
+                        Esta sessão não gerou modificações na working tree ou os arquivos gerados foram descartados.
+                      </p>
+                    </div>
+                  </Show>
+
+                  <Show when={!carregandoDiff() && diffRun().trim()}>
+                    {/* Header Resumo dos Arquivos Alterados */}
+                    <div class="bg-zinc-950/80 border border-zinc-800/80 rounded-xl p-3 flex-shrink-0">
+                      <div class="flex items-center justify-between mb-2 pb-2 border-b border-zinc-800/60">
+                        <div class="flex items-center gap-2">
+                          <GitCommit size={14} class="text-amber-400" />
+                          <span class="text-xs font-semibold text-zinc-200">
+                            {arquivosDiff().length > 0 ? `${arquivosDiff().length} arquivo(s) modificado(s)` : "Diff Registrado"}
+                          </span>
+                        </div>
+                        <Show when={commitHashDiff()}>
+                          <span class="text-[10px] font-mono bg-zinc-800/80 text-zinc-300 px-2 py-0.5 rounded border border-zinc-700">
+                            commit: {commitHashDiff()!.slice(0, 8)}
+                          </span>
+                        </Show>
+                      </div>
+
+                      <Show when={arquivosDiff().length > 0}>
+                        <div class="flex flex-wrap gap-1.5">
+                          <For each={arquivosDiff()}>
+                            {(arq) => (
+                              <div class="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 text-[11px] px-2 py-0.5 rounded-md font-mono">
+                                <FileText size={11} class="text-zinc-500" />
+                                <span class="text-zinc-300 truncate max-w-xs">{arq.caminho}</span>
+                                <Show when={arq.adicionadas && arq.adicionadas !== "-"}>
+                                  <span class="text-emerald-400 text-[10px]">+{arq.adicionadas}</span>
+                                </Show>
+                                <Show when={arq.removidas && arq.removidas !== "-"}>
+                                  <span class="text-rose-400 text-[10px]">-{arq.removidas}</span>
+                                </Show>
+                                <button
+                                  type="button"
+                                  onClick={() => void restaurarArquivoDoDiff(arq.caminho)}
+                                  class="ml-1 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 hover:text-amber-300 text-[10px] cursor-pointer"
+                                  title={`Restaurar ${arq.caminho} (descartar alterações)`}
+                                >
+                                  ↩ restaurar
+                                </button>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
+                    </div>
+
+                    {/* Exibição formatada do Git Diff */}
+                    <div class="flex-1 bg-black/95 p-3 rounded-xl border border-zinc-800 text-[11px] font-mono overflow-y-auto leading-relaxed scrollbar-thin select-text">
+                      <For each={diffRun().split("\n")}>
+                        {(linha) => {
+                          const isAdd = linha.startsWith("+") && !linha.startsWith("+++");
+                          const isDel = linha.startsWith("-") && !linha.startsWith("---");
+                          const isChunk = linha.startsWith("@@");
+                          const isHeader = linha.startsWith("diff --git") || linha.startsWith("index ");
+
+                          return (
+                            <div
+                              class={`px-1.5 py-0.5 rounded-xs transition-colors ${
+                                isAdd
+                                  ? "bg-emerald-950/40 text-emerald-300"
+                                  : isDel
+                                  ? "bg-rose-950/40 text-rose-300"
+                                  : isChunk
+                                  ? "bg-sky-950/30 text-sky-400 font-bold border-t border-b border-sky-900/40 my-1"
+                                  : isHeader
+                                  ? "text-amber-400/90 font-bold mt-2 pt-1 border-t border-zinc-800"
+                                  : "text-zinc-400"
+                              }`}
+                            >
+                              {linha || " "}
                             </div>
                           );
                         }}

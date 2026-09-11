@@ -164,18 +164,19 @@ export function registerWorkspaceCommands(program: Command): void {
   gitCmd
     .command("log [id]")
     .option("-n, --limite <n>", "quantidade máxima de commits", "20")
+    .option("-f, --file <caminho>", "filtra commits que alteraram este arquivo")
     .description("lista o histórico de commits e alterações dos agentes")
-    .action((id: string | undefined, opts: { limite?: string }) =>
+    .action((id: string | undefined, opts: { limite?: string; file?: string }) =>
       comErros(async () => {
         const alvo = await manager.resolver(id);
         const { WorkspaceGit } = await import("../../core/workspace-git.js");
         const wsGit = new WorkspaceGit();
-        const commits = await wsGit.listarHistorico(alvo.path, Number(opts.limite || "20"));
+        const commits = await wsGit.listarHistorico(alvo.path, Number(opts.limite || "20"), opts.file);
         if (commits.length === 0) {
-          console.log(`[${alvo.id}] nenhum commit registrado ou repositório não inicializado`);
+          console.log(`[${alvo.id}] nenhum commit registrado para este critério`);
           return;
         }
-        console.log(`\n=== Histórico Git: Workspace "${alvo.id}" (${commits.length} commits) ===`);
+        console.log(`\n=== Histórico Git: Workspace "${alvo.id}"${opts.file ? ` (${opts.file})` : ""} (${commits.length} commits) ===`);
         for (const c of commits) {
           const dataFmt = new Date(c.data).toLocaleString("pt-BR");
           console.log(`  \x1b[33m${c.hashCurto}\x1b[0m \x1b[36m[${c.autor}]\x1b[0m \x1b[90m${dataFmt}\x1b[0m — ${c.mensagem}`);
@@ -187,18 +188,160 @@ export function registerWorkspaceCommands(program: Command): void {
   gitCmd
     .command("diff [hash]")
     .option("-w, --workspace <id>", "id do workspace")
+    .option("-f, --file <caminho>", "filtra o diff para um arquivo específico")
     .description("mostra o diff de um commit específico ou das mudanças atuais não commitadas")
-    .action((hash: string | undefined, opts: { workspace?: string }) =>
+    .action((hash: string | undefined, opts: { workspace?: string; file?: string }) =>
       comErros(async () => {
         const alvo = await manager.resolver(opts.workspace);
         const { WorkspaceGit } = await import("../../core/workspace-git.js");
         const wsGit = new WorkspaceGit();
-        const diff = await wsGit.obterDiff(alvo.path, hash);
+        const diff = await wsGit.obterDiff(alvo.path, hash, opts.file);
         if (!diff.trim()) {
           console.log(`[${alvo.id}] nenhuma alteração encontrada no diff`);
           return;
         }
         console.log(diff);
+      }),
+    );
+
+  gitCmd
+    .command("status [id]")
+    .description("lista o status cirúrgico de arquivos do workspace (modificados, staged, untracked)")
+    .action((id?: string) =>
+      comErros(async () => {
+        const alvo = await manager.resolver(id);
+        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const wsGit = new WorkspaceGit();
+        const status = await wsGit.obterStatusArquivos(alvo.path);
+        console.log(`\n=== Status Git: Workspace "${alvo.id}" (branch: \x1b[32m${status.branch}\x1b[0m) ===`);
+        if (status.limpo) {
+          console.log("  \x1b[90mNenhuma alteração pendente (working tree limpo)\x1b[0m\n");
+          return;
+        }
+        for (const a of status.arquivos) {
+          const cor =
+            a.status === "untracked"
+              ? "\x1b[36m"
+              : a.status === "deletado"
+                ? "\x1b[31m"
+                : a.status === "adicionado"
+                  ? "\x1b[32m"
+                  : "\x1b[33m";
+          const tagStaged = a.staged ? " [staged]" : "";
+          console.log(`  ${cor}${a.status.padEnd(12)}\x1b[0m ${a.caminho}${tagStaged}`);
+        }
+        console.log("");
+      }),
+    );
+
+  gitCmd
+    .command("restore <arquivo>")
+    .option("-w, --workspace <id>", "id do workspace")
+    .option("--from <commit>", "commit específico do qual restaurar o arquivo")
+    .description("restaura um arquivo cirurgicamente para um commit ou descarta suas alterações locais")
+    .action((arquivo: string, opts: { workspace?: string; from?: string }) =>
+      comErros(async () => {
+        const alvo = await manager.resolver(opts.workspace);
+        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const wsGit = new WorkspaceGit();
+        const res = await wsGit.restaurarArquivo(alvo.path, arquivo, opts.from);
+        if (res.sucesso) {
+          console.log(`ok: ${res.mensagem}`);
+        } else {
+          console.error(`erro: ${res.mensagem}`);
+          process.exitCode = 1;
+        }
+      }),
+    );
+
+  gitCmd
+    .command("branch [nome]")
+    .option("-w, --workspace <id>", "id do workspace")
+    .option("-c, --create", "cria uma nova branch e alterna para ela")
+    .description("lista as branches do workspace ou alterna/cria uma nova branch")
+    .action((nome: string | undefined, opts: { workspace?: string; create?: boolean }) =>
+      comErros(async () => {
+        const alvo = await manager.resolver(opts.workspace);
+        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const wsGit = new WorkspaceGit();
+        if (!nome) {
+          const info = await wsGit.listarBranches(alvo.path);
+          console.log(`\n=== Branches: Workspace "${alvo.id}" ===`);
+          for (const b of info.branches) {
+            const prefixo = b === info.atual ? "\x1b[32m* " : "  ";
+            console.log(`${prefixo}${b}\x1b[0m`);
+          }
+          console.log("");
+          return;
+        }
+        const res = await wsGit.criarOuAlternarBranch(alvo.path, nome, opts.create ?? false);
+        if (res.sucesso) {
+          console.log(`ok: ${res.mensagem}`);
+        } else {
+          console.error(`erro: ${res.mensagem}`);
+          process.exitCode = 1;
+        }
+      }),
+    );
+
+  gitCmd
+    .command("checkpoints [id]")
+    .description("lista checkpoints pre-execução (tags checkpoint/pre-*) para reversão")
+    .action((id?: string) =>
+      comErros(async () => {
+        const alvo = await manager.resolver(id);
+        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const wsGit = new WorkspaceGit();
+        const cps = await wsGit.listarCheckpoints(alvo.path);
+        if (cps.length === 0) { console.log(`[${alvo.id}] nenhum checkpoint registrado`); return; }
+        console.log(`\n=== Checkpoints: "${alvo.id}" (${cps.length}) ===`);
+        for (const c of cps) console.log(`  ${c.tag}  ${c.hash}  ${c.data}`);
+        console.log("");
+      }),
+    );
+
+  gitCmd
+    .command("task-branch <tarefa>")
+    .option("-w, --workspace <id>", "id do workspace")
+    .description("cria/alterna para branch isolada task/<id> (one task, one branch)")
+    .action((tarefa: string, opts: { workspace?: string }) =>
+      comErros(async () => {
+        const alvo = await manager.resolver(opts.workspace);
+        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const wsGit = new WorkspaceGit();
+        const res = await wsGit.criarBranchTarefa(alvo.path, tarefa);
+        if (res.sucesso) console.log(`ok: ${res.mensagem}`);
+        else { console.error(`erro: ${res.mensagem}`); process.exitCode = 1; }
+      }),
+    );
+
+  gitCmd
+    .command("worktree [branch]")
+    .option("-w, --workspace <id>", "id do workspace")
+    .option("--list", "lista worktrees")
+    .option("--remove <caminho>", "remove worktree")
+    .option("--path <caminho>", "caminho destino da worktree")
+    .description("gerencia git worktrees para agentes concorrentes")
+    .action((branch: string | undefined, opts: { workspace?: string; list?: boolean; remove?: string; path?: string }) =>
+      comErros(async () => {
+        const alvo = await manager.resolver(opts.workspace);
+        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const wsGit = new WorkspaceGit();
+        if (opts.remove) {
+          const res = await wsGit.removerWorktree(alvo.path, opts.remove);
+          if (res.sucesso) console.log(`ok: ${res.mensagem}`);
+          else { console.error(`erro: ${res.mensagem}`); process.exitCode = 1; }
+          return;
+        }
+        if (opts.list || !branch) {
+          const wts = await wsGit.listarWorktrees(alvo.path);
+          if (wts.length === 0) { console.log(`[${alvo.id}] nenhuma worktree`); return; }
+          for (const w of wts) console.log(`  ${w.caminho}  [${w.branch}] ${w.hash}`);
+          return;
+        }
+        const res = await wsGit.criarWorktree(alvo.path, branch, opts.path);
+        if (res.sucesso) console.log(`ok: ${res.mensagem}`);
+        else { console.error(`erro: ${res.mensagem}`); process.exitCode = 1; }
       }),
     );
 

@@ -619,6 +619,25 @@ export class Scheduler {
         .prepare("UPDATE jobs SET ultima_exec = ?, proxima_exec = ?, ativo = ? WHERE id = ? AND proxima_exec = ?")
         .run(agora.toISOString(), proxima, desativar ? 0 : 1, job.id, job.proxima_exec);
       if (claim.changes !== 1) continue; // outro daemon/processo já assumiu este tick
+      // Governança Git pré-execução (best-effort): checkpoint + auto-commit de resíduos
+      // do ciclo anterior para que jobs baseados em script também versionem o workspace.
+      // Não altera o fluxo de execução — falhas aqui são silenciosas.
+      if (job.workspace) {
+        try {
+          const { WorkspaceManager } = await import("./workspace-manager.js");
+          const { WorkspaceGit } = await import("./workspace-git.js");
+          const wm = new WorkspaceManager({ homeDir: this.homeDir });
+          const wsInfo = await wm.resolver(job.workspace).catch(() => null);
+          if (wsInfo) {
+            const wsGit = new WorkspaceGit();
+            const execId = `sch-${job.id}-${agora.getTime().toString(36)}`;
+            await wsGit.criarCheckpoint(wsInfo.path, execId).catch(() => null);
+            await wsGit.autoCommit(wsInfo.path, `scheduler:${job.nome}`, `ciclo anterior do job ${job.nome}`, execId).catch(() => null);
+          }
+        } catch {
+          /* best-effort */
+        }
+      }
       try {
         const resultado = await this.executarFn(job);
         await this.registrarRun(job, { resultado });

@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, rmSync } from "node:fs";
+import { join, resolve, relative } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { execa } from "execa";
 
@@ -11,6 +11,18 @@ export interface CommitInfo {
   data: string;
   mensagem: string;
   arquivosAlterados?: number;
+}
+
+export interface StatusItemGit {
+  caminho: string;
+  status: "modificado" | "adicionado" | "deletado" | "renomeado" | "untracked";
+  staged: boolean;
+}
+
+export interface StatusWorkspaceGit {
+  limpo: boolean;
+  branch: string;
+  arquivos: StatusItemGit[];
 }
 
 export const GITIGNORE_PADRAO_WORKSPACE = `# ==============================================================================
@@ -29,6 +41,8 @@ logs/
 *.log
 *.jsonl
 .opencorp/events.jsonl
+.opencorp/logs/
+.opencorp/cron/
 
 # 3. Mídia Pesada, Renderizações e Banco de Imagens
 exports/videos/
@@ -49,6 +63,11 @@ __pycache__/
 .opencorp/sessions/
 .opencorp/approvals/*.json
 .opencorp/tokens.json
+
+# 6. Runtime e Cache do OpenCode
+.opencode
+.opencorp/opencode/
+.opencorp/opencode-data/
 `;
 
 export class WorkspaceGit {
@@ -81,7 +100,10 @@ export class WorkspaceGit {
       modificado = true;
     }
     if (!atual.includes("logs/")) {
-      novoConteudo += "\nlogs/\n*.log\n*.jsonl\n";
+      novoConteudo += "\nlogs/\n*.log\n*.jsonl\n.opencorp/logs/\n";
+      modificado = true;
+    } else if (!atual.includes(".opencorp/logs/")) {
+      novoConteudo += "\n.opencorp/logs/\n";
       modificado = true;
     }
     if (modificado) {
@@ -216,18 +238,19 @@ export class WorkspaceGit {
 
   /**
    * Lista o histórico de commits do workspace com metadados estruturados.
+   * Se caminhoArquivo for fornecido, filtra os commits que alteraram aquele arquivo.
    */
-  async listarHistorico(wsPath: string, limite = 30): Promise<CommitInfo[]> {
+  async listarHistorico(wsPath: string, limite = 30, caminhoArquivo?: string): Promise<CommitInfo[]> {
     if (!this.temGit(wsPath)) return [];
 
     try {
       const delimitador = "§§";
       const formato = `%H${delimitador}%h${delimitador}%an${delimitador}%ae${delimitador}%aI${delimitador}%s`;
-      const res = await execa(
-        "git",
-        ["log", `-n${limite}`, `--pretty=format:${formato}`],
-        { cwd: wsPath, reject: false },
-      );
+      const args = ["log", `-n${limite}`, `--pretty=format:${formato}`];
+      if (caminhoArquivo) {
+        args.push("--", caminhoArquivo);
+      }
+      const res = await execa("git", args, { cwd: wsPath, reject: false });
 
       if (res.exitCode !== 0 || !res.stdout.trim()) {
         return [];
@@ -258,19 +281,28 @@ export class WorkspaceGit {
 
   /**
    * Obtém o diff de um commit específico ou as mudanças não commitadas atuais.
+   * Se caminhoArquivo for fornecido, filtra o diff apenas para aquele arquivo.
    */
-  async obterDiff(wsPath: string, commitHash?: string): Promise<string> {
+  async obterDiff(wsPath: string, commitHash?: string, caminhoArquivo?: string): Promise<string> {
     if (!this.temGit(wsPath)) return "";
 
     try {
       if (commitHash) {
         // Diff do commit contra o anterior
-        const res = await execa("git", ["show", "--stat", "-p", commitHash], { cwd: wsPath, reject: false });
+        const args = ["show", "--stat", "-p", commitHash];
+        if (caminhoArquivo) {
+          args.push("--", caminhoArquivo);
+        }
+        const res = await execa("git", args, { cwd: wsPath, reject: false });
         return res.stdout || "";
       }
 
       // Diff uncommitted atual (staged + unstaged)
-      const res = await execa("git", ["diff", "HEAD"], { cwd: wsPath, reject: false });
+      const args = ["diff", "HEAD"];
+      if (caminhoArquivo) {
+        args.push("--", caminhoArquivo);
+      }
+      const res = await execa("git", args, { cwd: wsPath, reject: false });
       return res.stdout || "";
     } catch {
       return "";
@@ -316,4 +348,317 @@ export class WorkspaceGit {
       return { sucesso: false, mensagem: `Falha ao reverter: ${msgErro}` };
     }
   }
+
+  /**
+   * Obtém o status granular dos arquivos no workspace (modificados, untracked, deletados).
+   */
+  async obterStatusArquivos(wsPath: string): Promise<StatusWorkspaceGit> {
+    if (!this.temGit(wsPath)) {
+      return { limpo: true, branch: "main", arquivos: [] };
+    }
+
+    try {
+      let branch = "main";
+      try {
+        const b = await execa("git", ["branch", "--show-current"], { cwd: wsPath, reject: false });
+        if (b.stdout.trim()) branch = b.stdout.trim();
+      } catch {}
+
+      const res = await execa("git", ["status", "--porcelain=v1"], { cwd: wsPath, reject: false });
+      if (res.exitCode !== 0 || !res.stdout.trim()) {
+        return { limpo: true, branch, arquivos: [] };
+      }
+
+      const linhas = res.stdout.split("\n").filter((l) => l.trim().length >= 3);
+      const arquivos: StatusItemGit[] = [];
+
+      for (const l of linhas) {
+        const x = l[0] ?? " ";
+        const y = l[1] ?? " ";
+        const caminho = l.slice(3).trim();
+
+        let status: StatusItemGit["status"] = "modificado";
+        let staged = false;
+
+        if (x === "?" && y === "?") {
+          status = "untracked";
+        } else if (x === "A" || y === "A") {
+          status = "adicionado";
+          staged = x === "A";
+        } else if (x === "D" || y === "D") {
+          status = "deletado";
+          staged = x === "D";
+        } else if (x === "R" || y === "R") {
+          status = "renomeado";
+          staged = x === "R";
+        } else {
+          status = "modificado";
+          staged = x === "M";
+        }
+
+        arquivos.push({ caminho, status, staged });
+      }
+
+      return {
+        limpo: arquivos.length === 0,
+        branch,
+        arquivos,
+      };
+    } catch {
+      return { limpo: true, branch: "main", arquivos: [] };
+    }
+  }
+
+  /**
+   * Restaura ou descarta alterações de um arquivo ESPECÍFICO (cirúrgico).
+   * Se commitHash for fornecido, restaura o arquivo para a versão daquele commit.
+   * Se commitHash não for fornecido, descarta as alterações locais não comitadas do arquivo.
+   */
+  async restaurarArquivo(
+    wsPath: string,
+    caminhoArquivo: string,
+    commitHash?: string,
+  ): Promise<{ sucesso: boolean; mensagem: string }> {
+    if (!this.temGit(wsPath)) {
+      return { sucesso: false, mensagem: "Workspace não possui repositório Git" };
+    }
+
+    // Proteção de path traversal
+    const normalizado = relative(wsPath, resolve(wsPath, caminhoArquivo));
+    if (normalizado.startsWith("..") || normalizado.includes("\0")) {
+      return { sucesso: false, mensagem: "Caminho de arquivo inválido ou fora do workspace" };
+    }
+
+    try {
+      if (commitHash) {
+        // Restaura arquivo a partir de um commit específico
+        const res = await execa("git", ["checkout", commitHash, "--", normalizado], {
+          cwd: wsPath,
+          reject: false,
+        });
+        if (res.exitCode === 0) {
+          return {
+            sucesso: true,
+            mensagem: `Arquivo "${normalizado}" restaurado com sucesso para a versão ${commitHash.slice(0, 7)}`,
+          };
+        }
+        // Fallback para git restore se checkout falhar
+        const resRestore = await execa(
+          "git",
+          ["restore", `--source=${commitHash}`, "--", normalizado],
+          { cwd: wsPath, reject: false },
+        );
+        if (resRestore.exitCode === 0) {
+          return {
+            sucesso: true,
+            mensagem: `Arquivo "${normalizado}" restaurado com sucesso para a versão ${commitHash.slice(0, 7)}`,
+          };
+        }
+        return {
+          sucesso: false,
+          mensagem: `Falha ao restaurar arquivo: ${res.stderr || resRestore.stderr || "commit ou arquivo não encontrado"}`,
+        };
+      }
+
+      // Sem commitHash: descarta alterações locais
+      // 1. Verifica se é um arquivo untracked
+      const statusRes = await execa("git", ["status", "--porcelain", "--", normalizado], {
+        cwd: wsPath,
+        reject: false,
+      });
+
+      if (statusRes.stdout.trim().startsWith("??")) {
+        // Arquivo untracked -> remove com segurança
+        const fullPath = join(wsPath, normalizado);
+        if (existsSync(fullPath)) {
+          rmSync(fullPath, { force: true, recursive: true });
+        }
+        return {
+          sucesso: true,
+          mensagem: `Arquivo não-rastreado "${normalizado}" removido com sucesso`,
+        };
+      }
+
+      // Arquivo rastreado modificado -> descarta alterações da working tree
+      const resCheckout = await execa("git", ["checkout", "HEAD", "--", normalizado], {
+        cwd: wsPath,
+        reject: false,
+      });
+
+      if (resCheckout.exitCode === 0) {
+        return {
+          sucesso: true,
+          mensagem: `Alterações locais no arquivo "${normalizado}" descartadas com sucesso`,
+        };
+      }
+
+      const resRestore = await execa("git", ["restore", "--", normalizado], {
+        cwd: wsPath,
+        reject: false,
+      });
+
+      if (resRestore.exitCode === 0) {
+        return {
+          sucesso: true,
+          mensagem: `Alterações locais no arquivo "${normalizado}" descartadas com sucesso`,
+        };
+      }
+
+      return {
+        sucesso: false,
+        mensagem: `Não foi possível descartar alterações do arquivo: ${resCheckout.stderr || resRestore.stderr}`,
+      };
+    } catch (erro) {
+      const msgErro = erro instanceof Error ? erro.message : String(erro);
+      return { sucesso: false, mensagem: `Erro ao processar arquivo: ${msgErro}` };
+    }
+  }
+
+  /**
+   * Lista as branches do workspace.
+   */
+  async listarBranches(wsPath: string): Promise<{ atual: string; branches: string[] }> {
+    if (!this.temGit(wsPath)) return { atual: "main", branches: ["main"] };
+
+    try {
+      const res = await execa("git", ["branch", "--list"], { cwd: wsPath, reject: false });
+      if (res.exitCode !== 0 || !res.stdout.trim()) {
+        return { atual: "main", branches: ["main"] };
+      }
+
+      const linhas = res.stdout.split("\n");
+      let atual = "main";
+      const branches: string[] = [];
+
+      for (const l of linhas) {
+        const limpa = l.replace("*", "").trim();
+        if (!limpa) continue;
+        branches.push(limpa);
+        if (l.trim().startsWith("*")) {
+          atual = limpa;
+        }
+      }
+
+      return { atual, branches };
+    } catch {
+      return { atual: "main", branches: ["main"] };
+    }
+  }
+
+  /**
+   * Cria ou alterna para uma branch no workspace.
+   */
+  async criarOuAlternarBranch(
+    wsPath: string,
+    nomeBranch: string,
+    criarNova = false,
+  ): Promise<{ sucesso: boolean; mensagem: string }> {
+    if (!this.temGit(wsPath)) {
+      return { sucesso: false, mensagem: "Workspace não possui repositório Git" };
+    }
+
+    const safeBranch = nomeBranch.trim().replace(/[^a-zA-Z0-9._\-/]/g, "-");
+    if (!safeBranch) {
+      return { sucesso: false, mensagem: "Nome de branch inválido" };
+    }
+
+    try {
+      const args = criarNova ? ["checkout", "-B", safeBranch] : ["checkout", safeBranch];
+      const res = await execa("git", args, { cwd: wsPath, reject: false });
+      if (res.exitCode === 0) {
+        return { sucesso: true, mensagem: `Alternado para a branch "${safeBranch}"` };
+      }
+      return { sucesso: false, mensagem: `Falha ao alternar branch: ${res.stderr}` };
+    } catch (erro) {
+      const msgErro = erro instanceof Error ? erro.message : String(erro);
+      return { sucesso: false, mensagem: `Erro na operação de branch: ${msgErro}` };
+    }
+  }
+
+  /**
+   * Lista checkpoints (tags checkpoint/pre-*) com hash e data.
+   */
+  async listarCheckpoints(wsPath: string): Promise<Array<{ tag: string; execId: string; hash: string; data: string }>> {
+    if (!this.temGit(wsPath)) return [];
+    try {
+      const res = await execa("git", ["tag", "-l", "checkpoint/pre-*", "--format=%(refname:short)%09%(objectname:short)%09%(creatordate:iso)"], { cwd: wsPath, reject: false });
+      if (res.exitCode !== 0 || !res.stdout.trim()) return [];
+      return res.stdout.trim().split("\n").map((l) => {
+        const [tag = "", hash = "", data = ""] = l.split("\t");
+        return { tag, execId: tag.replace("checkpoint/pre-", ""), hash, data };
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Cria branch isolada por tarefa (task/<id>) a partir da branch atual.
+   */
+  async criarBranchTarefa(wsPath: string, tarefaId: string): Promise<{ sucesso: boolean; mensagem: string; branch?: string }> {
+    if (!this.temGit(wsPath)) {
+      return { sucesso: false, mensagem: "Workspace não possui repositório Git" };
+    }
+    const safe = tarefaId.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+    if (!safe) return { sucesso: false, mensagem: "ID de tarefa inválido" };
+    const branch = `task/${safe}`;
+    try {
+      const res = await execa("git", ["checkout", "-B", branch], { cwd: wsPath, reject: false });
+      if (res.exitCode === 0) return { sucesso: true, mensagem: `Branch de tarefa "${branch}" criada`, branch };
+      return { sucesso: false, mensagem: `Falha ao criar branch: ${res.stderr}` };
+    } catch (erro) {
+      return { sucesso: false, mensagem: `Erro: ${erro instanceof Error ? erro.message : String(erro)}` };
+    }
+  }
+
+  /**
+   * Git worktrees para execuções paralelas isoladas.
+   */
+  async listarWorktrees(wsPath: string): Promise<Array<{ caminho: string; hash: string; branch: string }>> {
+    if (!this.temGit(wsPath)) return [];
+    try {
+      const res = await execa("git", ["worktree", "list", "--porcelain"], { cwd: wsPath, reject: false });
+      if (res.exitCode !== 0 || !res.stdout.trim()) return [];
+      const out: Array<{ caminho: string; hash: string; branch: string }> = [];
+      let cur: { caminho?: string; hash?: string; branch?: string } = {};
+      for (const l of res.stdout.split("\n")) {
+        if (l.startsWith("worktree ")) { if (cur.caminho) out.push({ caminho: cur.caminho, hash: cur.hash ?? "", branch: cur.branch ?? "" }); cur = { caminho: l.slice(9).trim() }; }
+        else if (l.startsWith("HEAD ")) cur.hash = l.slice(5).trim().slice(0, 7);
+        else if (l.startsWith("branch ")) cur.branch = l.slice(7).trim();
+      }
+      if (cur.caminho) out.push({ caminho: cur.caminho, hash: cur.hash ?? "", branch: cur.branch ?? "" });
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  async criarWorktree(wsPath: string, branch: string, caminho?: string): Promise<{ sucesso: boolean; mensagem: string; caminho?: string }> {
+    if (!this.temGit(wsPath)) return { sucesso: false, mensagem: "Workspace não possui repositório Git" };
+    const safeBranch = branch.trim().replace(/[^a-zA-Z0-9._\-/]/g, "-");
+    if (!safeBranch) return { sucesso: false, mensagem: "Branch inválida" };
+    const destino = caminho ?? join(wsPath, ".opencorp", "worktrees", safeBranch.replace(/\//g, "-"));
+    try {
+      const res = await execa("git", ["worktree", "add", "-B", safeBranch, destino], { cwd: wsPath, reject: false });
+      if (res.exitCode === 0) return { sucesso: true, mensagem: `Worktree criada em ${destino}`, caminho: destino };
+      return { sucesso: false, mensagem: `Falha: ${res.stderr}` };
+    } catch (erro) {
+      return { sucesso: false, mensagem: `Erro: ${erro instanceof Error ? erro.message : String(erro)}` };
+    }
+  }
+
+  async removerWorktree(wsPath: string, caminho: string, forcar = true): Promise<{ sucesso: boolean; mensagem: string }> {
+    const normalizado = relative(wsPath, resolve(wsPath, caminho));
+    if (normalizado.startsWith("..")) return { sucesso: false, mensagem: "Caminho fora do workspace" };
+    try {
+      const args = ["worktree", "remove", forcar ? "--force" : "", normalizado].filter(Boolean);
+      const res = await execa("git", args, { cwd: wsPath, reject: false });
+      if (res.exitCode === 0) return { sucesso: true, mensagem: "Worktree removida" };
+      return { sucesso: false, mensagem: `Falha: ${res.stderr}` };
+    } catch (erro) {
+      return { sucesso: false, mensagem: `Erro: ${erro instanceof Error ? erro.message : String(erro)}` };
+    }
+  }
 }
+
+export const workspaceGit = new WorkspaceGit();

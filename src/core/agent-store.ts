@@ -59,6 +59,7 @@ export function serializarFrontmatter(ag: Agente): string {
   if (ag.rotation && ag.rotation.length > 0) saida += linhaFrontmatter("rotation", listaInline(ag.rotation));
   if (ag.model_fallback && ag.model_fallback.length > 0) saida += linhaFrontmatter("model_fallback", listaInline(ag.model_fallback));
   if (ag.inherits) saida += linhaFrontmatter("inherits", ag.inherits);
+  if ((ag as { execution_driver?: string }).execution_driver) saida += linhaFrontmatter("execution_driver", String((ag as { execution_driver?: string }).execution_driver));
   saida += linhaFrontmatter("tools", listaInline(ag.tools));
   saida += linhaFrontmatter("permissions", ag.permissions);
   saida += "budget:\n";

@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, Show, For } from "solid-js";
+import { type Component, createSignal, onMount, createEffect, Show, For } from "solid-js";
 import { useLocation, A } from "@solidjs/router";
 import {
   Radio,
@@ -22,8 +22,12 @@ import {
   Menu,
   Building2,
   ChevronsUpDown,
+  Shield,
+  Zap,
+  Container,
 } from "lucide-solid";
 import { sseConnected, wsAtivo, setWsAtivo, workspaces, fetchApi, notificacoesNaoLidas, setSidebarMobileAberta } from "../lib/context";
+import { ModalConfigIsolamento } from "./ModalConfigIsolamento";
 
 interface StatusInfo {
   scheduler?: boolean;
@@ -62,8 +66,37 @@ interface StatusInfo {
 export const Topbar: Component = () => {
   const location = useLocation();
   const [hoverCard, setHoverCard] = createSignal(false);
+  const [modalIsolamentoAberto, setModalIsolamentoAberto] = createSignal(false);
   const [statusInfo, setStatusInfo] = createSignal<StatusInfo>({ versao: "0.7.0" });
+  const [driverInfo, setDriverInfo] = createSignal<{
+    driver_configurado: string;
+    driver_ativo: string;
+    limites: { ramMb?: number; cpuPct?: number };
+  } | null>(null);
   let timerHover: number | undefined;
+
+  const carregarDriverInfo = () => {
+    const ws = wsAtivo();
+    if (!ws) {
+      setDriverInfo(null);
+      return;
+    }
+    void fetchApi<any>("/workspaces/driver-info")
+      .then((res) => {
+        if (res && res.ok) {
+          setDriverInfo({
+            driver_configurado: res.driver_configurado,
+            driver_ativo: res.driver_ativo,
+            limites: res.limites || {},
+          });
+        }
+      })
+      .catch(() => setDriverInfo(null));
+  };
+
+  createEffect(() => {
+    carregarDriverInfo();
+  });
 
   const getBreadcrumb = () => {
     const p = location.pathname.replace(/^\//, "") || "home";
@@ -235,6 +268,55 @@ export const Topbar: Component = () => {
 
         <span class="text-zinc-600 hidden sm:inline">/</span>
         <span class="text-zinc-200 font-semibold truncate hidden sm:inline">{getBreadcrumb()}</span>
+
+        {/* Badge de Isolamento (Sandbox / Host / Container) - Clicável para Configuração */}
+        <Show when={wsAtivo() && driverInfo()}>
+          <button
+            type="button"
+            id="badge-driver-isolamento"
+            onClick={() => setModalIsolamentoAberto(true)}
+            class={`hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px] font-mono font-medium transition-all select-none shrink-0 cursor-pointer hover:opacity-90 hover:scale-[1.02] active:scale-95 ${
+              driverInfo()?.driver_ativo === "sandbox"
+                ? "bg-emerald-950/40 border-emerald-800/60 text-emerald-300 hover:border-emerald-600"
+                : driverInfo()?.driver_ativo === "host"
+                ? "bg-amber-950/40 border-amber-800/60 text-amber-300 hover:border-amber-600"
+                : "bg-blue-950/40 border-blue-800/60 text-blue-300 hover:border-blue-600"
+            }`}
+            title={`Driver de Execução: ${driverInfo()?.driver_ativo?.toUpperCase()} (configurado: ${driverInfo()?.driver_configurado})${
+              driverInfo()?.limites?.ramMb ? ` | RAM: ${driverInfo()?.limites.ramMb}MB` : ""
+            }${
+              driverInfo()?.limites?.cpuPct ? ` | CPU: ${driverInfo()?.limites.cpuPct}%` : ""
+            } — Clique para configurar`}
+          >
+            <Show
+              when={driverInfo()?.driver_ativo === "sandbox"}
+              fallback={
+                <Show
+                  when={driverInfo()?.driver_ativo === "host"}
+                  fallback={
+                    <>
+                      <Container size={12} class="text-blue-400" />
+                      <span>Container</span>
+                    </>
+                  }
+                >
+                  <Zap size={12} class="text-amber-400" />
+                  <span>Host</span>
+                </Show>
+              }
+            >
+              <Shield size={12} class="text-emerald-400" />
+              <span>Sandbox</span>
+            </Show>
+            <Show when={driverInfo()?.limites?.ramMb || driverInfo()?.limites?.cpuPct}>
+              <span class="opacity-70 border-l border-current/30 pl-1.5 text-[10px]">
+                {driverInfo()?.limites?.ramMb ? `${driverInfo()?.limites.ramMb}MB` : ""}
+                {driverInfo()?.limites?.ramMb && driverInfo()?.limites?.cpuPct ? "·" : ""}
+                {driverInfo()?.limites?.cpuPct ? `${driverInfo()?.limites.cpuPct}%` : ""}
+              </span>
+            </Show>
+          </button>
+        </Show>
       </div>
 
       {/* Ações e Controles à Direita */}
@@ -480,6 +562,14 @@ export const Topbar: Component = () => {
           </Show>
         </div>
       </div>
+
+      {/* Modal de Configuração de Isolamento e Limites */}
+      <ModalConfigIsolamento
+        open={modalIsolamentoAberto()}
+        onClose={() => setModalIsolamentoAberto(false)}
+        driverAtual={driverInfo()}
+        onSalvo={carregarDriverInfo}
+      />
     </header>
   );
 };

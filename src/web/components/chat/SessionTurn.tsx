@@ -21,6 +21,7 @@ import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
 import { renderMarkdown, processarDiagramasMermaid } from "../../md.js";
 import type { ChatMensagem, TurnoPasso, AcaoItem, ItemPergunta } from "./types";
+import { GitStatusCard, GitDiffViewCard } from "./GitStatusCard";
 
 export type { ChatMensagem, TurnoPasso, AcaoItem, ItemPergunta };
 
@@ -484,6 +485,22 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
     return match ? match[1] : null;
   });
 
+  // Detecta caminhos de arquivo mencionados (`pasta/arquivo.ext`) para cards clicáveis de preview
+  const arquivosDetectados = createMemo(() => {
+    const texto = m().content || "";
+    const achados = new Set<string>();
+    const re = /`((?:[\w\-\.~]+\/)+[\w\-\.~]+\.\w{1,5})`/g;
+    let mt: RegExpExecArray | null;
+    while ((mt = re.exec(texto)) !== null && achados.size < 5) {
+      achados.add(mt[1]!);
+    }
+    const re2 = /^CREATED_FILE:\s*(.+)$/gim;
+    while ((mt = re2.exec(texto)) !== null && achados.size < 5) {
+      achados.add(mt[1]!.trim());
+    }
+    return [...achados];
+  });
+
   const copiar = async () => {
     const texto = m().content || "";
     if (!texto) {
@@ -694,6 +711,35 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
                 class="text-sm text-zinc-100 leading-relaxed font-sans break-words select-text my-1"
                 innerHTML={renderMarkdown(m().content)}
               />
+            </Show>
+
+            {/* Card Interativo de Git Status */}
+            <Show when={m().gitStatus}>
+              <GitStatusCard status={m().gitStatus!} />
+            </Show>
+
+            {/* Card de Git Diff */}
+            <Show when={m().gitDiff}>
+              <GitDiffViewCard diff={m().gitDiff!.diff} arquivo={m().gitDiff!.arquivo} />
+            </Show>
+
+            {/* Cards de arquivos gerados/mencionados no chat */}
+            <Show when={arquivosDetectados().length > 0}>
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <For each={arquivosDetectados()}>
+                  {(arq) => (
+                    <a
+                      href={`/workspace?arquivo=${encodeURIComponent(arq)}`}
+                      class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-700/70 text-[11px] font-mono text-zinc-200 hover:border-emerald-500/60 hover:text-emerald-200 transition-colors"
+                      title={`Abrir ${arq} no workspace`}
+                    >
+                      <span>📄</span>
+                      <span class="truncate max-w-[220px]">{arq}</span>
+                      <span class="text-zinc-500">↗</span>
+                    </a>
+                  )}
+                </For>
+              </div>
             </Show>
           </>
         }

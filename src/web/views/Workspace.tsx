@@ -36,12 +36,15 @@ import {
   ExternalLink,
   Sparkles,
   FileCode,
+  GitBranch,
+  RotateCcw,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
 import { fetchApi, wsAtivo, setWsAtivo } from "../lib/context";
 import { renderDocMarkdown } from "../lib/doc-renderer";
+import { GitVersionPanel } from "../components/GitVersionPanel";
 
 export interface NoArvoreWeb {
   nome: string;
@@ -94,6 +97,7 @@ export const WorkspaceView: Component = () => {
   const [arvore, setArvore] = createSignal<NoArvoreWeb[]>([]);
   const [carregandoArvore, setCarregandoArvore] = createSignal(false);
   const [expandidos, setExpandidos] = createSignal<Set<string>>(new Set());
+  const [gitPainelAberto, setGitPainelAberto] = createSignal(false);
 
   // Menu de contexto e operações
   const [menuContexto, setMenuContexto] = createSignal<MenuContextoState>({
@@ -375,6 +379,27 @@ export const WorkspaceView: Component = () => {
     showToast(`Caminho "${caminho}" copiado!`, "sucesso");
   };
 
+  const descartarAlteracoesArquivo = async (caminho: string) => {
+    fecharMenuContexto();
+    try {
+      const res = await fetchApi<{ sucesso: boolean; mensagem: string }>("/workspaces/git/restore", {
+        method: "POST",
+        body: JSON.stringify({ arquivo: caminho }),
+      });
+      if (res.sucesso) {
+        showToast(res.mensagem, "sucesso");
+        if (abaAtiva() === caminho) {
+          void abrirArquivo(caminho, false);
+        }
+        void carregarArvore();
+      } else {
+        showToast(res.mensagem || "Falha ao descartar alterações", "erro");
+      }
+    } catch (err: any) {
+      showToast(`Erro ao restaurar: ${err.message}`, "erro");
+    }
+  };
+
   const confirmarAcaoArquivo = async () => {
     const estado = modalArquivo();
     const valor = estado.valor.trim();
@@ -647,6 +672,14 @@ export const WorkspaceView: Component = () => {
             <IconButton
               size="xs"
               variant="ghost"
+              onClick={() => setGitPainelAberto(!gitPainelAberto())}
+              title="Versões & Git (commits e diffs)"
+            >
+              <GitBranch size={13} class={gitPainelAberto() ? "text-purple-400" : ""} />
+            </IconButton>
+            <IconButton
+              size="xs"
+              variant="ghost"
               onClick={carregarArvore}
               title="Atualizar árvore"
             >
@@ -680,6 +713,12 @@ export const WorkspaceView: Component = () => {
             )}
           </For>
         </div>
+
+        {/* Painel Git de Versões, Commits & Rollback */}
+        <GitVersionPanel
+          visible={gitPainelAberto()}
+          onToggle={() => setGitPainelAberto(!gitPainelAberto())}
+        />
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
@@ -1189,6 +1228,18 @@ export const WorkspaceView: Component = () => {
                   <Copy size={14} class="text-zinc-400" />
                   <span>Copiar Caminho</span>
                 </button>
+
+                {/* Descartar Alterações Git (apenas arquivos) */}
+                <Show when={no().tipo === "arquivo"}>
+                  <button
+                    type="button"
+                    onClick={() => descartarAlteracoesArquivo(no().caminho)}
+                    class="w-full px-2.5 py-1.5 rounded-lg hover:bg-amber-950/40 text-amber-400 hover:text-amber-300 flex items-center gap-2 text-left cursor-pointer transition-colors"
+                  >
+                    <RotateCcw size={14} />
+                    <span>Descartar Alterações (Git)</span>
+                  </button>
+                </Show>
 
                 <div class="my-1 border-t border-zinc-800" />
 

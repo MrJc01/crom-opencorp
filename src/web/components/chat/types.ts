@@ -30,6 +30,25 @@ export type TurnoPasso =
   | { tipo: "pergunta"; pergunta: string; opcoes: string[]; perguntas?: ItemPergunta[] }
   | { tipo: "texto"; texto: string };
 
+export interface GitArquivoCard {
+  arquivo: string;
+  status: string; // 'M' | '?' | 'A' | 'D'
+  adicionadas?: number;
+  removidas?: number;
+}
+
+export interface GitStatusPayload {
+  workspace: string;
+  branch?: string;
+  arquivos: GitArquivoCard[];
+  clean: boolean;
+}
+
+export interface GitDiffPayload {
+  arquivo?: string;
+  diff: string;
+}
+
 export interface ChatMensagem {
   id?: string;
   indice_global?: number;
@@ -52,6 +71,8 @@ export interface ChatMensagem {
     ordem: string;
     motivo_guard: string;
   };
+  gitStatus?: GitStatusPayload;
+  gitDiff?: GitDiffPayload;
 }
 
 export interface PaginacaoMensagens {
