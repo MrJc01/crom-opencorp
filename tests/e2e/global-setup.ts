@@ -1,6 +1,8 @@
-import { rm, mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { rm, mkdir, writeFile, cp } from "node:fs/promises";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const E2E_HOME = "/tmp/opencorp-e2e";
 
 export default async function globalSetup(): Promise<void> {
@@ -9,17 +11,21 @@ export default async function globalSetup(): Promise<void> {
   await mkdir(join(E2E_HOME, "logs"), { recursive: true });
   await mkdir(join(E2E_HOME, "workspaces"), { recursive: true });
 
+  const templatesAgents = join(__dirname, "..", "..", "templates", "default", ".opencorp", "agents");
+
   // Criar workspace e2e-corp
   const wsDir = join(E2E_HOME, "workspaces", "e2e-corp");
   await mkdir(wsDir, { recursive: true });
   await mkdir(join(wsDir, ".opencorp"), { recursive: true });
   await writeFile(join(wsDir, ".opencorp", "config.json"), "{}");
+  await cp(templatesAgents, join(wsDir, ".opencorp", "agents"), { recursive: true }).catch(() => {});
 
   // Criar workspace outo-ws para testes de alternância
   const wsDir2 = join(E2E_HOME, "workspaces", "outro-ws");
   await mkdir(wsDir2, { recursive: true });
   await mkdir(join(wsDir2, ".opencorp"), { recursive: true });
   await writeFile(join(wsDir2, ".opencorp", "config.json"), "{}");
+  await cp(templatesAgents, join(wsDir2, ".opencorp", "agents"), { recursive: true }).catch(() => {});
 
   // Registrar workspaces no arquivo de workspaces ativos
   const workspacesConfig = {

@@ -1,13 +1,13 @@
 import { test, expect } from "@playwright/test";
-import { logado, seederEmpresaBasica, api, esperarNavegacao, esperarElementoTexto } from "./helpers.js";
+import { logado, seederEmpresaBasica, api, esperarNavegacao } from "./helpers.js";
 
 const views = [
-  { hash: "home", titulo: "Informações importantes" },
-  { hash: "tasks", titulo: "Tasks" },
-  { hash: "fluxos", titulo: "Fluxos" },
-  { hash: "historico", titulo: "Histórico" },
-  { hash: "secretario", titulo: "Secretário" },
-  { hash: "apps", titulo: "Apps" },
+  { path: "home", seletor: "h1:has-text('Painel de Operações')" },
+  { path: "tasks", seletor: "h1:has-text('Quadro Kanban')" },
+  { path: "fluxos", seletor: "h1:has-text('Fluxos')" },
+  { path: "historico", seletor: "h1:has-text('Histórico')" },
+  { path: "secretario", seletor: "#chat-input" },
+  { path: "apps", seletor: "h1:has-text('Mini-Apps')" },
 ];
 
 test.describe("Navegação Sidebar", () => {
@@ -17,51 +17,59 @@ test.describe("Navegação Sidebar", () => {
   });
 
   for (const view of views) {
-    test(`clicar em ${view.titulo} muda hash para #/${view.hash} e renderiza título`, async ({ page }) => {
-      await page.goto("/");
-      await esperarNavegacao(page, "home");
-      // Clica no item da sidebar
-      const navItem = page.locator(`.nav-item[data-view="${view.hash}"]`);
+    test(`clicar em ${view.path} navega para /${view.path}`, async ({ page }) => {
+      // Inicia em rota diferente para garantir transição real
+      const pontoPartida = view.path === "home" ? "tasks" : "home";
+      await page.goto(`/${pontoPartida}`);
+      await esperarNavegacao(page, pontoPartida);
+
+      // Clica no item correspondente da sidebar
+      const navItem = page.locator(`aside a[href="/${view.path}"], .nav-item[data-view="${view.path}"]`).first();
+      await expect(navItem).toBeVisible();
       await navItem.click();
+
       // Aguarda navegação
-      await page.waitForURL(`**/#/${view.hash}`);
-      // Verifica se o título da view aparece
-      await esperarElementoTexto(page, view.titulo);
-      // Verifica se a view está ativa
-      const viewEl = page.locator(`#view-${view.hash}`);
-      await expect(viewEl).toHaveClass(/active/);
+      await page.waitForURL(`**/${view.path}*`);
+      await expect(page).toHaveURL(new RegExp(`/${view.path}`));
+
+      // Verifica que o elemento identificador da página está visível
+      await expect(page.locator(view.seletor).first()).toBeVisible({ timeout: 10000 });
     });
   }
 
-  test("Reuniões saiu do navbar (P-13) mas a rota #/reunioes continua funcionando como aba do Secretário", async ({ page }) => {
-    await page.goto("/");
+  test("rota com hash legado #/reunioes redireciona para /reunioes", async ({ page }) => {
+    await page.goto("/home");
     await esperarNavegacao(page, "home");
-    await expect(page.locator('.nav-item[data-view="reunioes"]')).toHaveCount(0);
     await page.evaluate(() => { window.location.hash = "#/reunioes"; });
-    await page.waitForURL("**/#/reunioes");
-    await esperarElementoTexto(page, "Reuniões");
-    // Reuniões vive DENTRO da página do Secretário (aba) — PLANO-WEB-CRUD D
-    await expect(page.locator("#view-secretario")).toHaveClass(/active/);
+    await page.waitForURL("**/reunioes*");
+    await expect(page).toHaveURL(/\/reunioes/);
+    await expect(page.locator("main").getByText("Reunião", { exact: false }).first()).toBeVisible({ timeout: 10000 });
   });
 
-  test("botão recolher esconde labels do navbar e persiste após reload (P-14)", async ({ page }) => {
-    await page.goto("/");
+  test("botão recolher altera largura da sidebar e persiste após reload", async ({ page }) => {
+    await page.goto("/home");
     await esperarNavegacao(page, "home");
-    await expect(page.locator("body")).not.toHaveClass(/sidebar-colapsada/);
 
-    await page.click("#sidebar-collapse-btn");
-    await expect(page.locator("body")).toHaveClass(/sidebar-colapsada/);
-    await expect(page.locator(".nav-label").first()).toBeHidden();
-    await expect(page.locator("#nav-icon-tasks")).toBeVisible();
+    const aside = page.locator("aside");
+    await expect(aside).toBeVisible();
+    await expect(aside).toHaveClass(/md:w-60/);
+
+    // Clica no botão de recolher da sidebar desktop
+    const btnColapso = page.locator('aside button[title*="menu"], aside button[title*="Recolher"], aside button[title*="Expandir"], #sidebar-collapse-btn').last();
+    await expect(btnColapso).toBeVisible();
+    await btnColapso.click();
+
+    // Sidebar fica recolhida
+    await expect(aside).toHaveClass(/md:w-16/);
 
     // Persistência: recarrega e o estado colapsado volta
     await page.reload();
     await esperarNavegacao(page, "home");
-    await expect(page.locator("body")).toHaveClass(/sidebar-colapsada/);
+    await expect(aside).toHaveClass(/md:w-16/);
 
-    // Volta ao normal
-    await page.click("#sidebar-collapse-btn");
-    await expect(page.locator("body")).not.toHaveClass(/sidebar-colapsada/);
-    await expect(page.locator(".nav-label").first()).toBeVisible();
+    // Volta ao normal (expande)
+    const btnExpansao = page.locator('aside button[title*="menu"], aside button[title*="Recolher"], aside button[title*="Expandir"], #sidebar-collapse-btn').last();
+    await btnExpansao.click();
+    await expect(aside).toHaveClass(/md:w-60/);
   });
 });

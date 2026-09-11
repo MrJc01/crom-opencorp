@@ -39,6 +39,7 @@ import { taskCreateSchema } from "../schemas/task.js";
 import { SecretsStore, type SecretOrigem } from "../core/secrets-store.js";
 import { completarChatDirect, testarModeloDirect, listarProvedoresStatus } from "../core/llm-client.js";
 import { engineRegistry, getEngineAuthInstructions, checkEngineAuthStatus, EngineAccountStore, WebLoginOrchestrator } from "../core/engines/index.js";
+import { TelemetryCollector, gerarTraceId, type TraceContext } from "../core/telemetry-collector.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
@@ -1707,6 +1708,58 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             limite: Math.min(Number(url.searchParams.get("limite")) || 100, 500),
           };
           enviar(res, 200, registros.corpDb(ws.path).listarExecucoes(filtro));
+          return;
+        }
+
+        // ── /telemetria/resumo — agregação de métricas de telemetria de agentes ──
+        if (rota === "/telemetria/resumo" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const filtro = {
+            sessao_id: url.searchParams.get("sessao_id")?.trim() || undefined,
+            trace_id: url.searchParams.get("trace_id")?.trim() || undefined,
+            agente: url.searchParams.get("agente")?.trim() || undefined,
+            ferramenta: url.searchParams.get("ferramenta")?.trim() || undefined,
+            status: url.searchParams.get("status")?.trim() || undefined,
+            desde: url.searchParams.get("desde")?.trim() || undefined,
+            ate: url.searchParams.get("ate")?.trim() || undefined,
+          };
+          enviar(res, 200, registros.corpDb(ws.path).resumoTelemetria(filtro));
+          return;
+        }
+
+        // ── /telemetria/trace/:trace_id — timeline completa de um trace ──
+        const mTrace = /^\/telemetria\/trace\/([^/]+)$/.exec(rota);
+        if (mTrace && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const traceId = decodeURIComponent(mTrace[1]!);
+          enviar(res, 200, registros.corpDb(ws.path).listarAcoesPorTrace(traceId));
+          return;
+        }
+
+        // ── /acoes — listagem flexível de ações granulares de agentes ──
+        if (rota === "/acoes" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const filtro = {
+            sessao_id: url.searchParams.get("sessao_id")?.trim() || undefined,
+            trace_id: url.searchParams.get("trace_id")?.trim() || undefined,
+            agente: url.searchParams.get("agente")?.trim() || undefined,
+            ferramenta: url.searchParams.get("ferramenta")?.trim() || undefined,
+            status: url.searchParams.get("status")?.trim() || undefined,
+            desde: url.searchParams.get("desde")?.trim() || undefined,
+            ate: url.searchParams.get("ate")?.trim() || undefined,
+            limite: Math.min(Number(url.searchParams.get("limite")) || 200, 1000),
+          };
+          enviar(res, 200, registros.corpDb(ws.path).listarAcoes(filtro));
+          return;
+        }
+
+        // ── /acoes/:sessao_id — ações detalhadas de uma sessão específica ──
+        const mAcoesSessao = /^\/acoes\/([^/]+)$/.exec(rota);
+        if (mAcoesSessao && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const sessaoId = decodeURIComponent(mAcoesSessao[1]!);
+          const limite = Math.min(Number(url.searchParams.get("limite")) || 500, 1000);
+          enviar(res, 200, registros.corpDb(ws.path).listarAcoesSessao(sessaoId, limite));
           return;
         }
 
@@ -5204,6 +5257,25 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             const passosFinais = extrairPassosMensagens(novasFinais);
             if (passosFinais.length > 0) {
               sse("passos", { passos: passosFinais });
+
+              // ── Telemetria: persistir ações do agente ──────────
+              try {
+                const tc = TelemetryCollector.obter();
+                const wsStream = wsParaCfgStream ?? (await resolverWs(url).catch(() => ({ path: process.cwd() })));
+                const db = registros.corpDb(wsStream.path);
+                tc.conectar(db);
+                const traceCtx: TraceContext = {
+                  trace_id: gerarTraceId(),
+                  sessao_id: sessaoId!,
+                  agente,
+                  modelo: modelosFallback[modeloIdx % modelosFallback.length] ?? "desconhecido",
+                  workspace: wsStream.path,
+                };
+                tc.registrarPassos(traceCtx, passosFinais);
+                tc.flush();
+              } catch (telErr) {
+                console.warn("[telemetria] falha ao registrar passos:", telErr);
+              }
             }
 
             const respostaFinal = enviado || (totalAcoes > 0 ? "Ação concluída." : "Processamento concluído.");

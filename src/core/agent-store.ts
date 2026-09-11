@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, mkdirSync, cpSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -95,7 +95,17 @@ export class AgentStore {
 
   async listar(wsPath: string): Promise<AgenteResumo[]> {
     const dir = this.dirAgentes(wsPath);
-    if (!existsSync(dir)) return [];
+    if (!existsSync(dir) || readdirSync(dir).filter((f) => f.endsWith(".md")).length === 0) {
+      const templateAgents = join(this.templatesDir, "default", ".opencorp", "agents");
+      if (existsSync(templateAgents)) {
+        try {
+          mkdirSync(dir, { recursive: true });
+          cpSync(templateAgents, dir, { recursive: true });
+        } catch {}
+      } else if (!existsSync(dir)) {
+        return [];
+      }
+    }
     return readdirSync(dir)
       .filter((f) => f.endsWith(".md"))
       .map((f) => {
@@ -112,6 +122,14 @@ export class AgentStore {
   private caminhoExistente(wsPath: string, id: string): string {
     const path = this.caminho(wsPath, id);
     if (!existsSync(path)) {
+      const noTemplate = join(this.templatesDir, "default", ".opencorp", "agents", `${id}.md`);
+      if (existsSync(noTemplate)) {
+        try {
+          mkdirSync(this.dirAgentes(wsPath), { recursive: true });
+          cpSync(noTemplate, path);
+          return path;
+        } catch {}
+      }
       throw new AgentError(
         `agente "${id}" não encontrado em ${this.dirAgentes(wsPath)} — veja "opencorp agent list"`,
       );

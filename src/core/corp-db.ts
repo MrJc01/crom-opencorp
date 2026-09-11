@@ -57,11 +57,46 @@ export interface LinhaExecucao {
   erro?: string | null;
 }
 
+/** Linha granular de ação/passo de um agente — telemetria com trace context (OpenTelemetry-inspired). */
+export interface LinhaAcaoAgente {
+  id: string;
+  trace_id: string;
+  span_id: string;
+  parent_span_id?: string | null;
+  sessao_id: string;
+  agente: string;
+  modelo: string;
+  workspace: string;
+  tipo_acao: "tool" | "pensamento" | "resposta" | "erro";
+  ferramenta?: string | null;
+  comando_resumo?: string | null;
+  input_json?: string | null;
+  output_json?: string | null;
+  status: "sucesso" | "falhou" | "timeout" | "abortado";
+  duracao_ms?: number;
+  tokens_prompt?: number;
+  tokens_saida?: number;
+  custo_usd?: number;
+  erro?: string | null;
+  criado_em: string;
+}
+
 export interface FiltroExecucoes {
   agente?: string;
   gatilho_tipo?: string;
   gatilho_origem?: string;
   status?: string;
+  limite?: number;
+}
+
+export interface FiltroTelemetria {
+  sessao_id?: string;
+  trace_id?: string;
+  agente?: string;
+  ferramenta?: string;
+  status?: string;
+  desde?: string;
+  ate?: string;
   limite?: number;
 }
 
@@ -136,6 +171,35 @@ export class CorpDb {
       CREATE INDEX IF NOT EXISTS idx_mensagens_sessao ON mensagens (sessao_id, criado_em);
       CREATE INDEX IF NOT EXISTS idx_execucoes_gatilho ON execucoes (gatilho_tipo, gatilho_origem);
       CREATE INDEX IF NOT EXISTS idx_execucoes_agente ON execucoes (agente, inicio);
+
+      -- Tabela de telemetria granular: ações/passos dos agentes com trace context
+      CREATE TABLE IF NOT EXISTS acoes_agentes (
+        id TEXT PRIMARY KEY,
+        trace_id TEXT NOT NULL,
+        span_id TEXT NOT NULL,
+        parent_span_id TEXT,
+        sessao_id TEXT NOT NULL,
+        agente TEXT NOT NULL,
+        modelo TEXT NOT NULL DEFAULT '',
+        workspace TEXT NOT NULL DEFAULT '',
+        tipo_acao TEXT NOT NULL,
+        ferramenta TEXT,
+        comando_resumo TEXT,
+        input_json TEXT,
+        output_json TEXT,
+        status TEXT NOT NULL DEFAULT 'sucesso',
+        duracao_ms INTEGER DEFAULT 0,
+        tokens_prompt INTEGER DEFAULT 0,
+        tokens_saida INTEGER DEFAULT 0,
+        custo_usd REAL DEFAULT 0.0,
+        erro TEXT,
+        criado_em TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_acoes_sessao ON acoes_agentes (sessao_id, criado_em);
+      CREATE INDEX IF NOT EXISTS idx_acoes_agente ON acoes_agentes (agente, criado_em);
+      CREATE INDEX IF NOT EXISTS idx_acoes_trace ON acoes_agentes (trace_id);
+      CREATE INDEX IF NOT EXISTS idx_acoes_ferramenta ON acoes_agentes (ferramenta, status);
+      CREATE INDEX IF NOT EXISTS idx_acoes_falhas ON acoes_agentes (status) WHERE status != 'sucesso';
     `);
     try {
       this.db.exec("ALTER TABLE execucoes ADD COLUMN erro TEXT;");
@@ -146,7 +210,7 @@ export class CorpDb {
 
   limpar(): void {
     this.db.exec(
-      "DELETE FROM registros; DELETE FROM journal; DELETE FROM sessoes; DELETE FROM mensagens; DELETE FROM execucoes;",
+      "DELETE FROM registros; DELETE FROM journal; DELETE FROM sessoes; DELETE FROM mensagens; DELETE FROM execucoes; DELETE FROM acoes_agentes;",
     );
   }
 
@@ -322,6 +386,119 @@ export class CorpDb {
          ORDER BY categoria, id`,
       )
       .all({ padrao }) as { categoria: string; id: string; descricao: string }[];
+  }
+
+  // ─── Telemetria de Agentes ─────────────────────────────────
+
+  /** Grava ações de agente em lote (batch insert otimizado para o ring buffer). */
+  gravarAcoesEmLote(acoes: LinhaAcaoAgente[]): void {
+    if (!acoes.length) return;
+    const stmt = this.db.prepare(
+      `INSERT OR IGNORE INTO acoes_agentes
+        (id, trace_id, span_id, parent_span_id, sessao_id, agente, modelo, workspace,
+         tipo_acao, ferramenta, comando_resumo, input_json, output_json,
+         status, duracao_ms, tokens_prompt, tokens_saida, custo_usd, erro, criado_em)
+       VALUES
+        (@id, @trace_id, @span_id, @parent_span_id, @sessao_id, @agente, @modelo, @workspace,
+         @tipo_acao, @ferramenta, @comando_resumo, @input_json, @output_json,
+         @status, @duracao_ms, @tokens_prompt, @tokens_saida, @custo_usd, @erro, @criado_em)`,
+    );
+    const tx = this.db.transaction((rows: LinhaAcaoAgente[]) => {
+      for (const r of rows) {
+        stmt.run({
+          ...r,
+          parent_span_id: r.parent_span_id ?? null,
+          ferramenta: r.ferramenta ?? null,
+          comando_resumo: r.comando_resumo ?? null,
+          input_json: r.input_json ?? null,
+          output_json: r.output_json ?? null,
+          duracao_ms: r.duracao_ms ?? 0,
+          tokens_prompt: r.tokens_prompt ?? 0,
+          tokens_saida: r.tokens_saida ?? 0,
+          custo_usd: r.custo_usd ?? 0,
+          erro: r.erro ?? null,
+        });
+      }
+    });
+    tx(acoes);
+  }
+
+  /** Lista ações de uma sessão específica (linha do tempo cronológica). */
+  listarAcoesSessao(sessaoId: string, limite = 500): LinhaAcaoAgente[] {
+    return this.db
+      .prepare(`SELECT * FROM acoes_agentes WHERE sessao_id = ? ORDER BY criado_em ASC LIMIT ?`)
+      .all(sessaoId, limite) as LinhaAcaoAgente[];
+  }
+
+  /** Lista ações por trace_id (jornada completa: job → task → sessão → ações). */
+  listarAcoesPorTrace(traceId: string): LinhaAcaoAgente[] {
+    return this.db
+      .prepare(`SELECT * FROM acoes_agentes WHERE trace_id = ? ORDER BY criado_em ASC`)
+      .all(traceId) as LinhaAcaoAgente[];
+  }
+
+  /** Resumo de telemetria com métricas agregadas por ferramenta/agente. */
+  resumoTelemetria(filtro?: FiltroTelemetria): {
+    total_acoes: number;
+    total_falhas: number;
+    ferramentas: Array<{ ferramenta: string; total: number; falhas: number; media_ms: number; custo_usd: number }>;
+    agentes: Array<{ agente: string; total: number; falhas: number; media_ms: number; custo_usd: number }>;
+  } {
+    const condicoes: string[] = [];
+    const params: Record<string, string | number> = {};
+    if (filtro?.sessao_id) { condicoes.push("sessao_id = @sessao_id"); params.sessao_id = filtro.sessao_id; }
+    if (filtro?.trace_id) { condicoes.push("trace_id = @trace_id"); params.trace_id = filtro.trace_id; }
+    if (filtro?.agente) { condicoes.push("agente = @agente"); params.agente = filtro.agente; }
+    if (filtro?.ferramenta) { condicoes.push("ferramenta = @ferramenta"); params.ferramenta = filtro.ferramenta; }
+    if (filtro?.status) { condicoes.push("status = @status"); params.status = filtro.status; }
+    if (filtro?.desde) { condicoes.push("criado_em >= @desde"); params.desde = filtro.desde; }
+    if (filtro?.ate) { condicoes.push("criado_em <= @ate"); params.ate = filtro.ate; }
+    const where = condicoes.length > 0 ? `WHERE ${condicoes.join(" AND ")}` : "";
+    const whereFerr = condicoes.length > 0
+      ? `WHERE ${condicoes.join(" AND ")} AND ferramenta IS NOT NULL`
+      : "WHERE ferramenta IS NOT NULL";
+
+    const totais = this.db.prepare(
+      `SELECT COUNT(*) AS total, SUM(CASE WHEN status != 'sucesso' THEN 1 ELSE 0 END) AS falhas FROM acoes_agentes ${where}`,
+    ).get(params) as { total: number; falhas: number };
+
+    const ferramentas = this.db.prepare(
+      `SELECT ferramenta, COUNT(*) AS total,
+              SUM(CASE WHEN status != 'sucesso' THEN 1 ELSE 0 END) AS falhas,
+              ROUND(AVG(duracao_ms), 1) AS media_ms,
+              ROUND(SUM(custo_usd), 6) AS custo_usd
+       FROM acoes_agentes ${whereFerr}
+       GROUP BY ferramenta ORDER BY total DESC`,
+    ).all(params) as Array<{ ferramenta: string; total: number; falhas: number; media_ms: number; custo_usd: number }>;
+
+    const agentes = this.db.prepare(
+      `SELECT agente, COUNT(*) AS total,
+              SUM(CASE WHEN status != 'sucesso' THEN 1 ELSE 0 END) AS falhas,
+              ROUND(AVG(duracao_ms), 1) AS media_ms,
+              ROUND(SUM(custo_usd), 6) AS custo_usd
+       FROM acoes_agentes ${where}
+       GROUP BY agente ORDER BY total DESC`,
+    ).all(params) as Array<{ agente: string; total: number; falhas: number; media_ms: number; custo_usd: number }>;
+
+    return { total_acoes: totais.total ?? 0, total_falhas: totais.falhas ?? 0, ferramentas, agentes };
+  }
+
+  /** Consulta flexível de ações de agentes com filtros combinados. */
+  listarAcoes(filtro?: FiltroTelemetria): LinhaAcaoAgente[] {
+    const condicoes: string[] = [];
+    const params: Record<string, string | number> = {};
+    if (filtro?.sessao_id) { condicoes.push("sessao_id = @sessao_id"); params.sessao_id = filtro.sessao_id; }
+    if (filtro?.trace_id) { condicoes.push("trace_id = @trace_id"); params.trace_id = filtro.trace_id; }
+    if (filtro?.agente) { condicoes.push("agente = @agente"); params.agente = filtro.agente; }
+    if (filtro?.ferramenta) { condicoes.push("ferramenta = @ferramenta"); params.ferramenta = filtro.ferramenta; }
+    if (filtro?.status) { condicoes.push("status = @status"); params.status = filtro.status; }
+    if (filtro?.desde) { condicoes.push("criado_em >= @desde"); params.desde = filtro.desde; }
+    if (filtro?.ate) { condicoes.push("criado_em <= @ate"); params.ate = filtro.ate; }
+    const where = condicoes.length > 0 ? `WHERE ${condicoes.join(" AND ")}` : "";
+    const limite = filtro?.limite ? Math.max(1, Math.floor(filtro.limite)) : 200;
+    return this.db
+      .prepare(`SELECT * FROM acoes_agentes ${where} ORDER BY criado_em DESC LIMIT ${limite}`)
+      .all(params) as LinhaAcaoAgente[];
   }
 
   fechar(): void {

@@ -19,6 +19,12 @@ import {
   StopCircle,
   Settings,
   RotateCcw,
+  Activity,
+  Wrench,
+  Brain,
+  ChevronDown,
+  ChevronRight,
+  Gauge,
 } from "lucide-solid";
 import { useSearchParams, useNavigate } from "@solidjs/router";
 import { Button } from "../ui/Button";
@@ -42,6 +48,36 @@ export interface ItemHistorico {
   modelo?: string;
 }
 
+export interface AcaoAgente {
+  id: string;
+  trace_id: string;
+  span_id: string;
+  parent_span_id?: string | null;
+  sessao_id: string;
+  agente: string;
+  modelo: string;
+  workspace: string;
+  tipo_acao: "tool" | "pensamento" | "resposta" | "erro";
+  ferramenta?: string | null;
+  comando_resumo?: string | null;
+  input_json?: string | null;
+  output_json?: string | null;
+  status: "sucesso" | "falhou" | "timeout" | "abortado";
+  duracao_ms?: number;
+  tokens_prompt?: number;
+  tokens_saida?: number;
+  custo_usd?: number;
+  erro?: string | null;
+  criado_em: string;
+}
+
+export interface ResumoTelemetria {
+  total_acoes: number;
+  total_falhas: number;
+  ferramentas: Array<{ ferramenta: string; total: number; falhas: number; media_ms: number; custo_usd: number }>;
+  agentes: Array<{ agente: string; total: number; falhas: number; media_ms: number; custo_usd: number }>;
+}
+
 export const HistoricoView: Component = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -51,11 +87,18 @@ export const HistoricoView: Component = () => {
   const [runSelecionado, setRunSelecionado] = createSignal<any | null>(null);
   const [logRun, setLogRun] = createSignal<string>("");
   const [carregandoLog, setCarregandoLog] = createSignal(false);
-  const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal">("chat");
+  const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal" | "telemetria">("chat");
   const [encerrando, setEncerrando] = createSignal(false);
   const [reenviando, setReenviando] = createSignal(false);
   const [tempoRealAtivo, setTempoRealAtivo] = createSignal(true);
   const [ultimaAtualizacao, setUltimaAtualizacao] = createSignal<string>("");
+
+  // Estados de Telemetria e Spans
+  const [acoesRun, setAcoesRun] = createSignal<AcaoAgente[]>([]);
+  const [carregandoAcoes, setCarregandoAcoes] = createSignal(false);
+  const [acaoAbertaId, setAcaoAbertaId] = createSignal<string | null>(null);
+  const [resumoTelemetria, setResumoTelemetria] = createSignal<ResumoTelemetria | null>(null);
+  const [mostrarCardsTelemetria, setMostrarCardsTelemetria] = createSignal(true);
 
   let liveLogInterval: any = null;
   let timerTempoReal: any = null;
@@ -90,6 +133,12 @@ export const HistoricoView: Component = () => {
           second: "2-digit",
         })
       );
+
+      // Carregar resumo de telemetria agregado
+      try {
+        const resTelemetria = await fetchApi<ResumoTelemetria>("/telemetria/resumo");
+        if (resTelemetria) setResumoTelemetria(resTelemetria);
+      } catch {}
 
       // Se há um run aberto na URL, atualiza seus dados reais
       const runAtual = searchParams.run as string | undefined;
@@ -154,10 +203,17 @@ export const HistoricoView: Component = () => {
       const res = await fetchApi<{ id: string; log: string }>(
         `/sessions/${encodeURIComponent(runId)}/log`
       );
-      return res?.log || "(Nenhuma saída de log capturada para esta execução)";
-    } catch (e: any) {
-      return `Erro ao carregar log da execução ${runId}: ${e.message}`;
-    }
+      if (res?.log && res.log.trim()) return res.log;
+    } catch {}
+
+    try {
+      const reg = await fetchApi<{ conteudo?: string }>(
+        `/registries/execucoes/${encodeURIComponent(runId)}`
+      );
+      if (reg?.conteudo && reg.conteudo.trim()) return reg.conteudo;
+    } catch {}
+
+    return "(Nenhuma saída de log capturada para esta execução)";
   };
 
   const abrirLogPorId = async (runId: string) => {
@@ -215,6 +271,13 @@ export const HistoricoView: Component = () => {
     setLogRun(textoLog);
     setCarregandoLog(false);
 
+    // Carregar ações/spans granulares de telemetria para esta sessão
+    setCarregandoAcoes(true);
+    fetchApi<AcaoAgente[]>(`/acoes/${encodeURIComponent(runId)}`)
+      .then((acoes) => setAcoesRun(Array.isArray(acoes) ? acoes : []))
+      .catch(() => setAcoesRun([]))
+      .finally(() => setCarregandoAcoes(false));
+
     if (liveLogInterval) {
       clearInterval(liveLogInterval);
       liveLogInterval = null;
@@ -266,6 +329,8 @@ export const HistoricoView: Component = () => {
     }
     setRunSelecionado(null);
     setLogRun("");
+    setAcoesRun([]);
+    setAcaoAbertaId(null);
     setSearchParams({ run: undefined });
   };
 
@@ -591,6 +656,78 @@ export const HistoricoView: Component = () => {
         </div>
       </div>
 
+      {/* Banner de Telemetria e Observabilidade */}
+      <Show when={resumoTelemetria() && resumoTelemetria()!.total_acoes > 0}>
+        <div class="bg-zinc-900/80 border border-zinc-800 rounded-xl p-3 text-xs flex-shrink-0">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <div class="flex items-center gap-2">
+              <Activity size={14} class="text-sky-400" />
+              <span class="font-semibold text-zinc-200">Telemetria de Agentes & Ferramentas</span>
+              <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                {resumoTelemetria()!.total_acoes} ações registradas
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMostrarCardsTelemetria(!mostrarCardsTelemetria())}
+              class="text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 cursor-pointer"
+            >
+              <span>{mostrarCardsTelemetria() ? "Ocultar métricas" : "Ver métricas"}</span>
+              <Show when={mostrarCardsTelemetria()} fallback={<ChevronRight size={12} />}>
+                <ChevronDown size={12} />
+              </Show>
+            </button>
+          </div>
+
+          <Show when={mostrarCardsTelemetria()}>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1.5 border-t border-zinc-800/60">
+              <div class="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-800/60">
+                <span class="text-[10px] text-zinc-500 uppercase tracking-wider font-mono block">Taxa de Sucesso</span>
+                <div class="flex items-baseline gap-1.5 mt-0.5">
+                  <span class="text-lg font-bold text-zinc-100">
+                    {resumoTelemetria()!.total_acoes > 0
+                      ? (((resumoTelemetria()!.total_acoes - resumoTelemetria()!.total_falhas) / resumoTelemetria()!.total_acoes) * 100).toFixed(1)
+                      : "100"}%
+                  </span>
+                  <span class="text-[10px] text-zinc-400">
+                    ({resumoTelemetria()!.total_falhas} falhas)
+                  </span>
+                </div>
+              </div>
+
+              <div class="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-800/60 col-span-1 sm:col-span-2">
+                <span class="text-[10px] text-zinc-500 uppercase tracking-wider font-mono block mb-1">Ferramentas Mais Utilizadas</span>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <For each={resumoTelemetria()!.ferramentas.slice(0, 4)}>
+                    {(f) => (
+                      <span class="px-2 py-0.5 rounded bg-zinc-800/80 text-zinc-300 font-mono text-[10px] border border-zinc-700/50 flex items-center gap-1">
+                        <Wrench size={10} class="text-sky-400" />
+                        {f.ferramenta}
+                        <span class="text-zinc-400 font-semibold">{f.total}</span>
+                        <span class="text-zinc-500 text-[9px]">({f.media_ms}ms)</span>
+                      </span>
+                    )}
+                  </For>
+                </div>
+              </div>
+
+              <div class="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-800/60">
+                <span class="text-[10px] text-zinc-500 uppercase tracking-wider font-mono block mb-1">Agentes Ativos</span>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <For each={resumoTelemetria()!.agentes.slice(0, 2)}>
+                    {(ag) => (
+                      <span class="px-2 py-0.5 rounded bg-zinc-800/80 text-zinc-300 font-mono text-[10px] border border-zinc-700/50">
+                        @{ag.agente} ({ag.total})
+                      </span>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </div>
+          </Show>
+        </div>
+      </Show>
+
       {/* Lista de Registros */}
       <div class="flex-1 overflow-y-auto min-h-0 scrollbar-thin">
         <div class="space-y-2.5 pb-4">
@@ -728,7 +865,7 @@ export const HistoricoView: Component = () => {
 
               {/* Controles e Alternador de Visão */}
               <div class="flex items-center gap-2 flex-wrap">
-                {/* Switcher Chat / Terminal */}
+                {/* Switcher Chat / Telemetria / Terminal */}
                 <div class="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800">
                   <button
                     type="button"
@@ -741,6 +878,18 @@ export const HistoricoView: Component = () => {
                   >
                     <MessageSquare size={13} class="text-zinc-400" />
                     <span>Chat ao Vivo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModoVisualizacao("telemetria")}
+                    class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                      modoVisualizacao() === "telemetria"
+                        ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    <Activity size={13} class="text-sky-400" />
+                    <span>Telemetria {acoesRun().length > 0 ? `(${acoesRun().length})` : ""}</span>
                   </button>
                   <button
                     type="button"
@@ -818,16 +967,9 @@ export const HistoricoView: Component = () => {
               <span>{logRun().split("\n").length} linhas capturadas</span>
             </div>
 
-            {/* Corpo: Chat ao Vivo ou Terminal Raw */}
+            {/* Corpo: Chat ao Vivo, Terminal Raw ou Telemetria Granular */}
             <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
-              <Show
-                when={modoVisualizacao() === "chat"}
-                fallback={
-                  <pre class="flex-1 bg-black/95 p-4 rounded-xl border border-zinc-800 text-[11px] font-mono text-zinc-300 overflow-y-auto whitespace-pre-wrap leading-relaxed scrollbar-thin select-text">
-                    {logRun()}
-                  </pre>
-                }
-              >
+              <Show when={modoVisualizacao() === "chat"}>
                 <div class="flex-1 overflow-y-auto scrollbar-thin pr-1 pb-2">
                   <LogChatViewer
                     log={logRun()}
@@ -838,6 +980,201 @@ export const HistoricoView: Component = () => {
                     gatilho={runSelecionado()?.gatilho}
                     duracaoMs={runSelecionado()?.duracao_ms}
                   />
+                </div>
+              </Show>
+
+              <Show when={modoVisualizacao() === "terminal"}>
+                <pre class="flex-1 bg-black/95 p-4 rounded-xl border border-zinc-800 text-[11px] font-mono text-zinc-300 overflow-y-auto whitespace-pre-wrap leading-relaxed scrollbar-thin select-text">
+                  {logRun()}
+                </pre>
+              </Show>
+
+              <Show when={modoVisualizacao() === "telemetria"}>
+                <div class="flex-1 overflow-y-auto scrollbar-thin p-1 space-y-3">
+                  <Show when={carregandoAcoes()}>
+                    <div class="py-16 text-center text-xs text-zinc-400">
+                      <RefreshCw size={18} class="animate-spin mx-auto mb-2 text-sky-400" />
+                      Carregando telemetria e passos do agente...
+                    </div>
+                  </Show>
+
+                  <Show when={!carregandoAcoes() && acoesRun().length === 0}>
+                    <div class="py-16 text-center text-xs text-zinc-500 bg-zinc-950/40 rounded-xl border border-zinc-800/80 p-6">
+                      <Activity size={24} class="mx-auto mb-2 text-zinc-600" />
+                      <p class="font-medium text-zinc-400">Nenhum span granular registrado para esta execução</p>
+                      <p class="text-[11px] text-zinc-500 mt-1 max-w-sm mx-auto">
+                        A telemetria detalhada (chamadas a ferramentas, pensamentos e respostas) é gravada automaticamente nas sessões e conversas do Secretário.
+                      </p>
+                    </div>
+                  </Show>
+
+                  <Show when={!carregandoAcoes() && acoesRun().length > 0}>
+                    {/* Header do Trace */}
+                    <div class="bg-zinc-950/70 border border-zinc-800 rounded-xl p-3 text-xs flex items-center justify-between gap-3 flex-wrap">
+                      <div class="flex items-center gap-2">
+                        <Activity size={14} class="text-sky-400" />
+                        <span class="text-zinc-400 font-mono text-[11px]">Trace:</span>
+                        <code class="text-zinc-200 font-mono bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800 select-all">
+                          {acoesRun()[0]?.trace_id || runSelecionado()?.id}
+                        </code>
+                      </div>
+                      <div class="flex items-center gap-2 text-[11px]">
+                        <span class="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono">
+                          {acoesRun().length} passos
+                        </span>
+                        <span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-mono">
+                          {acoesRun().filter((a) => a.status === "sucesso").length} ok
+                        </span>
+                        <Show when={acoesRun().some((a) => a.status !== "sucesso")}>
+                          <span class="px-2 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/20 font-mono">
+                            {acoesRun().filter((a) => a.status !== "sucesso").length} falhas
+                          </span>
+                        </Show>
+                      </div>
+                    </div>
+
+                    {/* Timeline de Ações / Spans */}
+                    <div class="space-y-2">
+                      <For each={acoesRun()}>
+                        {(acao, index) => {
+                          const aberta = () => acaoAbertaId() === acao.id;
+                          const toggle = () => setAcaoAbertaId(aberta() ? null : acao.id);
+                          const sucesso = acao.status === "sucesso";
+
+                          return (
+                            <div class={`rounded-xl border transition-all text-xs ${
+                              sucesso
+                                ? "bg-zinc-900/60 border-zinc-800/80 hover:border-zinc-700"
+                                : "bg-rose-950/20 border-rose-900/50 hover:border-rose-800/70"
+                            }`}>
+                              {/* Linha do Span */}
+                              <div
+                                onClick={toggle}
+                                class="p-3 flex items-center justify-between gap-3 cursor-pointer select-none"
+                              >
+                                <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                                  <span class="text-zinc-500 font-mono text-[10px] w-6 flex-shrink-0">
+                                    #{String(index() + 1).padStart(2, "0")}
+                                  </span>
+
+                                  {/* Ícone por tipo */}
+                                  <div class="flex-shrink-0">
+                                    <Show when={acao.tipo_acao === "tool"}>
+                                      <div class="p-1 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                                        <Wrench size={12} />
+                                      </div>
+                                    </Show>
+                                    <Show when={acao.tipo_acao === "pensamento"}>
+                                      <div class="p-1 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                        <Brain size={12} />
+                                      </div>
+                                    </Show>
+                                    <Show when={acao.tipo_acao === "resposta"}>
+                                      <div class="p-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                        <MessageSquare size={12} />
+                                      </div>
+                                    </Show>
+                                    <Show when={acao.tipo_acao === "erro"}>
+                                      <div class="p-1 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                        <AlertTriangle size={12} />
+                                      </div>
+                                    </Show>
+                                  </div>
+
+                                  {/* Identificação da Ação / Tool */}
+                                  <div class="min-w-0 flex-1 flex items-baseline gap-2">
+                                    <span class="font-mono font-semibold text-zinc-200 text-xs">
+                                      {acao.ferramenta || acao.tipo_acao}
+                                    </span>
+                                    <Show when={acao.comando_resumo}>
+                                      <span class="text-zinc-400 text-[11px] truncate max-w-md font-mono">
+                                        {acao.comando_resumo}
+                                      </span>
+                                    </Show>
+                                  </div>
+                                </div>
+
+                                {/* Status & Duração & Toggle */}
+                                <div class="flex items-center gap-2 flex-shrink-0">
+                                  <Show when={acao.duracao_ms && acao.duracao_ms > 0}>
+                                    <span class="text-[10px] font-mono text-zinc-500">
+                                      {acao.duracao_ms}ms
+                                    </span>
+                                  </Show>
+                                  <span class={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold ${
+                                    sucesso
+                                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                                      : "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                                  }`}>
+                                    {acao.status}
+                                  </span>
+                                  <span class="text-zinc-500 text-[10px] font-mono">
+                                    {(acao.criado_em || "").slice(11, 19)}
+                                  </span>
+                                  {aberta() ? <ChevronDown size={14} class="text-zinc-400" /> : <ChevronRight size={14} class="text-zinc-500" />}
+                                </div>
+                              </div>
+
+                              {/* Detalhes Colapsáveis */}
+                              <Show when={aberta()}>
+                                <div class="px-3 pb-3 pt-1 border-t border-zinc-800/80 space-y-2 text-xs">
+                                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono text-zinc-400 bg-zinc-950/60 p-2 rounded-lg border border-zinc-800/60">
+                                    <div>
+                                      <span class="text-zinc-600 block">Span ID:</span>
+                                      <span class="text-zinc-300 select-all">{acao.span_id}</span>
+                                    </div>
+                                    <div>
+                                      <span class="text-zinc-600 block">Parent Span:</span>
+                                      <span class="text-zinc-300 select-all">{acao.parent_span_id || "root"}</span>
+                                    </div>
+                                    <div>
+                                      <span class="text-zinc-600 block">Agente:</span>
+                                      <span class="text-zinc-300">@{acao.agente}</span>
+                                    </div>
+                                    <div>
+                                      <span class="text-zinc-600 block">Modelo:</span>
+                                      <span class="text-zinc-300 truncate">{acao.modelo || "-"}</span>
+                                    </div>
+                                  </div>
+
+                                  <Show when={acao.erro}>
+                                    <div class="bg-rose-950/40 border border-rose-800/60 rounded-lg p-2.5 text-rose-200 text-xs">
+                                      <span class="font-bold text-[10px] uppercase font-mono tracking-wider block text-rose-400 mb-1">
+                                        Erro Registrado:
+                                      </span>
+                                      <pre class="font-mono text-[11px] whitespace-pre-wrap select-text">{acao.erro}</pre>
+                                    </div>
+                                  </Show>
+
+                                  <Show when={acao.input_json}>
+                                    <div class="bg-zinc-950/80 border border-zinc-800/80 rounded-lg p-2.5">
+                                      <span class="font-bold text-[10px] uppercase font-mono tracking-wider block text-zinc-500 mb-1">
+                                        Entrada / Parâmetros:
+                                      </span>
+                                      <pre class="font-mono text-[11px] text-zinc-300 whitespace-pre-wrap max-h-40 overflow-y-auto scrollbar-thin select-text">
+                                        {acao.input_json}
+                                      </pre>
+                                    </div>
+                                  </Show>
+
+                                  <Show when={acao.output_json}>
+                                    <div class="bg-zinc-950/80 border border-zinc-800/80 rounded-lg p-2.5">
+                                      <span class="font-bold text-[10px] uppercase font-mono tracking-wider block text-zinc-500 mb-1">
+                                        Saída Sanitizada / Resultado:
+                                      </span>
+                                      <pre class="font-mono text-[11px] text-zinc-300 whitespace-pre-wrap max-h-60 overflow-y-auto scrollbar-thin select-text">
+                                        {acao.output_json}
+                                      </pre>
+                                    </div>
+                                  </Show>
+                                </div>
+                              </Show>
+                            </div>
+                          );
+                        }}
+                      </For>
+                    </div>
+                  </Show>
                 </div>
               </Show>
             </div>

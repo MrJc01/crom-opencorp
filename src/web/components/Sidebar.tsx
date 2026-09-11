@@ -143,6 +143,7 @@ export const Sidebar: Component = () => {
             </button>
             {/* Botão colapsar no desktop */}
             <button
+              id="sidebar-collapse-btn"
               type="button"
               onClick={toggleColapso}
               class="hidden md:flex !bg-transparent hover:!bg-zinc-900/80 p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 border border-transparent hover:border-zinc-800 transition-all cursor-pointer"

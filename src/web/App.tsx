@@ -1,4 +1,4 @@
-import { type Component, onMount, createEffect, Show } from "solid-js";
+import { type Component, onMount, onCleanup, createEffect, Show } from "solid-js";
 import { Router, Route, useLocation, useNavigate, Navigate } from "@solidjs/router";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
@@ -29,6 +29,17 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
   onMount(() => {
     void carregarWorkspaces();
     conectarSSE();
+
+    const lidarComHash = () => {
+      const hash = window.location.hash;
+      if (hash && hash.startsWith("#/")) {
+        const rota = hash.slice(1);
+        navigate(rota, { replace: true });
+      }
+    };
+    lidarComHash();
+    window.addEventListener("hashchange", lidarComHash);
+    onCleanup(() => window.removeEventListener("hashchange", lidarComHash));
   });
 
   // Quando não há workspace ativo, rotas restritas a workspaces redirecionam para a home global
@@ -38,15 +49,6 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
     const rotasGlobais = ["/", "/home", "/secretario", "/docs", "/config", "/secrets"];
     if (!ws && !rotasGlobais.some((r) => rota === r || rota.startsWith(r + "/"))) {
       navigate("/home", { replace: true });
-    }
-  });
-
-  // Suporte a links e testes com hash legado (ex: /#/notificacoes -> /notificacoes)
-  createEffect(() => {
-    const hash = window.location.hash;
-    if (hash && hash.startsWith("#/")) {
-      const rota = hash.slice(1);
-      navigate(rota, { replace: true });
     }
   });
 

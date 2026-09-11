@@ -17,7 +17,7 @@ import {
 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 import { UniversalChat } from "../components/chat/UniversalChat";
-import type { ChatMensagem, PromptFilaItem } from "../components/chat/types";
+import type { ChatMensagem, PromptFilaItem, PaginacaoMensagens } from "../components/chat/types";
 import type { Anexo } from "../components/chat/PromptInput";
 import { HistoricoModal, type SessaoResumo } from "../components/chat/HistoricoModal";
 import { Button } from "../ui/Button";
@@ -92,9 +92,22 @@ export const SecretarioView: Component = () => {
   const [decorridoSegundos, setDecorridoSegundos] = createSignal(0);
   const [mostrarBotaoFim, setMostrarBotaoFim] = createSignal(false);
 
+  // ── Paginação de mensagens ──
+  const [totalMensagensServidor, setTotalMensagensServidor] = createSignal(0);
+  const [temMaisMensagensAnteriores, setTemMaisMensagensAnteriores] = createSignal(false);
+  const [carregandoAnteriores, setCarregandoAnteriores] = createSignal(false);
+  let ultimoHash = "";
+
   // Configuração lateral de Agente, Motor e Modelo
   const [configLateralAberta, setConfigLateralAberta] = createSignal(false);
-  const [listaAgentes, setListaAgentes] = createSignal<Array<{ id: string; role: string; model: string; harness?: string; engine?: string; rotation?: string[] }>>([]);
+  const [listaAgentes, setListaAgentes] = createSignal<Array<{ id: string; role: string; model: string; harness?: string; engine?: string; rotation?: string[] }>>([
+    {
+      id: "secretario-exec",
+      role: "Secretário Executivo",
+      model: "opencode-go/glm-5.3-flash",
+      harness: "opencode",
+    },
+  ]);
   const [listaMotores, setListaMotores] = createSignal<Array<{ id: string; name: string; installed: boolean; version?: string }>>([]);
   const [agenteConfig, setAgenteConfig] = createSignal<string>("secretario-exec");
   const [motorConfig, setMotorConfig] = createSignal<string>("opencode");
@@ -133,19 +146,20 @@ export const SecretarioView: Component = () => {
 
   const carregarAgentesEMotores = async () => {
     try {
-      const resAg = await fetchApi(`/agents?workspace=${encodeURIComponent(wsAtivo())}`);
-      if (resAg.ok) {
-        const ags = await resAg.json();
-        if (Array.isArray(ags)) setListaAgentes(ags);
+      const ags = await fetchApi<any[]>(`/agents?workspace=${encodeURIComponent(wsAtivo())}`);
+      if (Array.isArray(ags) && ags.length > 0) {
+        setListaAgentes(ags);
+        const enc = ags.find((a) => a.id === agente());
+        if (enc && !modeloConfig()) {
+          if (enc.model) setModeloConfig(enc.model);
+          if (enc.harness || enc.engine) setMotorConfig(enc.harness || enc.engine);
+        }
       }
     } catch {}
 
     try {
-      const resMot = await fetchApi("/engines");
-      if (resMot.ok) {
-        const mots = await resMot.json();
-        if (Array.isArray(mots)) setListaMotores(mots);
-      }
+      const mots = await fetchApi<any[]>("/engines");
+      if (Array.isArray(mots) && mots.length > 0) setListaMotores(mots);
     } catch {}
   };
 
@@ -246,7 +260,7 @@ export const SecretarioView: Component = () => {
         .map((s) => s.trim())
         .filter(Boolean);
 
-      const res = await fetchApi(`/agents/${encodeURIComponent(agenteConfig())}?workspace=${encodeURIComponent(wsAtivo())}`, {
+      await fetchApi(`/agents/${encodeURIComponent(agenteConfig())}?workspace=${encodeURIComponent(wsAtivo())}`, {
         method: "PUT",
         body: JSON.stringify({
           harness: motorConfig(),
@@ -254,11 +268,6 @@ export const SecretarioView: Component = () => {
           rotation: rot,
         }),
       });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.erro || `Erro HTTP ${res.status}`);
-      }
 
       setAgente(agenteConfig() as any);
       await carregarAgentesEMotores();
@@ -446,9 +455,31 @@ export const SecretarioView: Component = () => {
     }
     setSessaoAtivaId(id);
     try {
-      const msgs = await fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(id)}/mensagens`);
-      const lista = Array.isArray(msgs) ? msgs : [];
-      setMensagens((prev) => reconciliarMensagens(prev, lista));
+      // Carrega apenas os últimos 2 turnos inicialmente (paginação)
+      const respPag = await fetchApi<any>(`/secretario/sessoes/${encodeURIComponent(id)}/mensagens?turnos=2`);
+
+      let lista: ChatMensagem[] = [];
+      let paginacao: PaginacaoMensagens | null = null;
+
+      if (respPag && typeof respPag === "object" && "mensagens" in respPag) {
+        // Resposta paginada: { mensagens: [...], paginacao: {...} }
+        lista = Array.isArray(respPag.mensagens) ? respPag.mensagens : [];
+        paginacao = respPag.paginacao || null;
+      } else if (Array.isArray(respPag)) {
+        // Fallback: resposta sem paginação (array direto)
+        lista = respPag;
+      }
+
+      setMensagens(lista);
+
+      if (paginacao) {
+        setTotalMensagensServidor(paginacao.total_mensagens);
+        setTemMaisMensagensAnteriores(paginacao.tem_mais);
+      } else {
+        setTotalMensagensServidor(lista.length);
+        setTemMaisMensagensAnteriores(false);
+      }
+
       setTimeout(() => scrollFim(true), 50);
 
       const ult = lista[lista.length - 1];
@@ -475,7 +506,60 @@ export const SecretarioView: Component = () => {
       }
     } catch {
       setMensagens([]);
+      setTotalMensagensServidor(0);
+      setTemMaisMensagensAnteriores(false);
       setCarregando(false);
+    }
+  };
+
+  const carregarMensagensAnteriores = async () => {
+    const sid = sessaoAtivaId();
+    if (!sid || carregandoAnteriores() || !temMaisMensagensAnteriores()) return;
+
+    setCarregandoAnteriores(true);
+    try {
+      // Encontra o menor indice_global das mensagens atualmente carregadas
+      const msgsAtuais = mensagens();
+      let menorIndice = Infinity;
+      for (const m of msgsAtuais) {
+        if (m.indice_global !== undefined && m.indice_global < menorIndice) {
+          menorIndice = m.indice_global;
+        }
+      }
+
+      const antesDoIndice = menorIndice === Infinity ? undefined : menorIndice;
+      let urlAnterior = `/secretario/sessoes/${encodeURIComponent(sid)}/mensagens?turnos=2`;
+      if (antesDoIndice !== undefined) {
+        urlAnterior += `&antes_do_indice=${antesDoIndice}`;
+      }
+
+      const respPag = await fetchApi<any>(urlAnterior);
+
+      let anteriores: ChatMensagem[] = [];
+      let paginacao: PaginacaoMensagens | null = null;
+
+      if (respPag && typeof respPag === "object" && "mensagens" in respPag) {
+        anteriores = Array.isArray(respPag.mensagens) ? respPag.mensagens : [];
+        paginacao = respPag.paginacao || null;
+      } else if (Array.isArray(respPag)) {
+        anteriores = respPag;
+      }
+
+      if (anteriores.length > 0) {
+        // Prepende mensagens anteriores às atuais
+        setMensagens((prev) => [...anteriores, ...prev]);
+      }
+
+      if (paginacao) {
+        setTotalMensagensServidor(paginacao.total_mensagens);
+        setTemMaisMensagensAnteriores(paginacao.tem_mais);
+      } else {
+        setTemMaisMensagensAnteriores(false);
+      }
+    } catch {
+      // Silenciosamente ignora erros de carregamento
+    } finally {
+      setCarregandoAnteriores(false);
     }
   };
 
@@ -489,6 +573,8 @@ export const SecretarioView: Component = () => {
     setMensagens([]);
     setInputValor("");
     setAnexos([]);
+    setTotalMensagensServidor(0);
+    setTemMaisMensagensAnteriores(false);
     showToast("Nova conversa iniciada", "info");
   };
 
@@ -982,7 +1068,7 @@ export const SecretarioView: Component = () => {
     // Ao focar na aba, recarrega mensagens caso tenham chegado da outra guia
     const onFoco = () => {
       const sid = sessaoAtivaId();
-      if (sid && !streamingAtivo) {
+      if (sid && !streamingAtivo && !temMaisMensagensAnteriores()) {
         void fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(sid)}/mensagens`)
           .then((msgs) => {
             if (Array.isArray(msgs) && msgs.length > 0) {
@@ -1069,6 +1155,10 @@ export const SecretarioView: Component = () => {
         onAbrirHistorico={() => setHistoricoAberto(true)}
         onAbrirConfiguracoes={abrirPainelLateral}
         onParar={pararStream}
+        temMaisMensagensAnteriores={temMaisMensagensAnteriores()}
+        carregandoAnteriores={carregandoAnteriores()}
+        onCarregarAnteriores={carregarMensagensAnteriores}
+        totalMensagens={totalMensagensServidor()}
         sugestoesRapidas={SUGESTOES.map((s) => ({ rotulo: s, prompt: s }))}
         iframeConfig={{
           habilitado: true,

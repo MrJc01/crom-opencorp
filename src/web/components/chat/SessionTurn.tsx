@@ -543,6 +543,13 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
           : "oc-assistant bg-transparent mr-auto max-w-full w-full"
       }`}
     >
+      {/* Cabeçalho do Turno do Usuário */}
+      <Show when={m().role === "user"}>
+        <div class="flex items-center gap-1.5 mb-1.5 text-[11px] font-medium text-zinc-400 select-none">
+          <span class="font-semibold text-zinc-200">Você</span>
+        </div>
+      </Show>
+
       {/* Imagens Anexadas ao Turno */}
       <Show when={m().imagens && m().imagens!.length > 0}>
         <div class="flex flex-wrap gap-2 mb-2">
