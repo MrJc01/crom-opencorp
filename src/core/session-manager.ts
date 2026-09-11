@@ -886,11 +886,69 @@ export class SessionManager {
       execCwd = prep.cwd;
     }
 
+    try {
+      const { WorkspaceGit } = await import("./workspace-git.js");
+      const wsGit = new WorkspaceGit();
+      if (wsGit.temGit(ws.path)) {
+        void wsGit.criarCheckpoint(ws.path, id);
+      }
+    } catch {
+      /* best-effort checkpoint */
+    }
+
     let child: ReturnType<typeof execa>;
     try {
-      child = execa(runnerBin, args, {
-        cwd: execCwd,
-        env: execEnv,
+      // Resolve driver de execução (sandbox Bubblewrap, host ou container) e limites
+      let binEfetivo = runnerBin;
+      let argsEfetivos = args;
+      let cwdEfetivo = execCwd;
+      let envEfetivo = execEnv;
+
+      try {
+        const { resolverDriverExecucao } = await import("./execution-driver.js");
+        let modoDriver = "sandbox";
+        let limites: { ramMb?: number; cpuPct?: number } | undefined;
+        try {
+          const cfgPath = join(ws.path, ".opencorp", "config.json");
+          if (existsSync(cfgPath)) {
+            const rawCfg = JSON.parse(await readFile(cfgPath, "utf8"));
+            if (rawCfg.runner?.modo) modoDriver = rawCfg.runner.modo;
+            if (rawCfg.runner?.limite_ram_mb || rawCfg.runner?.limite_cpu_pct) {
+              limites = {
+                ramMb: rawCfg.runner.limite_ram_mb,
+                cpuPct: rawCfg.runner.limite_cpu_pct,
+              };
+            }
+          }
+        } catch {}
+
+        const driver = await resolverDriverExecucao(modoDriver);
+        const prep = await driver.preparar({
+          binary: runnerBin,
+          args,
+          cwd: execCwd,
+          env: execEnv,
+          workspaceId: ws.id,
+          workspacePath: ws.path,
+          limites,
+        });
+
+        binEfetivo = prep.binary;
+        argsEfetivos = prep.args;
+        cwdEfetivo = prep.cwd;
+        envEfetivo = Object.fromEntries(
+          Object.entries(prep.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+        );
+        if (prep.aviso) {
+          console.warn(`[session:${id}] ${prep.aviso}`);
+        }
+      } catch {
+        /* fallback silencioso para execução direta */
+      }
+
+      child = execa(binEfetivo, argsEfetivos, {
+        cwd: cwdEfetivo,
+        env: envEfetivo,
         buffer: false,
         reject: false,
         stdin: "ignore",
@@ -1422,6 +1480,17 @@ export class SessionManager {
         : null);
     (registro as any).erro = erroDesc;
     this.registrarNoLedger(ws.path, registro, custoUsd, erroDesc);
+
+    // Auto-commit Git no workspace se houver arquivos alterados
+    try {
+      const { WorkspaceGit } = await import("./workspace-git.js");
+      const wsGit = new WorkspaceGit();
+      if (wsGit.temGit(ws.path)) {
+        void wsGit.autoCommit(ws.path, registro.agente, registro.ordem || "", registro.id);
+      }
+    } catch {
+      /* best-effort auto-commit */
+    }
 
     // Notificação automática de falha de execução/modelo
     if (status === "falhou") {

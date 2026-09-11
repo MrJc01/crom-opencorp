@@ -96,6 +96,7 @@ export function buildProgram(isOc: boolean = isModoOc()): Command {
 
   // Comandos de Workspace (disponíveis tanto em oc quanto em opencorp)
   registerTaskCommand(program);
+  registerWorkspaceCommands(program);
   registerAgentCommand(program);
   registerScheduleCommands(program);
   registerAppCommand(program);
@@ -168,7 +169,6 @@ export function buildProgram(isOc: boolean = isModoOc()): Command {
       .action(notImplementedAction("opencorp init"));
 
     registerSettingsCommand(program);
-    registerWorkspaceCommands(program);
     registerTemplateCommand(program);
     registerSubcorpCommand(program);
     registerDaemonCommand(program);

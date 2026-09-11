@@ -145,6 +145,87 @@ export function registerWorkspaceCommands(program: Command): void {
       }),
     );
 
+  // ── Subcomandos de Git & Versionamento ──
+  const gitCmd = grupo.command("git").description("governança e versionamento Git do workspace");
+
+  gitCmd
+    .command("init [id]")
+    .description("inicializa o repositório Git no workspace com .gitignore oficial")
+    .action((id?: string) =>
+      comErros(async () => {
+        const alvo = await manager.resolver(id);
+        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const wsGit = new WorkspaceGit();
+        const res = await wsGit.inicializar(alvo.path);
+        console.log(`[${alvo.id}] ${res.mensagem}${res.hash ? ` (${res.hash.slice(0, 7)})` : ""}`);
+      }),
+    );
+
+  gitCmd
+    .command("log [id]")
+    .option("-n, --limite <n>", "quantidade máxima de commits", "20")
+    .description("lista o histórico de commits e alterações dos agentes")
+    .action((id: string | undefined, opts: { limite?: string }) =>
+      comErros(async () => {
+        const alvo = await manager.resolver(id);
+        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const wsGit = new WorkspaceGit();
+        const commits = await wsGit.listarHistorico(alvo.path, Number(opts.limite || "20"));
+        if (commits.length === 0) {
+          console.log(`[${alvo.id}] nenhum commit registrado ou repositório não inicializado`);
+          return;
+        }
+        console.log(`\n=== Histórico Git: Workspace "${alvo.id}" (${commits.length} commits) ===`);
+        for (const c of commits) {
+          const dataFmt = new Date(c.data).toLocaleString("pt-BR");
+          console.log(`  \x1b[33m${c.hashCurto}\x1b[0m \x1b[36m[${c.autor}]\x1b[0m \x1b[90m${dataFmt}\x1b[0m — ${c.mensagem}`);
+        }
+        console.log("");
+      }),
+    );
+
+  gitCmd
+    .command("diff [hash]")
+    .option("-w, --workspace <id>", "id do workspace")
+    .description("mostra o diff de um commit específico ou das mudanças atuais não commitadas")
+    .action((hash: string | undefined, opts: { workspace?: string }) =>
+      comErros(async () => {
+        const alvo = await manager.resolver(opts.workspace);
+        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const wsGit = new WorkspaceGit();
+        const diff = await wsGit.obterDiff(alvo.path, hash);
+        if (!diff.trim()) {
+          console.log(`[${alvo.id}] nenhuma alteração encontrada no diff`);
+          return;
+        }
+        console.log(diff);
+      }),
+    );
+
+  grupo
+    .command("rollback <alvo>")
+    .option("-w, --workspace <id>", "id do workspace")
+    .description("reverte o workspace para um commit, tag ou id de execução (ex: exec-123 ou HEAD~1)")
+    .action((alvoRef: string, opts: { workspace?: string }) =>
+      comErros(async () => {
+        const alvo = await manager.resolver(opts.workspace);
+        const confirm = await confirmar(`Reverter workspace "${alvo.id}" para ${alvoRef}? Alterações não commitadas serão perdidas. (s/N) `);
+        if (confirm !== "sim") {
+          console.log("Operação cancelada.");
+          return;
+        }
+        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const wsGit = new WorkspaceGit();
+        const res = await wsGit.reverter(alvo.path, alvoRef);
+        if (res.sucesso) {
+          console.log(`ok: ${res.mensagem}${res.hashAtual ? ` (HEAD agora em ${res.hashAtual.slice(0, 7)})` : ""}`);
+        } else {
+          console.error(`erro: ${res.mensagem}`);
+          process.exitCode = 1;
+        }
+      }),
+    );
+
   program
     .command("use")
     .argument("<id>", "id do workspace ativo (kebab-case)")

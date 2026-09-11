@@ -1180,6 +1180,47 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           return;
         }
 
+        // ── workspace git ───────────────────────────────────────────
+        if (rota === "/workspaces/git/log" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const limite = Number(url.searchParams.get("limite") || "30");
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const commits = await wsGit.listarHistorico(ws.path, limite);
+          enviar(res, 200, { ok: true, workspace: ws.id, commits });
+          return;
+        }
+        if (rota === "/workspaces/git/diff" && req.method === "GET") {
+          const ws = await resolverWs(url);
+          const hash = url.searchParams.get("hash") || undefined;
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const diff = await wsGit.obterDiff(ws.path, hash);
+          enviar(res, 200, { ok: true, workspace: ws.id, hash, diff });
+          return;
+        }
+        if (rota === "/workspaces/git/init" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const resultado = await wsGit.inicializar(ws.path);
+          enviar(res, 200, { ok: resultado.inicializado, ...resultado });
+          return;
+        }
+        if (rota === "/workspaces/git/rollback" && req.method === "POST") {
+          const ws = await resolverWs(url);
+          const corpo = (await lerCorpo(req)) as { alvo?: string };
+          if (!corpo.alvo) {
+            enviar(res, 400, { ok: false, erro: "campo 'alvo' é obrigatório (hash, tag ou execId)" });
+            return;
+          }
+          const { WorkspaceGit } = await import("../core/workspace-git.js");
+          const wsGit = new WorkspaceGit();
+          const resultado = await wsGit.reverter(ws.path, corpo.alvo);
+          enviar(res, resultado.sucesso ? 200 : 400, resultado);
+          return;
+        }
+
         // ── agentes ─────────────────────────────────────────────────
         if (rota === "/agents" && req.method === "GET") {
           const ws = await resolverWs(url);
