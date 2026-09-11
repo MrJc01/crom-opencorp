@@ -273,12 +273,15 @@ export async function coletarStatus(wsId?: string): Promise<StatusInfo> {
     },
     approvals: {
       total_pendentes: pendencias.length,
-      pendencias: pendencias.map((p) => ({
-        id: p.id,
-        acao: p.acao,
-        agente: p.agente,
-        descricao: p.descricao,
-      })),
+      pendencias: pendencias.map((p) => {
+        const resumo = p.padrao ? `Gatilho "${p.padrao}"` : (p.ordem ? (p.ordem.length > 50 ? p.ordem.slice(0, 50).trim() + "..." : p.ordem) : "Ação pendente");
+        return {
+          id: p.id,
+          acao: p.acao || resumo,
+          agente: p.agente,
+          descricao: p.descricao || p.motivo_guard || "",
+        };
+      }),
     },
     scheduler: {
       total_ativos: jobsAtivos,
