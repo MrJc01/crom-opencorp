@@ -318,10 +318,18 @@ O OpenCorp conta com hierarquia segura de resolução (`Workspace` com override 
 
 ---
 
-### 10. 🩺 Diagnóstico, Histórico e Telemetria
+### 10. 🩺 Diagnóstico, Histórico e Telemetria Granular de Agentes
+O OpenCorp conta com um subsistema completo de **Observabilidade e Telemetria de Agentes** em tempo real:
+- **Tracing Distribuído:** Rastreamento por `trace_id` e `span_id` para cada passo (ferramentas, pensamento, escrita de arquivos, execuções de shell).
+- **Ring Buffer Assíncrono:** Coleta em memória de alta performance com sanitização automática de segredos (chaves de API OpenAI/Anthropic/Google, tokens GitHub) e truncamento com hash SHA-256 para saídas volumosas (>64KB).
+- **Waterfall & Visualizador Web:** Alternador no drawer do Histórico entre Chat ao Vivo, Telemetria Granular (Timeline Waterfall de spans) e Terminal Raw.
+
 | Comando Completo | Atalho Rápido | Descrição | Exemplo de Uso |
 |---|---|---|---|
 | `opencorp historico` | `oc historico` | Exibe o histórico de execuções com tempo, modelo e exit code | `oc historico --limite 20` |
+| `opencorp historico show <id> --acoes` | `oc historico show <id> --acoes` | Exibe a timeline passo a passo com chamadas de ferramentas e durações | `oc historico show ses_123 --acoes` |
+| `opencorp historico acoes [id]` | `oc historico acoes [id]` | Lista as ações atômicas de agentes filtrando por trace ou falhas | `oc historico acoes --falhas` |
+| `opencorp historico telemetria` | `oc historico telemetria` | Relatório consolidado com latência média, erros e top ferramentas | `oc historico telemetria --hoje` |
 | `opencorp historico --falhas` | `oc historico --falhas` | Filtra apenas execuções que falharam com diagnóstico de causa raiz | `oc historico --falhas` |
 | `opencorp historico retry <id>` | `oc historico retry <id>` | Redispara uma execução anterior preservando contexto e ordem | `oc historico retry exec-20260903-1234` |
 | `opencorp historico erro <id>` | `oc historico erro <id>` | Imprime o stacktrace e mensagem exata do erro da execução | `oc historico erro exec-20260903-1234` |
@@ -329,7 +337,7 @@ O OpenCorp conta com hierarquia segura de resolução (`Workspace` com override 
 | `opencorp relatorio [--hoje]` | `oc relatorio [--hoje]` | Gera relatório consolidado de produção, custos e taxa de sucesso | `opencorp relatorio --hoje` |
 | `opencorp logs [--follow]` | `oc logs [--follow]` | Stream ao vivo de eventos estruturados do sistema (`events.jsonl`) | `oc logs -f --tail 50` |
 | `opencorp monitor` | `oc monitor` | TUI interativa em tempo real com métricas e custos | `oc monitor` |
-| `opencorp status` | `oc status` | Painel geral de status dos serviços ativos | `oc status` |
+| `opencorp status` | `oc status` | Painel consolidado do workspace ativo: serviços, tarefas, HITL e scheduler | `oc status` |
 | `opencorp doctor` | `oc doctor` | Auditoria completa do ambiente: Node, OpenCode, daemons e chaves | `opencorp doctor` |
 
 ---
@@ -388,6 +396,7 @@ npm run test:e2e
 1. **Isolamento Total:** Cada workspace possui seu próprio banco SQLite (`corp.db`), sessões e diretórios de dados.
 2. **Proteção contra Vazamentos:** Arquivos `.corp` exportados passam por sanitização automática que remove chaves de API, senhas e arquivos de ambiente (`.env`, `secrets.json`, `auth.json`).
 3. **Nível de Intervenção Humana (HITL):** Suporte a políticas de segurança configuráveis por workspace (`permissivo`, `moderado`, `estrito`).
+4. **Auditoria & Telemetria em Banco Local (`corp.db`):** Todas as ações, ferramentas chamadas e parâmetros de agentes são gravados na tabela `acoes_agentes` de cada workspace com sanitização de segredos em tempo real e hash SHA-256 para saídas volumosas (>64KB).
 
 ---
 
