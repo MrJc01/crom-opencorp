@@ -27,17 +27,17 @@ export async function seederEmpresaBasica(api: APIRequestContext, token: string,
     if (!existe) throw new Error(`Workspace ${wsId} não pôde ser criado nem encontrado`);
   }
 
-  // 2. Criar 2 tasks (uma backlog, uma feito)
-  await api.post("/tasks", {
+  // 2. Criar 2 tasks (uma backlog, uma feito) — SEMPRE com workspace explícito (senão cai no ativo da produção)
+  await api.post(`/tasks?workspace=${encodeURIComponent(wsId)}`, {
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     data: { titulo: "Task backlog e2e", descricao: "Descrição backlog", coluna: "backlog", prioridade: "media" },
   });
-  await api.post("/tasks", {
+  await api.post(`/tasks?workspace=${encodeURIComponent(wsId)}`, {
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     data: { titulo: "Task feito e2e", descricao: "Descrição feito", coluna: "feito", prioridade: "alta" },
   });
 
-  // 3. Criar 1 team com pipeline válido
+  // 3. Criar 1 team com pipeline válido — com workspace
   const teamSpec = {
     id: "e2e-pipe",
     titulo: "Pipe E2E",
@@ -48,7 +48,7 @@ export async function seederEmpresaBasica(api: APIRequestContext, token: string,
     ],
     criado_em: new Date().toISOString(),
   };
-  const teamResp = await api.post("/teams", {
+  const teamResp = await api.post(`/teams?workspace=${encodeURIComponent(wsId)}`, {
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     data: teamSpec,
   });
@@ -57,7 +57,7 @@ export async function seederEmpresaBasica(api: APIRequestContext, token: string,
     console.warn(`Team creation failed: ${teamResp.status()} ${body}`);
   }
 
-  // 4. Criar app com widget metrica
+  // 4. Criar app com widget metrica — com workspace
   const appSpec = {
     id: "painel-tarefas",
     titulo: "Painel de Tarefas",
@@ -70,7 +70,7 @@ export async function seederEmpresaBasica(api: APIRequestContext, token: string,
       },
     ],
   };
-  const appResp = await api.post("/apps", {
+  const appResp = await api.post(`/apps?workspace=${encodeURIComponent(wsId)}`, {
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     data: appSpec,
   });
