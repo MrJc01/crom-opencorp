@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { z } from "zod";
 import { AgentStore, type AgenteResumo } from "./agent-store.js";
 import { WorkspaceError } from "./errors.js";
+import { PromptStore } from "./prompt-store.js";
 import { RegistryStore } from "./registry-store.js";
 import { SettingsStore } from "./settings-store.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
@@ -316,6 +317,11 @@ export class WorkspaceManager {
 
       await this.registros.garantirCategorias(destino);
       await this.registros.reindexar(destino);
+
+      // F3-T02 (D1): seed de prompts globais na CRIAÇÃO do workspace. Copia
+      // ~/.opencorp/prompts.json para .opencorp/prompts.json se existir e o
+      // workspace ainda não tiver prompts (não sobrescreve template/pacote).
+      await new PromptStore({ homeDir: this.homeDir }).semear(destino);
 
       // Se houver tarefas_iniciais.json no destino, popula automaticamente no tasks.db
       const tarefasJsonPath = join(destino, "tarefas_iniciais.json");

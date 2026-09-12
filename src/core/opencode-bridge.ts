@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import type { Agente } from "../schemas/agent.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
 import { montarSecaoSkills, SkillStore } from "./skill-store.js";
+import { PromptStore } from "./prompt-store.js";
 
 const TOOLS_OPENCODE = [
   "bash",
@@ -361,7 +362,9 @@ export class OpenCodeBridge {
     const wsId = basename(wsPath);
     const priming = obterContextoAdaptativo(wsPath, wsId, agente);
     const secaoSkills = this.montarSkills(wsPath, agente);
-    const corpoFinal = corpo.replaceAll("{{workspace}}", wsId) + secaoSkills + "\n" + priming;
+    // F3-T02: corpo do agente pode referenciar {{prompt:chave}} (puxado em runtime).
+    const corpoResolvido = await new PromptStore().resolverReferencias(wsPath, corpo);
+    const corpoFinal = corpoResolvido.replaceAll("{{workspace}}", wsId) + secaoSkills + "\n" + priming;
     await writeFileAtomic(destino, gerarAgenteOpencode(agente, corpoFinal));
     this.vincular(wsPath, agente.id, destino);
     return destino;

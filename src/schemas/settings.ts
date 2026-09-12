@@ -40,6 +40,13 @@ export const settingsSchema = z.object({
       workspaces_root: z.string().min(1).default("~/.opencorp/workspaces"),
     })
     .prefault({}),
+  prompts: z
+    .object({
+      /** Permite puxar prompts do global (~/.opencorp/prompts.json) em runtime quando
+       *  o workspace não tem a chave. Default OFF (D1): por padrão só há seed na criação. */
+      fallback_global: z.boolean().default(false),
+    })
+    .prefault({}),
   tests: z
     .object({
       blind: z.boolean().default(true),

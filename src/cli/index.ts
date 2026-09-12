@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { registerAgentCommand } from "./commands/agent.js";
 import { registerSkillCommand } from "./commands/skill.js";
+import { registerAssetCommand } from "./commands/asset.js";
+import { registerPromptCommand } from "./commands/prompt.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerRunCommand } from "./commands/run.js";
 import { registerSessionCommand } from "./commands/session.js";
@@ -100,6 +102,8 @@ export function buildProgram(isOc: boolean = isModoOc()): Command {
   registerWorkspaceCommands(program);
   registerAgentCommand(program);
   registerSkillCommand(program);
+  registerAssetCommand(program);
+  registerPromptCommand(program);
   registerScheduleCommands(program);
   registerAppCommand(program);
   registerFlowCommand(program);

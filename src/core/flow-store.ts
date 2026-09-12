@@ -7,6 +7,7 @@ import { eventBus } from "./event-bus.js";
 import { SessionManager, type OpcoesRun, type ResultadoRun } from "./session-manager.js";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
+import { PromptStore } from "./prompt-store.js";
 
 import { sincronizarFluxoParaScheduler, removerJobDoScheduler, sincronizarJobsParaFluxos } from "./scheduler-flow-bridge.js";
 
@@ -1101,6 +1102,9 @@ export class FlowStore {
           if (typeof config.prompt_sistema === "string" && config.prompt_sistema.trim().length > 0) {
             ordemBase = `${config.prompt_sistema}\n\n${ordemBase}`;
           }
+
+          // F3-T02: resolve {{prompt:chave}} via PromptStore (sem a sintaxe, nada muda).
+          ordemBase = await new PromptStore({ homeDir: opencorpHome() }).resolverReferencias(wsPath, ordemBase);
 
           // contrato de resposta por ARQUIVO: a resposta limpa fica no sandbox
           const arquivoResposta = config.resposta_arquivo ?? "";
