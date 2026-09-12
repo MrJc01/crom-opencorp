@@ -10,11 +10,12 @@ test.describe("Workspaces / Empresas", () => {
   });
 
   test("seletor lista as empresas", async ({ page }) => {
-    const selector = page.locator("#ws-select");
+    const selector = page.locator("#select-workspace-topbar");
     await expect(selector).toBeVisible();
-    // Verifica se há opções
+    // Verifica se há opções (Início + empresas)
     const options = selector.locator("option");
-    await expect(options.first()).toBeTruthy();
+    expect(await options.count()).toBeGreaterThan(1);
+    await expect(selector.locator('option[value="e2e-corp"]')).toHaveCount(1);
   });
 
   test("sem localStorage oc-ws: UI auto-seleciona a primeira empresa", async ({ page }) => {

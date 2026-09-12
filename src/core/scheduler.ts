@@ -99,12 +99,14 @@ function gerarId(): string {
 }
 
 /**
- * Gatilho do ledger unificado: se o job roda um `agent run`, ele deve se
+ * Gatilho do ledger unificado: se o job roda um `agent run` ou `flow run`, ele deve se
  * auto-declarar como ativação "cron" de origem <jobId> (retorna o valor do
- * flag --gatilho; vazio quando o job não é agent run).
+ * flag --gatilho; vazio quando o job não é agent/flow run).
  */
 export function argsComGatilhoCron(job: { id: string; args: string[] }): string {
-  return job.args[0] === "agent" && job.args[1] === "run" ? `cron:${job.id}` : "";
+  if (job.args[0] === "agent" && job.args[1] === "run") return `cron:${job.id}`;
+  if (job.args[0] === "flow" && job.args[1] === "run") return `cron:${job.id}`;
+  return "";
 }
 
 export function parseQuandoDataUnica(quando: string, agora: Date = new Date()): string {

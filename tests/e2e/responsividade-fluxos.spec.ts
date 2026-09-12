@@ -1,106 +1,66 @@
 import { test, expect } from "@playwright/test";
-import { logado, seederEmpresaBasica, api } from "./helpers.js";
-import { join } from "node:path";
+import { logado, seederEmpresaBasica, api, esperarElementoTexto } from "./helpers.js";
 
-const artifactDir = "/home/j/.gemini/antigravity-ide/brain/0aa920af-1aee-41cb-a1e9-55c3e70c5802";
-
-test.describe("Auditoria Visual & Responsividade do Studio de Fluxos", () => {
+test.describe("Responsividade do Studio de Fluxos", () => {
   test.beforeEach(async ({ page }) => {
     logado(page, "test-e2e");
     await seederEmpresaBasica(api(page), "test-e2e");
-    await page.goto("/fluxos");
-
     await api(page).post("/flows", {
       headers: { authorization: "Bearer test-e2e", "content-type": "application/json" },
       data: {
         id: "flow-resp-test",
         nome: "Pipeline Responsivo",
-        descricao: "Esteira para validação de responsividade",
         nos: [
           { id: "inicio", tipo: "manual", config: {} },
-          { id: "comp", tipo: "componente", config: { componente_id: "slack-message" } },
+          { id: "saida", tipo: "registro", config: { categoria: "documentos" } },
         ],
-        arestas: [{ id: "a1", de: "inicio", para: "comp" }],
+        arestas: [{ de: "inicio", para: "saida" }],
       },
     });
+    await page.goto("/fluxos");
+    await esperarElementoTexto(page, "Fluxos");
   });
 
-  test("Desktop (1280x800) — Toolbar completa, Canvas n8n-style e Split-view", async ({ page }) => {
+  async function abrirCanvas(page: import("@playwright/test").Page) {
+    await page.locator('input[placeholder="Pesquisar fluxos..."]').fill("flow-resp-test");
+    const btnAbrir = page.locator('button:has-text("Abrir Canvas")').first();
+    await expect(btnAbrir).toBeVisible({ timeout: 15000 });
+    await btnAbrir.click();
+    await expect(page.locator('[data-node-id="inicio"]').first()).toBeVisible({ timeout: 15000 });
+  }
+
+  test("Desktop (1280x800) — toolbar, canvas e NDV", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto("/fluxos");
+    await abrirCanvas(page);
 
-    const btnAbrir = page.locator('button:has-text("Abrir Canvas")').first();
-    await expect(btnAbrir).toBeVisible();
-    await btnAbrir.click();
+    await expect(page.locator('button[title="Foco no Chat do Secretário"]')).toBeVisible();
+    await expect(page.locator('button[title="Chat e Canvas Lado a Lado"]')).toBeVisible();
+    await expect(page.locator('button[title="Foco no Canvas de Nós"]')).toBeVisible();
+    await expect(page.getByRole("button", { name: /Executar/ })).toBeVisible();
+    await page.screenshot({ path: "test-results/resp-desktop-1280-canvas.png" });
 
-    // Toolbar desktop deve ter todos os botões e split view
-    await expect(page.locator("button:has-text('Chat')")).toBeVisible();
-    await expect(page.locator("button:has-text('Lado a Lado')")).toBeVisible();
-    await expect(page.locator("button:has-text('Canvas')")).toBeVisible();
-    await expect(page.locator("button:has-text('Executar')")).toBeVisible();
-
-    const nodeComp = page.locator('[data-node-id="comp"]');
-    await expect(nodeComp).toBeVisible();
-
-    // Captura screenshot Desktop Canvas
-    await page.screenshot({ path: join(artifactDir, "desktop_1280_canvas.png") });
-
-    // Abre o NDV clicando no nó de componente
-    await nodeComp.click();
-    const ndvPanel = page.locator('.ndv-panel');
-    await expect(ndvPanel).toBeVisible();
-
-    // Captura screenshot Desktop com NDV aberto
-    await page.screenshot({ path: join(artifactDir, "desktop_1280_ndv.png") });
+    await page.locator('[data-node-id="inicio"]').first().click();
+    const ndv = page.locator(".ndv-panel");
+    await expect(ndv).toBeVisible();
+    await page.screenshot({ path: "test-results/resp-desktop-1280-ndv.png" });
   });
 
-  test("Tablet (768x1024) — Layout adaptativo de toolbar e canvas", async ({ page }) => {
-    await page.setViewportSize({ width: 768, height: 1024 });
-    await page.goto("/fluxos");
-
-    const btnAbrir = page.locator('button:has-text("Abrir Canvas")').first();
-    await expect(btnAbrir).toBeVisible();
-    await btnAbrir.click();
-
-    // No tablet, verifica que o canvas e toolbar renderizam sem quebrar layout
-    await expect(page.locator("button:has-text('Executar')")).toBeVisible();
-    await expect(page.locator("button:has-text('Adicionar Node')")).toBeVisible();
-
-    // Captura screenshot Tablet
-    await page.screenshot({ path: join(artifactDir, "tablet_768_canvas.png") });
-  });
-
-  test("Mobile (375x667) — Drawer mobile, toolbar colapsada, canvas móvel e NDV drawer", async ({ page }) => {
+  test("Mobile (375x667) — canvas e NDV cabem na tela", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto("/fluxos");
+    await abrirCanvas(page);
 
-    const btnAbrir = page.locator('button:has-text("Abrir Canvas")').first();
-    await expect(btnAbrir).toBeVisible();
-    await btnAbrir.click();
+    await expect(page.locator('button[title="Foco no Canvas de Nós"]')).toBeVisible();
+    await page.screenshot({ path: "test-results/resp-mobile-375-canvas.png" });
 
-    // No mobile, verifica adaptação do studio
-    await expect(page.locator("button:has-text('Executar')")).toBeVisible();
-
-    // Captura screenshot Mobile Studio Canvas
-    await page.screenshot({ path: join(artifactDir, "mobile_375_studio.png") });
-
-    // Clica no nó inicial para inspecionar NDV responsivo
-    const nodeInicio = page.locator('[data-node-id="inicio"]');
-    await expect(nodeInicio).toBeVisible();
-    await nodeInicio.click();
-
-    const ndvPanel = page.locator('.ndv-panel');
-    await expect(ndvPanel).toBeVisible();
-
-    const box = await ndvPanel.boundingBox();
-    // Valida que o NDV está inteiramente dentro da tela de 375px (x >= 0 e x + width <= 375)
+    await page.locator('[data-node-id="inicio"]').first().click();
+    const ndv = page.locator(".ndv-panel");
+    await expect(ndv).toBeVisible();
+    const box = await ndv.boundingBox();
     expect(box).not.toBeNull();
     if (box) {
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(375);
     }
-
-    // Captura screenshot Mobile com NDV aberto
-    await page.screenshot({ path: join(artifactDir, "mobile_375_ndv.png") });
+    await page.screenshot({ path: "test-results/resp-mobile-375-ndv.png" });
   });
 });

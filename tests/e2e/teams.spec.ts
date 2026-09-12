@@ -1,44 +1,48 @@
 import { test, expect } from "@playwright/test";
-import { logado, seederEmpresaBasica, api, esperarNavegacao, esperarElementoTexto } from "./helpers.js";
+import { logado, seederEmpresaBasica, api, esperarElementoTexto } from "./helpers.js";
 
-// Fusão team×fluxo (PLANO-WEB-CRUD F): o item Teams saiu da sidebar; #/teams
-// redireciona para Fluxos, onde times legados aparecem com botão Migrar.
-test.describe("Teams → Fluxos (fusão)", () => {
+// Teams vivem em /agentes (Grupos de Agentes) e a migração legada segue via API.
+test.describe("Teams / Grupos de Agentes", () => {
   test.beforeEach(async ({ page }) => {
     logado(page, "test-e2e");
     await seederEmpresaBasica(api(page), "test-e2e");
     await page.goto("/");
-    await esperarNavegacao(page, "home");
   });
 
-  test("#/teams redireciona para Fluxos e mostra times legados semeado", async ({ page }) => {
-    await page.evaluate(() => { window.location.hash = '/teams'; });
-    await page.waitForURL("**/#/fluxos");
-    await esperarElementoTexto(page, "Fluxos");
-
-    // Time semeado aparece na seção de legados
-    const legados = page.locator('#times-legados');
-    await expect(legados).toBeVisible();
-    await expect(legados.locator('text=e2e-pipe').first()).toBeVisible();
+  test("agentes lista o grupo semeado e2e-pipe", async ({ page }) => {
+    const respTeams = page.waitForResponse(
+      (r) => r.url().includes("/teams") && r.request().method() === "GET",
+      { timeout: 20000 },
+    );
+    await page.goto("/agentes");
+    await esperarElementoTexto(page, "Grupos de Agentes / Teams");
+    const res = await respTeams;
+    expect(res.status()).toBe(200);
+    await page.getByRole("button", { name: /Grupos de Agentes/ }).click();
+    await expect(page.getByText("team:e2e-pipe").first()).toBeVisible({ timeout: 15000 });
   });
 
-  test("botão Migrar todos converte team legado em fluxo listado", async ({ page }) => {
-    await page.evaluate(() => { window.location.hash = '/teams'; });
-    await page.waitForURL("**/#/fluxos");
-    await esperarElementoTexto(page, "Times legados");
+  test("POST /flows/migrate-teams converte team legado em fluxo", async ({ page }) => {
+    const r = await api(page).post("/flows/migrate-teams", {
+      headers: { authorization: "Bearer test-e2e", "content-type": "application/json" },
+      data: {},
+    });
+    expect([200, 201]).toContain(r.status());
 
-    await page.click('button:has-text("Migrar todos")');
-    // o fluxo migrado entra na lista de fluxos
-    await esperarElementoTexto(page, "e2e-pipe");
-    // e a seção de legados esvazia (team arquivado como .json.migrado)
-    await expect(page.locator('#times-legados')).not.toContainText('e2e-pipe');
+    const lista = await api(page).get("/flows", {
+      headers: { authorization: "Bearer test-e2e" },
+    });
+    const flows = await lista.json();
+    expect(flows.some((f: any) => f.id === "e2e-pipe" || f.nome?.includes("e2e-pipe") || f.nome?.includes("Pipe E2E"))).toBe(true);
   });
 
-  test("templates de coordenação disponíveis no cabeçalho (Pipeline/Fanout/Review/Debate)", async ({ page }) => {
-    await page.click('.nav-item[data-view="fluxos"]');
-    await page.waitForURL("**/#/fluxos");
-    for (const template of ["Pipeline", "Fanout", "Review", "Debate"]) {
-      await expect(page.locator(`button:has-text("${template}")`).first()).toBeVisible();
-    }
+  test("modal Novo Grupo oferece padrões Pipeline/Fanout/Debate", async ({ page }) => {
+    await page.goto("/agentes");
+    await esperarElementoTexto(page, "Grupos de Agentes / Teams");
+    await page.getByRole("button", { name: "Novo Grupo" }).click();
+    await esperarElementoTexto(page, "Criar Novo Grupo Multi-Agente");
+    await expect(page.getByText("Pipeline (Sequencial)").first()).toBeVisible();
+    await expect(page.getByText("Simultâneo (Fanout)").first()).toBeVisible();
+    await expect(page.getByText("Debate Multi-Agente").first()).toBeVisible();
   });
 });

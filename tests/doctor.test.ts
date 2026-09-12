@@ -513,3 +513,57 @@ describe("checkLedger (PLANO-UNIFICACAO)", () => {
     db.fechar();
   });
 });
+
+describe("checkFlows + checkFlowsAgendados (integridade agenda↔fluxo)", () => {
+  it("checkFlows: sem dir → info; flow válido → ok; inválido → fail", async () => {
+    const { checkFlows } = await import("../src/core/doctor.js");
+    const { FlowStore } = await import("../src/core/flow-store.js");
+    const vazio = await tmpDir();
+    expect((await checkFlows(vazio)).status).toBe("info");
+
+    const ws = await tmpDir();
+    const flows = new FlowStore();
+    await flows.salvar(ws, {
+      id: "ok-flow",
+      nome: "OK",
+      nos: [{ id: "gatilho", tipo: "manual", config: {} }],
+      arestas: [],
+    } as any);
+    expect((await checkFlows(ws)).status).toBe("ok");
+
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    mkdirSync(join(ws, ".opencorp", "flows"), { recursive: true });
+    writeFileSync(join(ws, ".opencorp", "flows", "ruim.json"), '{"id":"RUIM","nos":[]}');
+    const ruim = await checkFlows(ws);
+    expect(ruim.status).toBe("fail");
+    expect(ruim.items?.join(" ")).toContain("ruim.json");
+  });
+
+  it("checkFlowsAgendados: job para flow fantasma → fail; destino existe → ok", async () => {
+    const { checkFlowsAgendados } = await import("../src/core/doctor.js");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const Database = (await import("better-sqlite3")).default;
+    const { FlowStore } = await import("../src/core/flow-store.js");
+
+    const home = await tmpDir();
+    mkdirSync(join(home, ".opencorp", "workspaces", "ws1", ".opencorp", "flows"), { recursive: true });
+    const db = new Database(join(home, ".opencorp", "scheduler.db"));
+    db.exec("CREATE TABLE jobs (id TEXT PRIMARY KEY, nome TEXT, agenda_tipo TEXT, agenda_valor TEXT, args TEXT NOT NULL, workspace TEXT NOT NULL DEFAULT '', ativo INTEGER NOT NULL DEFAULT 1, graca_min INTEGER NOT NULL DEFAULT 5, ultima_exec TEXT, proxima_exec TEXT, criado_em TEXT NOT NULL DEFAULT '')");
+    const ins = db.prepare("INSERT INTO jobs (id, nome, agenda_tipo, agenda_valor, args, workspace) VALUES (?,?,?,?,?,?)");
+    ins.run("sch-fantasma", "Fantasma", "cron", "0 9 * * *", JSON.stringify(["flow", "run", "nao-existe", "--workspace", "ws1"]), "ws1");
+    ins.run("sch-agent", "Agente", "cron", "0 9 * * *", JSON.stringify(["agent", "run", "a", "oi"]), "ws1");
+    const antes = await checkFlowsAgendados(home);
+    expect(antes.status).toBe("fail");
+    expect(antes.items?.join(" ")).toContain("sch-fantasma");
+
+    await new FlowStore().salvar(join(home, ".opencorp", "workspaces", "ws1"), {
+      id: "nao-existe",
+      nome: "Agora existe",
+      nos: [{ id: "gatilho", tipo: "manual", config: {} }],
+      arestas: [],
+    } as any);
+    const depois = await checkFlowsAgendados(home);
+    expect(depois.status).toBe("ok");
+    db.close();
+  });
+});

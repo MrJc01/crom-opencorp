@@ -1,86 +1,69 @@
 import { test, expect } from "@playwright/test";
-import { logado, esperarNavegacao } from "./helpers.js";
+import { logado, esperarElementoTexto } from "./helpers.js";
 
 /**
- * Workspace estilo VS Code (PLANO-PAINEL-V2 Etapa 3 · P-08/P-09/P-10).
- * Workspace dedicado criado com perfil editorial → .opencorp/projeto.json
- * existe sempre (server grava no POST /workspaces com perfil).
+ * Workspace estilo VS Code: explorador, editor com salvar e terminais.
  */
 const WS = "ws-arquivos";
 const AUTH = { authorization: "Bearer test-e2e", "content-type": "application/json" };
 const ARQ = ".opencorp/projeto.json";
 
-test.describe("View Workspace (Etapa 3)", () => {
+test.describe("View Workspace", () => {
   test.beforeAll(async ({ request }) => {
-    // ignora 4xx (workspace de run anterior); perfil → projeto.json na criação
     await request.post("/workspaces", {
       headers: AUTH,
       data: { id: WS, perfil: { empresa: "E2E Files", nicho: "teste" } },
     }).catch(() => {});
-    // conteúdo canônico (idempotente) — arquivo existe (criação via perfil)
     await request.put(`/files?workspace=${WS}&path=${encodeURIComponent(ARQ)}`, {
       headers: AUTH,
       data: { conteudo: '{\n  "empresa": "E2E Files",\n  "nicho": "teste"\n}\n' },
     }).catch(() => {});
   });
 
-  /** Navega à view e expande .opencorp até o projeto.json ficar visível. */
-  async function abrirProjeto(page: import("@playwright/test").Page): Promise<void> {
+  async function irParaWorkspace(page: import("@playwright/test").Page): Promise<void> {
     logado(page, "test-e2e", WS);
-    await esperarNavegacao(page, "workspace");
-    const dir = page.locator('.tree-dir[data-path=".opencorp"]');
-    await expect(dir).toBeVisible();
-    await dir.click();
-    await expect(page.locator(`.tree-arquivo[data-path="${ARQ}"]`)).toBeVisible();
+    await page.goto("/workspace");
+    await esperarElementoTexto(page, "Explorador");
+  }
+
+  async function abrirProjeto(page: import("@playwright/test").Page): Promise<void> {
+    await irParaWorkspace(page);
+    await page.getByText(".opencorp", { exact: true }).first().click();
+    await expect(page.getByText("projeto.json", { exact: true }).first()).toBeVisible({ timeout: 10000 });
   }
 
   test("(a) árvore lista os arquivos semeados do workspace", async ({ page }) => {
-    logado(page, "test-e2e", WS);
-    await esperarNavegacao(page, "workspace");
-    const dir = page.locator('.tree-dir[data-path=".opencorp"]');
-    await expect(dir).toBeVisible();
-    // fechado: chevron ▸; clique alterna (Etapa 3.2)
-    await expect(dir).toContainText("▸");
+    await irParaWorkspace(page);
+    const dir = page.getByText(".opencorp", { exact: true }).first();
+    await expect(dir).toBeVisible({ timeout: 10000 });
     await dir.click();
-    await expect(dir).toHaveClass(/tree-aberto/);
-    await expect(dir).toContainText("▾");
-    await expect(page.locator(`.tree-arquivo[data-path="${ARQ}"]`)).toBeVisible();
-    // subpastas do template também entram na árvore (dirs primeiro, alfabética)
-    await page.locator('.tree-dir[data-path=".opencorp/agents"]').click();
-    await expect(page.locator('#view-workspace .tree-arquivo').first()).toBeVisible();
+    await expect(page.getByText("projeto.json", { exact: true }).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("agents", { exact: true }).first()).toBeVisible();
   });
 
-  test("(b) abrir projeto.json → tab abre no modo padrão (json → Editor) com conteúdo", async ({ page }) => {
+  test("(b) abrir projeto.json → tab com conteúdo no editor e salvar desabilitado", async ({ page }) => {
     await abrirProjeto(page);
-    await page.locator(`.tree-arquivo[data-path="${ARQ}"]`).click();
+    await page.getByText("projeto.json", { exact: true }).first().click();
 
-    await expect(page.locator("#ws-tabs-arq .ui-tab")).toHaveCount(1);
-    await expect(page.locator("#ws-tabs-arq .ui-tab").first()).toContainText("projeto.json");
-    // .md → Preview; demais → Editor (json cai no Editor)
-    await expect(page.locator("#ws-editor")).toBeVisible();
-    await expect(page.locator("#ws-editor")).toHaveValue(/E2E Files/);
-    // salvar desabilitado (limpo) e botão "Lado a lado" não existe para .json
-    await expect(page.locator("#ws-btn-salvar")).toBeDisabled();
-    await expect(page.locator('.ws-modo[data-modo="split"]')).toHaveCount(0);
+    await expect(page.getByText(".opencorp/projeto.json").first()).toBeVisible({ timeout: 10000 });
+    const editor = page.locator("textarea").first();
+    await expect(editor).toHaveValue(/E2E Files/, { timeout: 10000 });
+    await expect(page.getByRole("button", { name: "Salvar (Ctrl+S)" })).toBeDisabled();
   });
 
-  test("(c) editar + Salvar → PUT grava no server e badge de sujo some", async ({ page }) => {
+  test("(c) editar + Salvar → PUT grava no server e marca some", async ({ page }) => {
     await abrirProjeto(page);
-    await page.locator(`.tree-arquivo[data-path="${ARQ}"]`).click();
+    await page.getByText("projeto.json", { exact: true }).first().click();
+    const editor = page.locator("textarea").first();
+    await expect(editor).toHaveValue(/E2E/, { timeout: 10000 });
 
-    const editor = page.locator("#ws-editor");
     await editor.fill('{\n  "empresa": "E2E Editada",\n  "nicho": "teste"\n}\n');
-    await expect(page.locator("#ws-btn-salvar")).toBeEnabled();
-    await expect(page.locator("#ws-arq-nome")).toContainText("●");
-    await expect(page.locator("#ws-tabs-arq .ui-tab").first()).toContainText("●");
+    await expect(page.getByText("(modificado)").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: "Salvar (Ctrl+S)" })).toBeEnabled();
 
-    await page.click("#ws-btn-salvar");
-    await expect(page.locator("#toast-container")).toContainText("Salvo", { timeout: 10000 });
-    // badge limpo após salvar
-    await expect(page.locator("#ws-btn-salvar")).toBeDisabled();
-    await expect(page.locator("#ws-arq-nome")).not.toContainText("●");
+    await page.getByRole("button", { name: "Salvar (Ctrl+S)" }).click();
+    await expect(page.getByText("(modificado)")).toHaveCount(0, { timeout: 10000 });
 
-    // conteúdo novo confirmado pelo GET /files
     const resp = await page.request.get(`/files?workspace=${WS}&path=${encodeURIComponent(ARQ)}`, {
       headers: { authorization: "Bearer test-e2e" },
     });
@@ -89,36 +72,28 @@ test.describe("View Workspace (Etapa 3)", () => {
     expect(body.conteudo).toContain("E2E Editada");
   });
 
-  test("(d) terminal: rodar 'task list' (whitelist) e comando fora da whitelist mostra erro", async ({ page }) => {
-    logado(page, "test-e2e", WS);
-    await esperarNavegacao(page, "workspace");
+  test("(d) terminal: 'task list' (whitelist) ok e comando fora mostra erro", async ({ page }) => {
+    await irParaWorkspace(page);
+    await expect(page.getByRole("button", { name: "Terminal 1" })).toBeVisible({ timeout: 10000 });
 
-    await page.click("#ws-btn-term-novo");
-    await expect(page.locator("#ws-tabs-term .ui-tab")).toHaveCount(1);
-    await expect(page.locator("#ws-tabs-term .ui-tab").first()).toContainText("term-1");
+    const input = page.locator('input[placeholder="Digite um comando (ex: tasks list, doctor, flow list)..."]');
+    await input.fill("task list");
+    await input.press("Enter");
+    await expect(page.getByText("ws$ task list").first()).toBeVisible({ timeout: 20000 });
+    await expect(page.getByText("[ok]").first()).toBeVisible({ timeout: 20000 });
 
-    const log = page.locator("#ws-term-log");
-    await page.fill("#ws-term-cmd", "task list");
-    await page.click("#ws-term-rodar");
-    await expect(log).toContainText("ws$ task list", { timeout: 20000 });
-    await expect(log).toContainText("[ok]", { timeout: 20000 });
-
-    // fora da whitelist → mensagem de erro aparece no log do tab
-    await page.fill("#ws-term-cmd", "rm -rf /");
-    await page.click("#ws-term-rodar");
-    await expect(log).toContainText("fora da whitelist", { timeout: 10000 });
+    await input.fill("rm -rf /");
+    await input.press("Enter");
+    await expect(page.getByText(/fora da whitelist/).first()).toBeVisible({ timeout: 10000 });
   });
 
-  test("(e) right-click no arquivo → 'Enviar como contexto @' abre o drawer com @caminho", async ({ page }) => {
+  test("(e) right-click no arquivo → menu com Renomear, Copiar Caminho e Excluir", async ({ page }) => {
     await abrirProjeto(page);
-    await page.locator(`.tree-arquivo[data-path="${ARQ}"]`).click({ button: "right" });
+    await page.getByText("projeto.json", { exact: true }).first().click({ button: "right" });
 
-    const menu = page.locator(".ctx-menu");
-    await expect(menu).toBeVisible();
-    await expect(menu.locator(".palette-item", { hasText: "Abrir" })).toBeVisible();
-
-    await menu.locator(".palette-item", { hasText: "Enviar como contexto @" }).click();
-    await expect(page.locator("#chat-drawer")).toHaveClass(/open/);
-    await expect(page.locator("#lat-input")).toHaveValue(`@${ARQ}`);
+    await expect(page.getByText("Renomear").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("Copiar Caminho").first()).toBeVisible();
+    await expect(page.getByText("Excluir").first()).toBeVisible();
+    await page.keyboard.press("Escape");
   });
 });

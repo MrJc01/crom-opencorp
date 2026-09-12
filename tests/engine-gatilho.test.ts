@@ -52,9 +52,10 @@ function dbDe(wsPath: string): CorpDb {
 }
 
 describe("Etapa 2 — motores declaram o gatilho da Execução", () => {
-  it("scheduler: job agent run se auto-declara cron:<jobId>", () => {
+  it("scheduler: jobs agent run e flow run se auto-declaram cron:<jobId>", () => {
     expect(argsComGatilhoCron({ id: "sch-abc", args: ["agent", "run", "auditor", "faça o ciclo"] })).toBe("cron:sch-abc");
-    expect(argsComGatilhoCron({ id: "sch-abc", args: ["flow", "run", "editoria"] })).toBe("");
+    expect(argsComGatilhoCron({ id: "sch-abc", args: ["flow", "run", "editoria"] })).toBe("cron:sch-abc");
+    expect(argsComGatilhoCron({ id: "sch-abc", args: ["task", "list"] })).toBe("");
   });
 
   it("flow: nó agente grava no ledger com gatilho dependencia flow:<id>/<no>", async () => {

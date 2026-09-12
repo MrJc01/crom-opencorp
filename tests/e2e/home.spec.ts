@@ -1,55 +1,46 @@
 import { test, expect } from "@playwright/test";
-import { logado, seederEmpresaBasica, api, esperarNavegacao, esperarElementoTexto } from "./helpers.js";
+import { logado, seederEmpresaBasica, api, esperarElementoTexto } from "./helpers.js";
 
-test.describe("Home / Início (hub)", () => {
+test.describe("Home / Painel de Operações", () => {
   test.beforeEach(async ({ page }) => {
     logado(page, "test-e2e");
     await seederEmpresaBasica(api(page), "test-e2e");
     await page.goto("/");
-    await esperarNavegacao(page, "home");
+    await esperarElementoTexto(page, "Painel de Operações");
   });
 
-  test("KPIs de operação aparecem (Tasks vencidas, Custos do dia, Fluxos ativos)", async ({ page }) => {
-    await esperarElementoTexto(page, "Tasks vencidas");
-    await esperarElementoTexto(page, "Custos do dia");
-    await esperarElementoTexto(page, "Fluxos ativos");
+  test("KPIs de operação aparecem (Custo, Tasks, Agentes, Fluxos, Saúde)", async ({ page }) => {
+    await esperarElementoTexto(page, "Custo do Dia");
+    await esperarElementoTexto(page, "Tasks em Aberto");
+    await esperarElementoTexto(page, "Agentes Prontos");
+    await esperarElementoTexto(page, "Fluxos Ativos");
+    await esperarElementoTexto(page, "Saúde do Sistema");
   });
 
-  test('painel "Feed ao vivo" presente com selo "todas as empresas"', async ({ page }) => {
-    await esperarElementoTexto(page, "Feed ao vivo");
-    await esperarElementoTexto(page, "todas as empresas");
+  test("abas navegam: Fluxos mostra automações e últimas execuções", async ({ page }) => {
+    await page.getByRole("button", { name: /Fluxos/ }).click();
+    await esperarElementoTexto(page, "Fluxos & Automações");
+    await page.getByRole("button", { name: /Visão Geral/ }).click();
+    await esperarElementoTexto(page, "Feed de Execuções Recentes");
   });
 
-  test('zona "Linhas de pensamento" com botão Rodar agora e link ver todas', async ({ page }) => {
-    // semeia um flow no workspace (a zona mostra vazio orientando criar, se não houver)
-    await api(page).post("/flows", {
-      headers: { authorization: `Bearer test-e2e`, "content-type": "application/json" },
-      data: { id: "ceo-analise-board", nome: "Análise do board pelo CEO" },
-    });
-    await page.reload();
-    await esperarNavegacao(page, "home");
-    await esperarElementoTexto(page, "Linhas de pensamento");
-    await esperarElementoTexto(page, "Rodar agora");
-    await esperarElementoTexto(page, "ver todas");
+  test("Nova Task abre o modal de criação e Cancelar fecha", async ({ page }) => {
+    await page.getByRole("button", { name: "Nova Task" }).first().click();
+    await esperarElementoTexto(page, "Criar Nova Tarefa");
+    await page.getByRole("button", { name: "Cancelar" }).click();
+    await expect(page.getByText("Criar Nova Tarefa")).toHaveCount(0);
   });
 
-  test('zona "Sistema" com atalhos Config, Secrets, Ferramentas, Doutor', async ({ page }) => {
-    await esperarElementoTexto(page, "Secrets");
-    await esperarElementoTexto(page, "Ferramentas");
-    await esperarElementoTexto(page, "Doutor");
+  test("comando rápido com texto → navega ao Secretário com a ordem", async ({ page }) => {
+    await page.locator('input[placeholder="Digite uma instrução para o Secretário ou ! comando no terminal..."]').fill("preparar resumo e2e");
+    await page.locator('input[placeholder="Digite uma instrução para o Secretário ou ! comando no terminal..."]').press("Enter");
+    await page.waitForURL("**/secretario?ordem=*", { timeout: 10000 });
   });
 
-  test("chip de workspace no header abre a sidebar", async ({ page }) => {
-    const chip = page.locator(".hub-ws");
-    await expect(chip).toBeVisible();
-    await chip.click();
-    await expect(page.locator("#sidebar")).toHaveClass(/open/);
-  });
-
-  test("botão Criar empresa abre o wizard (passo 1 Identidade)", async ({ page }) => {
-    await page.click('button:has-text("Criar empresa")');
-    await esperarElementoTexto(page, "Nova empresa");
-    await esperarElementoTexto(page, "Nome da empresa");
-    await page.click('button[aria-label="Fechar wizard"]');
+  test("atalhos do sistema levam a Agenda e Fluxos", async ({ page }) => {
+    await esperarElementoTexto(page, "Agenda 24h");
+    await esperarElementoTexto(page, "Fluxos de Trabalho");
+    await esperarElementoTexto(page, "Apps & Secrets");
+    await esperarElementoTexto(page, "Segurança & Regras");
   });
 });

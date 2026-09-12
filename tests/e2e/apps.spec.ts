@@ -1,49 +1,27 @@
 import { test, expect } from "@playwright/test";
-import { logado, seederEmpresaBasica, api, esperarNavegacao, esperarElementoTexto } from "./helpers.js";
+import { logado, seederEmpresaBasica, api, esperarElementoTexto } from "./helpers.js";
 
-test.describe("Apps", () => {
+test.describe("Apps / Mini-Apps", () => {
   test.beforeEach(async ({ page }) => {
     logado(page, "test-e2e");
     await seederEmpresaBasica(api(page), "test-e2e");
-    await page.goto("/");
-    await esperarNavegacao(page, "home");
+    await page.goto("/apps");
+    await esperarElementoTexto(page, "Mini-Apps");
   });
 
-  test("app semeado aparece na lista", async ({ page }) => {
-    await page.click('.nav-item[data-view="apps"]');
-    await page.waitForURL("**/#/apps");
-    await esperarElementoTexto(page, "Mini-apps");
-
+  test("app semeado aparece na lista instalada", async ({ page }) => {
     await esperarElementoTexto(page, "Painel de Tarefas");
-    await expect(page.locator("text=painel-tarefas")).toBeVisible();
+    await expect(page.getByText("apps/painel-tarefas").first()).toBeVisible();
   });
 
-  test("abrir app renderiza o widget metrica (número visível) e o título do widget", async ({ page }) => {
-    await page.click('.nav-item[data-view="apps"]');
-    await page.waitForURL("**/#/apps");
-    await esperarElementoTexto(page, "Mini-apps");
+  test("abrir app mostra topbar com modos e voltar funciona", async ({ page }) => {
+    const card = page.locator("div.p-4.rounded-xl", { hasText: "Painel de Tarefas" });
+    await expect(card).toBeVisible({ timeout: 15000 });
+    await card.getByRole("button", { name: "Abrir App" }).click();
 
-    // Clica no app
-    await page.click('.app-card:has-text("Painel de Tarefas")');
-    await esperarElementoTexto(page, "Painel de Tarefas");
-
-    // Verifica widget metrica
-    await esperarElementoTexto(page, "Tasks");
-    // O número deve aparecer na classe widget-metric
-    const widget = page.locator(".widget-metric").first();
-    await expect(widget).toBeVisible();
-  });
-
-  test("voltar funciona", async ({ page }) => {
-    await page.click('.nav-item[data-view="apps"]');
-    await page.waitForURL("**/#/apps");
-    await esperarElementoTexto(page, "Mini-apps");
-
-    await page.click('.app-card:has-text("Painel de Tarefas")');
-    await esperarElementoTexto(page, "Painel de Tarefas");
-
-    // Clica voltar
-    await page.click('button:has-text("← Voltar")');
-    await esperarElementoTexto(page, "Mini-apps");
+    await expect(page.getByRole("button", { name: "Voltar aos Apps" })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: "Só App" })).toBeVisible();
+    await page.getByRole("button", { name: "Voltar aos Apps" }).click();
+    await esperarElementoTexto(page, "Aplicações Instaladas");
   });
 });

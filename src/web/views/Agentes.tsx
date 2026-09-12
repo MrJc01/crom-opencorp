@@ -683,10 +683,12 @@ export const AgentesView: Component = () => {
             <For each={teamsFiltrados()}>
               {(grupo) => {
                 const participantes = () => {
-                  if (grupo.padrao === "pipeline") return grupo.passos?.map((p) => `@${p.agente}`) || [];
-                  if (grupo.padrao === "fanout") return [...(grupo.paralelos?.map((p) => `@${p.agente}`) || []), `@${grupo.sintese?.agente} (síntese)`];
+                  // GET /teams devolve resumo (passos/paralelos/proponentes podem vir como contagem) —
+                  // só faz map quando for array (detalhe completo); senão, lista vazia.
+                  if (grupo.padrao === "pipeline") return Array.isArray(grupo.passos) ? grupo.passos.map((p) => `@${p.agente}`) : [];
+                  if (grupo.padrao === "fanout") return [...(Array.isArray(grupo.paralelos) ? grupo.paralelos.map((p) => `@${p.agente}`) : []), `@${grupo.sintese?.agente} (síntese)`];
                   if (grupo.padrao === "review") return [`@${grupo.executor?.agente} (executor)`, `@${grupo.revisor?.agente} (revisor)`];
-                  if (grupo.padrao === "debate") return [...(grupo.proponentes?.map((p) => `@${p.agente}`) || []), `@${grupo.moderador?.agente} (moderador)`];
+                  if (grupo.padrao === "debate") return [...(Array.isArray(grupo.proponentes) ? grupo.proponentes.map((p) => `@${p.agente}`) : []), `@${grupo.moderador?.agente} (moderador)`];
                   return [];
                 };
 

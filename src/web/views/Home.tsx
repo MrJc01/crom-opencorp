@@ -86,6 +86,7 @@ export const HomeView: Component = () => {
   const [agentes, setAgentes] = createSignal<any[]>([]);
   const [sessoesSecretario, setSessoesSecretario] = createSignal<any[]>([]);
   const [fluxos, setFluxos] = createSignal<any[]>([]);
+  const [ultimosFluxos, setUltimosFluxos] = createSignal<any[]>([]);
 
   const abaInicial = () => {
     try {
@@ -225,7 +226,7 @@ export const HomeView: Component = () => {
   const carregarDadosHome = async () => {
     if (!wsAtivo()) return;
     try {
-      const [tasks, ags, flows, aprovs, budget, status, jobs, rExecs, sSec] = await Promise.allSettled([
+      const [tasks, ags, flows, aprovs, budget, status, jobs, rExecs, sSec, hFluxos] = await Promise.allSettled([
         fetchApi<any[]>("/tasks"),
         fetchApi<any[]>("/agents"),
         fetchApi<any[]>("/flows"),
@@ -235,6 +236,7 @@ export const HomeView: Component = () => {
         fetchApi<any[]>("/schedules"),
         fetchApi<any[]>("/execucoes?limite=30"),
         fetchApi<any[]>("/secretario/sessoes"),
+        fetchApi<any[]>("/historico?tipo=fluxo&limite=10"),
       ]);
 
       const getVal = <T>(r: PromiseSettledResult<T>, def: T): T => (r.status === "fulfilled" && r.value != null ? r.value : def);
@@ -254,6 +256,8 @@ export const HomeView: Component = () => {
       setExecucoes(dExecs);
       setFluxos(dFlows);
       setSessoesSecretario(Array.isArray(getVal(sSec, [])) ? getVal(sSec, []) : []);
+      const dFluxosHist = Array.isArray(getVal(hFluxos, [])) ? getVal(hFluxos, []) : [];
+      setUltimosFluxos(dFluxosHist);
 
       // Identificar se há algum agente executando agora (background run OU Secretário Executivo)
       const secSessoes = Array.isArray(getVal(sSec, [])) ? getVal(sSec, []) : [];
@@ -291,6 +295,8 @@ export const HomeView: Component = () => {
         tasksVencidas: vencidas,
         agentesAtivos: dAgentes.filter((a: any) => a.ativo !== false).length,
         fluxosAtivos: dFlows.length,
+        fluxosExecucoes: dFluxosHist.length,
+        fluxosExecutando: dFluxosHist.filter((f: any) => f.status === "executando").length,
         schedulerOk: dStatus?.scheduler ?? true,
         secretarioOk: dStatus?.secretario ?? true,
       });
@@ -312,7 +318,7 @@ export const HomeView: Component = () => {
     try {
       if (cmd.startsWith("!")) {
         const bashCmd = cmd.slice(1).trim();
-        const res = await fetchApi<any>("/terminal/exec", {
+        const res = await fetchApi<any>("/terminal", {
           method: "POST",
           body: JSON.stringify({ comando: bashCmd }),
         });
@@ -721,7 +727,11 @@ export const HomeView: Component = () => {
             <GitBranch size={15} class="text-amber-400" />
           </div>
           <div class="text-xl font-bold text-zinc-100">{metricas().fluxosAtivos}</div>
-          <div class="text-[10px] text-zinc-500 mt-1">Workflows em grafo</div>
+          <div class="text-[10px] text-zinc-500 mt-1">
+            {metricas().fluxosExecucoes > 0
+              ? `${metricas().fluxosExecucoes} execuções${metricas().fluxosExecutando > 0 ? ` · ${metricas().fluxosExecutando} executando` : ""}`
+              : "Nenhuma execução ainda — veja a aba Fluxos"}
+          </div>
         </div>
 
         {/* Saúde Operacional */}
@@ -1548,6 +1558,58 @@ export const HomeView: Component = () => {
          ───────────────────────────────────────────────────────────── */}
       <Show when={abaAtiva() === "fluxos"}>
         <div class="space-y-6">
+          {/* Últimas execuções de fluxos — como foi */}
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-bold text-zinc-100 font-mono flex items-center gap-2">
+                <Activity size={16} class="text-emerald-400" />
+                <span>Últimas execuções — como foi ({ultimosFluxos().length})</span>
+              </h3>
+              <A href="/historico?tipo=fluxo" class="text-xs font-mono text-indigo-400 hover:underline">
+                Ver no Histórico →
+              </A>
+            </div>
+            <Show
+              when={ultimosFluxos().length > 0}
+              fallback={
+                <div class="p-4 rounded-xl bg-zinc-900/40 border border-zinc-800 text-xs text-zinc-500 text-center">
+                  Nenhum fluxo executado ainda neste workspace. Execute no Studio para ver o resultado aqui.
+                </div>
+              }
+            >
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <For each={ultimosFluxos().slice(0, 6)}>
+                  {(fx) => (
+                    <A
+                      href={`/historico?run=${encodeURIComponent(fx.id)}`}
+                      class="p-3.5 rounded-2xl bg-zinc-900/50 border border-zinc-800 hover:border-indigo-700/60 transition-all flex flex-col gap-2 shadow-xs"
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <span class="text-[10px] font-mono text-zinc-500 truncate">{fx.flow || fx.agente} · {fx.id}</span>
+                        <span class={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded capitalize ${
+                          fx.status === "concluido" ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
+                          : fx.status === "falhou" ? "bg-rose-500/10 text-rose-300 border border-rose-500/30"
+                          : fx.status === "executando" ? "bg-amber-500/10 text-amber-300 border border-amber-500/30 animate-pulse"
+                          : "bg-zinc-800 text-zinc-400 border border-zinc-700"
+                        }`}>{fx.status}</span>
+                      </div>
+                      <div class="text-xs font-bold text-zinc-100 truncate">{fx.titulo || fx.flow || fx.id}</div>
+                      <Show when={fx.nos_total}>
+                        <div class="text-[11px] text-indigo-300/80 font-mono">{fx.nos_ok ?? 0}/{fx.nos_total} nós ok</div>
+                      </Show>
+                      <Show when={fx.contexto_final}>
+                        <div class="text-[11px] text-zinc-400 line-clamp-2 leading-relaxed">{String(fx.contexto_final).slice(0, 220)}</div>
+                      </Show>
+                      <div class="text-[10px] text-zinc-500 font-mono pt-1.5 border-t border-zinc-800/80 flex items-center justify-between">
+                        <span>{fx.quando ? new Date(fx.quando).toLocaleString("pt-BR") : ""}</span>
+                        <span class="text-indigo-400">Ver timeline →</span>
+                      </div>
+                    </A>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
           <div class="space-y-3">
             <div class="flex items-center justify-between">
               <h3 class="text-sm font-bold text-zinc-100 font-mono flex items-center gap-2">

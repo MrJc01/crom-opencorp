@@ -280,9 +280,9 @@ export const WorkspaceView: Component = () => {
     if (!t) return;
     setSalvando(true);
     try {
-      await fetchApi("/files", {
+      await fetchApi(`/files?path=${encodeURIComponent(t.caminho)}`, {
         method: "PUT",
-        body: JSON.stringify({ path: t.caminho, conteudo: t.editado }),
+        body: JSON.stringify({ conteudo: t.editado }),
       });
       setTabs((prev) =>
         prev.map((item) => (item.caminho === t.caminho ? { ...item, original: t.editado } : item)),

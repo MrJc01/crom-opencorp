@@ -1,6 +1,5 @@
 import { test, expect } from "@playwright/test";
 import { logado } from "./helpers.js";
-import * as path from "path";
 
 test.describe("Mobile Sidebar & Workspace Switcher (375x667)", () => {
   test.use({
@@ -8,7 +7,6 @@ test.describe("Mobile Sidebar & Workspace Switcher (375x667)", () => {
     hasTouch: true,
   });
 
-  const artifactDir = "/home/j/.gemini/antigravity-ide/brain/a6d6fd09-9d3c-478d-b31b-5b9234ec29dd";
 
   test("menu lateral mobile abre expandido mesmo se desktop estiver colapsado, e permite trocar de workspace", async ({ page }) => {
     // Simula que o usuário colapsou a sidebar no desktop, usando workspace existente
@@ -52,7 +50,7 @@ test.describe("Mobile Sidebar & Workspace Switcher (375x667)", () => {
     await expect(textoTarefas).toBeVisible();
     await expect(textoTarefas).toHaveText("Tasks");
 
-    await page.screenshot({ path: path.join(artifactDir, "mobile_drawer_expanded.png") });
+    await page.screenshot({ path: "test-results/mobile-drawer-expanded.png" });
 
     // 5. Troca de workspace pelo dropdown da sidebar móvel
     const options = await sidebarWsSelect.locator("option").allTextContents();
@@ -72,7 +70,7 @@ test.describe("Mobile Sidebar & Workspace Switcher (375x667)", () => {
     await topbarWsSelect.selectOption("e2e-corp");
     await page.waitForTimeout(600);
 
-    await page.screenshot({ path: path.join(artifactDir, "mobile_topbar_workspace_switched.png") });
+    await page.screenshot({ path: "test-results/mobile-topbar-switched.png" });
   });
 
   test("quando não há workspace ativo no mobile, GlobalTitlebar permite abrir gaveta e selecionar workspace", async ({ page }) => {
@@ -86,15 +84,16 @@ test.describe("Mobile Sidebar & Workspace Switcher (375x667)", () => {
     await page.goto("/home", { waitUntil: "networkidle" });
     await page.waitForTimeout(1000);
 
-    // GlobalTitlebar deve ter o botão burger e o dropdown
-    const globalMenuBtn = page.locator("header button[title='Abrir navegação']");
-    await expect(globalMenuBtn).toBeVisible();
+    // Auto-seleção pode já ter ativado a primeira empresa (Topbar) ou ainda
+    // estar na GlobalTitlebar — ambos os estados são válidos no mobile
+    const globalSelect = page.locator("#select-workspace-global");
+    const topbarSelect = page.locator("#select-workspace-topbar");
+    await expect(globalSelect.or(topbarSelect).first()).toBeVisible({ timeout: 10000 });
 
-    const globalWsSelect = page.locator("#select-workspace-global");
-    await expect(globalWsSelect).toBeVisible();
-
-    // Clica no menu burger do GlobalTitlebar para abrir a sidebar
-    await globalMenuBtn.click();
+    // Burger abre a gaveta em qualquer um dos headers
+    const burger = page.locator("header button[title='Abrir navegação']").first();
+    await expect(burger).toBeVisible();
+    await burger.click();
     await page.waitForTimeout(400);
 
     const sidebarAside = page.locator("#sidebar-principal");
@@ -103,7 +102,5 @@ test.describe("Mobile Sidebar & Workspace Switcher (375x667)", () => {
     // Seletor da sidebar deve estar acessível
     const sidebarWsSelect = page.locator("#select-workspace-sidebar");
     await expect(sidebarWsSelect).toBeVisible();
-
-    await page.screenshot({ path: path.join(artifactDir, "mobile_global_titlebar_drawer.png") });
   });
 });

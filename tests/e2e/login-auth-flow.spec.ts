@@ -1,7 +1,6 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("E2E — Fluxo de Autenticação e Modal de Login", () => {
-  const baseURL = "http://127.0.0.1:4100";
 
   test("quando não autenticado (401), deve exibir o modal de login acessível", async ({ page }) => {
     // Intercepta /workspaces para simular servidor protegido que requer token
@@ -13,7 +12,7 @@ test.describe("E2E — Fluxo de Autenticação e Modal de Login", () => {
       return route.fulfill({ status: 200, json: [] });
     });
 
-    await page.goto(`${baseURL}/home`);
+    await page.goto(`/home`);
     await page.waitForTimeout(1000);
 
     // Modal de login deve estar visível
@@ -28,7 +27,7 @@ test.describe("E2E — Fluxo de Autenticação e Modal de Login", () => {
       return route.fulfill({ status: 401, json: { erro: "Token inválido" } });
     });
 
-    await page.goto(`${baseURL}/home`);
+    await page.goto(`/home`);
     await page.waitForTimeout(1000);
 
     await page.fill("#login-token", "token-incorreto-123");
@@ -48,7 +47,7 @@ test.describe("E2E — Fluxo de Autenticação e Modal de Login", () => {
       return route.fulfill({ status: 401, json: { erro: "Não autorizado" } });
     });
 
-    await page.goto(`${baseURL}/home`);
+    await page.goto(`/home`);
     await page.waitForTimeout(1000);
 
     await page.fill("#login-token", "token-secreto-valido");

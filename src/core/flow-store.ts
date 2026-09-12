@@ -583,7 +583,7 @@ export class FlowStore {
   async executar(
     wsPath: string,
     flowId: string,
-    opts: { entrada?: string; model?: string; execId?: string; retomar?: boolean } = {},
+    opts: { entrada?: string; model?: string; execId?: string; retomar?: boolean; gatilho?: { tipo: string; origem: string } } = {},
   ): Promise<{ execId: string; status: "concluido" | "falhou"; nos: NoExecInfo[]; contextoFinal: string }> {
     const flow = await this.obter(wsPath, flowId);
     await this.registros.garantirCategorias(wsPath);
@@ -629,7 +629,7 @@ export class FlowStore {
         tipo: "flow",
         eventoInicial: {
           evento: "iniciado",
-          resumo: `flow ${flowId} · ${flow.nos.length} nó(s) · entrada: ${entrada.slice(0, 120)}`,
+          resumo: `flow ${flowId} · ${flow.nos.length} nó(s) · entrada: ${entrada.slice(0, 120)}${opts.gatilho ? ` · gatilho: ${opts.gatilho.tipo}:${opts.gatilho.origem}` : ""}`,
         },
         extras: {
           status: "executando",
@@ -639,6 +639,7 @@ export class FlowStore {
           entrada,
           nos: nosInfo,
           contexto_final: "",
+          ...(opts.gatilho ? { gatilho: opts.gatilho } : {}),
         },
       });
       eventBus.emit("flow-inicio", { flow: flowId, exec_id: execId, entrada });
@@ -1009,8 +1010,11 @@ export class FlowStore {
           const config = no.config as { categoria: string; id?: string; titulo?: string };
           const categoria = config.categoria;
           const base = (config.id ?? `${flowId}-${no.id}`).replaceAll("{{entrada}}", "").slice(0, 80);
-          const ts = this.agora().toISOString().slice(0, 16).replace("T", "-").replace(":", "");
-          const registroId = `${base.toLowerCase().replace(/[^a-z0-9._-]/g, "-")}-${ts}`;
+          // timestamp com segundos + sufixo aleatório: dois runs no mesmo
+          // minuto colidiam (registro "já existe" e o flow falhava).
+          const ts = this.agora().toISOString().slice(0, 19).replace("T", "-").replaceAll(":", "");
+          const aleatorio = Math.random().toString(36).slice(2, 6);
+          const registroId = `${base.toLowerCase().replace(/[^a-z0-9._-]/g, "-")}-${ts}-${aleatorio}`;
           const titulo = (config.titulo ?? `registro do flow "${flowId}"`).replaceAll("{{entrada}}", contexto).slice(0, 140);
           await this.registros.garantirCategorias(wsPath);
           await this.registros.criar(wsPath, {

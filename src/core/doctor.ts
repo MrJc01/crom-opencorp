@@ -9,6 +9,7 @@ import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { expandTilde } from "../utils/paths.js";
 import { AppStore } from "./app-store.js";
 import { TeamStore } from "./team-store.js";
+import { FlowStore } from "./flow-store.js";
 
 export const MIN_NODE_MAJOR = 22;
 export const DEFAULT_WORKSPACES_ROOT = "~/.opencorp/workspaces";
@@ -696,6 +697,84 @@ export async function checkTeams(wsPath: string): Promise<DoctorCheck> {  const 
   };
 }
 
+/** Flows do workspace: todo .json precisa passar na validação de schema + semântica. */
+export async function checkFlows(wsPath: string): Promise<DoctorCheck> {
+  const base = { id: "flows", label: "flows do workspace" } as const;
+  const store = new FlowStore();
+  const dir = store.dir(wsPath);
+  if (!existsSync(dir)) {
+    return { ...base, status: "info", detail: `diretório ${dir} não existe — sem flows configurados` };
+  }
+  let entradas: string[];
+  try {
+    entradas = await readdir(dir);
+  } catch (erro) {
+    return { ...base, status: "warn", detail: `não foi possível ler ${dir}: ${errorMessage(erro)}` };
+  }
+  const arquivos = entradas.filter((f) => f.endsWith(".json"));
+  if (arquivos.length === 0) {
+    return { ...base, status: "info", detail: `${dir} vazio — sem flows configurados` };
+  }
+  const invalidos: string[] = [];
+  for (const f of arquivos) {
+    try {
+      store.validarTexto(await readFile(join(dir, f), "utf8"), f);
+    } catch (erro) {
+      invalidos.push(`${f}: ${errorMessage(erro)}`);
+    }
+  }
+  if (invalidos.length > 0) {
+    return { ...base, status: "fail", detail: `${invalidos.length} flow(s) inválido(s) em ${dir} — não executam`, items: invalidos };
+  }
+  return { ...base, status: "ok", detail: `${arquivos.length} flow(s) válido(s) em ${dir}` };
+}
+
+/** Integridade agenda↔fluxo: todo job `flow run` (ativo ou pausado) precisa
+ *  apontar para um flow que existe no workspace — job para flow fantasma
+ *  falha para sempre a cada tick. */
+export async function checkFlowsAgendados(homeDir: string): Promise<DoctorCheck> {
+  const base = { id: "flows-agendados", label: "jobs flow run → flows existentes" } as const;
+  const dbPath = join(homeDir, ".opencorp", "scheduler.db");
+  if (!existsSync(dbPath)) {
+    return { ...base, status: "info", detail: "scheduler.db inexistente — sem agendamentos" };
+  }
+  let db: Database.Database;
+  try {
+    db = new Database(dbPath, { readonly: true });
+  } catch (erro) {
+    return { ...base, status: "fail", detail: `scheduler.db não abre: ${errorMessage(erro)}` };
+  }
+  try {
+    const jobs = db.prepare("SELECT id, workspace, args FROM jobs").all() as Array<{ id: string; workspace: string; args: string }>;
+    const quebrados: string[] = [];
+    let total = 0;
+    for (const job of jobs) {
+      let args: string[];
+      try {
+        args = JSON.parse(job.args);
+      } catch {
+        continue;
+      }
+      if (args[0] !== "flow" || args[1] !== "run") continue;
+      total++;
+      const flowId = String(args[2] ?? "");
+      const wsDir = join(homeDir, ".opencorp", "workspaces", job.workspace || "");
+      const flowPath = join(wsDir, ".opencorp", "flows", `${flowId}.json`);
+      if (!flowId || !existsSync(flowPath)) {
+        quebrados.push(`${job.id} → flow "${flowId || "?"}" inexistente em ${job.workspace || "?"}`);
+      }
+    }
+    if (quebrados.length > 0) {
+      return { ...base, status: "fail", detail: `${quebrados.length}/${total} job(s) flow run apontam para flows fantasmas`, items: quebrados };
+    }
+    return { ...base, status: "ok", detail: `${total} job(s) flow run com destino existente` };
+  } catch (erro) {
+    return { ...base, status: "fail", detail: `consulta ao scheduler falhou: ${errorMessage(erro)}` };
+  } finally {
+    try { db.close(); } catch { /* ignore */ }
+  }
+}
+
 export async function checkSecretario(
   homeDir: string,
   opcoes: { fetch?: typeof fetch; pidVivo?: (pid: number) => boolean | Promise<boolean> } = {},
@@ -830,6 +909,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
   }
 
   checks.push(await checkScheduler(home, { pidVivo: options.pidVivo }));
+  checks.push(await checkFlowsAgendados(home));
   checks.push(await checkSecretario(home, { pidVivo: options.pidVivo, fetch: options.fetch }));
   checks.push(await checkDaemonsDuplicados(home, { pidVivo: options.pidVivo }));
 
@@ -838,6 +918,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
     checks.push(await checkHooks(wsPath));
     checks.push(await checkApps(wsPath));
     checks.push(await checkTeams(wsPath));
+    checks.push(await checkFlows(wsPath));
     checks.push(await checkLedger(wsPath));
   } else {
     checks.push({
@@ -857,6 +938,12 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
       label: "teams do workspace",
       status: "info",
       detail: "nenhum workspace ativo — teams não verificados",
+    });
+    checks.push({
+      id: "flows",
+      label: "flows do workspace",
+      status: "info",
+      detail: "nenhum workspace ativo — flows não verificados",
     });
     checks.push({
       id: "ledger",

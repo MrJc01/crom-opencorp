@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { execa } from "execa";
 
 export type TipoDriver = "sandbox" | "host" | "docker" | "podman";
@@ -75,6 +75,32 @@ export class HostDriver implements ExecutionDriver {
 }
 
 /**
+ * Diretórios a montar (ro) para que o binário do motor exista dentro do
+ * sandbox. Resolve caminho absoluto (incluindo symlink → alvo) ou procura
+ * no PATH do host quando vier só o nome ("opencode").
+ */
+export function dirsDoBinario(binario: string): string[] {
+  const candidatos: string[] = [binario];
+  if (!isAbsolute(binario)) {
+    for (const p of (process.env.PATH || "/usr/local/bin:/usr/bin:/bin").split(":")) {
+      if (p) candidatos.push(resolve(p, binario));
+    }
+  }
+  const dirs = new Set<string>();
+  for (const c of candidatos) {
+    try {
+      const real = realpathSync(c);
+      dirs.add(dirname(real));
+      if (real !== c) dirs.add(dirname(c));
+      return [...dirs];
+    } catch {
+      /* tenta o próximo candidato */
+    }
+  }
+  return [];
+}
+
+/**
  * Driver Seguro Ultraleve via Bubblewrap (Sandbox)
  * Isola o sistema de arquivos, monta /usr, /lib, /bin como read-only e protege o /home.
  */
@@ -116,6 +142,21 @@ export class SandboxDriver implements ExecutionDriver {
       bwrapArgs.push("--unshare-net");
     }
 
+    // DNS dentro do sandbox: /etc/resolv.conf costuma ser symlink para
+    // /run/systemd/resolve/* (fora dos binds) — sem isso, toda chamada de
+    // rede falha (foi o que derrubou models.opencode.ai → "Model not found"
+    // em TODAS as rondas). Monta o diretório-alvo (bwrap não monta arquivo
+    // sobre symlink — dá "Can't create file").
+    try {
+      const resolvReal = realpathSync("/etc/resolv.conf");
+      if (resolvReal !== "/etc/resolv.conf" && existsSync(resolvReal)) {
+        const dirAlvo = dirname(resolvReal);
+        bwrapArgs.push("--ro-bind", dirAlvo, dirAlvo);
+      }
+    } catch {
+      /* sem resolv.conf no host — nada a fazer */
+    }
+
     if (existsSync("/lib64")) {
       bwrapArgs.unshift("--ro-bind", "/lib64", "/lib64");
     }
@@ -129,6 +170,39 @@ export class SandboxDriver implements ExecutionDriver {
     for (const c of caminhosLeituraOpcionais) {
       if (existsSync(c)) {
         bwrapArgs.push("--ro-bind", c, c);
+      }
+    }
+
+    // ── Binário do motor dentro do sandbox ──
+    // Sem isso, qualquer caminho absoluto fora dos binds (ex.:
+    // ~/.opencorp/bin/opencode) morre com ENOENT no execvp — foi o que
+    // quebrou TODAS as rondas quando o sandbox virou padrão.
+    for (const dir of dirsDoBinario(opts.binary)) {
+      bwrapArgs.push("--ro-bind", dir, dir);
+    }
+
+    // Segredos globais (wp.cjs e scripts legados leem ~/.opencorp/secrets.json
+    // direto do disco). Monta SOMENTE esse arquivo, read-only — sem ele,
+    // todo agente que publica/edita quebra em silêncio no sandbox.
+    // (Os agentes já recebem segredos via OPENCORP_SECRET por design; isto
+    // apenas restaura o comportamento pré-sandbox.)
+    {
+      const homeBase =
+        (typeof opts.env.OPENCORP_HOME === "string" && opts.env.OPENCORP_HOME) ||
+        process.env.HOME ||
+        "";
+      const segredos = homeBase ? resolve(homeBase, ".opencorp", "secrets.json") : "";
+      if (segredos && existsSync(segredos)) {
+        bwrapArgs.push("--ro-bind", segredos, segredos);
+      }
+    }
+
+    // /tmp gravável (opencode/node precisam de temp) + XDG isolados do opencorp
+    bwrapArgs.push("--tmpfs", "/tmp");
+    for (const chave of ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"] as const) {
+      const v = opts.env[chave];
+      if (typeof v === "string" && v.length > 0 && v.startsWith("/") && existsSync(v)) {
+        bwrapArgs.push("--bind", v, v);
       }
     }
 

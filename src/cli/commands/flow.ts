@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Command } from "commander";
 import { FlowStore } from "../../core/flow-store.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { parseGatilho } from "../../schemas/gatilho.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -158,12 +159,13 @@ function wsDe(opts: { workspace?: string }): string | undefined {
     .argument("<id>", "id do flow")
     .option("--entrada <texto>", "texto de entrada do contexto (disponível como {{entrada}} nas ordens)")
     .option("--model <provider/model>", "modelo usado nos nós agente")
+    .option("--gatilho <tipo:origem>", "declara quem ativa esta execução (cron:<jobId>, manual, webhook...) — ledger unificado")
     .description("executa o flow (topológico, a partir do gatilho manual)")
-    .action((id: string, opts: { entrada?: string; model?: string; workspace?: string }) =>
+    .action((id: string, opts: { entrada?: string; model?: string; gatilho?: string; workspace?: string }) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(opts));
         try {
-          const r = await store.executar(ws.path, id, { entrada: opts.entrada, model: opts.model });
+          const r = await store.executar(ws.path, id, { entrada: opts.entrada, model: opts.model, gatilho: opts.gatilho ? parseGatilho(opts.gatilho) : undefined });
           console.log(`[flow ${id}] ${r.status} (exec ${r.execId})`);
           for (const n of r.nos) {
             console.log(`  nó ${n.id.padEnd(16)} ${n.tipo.padEnd(9)} ${n.status}${n.exec_id ? ` (exec ${n.exec_id})` : ""}`);

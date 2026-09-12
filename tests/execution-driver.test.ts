@@ -154,6 +154,43 @@ describe("ExecutionDriver", () => {
         expect(prep.env.PATH).toContain("/usr/bin");
       }
     });
+
+    it("monta o diretório do binário absoluto (regressão: ENOENT do motor)", async () => {
+      const driver = new SandboxDriver();
+      if (!(await driver.disponivel())) return;
+      const prep = await driver.preparar({ ...mockOpts, binary: "/home/j/.opencorp/bin/opencode" });
+      expect(prep.args).toContain("/home/j/.opencorp/bin");
+      const i = prep.args.indexOf("/home/j/.opencorp/bin");
+      expect(prep.args[i - 1]).toBe("--ro-bind");
+      expect(prep.args).toContain("--tmpfs");
+      expect(prep.args).toContain("/tmp");
+    });
+
+    it("dirsDoBinario resolve nome via PATH e symlink (dir do link + alvo)", async () => {
+      const { dirsDoBinario } = await import("../src/core/execution-driver.js");
+      expect(dirsDoBinario("/home/j/.opencorp/bin/opencode")).toContain("/home/j/.opencorp/bin");
+      const viaPath = dirsDoBinario("node");
+      expect(viaPath.length).toBeGreaterThan(0);
+      expect(dirsDoBinario("/caminho/que/nao/existe/bin")).toEqual([]);
+    });
+
+    it("monta o diretório do resolv.conf (DNS vivo no sandbox)", async () => {
+      const driver = new SandboxDriver();
+      if (!(await driver.disponivel())) return;
+      const { realpathSync, existsSync } = await import("node:fs");
+      let alvo = "";
+      try {
+        const real = realpathSync("/etc/resolv.conf");
+        if (real !== "/etc/resolv.conf" && existsSync(real)) {
+          alvo = (await import("node:path")).dirname(real);
+        }
+      } catch {}
+      if (!alvo) return; // host sem symlink de resolv — nada a montar
+      const prep = await driver.preparar(mockOpts);
+      expect(prep.args).toContain(alvo);
+      const i = prep.args.indexOf(alvo);
+      expect(prep.args[i - 1]).toBe("--ro-bind");
+    });
   });
 
   // ── ContainerDriver ───────────────────────────────────────────────

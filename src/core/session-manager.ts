@@ -223,7 +223,7 @@ export const MODELOS_ROTACAO_POR_HARNESS: Record<string, string[]> = {
   copilot: [
     "github/gpt-4o",
     "github/claude-3.5-sonnet",
-    "github/o3-mini",
+    "github/gpt-4o-mini",
   ],
   opencode: [
     "opencode/nemotron-3-ultra-free",
@@ -1270,6 +1270,10 @@ export class SessionManager {
   async reconciliarZombie(wsPath: string, meta: MetaRegistro): Promise<void> {
     const extras = (meta.extras ?? {}) as Record<string, unknown>;
     if (extras.status !== "executando") return;
+    // Flows têm ciclo de vida próprio (FlowStore escreve o status final ao
+    // concluir) e nunca têm pid — sem este guard, todo flow com +60s era
+    // marcado "falhou" no meio da execução (falso-positivo no Histórico).
+    if (extras.tipo === "flow") return;
     const pid = extras.pid as number | null;
     if (!pid) {
       // Sem pid (ex.: processo falhou ao iniciar ou mention sem fork): se já passou 60s do início, é zumbi

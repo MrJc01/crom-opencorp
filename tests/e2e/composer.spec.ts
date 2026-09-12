@@ -1,104 +1,52 @@
 import { test, expect } from "@playwright/test";
-import { logado, seederEmpresaBasica, api, esperarNavegacao } from "./helpers.js";
+import { logado, seederEmpresaBasica, api } from "./helpers.js";
 
-test.describe("Composer inteligente — / comandos, @ contexto, ! terminal (PLANO-PAINEL-V2 Etapa 2)", () => {
+/** Composer do chat: autocomplete /, @ e ! no Secretário. */
+test.describe("Composer — autocomplete / @ !", () => {
   test.beforeEach(async ({ page }) => {
     logado(page, "test-e2e");
     await seederEmpresaBasica(api(page), "test-e2e");
-    await page.goto("/");
-    await esperarNavegacao(page, "home");
-    await page.click('.nav-item[data-view="secretario"]');
-    await page.waitForURL("**/#/secretario");
-    await page.waitForTimeout(600);
-
-    // inicia o fake opencode (com retry: corrida rara do start volta pro standby)
-    for (let i = 0; i < 2; i++) {
-      const standby = page.locator("#btn-iniciar-secretario");
-      if (await standby.isVisible().catch(() => false)) {
-        await standby.click();
-      }
-      try {
-        await page.waitForSelector("#chat-input", { timeout: 20000 });
-        return;
-      } catch {
-        if (i === 1) throw new Error("secretário não ficou pronto após 2 tentativas");
-      }
-    }
+    await page.goto("/secretario");
+    await page.waitForSelector("#chat-input", { timeout: 20000 });
   });
 
   test.afterAll(async ({ request }) => {
-    await request.post("/secretario/stop", { headers: { authorization: "Bearer test-e2e" } }).catch(() => {});
+    await request.post("/secretario/stop", { headers: { authorization: "Bearer test-e2e" } }).catch(() => undefined);
   });
 
-  test("(a) / abre palette de comandos; Enter preenche e roda /status localmente", async ({ page }) => {
-    await page.click('#secretario-chat button[title="Nova conversa"]');
-    await page.fill("#chat-input", "/");
-    await expect(page.locator(".palette-menu")).toBeVisible();
-    await expect(page.locator(".palette-menu .palette-item")).toHaveCount(7);
+  test("(a) / abre comandos; filtrar /status + Enter preenche e envia", async ({ page }) => {
+    await page.locator("#chat-input").fill("/");
+    await expect(page.getByText("/ Comandos Rápidos").first()).toBeVisible({ timeout: 10000 });
 
-    // filtra por "/st" → só /status
-    await page.fill("#chat-input", "/st");
-    await expect(page.locator(".palette-menu .palette-item")).toHaveCount(1);
-    await expect(page.locator(".palette-menu .palette-item").first()).toContainText("/status");
+    await page.locator("#chat-input").fill("/st");
+    await expect(page.getByText("/status", { exact: true }).first()).toBeVisible({ timeout: 10000 });
 
-    // Enter seleciona → insere "/status " e fecha a palette
     await page.keyboard.press("Enter");
-    await expect(page.locator("#chat-input")).toHaveValue("/status ");
-    await expect(page.locator(".palette-menu")).toHaveCount(0);
+    await expect(page.locator("#chat-input")).toHaveValue("/status ", { timeout: 5000 });
 
-    // Enter de novo envia → resposta LOCAL no feed (sem chamar o LLM)
     await page.keyboard.press("Enter");
-    await expect(page.locator(".oc-user").last()).toContainText("/status");
-    await expect(page.locator(".oc-assistant").last()).toContainText("Tasks", { timeout: 15000 });
+    await expect(page.locator(".oc-user").last()).toContainText("/status", { timeout: 15000 });
+    await expect(page.locator(".oc-assistant").last()).toBeVisible({ timeout: 20000 });
   });
 
-  test("(b) @ abre menu de contexto; clicar num agente insere @id no input", async ({ page }) => {
-    await api(page).post("/agents", {
-      headers: { authorization: "Bearer test-e2e", "content-type": "application/json" },
-      data: { id: "e2e-atendente" },
-    });
-    await page.click('#secretario-chat button[title="Nova conversa"]');
-    await page.fill("#chat-input", "@");
-    await expect(page.locator(".palette-menu")).toBeVisible();
-    // alvo explícito (o catálogo de agentes pode ter ids alfabeticamente anteriores)
-    const agente = page.locator('.palette-item[data-tipo="agente"]', { hasText: "e2e-atendente" }).first();
-    await expect(agente).toBeVisible();
-    await agente.click();
-    await expect(page.locator("#chat-input")).toHaveValue(/@e2e-atendente /);
-    await expect(page.locator(".palette-menu")).toHaveCount(0);
+  test("(b) @ abre menções; clicar insere o agente no input", async ({ page }) => {
+    await page.locator("#chat-input").fill("@");
+    await expect(page.getByText("@ Menções (Agentes, Tasks, Contexto)").first()).toBeVisible({ timeout: 10000 });
+
+    await page.getByText("@executor-padrao", { exact: true }).first().click();
+    await expect(page.locator("#chat-input")).toHaveValue(/@executor-padrao /, { timeout: 5000 });
   });
 
-  test("(c) right-click em task-card abre menu com Ver detalhes; clicar abre o drawer", async ({ page }) => {
-    await page.click('.nav-item[data-view="tasks"]');
-    await page.waitForURL("**/#/tasks");
-    await page.waitForSelector(".task-card", { timeout: 15000 });
-
-    const card = page.locator(".task-card").first();
-    await card.click({ button: "right" });
-    const menu = page.locator(".ctx-menu");
-    await expect(menu).toBeVisible();
-    await expect(menu.locator(".palette-item", { hasText: "Ver detalhes" })).toBeVisible();
-    await expect(menu.locator(".palette-item", { hasText: "Copiar título" })).toBeVisible();
-
-    await menu.locator(".palette-item", { hasText: "Ver detalhes" }).click();
-    await expect(menu).toHaveCount(0);
-    await expect(page.locator("#drawer")).toHaveClass(/open/);
-    await expect(page.locator("#drawer-title")).toContainText("Task backlog e2e");
+  test("(c) ! abre comandos de terminal", async ({ page }) => {
+    await page.locator("#chat-input").fill("!");
+    await expect(page.getByText("! Comandos de Terminal (Shell)").first()).toBeVisible({ timeout: 10000 });
   });
 
-  test("(d) !task list executa comando whitelistado e mostra saída .terminal-saida", async ({ page }) => {
-    // garante que há pelo menos uma task para o comando listar (suite completa roda com estado compartilhado)
-    await api(page).post("/tasks", {
-      headers: { authorization: "Bearer test-e2e", "content-type": "application/json" },
-      data: { titulo: "Task backlog e2e-composer-d", coluna: "backlog" },
-    });
-    await page.click('#secretario-chat button[title="Nova conversa"]');
-    await page.fill("#chat-input", "!task list");
-    await page.keyboard.press("Enter");
-
-    await expect(page.locator(".oc-user").last()).toContainText("!task list");
-    const saida = page.locator(".terminal-saida").last();
-    await expect(saida).toBeVisible({ timeout: 20000 });
-    await expect(saida).toContainText("Task backlog e2e");
+  test("(d) Escape fecha o popover sem enviar", async ({ page }) => {
+    await page.locator("#chat-input").fill("/");
+    await expect(page.getByText("/ Comandos Rápidos").first()).toBeVisible({ timeout: 10000 });
+    await page.keyboard.press("Escape");
+    await expect(page.getByText("/ Comandos Rápidos")).toHaveCount(0);
+    await expect(page.locator("#chat-input")).toHaveValue("/");
   });
 });

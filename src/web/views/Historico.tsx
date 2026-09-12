@@ -26,6 +26,7 @@ import {
   ChevronRight,
   Gauge,
   GitCommit,
+  GitBranch,
   FileText,
 } from "lucide-solid";
 import { useSearchParams, useNavigate } from "@solidjs/router";
@@ -37,7 +38,7 @@ import { LogChatViewer } from "../components/chat/LogChatViewer";
 
 export interface ItemHistorico {
   id: string;
-  tipo: "execucao" | "task" | "rotina" | "conversa";
+  tipo: "execucao" | "task" | "rotina" | "conversa" | "fluxo";
   titulo?: string;
   ordem?: string;
   agente?: string;
@@ -48,6 +49,18 @@ export interface ItemHistorico {
   duracao_ms?: number | null;
   custo_usd?: number | null;
   modelo?: string;
+  flow?: string;
+  nos_total?: number;
+  nos_ok?: number;
+  contexto_final?: string;
+  entrada?: string;
+}
+
+export interface NoFluxoInfo {
+  id: string;
+  tipo: string;
+  status: "ok" | "falhou" | "nao-executado";
+  exec_id: string | null;
 }
 
 export interface AcaoAgente {
@@ -89,7 +102,7 @@ export const HistoricoView: Component = () => {
   const [runSelecionado, setRunSelecionado] = createSignal<any | null>(null);
   const [logRun, setLogRun] = createSignal<string>("");
   const [carregandoLog, setCarregandoLog] = createSignal(false);
-  const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal" | "telemetria" | "diff">("chat");
+  const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal" | "telemetria" | "diff" | "fluxo">("chat");
   const [encerrando, setEncerrando] = createSignal(false);
   const [reenviando, setReenviando] = createSignal(false);
   const [tempoRealAtivo, setTempoRealAtivo] = createSignal(true);
@@ -107,6 +120,12 @@ export const HistoricoView: Component = () => {
   const [acaoAbertaId, setAcaoAbertaId] = createSignal<string | null>(null);
   const [resumoTelemetria, setResumoTelemetria] = createSignal<ResumoTelemetria | null>(null);
   const [mostrarCardsTelemetria, setMostrarCardsTelemetria] = createSignal(true);
+
+  // Estados de Fluxo (timeline por nó)
+  const [nosFluxo, setNosFluxo] = createSignal<NoFluxoInfo[]>([]);
+  const [contextoFinalFluxo, setContextoFinalFluxo] = createSignal<string>("");
+  const [entradaFluxo, setEntradaFluxo] = createSignal<string>("");
+  const [carregandoFluxo, setCarregandoFluxo] = createSignal(false);
 
   let liveLogInterval: any = null;
   let timerTempoReal: any = null;
@@ -243,24 +262,37 @@ export const HistoricoView: Component = () => {
           );
           if (reg?.meta) {
             const ex = reg.meta.extras || {};
-            r = {
-              id: runId,
-              tipo: "execucao",
-              agente: reg.meta.criado_por || ex.agente || "executor-padrao",
-              status: ex.status || "concluido",
-              quando: reg.meta.criado_em,
-              ordem: ex.ordem || reg.meta.descricao?.replace(/^Ordem:\s*/i, ""),
-              modelo: ex.modelo,
-              duracao_ms: ex.duracao_ms,
-              custo_usd: ex.custo_usd,
-            };
+            const ehFluxo = ex.tipo === "flow";
+            r = ehFluxo
+              ? {
+                  id: runId,
+                  tipo: "fluxo",
+                  agente: reg.meta.criado_por || `flow:${ex.flow || "?"}`,
+                  status: ex.status || "concluido",
+                  quando: reg.meta.criado_em,
+                  titulo: ex.nome ? `${ex.nome} (${ex.flow})` : `Fluxo ${ex.flow || runId}`,
+                  flow: typeof ex.flow === "string" ? ex.flow : undefined,
+                  contexto_final: typeof ex.contexto_final === "string" ? ex.contexto_final : undefined,
+                  entrada: typeof ex.entrada === "string" ? ex.entrada : undefined,
+                }
+              : {
+                  id: runId,
+                  tipo: "execucao",
+                  agente: reg.meta.criado_por || ex.agente || "executor-padrao",
+                  status: ex.status || "concluido",
+                  quando: reg.meta.criado_em,
+                  ordem: ex.ordem || reg.meta.descricao?.replace(/^Ordem:\s*/i, ""),
+                  modelo: ex.modelo,
+                  duracao_ms: ex.duracao_ms,
+                  custo_usd: ex.custo_usd,
+                };
           }
         } catch {}
       }
       if (!r) {
         r = { id: runId, tipo: "execucao", agente: "agente", status: "registrada" };
       }
-    } else if (!r.ordem) {
+    } else if (!r.ordem && r.tipo !== "fluxo") {
       try {
         const reg = await fetchApi<{ meta?: { descricao?: string; extras?: any } }>(
           `/registries/execucoes/${encodeURIComponent(runId)}`
@@ -274,10 +306,48 @@ export const HistoricoView: Component = () => {
       } catch {}
     }
     setRunSelecionado(r);
+    setModoVisualizacao(r.tipo === "fluxo" ? "fluxo" : "chat");
 
     const textoLog = await buscarLog(runId);
     setLogRun(textoLog);
     setCarregandoLog(false);
+
+    // Fluxo: carregar timeline por nó (status + contexto final + entrada)
+    setNosFluxo([]);
+    setContextoFinalFluxo((r as ItemHistorico).contexto_final || "");
+    setEntradaFluxo((r as ItemHistorico).entrada || "");
+    if (r.tipo === "fluxo") {
+      const flowId = (r as ItemHistorico).flow;
+      setCarregandoFluxo(true);
+      try {
+        if (flowId) {
+          const execs = await fetchApi<Array<{ execId: string; status: string; nos: NoFluxoInfo[]; contextoFinal: string; entrada?: string }>>(
+            `/flows/${encodeURIComponent(flowId)}/execucoes`
+          );
+          const atual = (execs || []).find((e) => e.execId === runId) || (execs || [])[0];
+          if (atual) {
+            setNosFluxo(atual.nos || []);
+            if (atual.contextoFinal) setContextoFinalFluxo(atual.contextoFinal);
+            if (atual.entrada) setEntradaFluxo(atual.entrada);
+            if (!(r as ItemHistorico).contexto_final && atual.contextoFinal) {
+              setRunSelecionado((prev: any) => (prev ? { ...prev, contexto_final: atual.contextoFinal, entrada: atual.entrada } : prev));
+            }
+            if (atual.contextoFinal && !logRun().trim()) setLogRun(atual.contextoFinal);
+          }
+        }
+        // Fallback: extras do registro trazem nos + contexto
+        if (nosFluxo().length === 0) {
+          const reg = await fetchApi<{ meta?: { extras?: any } }>(
+            `/registries/execucoes/${encodeURIComponent(runId)}`
+          );
+          const ex = reg?.meta?.extras || {};
+          if (Array.isArray(ex.nos)) setNosFluxo(ex.nos);
+          if (ex.contexto_final && !contextoFinalFluxo()) setContextoFinalFluxo(String(ex.contexto_final));
+          if (ex.entrada && !entradaFluxo()) setEntradaFluxo(String(ex.entrada));
+        }
+      } catch {}
+      setCarregandoFluxo(false);
+    }
 
     // Carregar ações/spans granulares de telemetria para esta sessão
     setCarregandoAcoes(true);
@@ -345,6 +415,11 @@ export const HistoricoView: Component = () => {
       navigate(`/secretario`);
       return;
     }
+    if (item.tipo === "rotina") {
+      navigate(`/agenda`);
+      return;
+    }
+    // execucao e fluxo abrem o visualizador com ?run=
     setSearchParams({ run: item.id });
   };
 
@@ -357,6 +432,10 @@ export const HistoricoView: Component = () => {
     setLogRun("");
     setAcoesRun([]);
     setAcaoAbertaId(null);
+    setNosFluxo([]);
+    setContextoFinalFluxo("");
+    setEntradaFluxo("");
+    setCarregandoFluxo(false);
     setSearchParams({ run: undefined });
   };
 
@@ -458,8 +537,29 @@ export const HistoricoView: Component = () => {
   };
 
   const reenviarExecucao = async () => {
-    const run = runSelecionado();
+    const run = runSelecionado() as ItemHistorico | null;
     if (!run) return;
+    // Fluxo: reexecuta o flow (gera novo exec_id rastreável)
+    if (run.tipo === "fluxo" && run.flow) {
+      setReenviando(true);
+      try {
+        const res = await fetchApi<{ status?: string; exec_id?: string; flow?: string }>(
+          `/flows/${encodeURIComponent(run.flow)}/run`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entrada: entradaFluxo() || undefined }) } as any
+        );
+        showToast(`Fluxo reenviado (${res?.exec_id ?? "?"})`, "sucesso");
+        if (res?.exec_id) {
+          fecharLog();
+          void carregarHistorico();
+          setTimeout(() => setSearchParams({ run: res.exec_id }), 1200);
+        }
+      } catch (e: any) {
+        showToast(`Erro ao reenviar fluxo: ${e.message || String(e)}`, "erro");
+      } finally {
+        setReenviando(false);
+      }
+      return;
+    }
     setReenviando(true);
     try {
       const res = await fetchApi<{
@@ -493,6 +593,24 @@ export const HistoricoView: Component = () => {
       }
     } catch (e: any) {
       showToast(`Erro ao reenviar execução: ${e.message || String(e)}`, "erro");
+    } finally {
+      setReenviando(false);
+    }
+  };
+
+  const retomarFluxo = async () => {
+    const run = runSelecionado() as ItemHistorico | null;
+    if (!run?.flow) return;
+    setReenviando(true);
+    try {
+      const res = await fetchApi<{ status?: string; exec?: string }>(
+        `/flows/${encodeURIComponent(run.flow)}/resume`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ exec_id: run.id }) } as any
+      );
+      showToast(`Fluxo retomando (${res?.exec ?? run.id})`, "sucesso");
+      void carregarHistorico();
+    } catch (e: any) {
+      showToast(`Erro ao retomar fluxo: ${e.message || String(e)}`, "erro");
     } finally {
       setReenviando(false);
     }
@@ -598,6 +716,10 @@ export const HistoricoView: Component = () => {
     switch (tipo) {
       case "execucao":
         return <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-zinc-700/40 text-zinc-300 border border-zinc-600/40">EXECUÇÃO</span>;
+      case "fluxo":
+        return <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">FLUXO</span>;
+      case "rotina":
+        return <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">ROTINA</span>;
       case "task":
         return <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30">TASK</span>;
       case "conversa":
@@ -619,7 +741,7 @@ export const HistoricoView: Component = () => {
             </span>
           </div>
           <p class="text-xs text-zinc-400 mt-0.5">
-            Linha do tempo auditável de cada chamada a LLM, tarefa concluída, rotina 24h e decisão do Secretário.
+            Linha do tempo auditável de cada chamada a LLM, fluxo executado, tarefa concluída, rotina 24h e decisão do Secretário.
           </p>
         </div>
 
@@ -641,6 +763,14 @@ export const HistoricoView: Component = () => {
               }`}
             >
               Execuções
+            </button>
+            <button
+              onClick={() => setSearchParams({ tipo: "fluxo" })}
+              class={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                filtroTipo() === "fluxo" ? "bg-zinc-800 text-zinc-100 font-semibold" : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              Fluxos
             </button>
             <button
               onClick={() => setSearchParams({ tipo: "task" })}
@@ -869,6 +999,11 @@ export const HistoricoView: Component = () => {
                       <div class="text-[11px] text-zinc-300 truncate max-w-xl mt-0.5 font-sans">
                         {item.titulo || item.ordem || "Registro de atividade no sistema"}
                       </div>
+                      <Show when={item.tipo === "fluxo" && item.nos_total}>
+                        <div class="text-[10px] text-indigo-300/80 font-mono mt-0.5">
+                          {item.nos_ok ?? 0}/{item.nos_total} nós ok{item.flow ? ` · ${item.flow}` : ""}
+                        </div>
+                      </Show>
                     </div>
                   </div>
 
@@ -934,6 +1069,14 @@ export const HistoricoView: Component = () => {
                     <span class="text-zinc-500 truncate max-w-xs">{runSelecionado()!.modelo}</span>
                   </Show>
                 </div>
+                <Show when={(runSelecionado() as ItemHistorico)?.tipo === "fluxo" && ((runSelecionado() as ItemHistorico)?.flow || entradaFluxo())}>
+                  <div class="mt-2 text-xs bg-indigo-950/30 border border-indigo-800/40 rounded-lg px-2.5 py-1.5 text-zinc-300 font-sans max-h-20 overflow-y-auto leading-relaxed select-text">
+                    <span class="text-[10px] uppercase font-mono font-bold tracking-wider text-indigo-400/80 block mb-0.5">
+                      Fluxo: {(runSelecionado() as ItemHistorico)?.flow || "—"}
+                    </span>
+                    {entradaFluxo() || (runSelecionado() as ItemHistorico)?.entrada || "Sem entrada registrada."}
+                  </div>
+                </Show>
                 <Show when={runSelecionado()!.ordem}>
                   <div class="mt-2 text-xs bg-zinc-950/70 border border-zinc-800/80 rounded-lg px-2.5 py-1.5 text-zinc-300 font-sans max-h-20 overflow-y-auto leading-relaxed select-text">
                     <span class="text-[10px] uppercase font-mono font-bold tracking-wider text-zinc-500 block mb-0.5">
@@ -948,6 +1091,20 @@ export const HistoricoView: Component = () => {
               <div class="flex items-center gap-2 flex-wrap">
                 {/* Switcher Chat / Telemetria / Terminal */}
                 <div class="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+                  <Show when={(runSelecionado() as ItemHistorico)?.tipo === "fluxo"}>
+                    <button
+                      type="button"
+                      onClick={() => setModoVisualizacao("fluxo")}
+                      class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                        modoVisualizacao() === "fluxo"
+                          ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      <GitBranch size={13} class="text-indigo-400" />
+                      <span>Fluxo {nosFluxo().length > 0 ? `(${nosFluxo().length})` : ""}</span>
+                    </button>
+                  </Show>
                   <button
                     type="button"
                     onClick={() => setModoVisualizacao("chat")}
@@ -1027,12 +1184,26 @@ export const HistoricoView: Component = () => {
                   variant="ghost"
                   onClick={reenviarExecucao}
                   disabled={reenviando()}
-                  title="Reenviar esta execução com os mesmos parâmetros"
+                  title={(runSelecionado() as ItemHistorico)?.tipo === "fluxo" ? "Reexecutar este fluxo (novo exec_id)" : "Reenviar esta execução com os mesmos parâmetros"}
                   class="!bg-sky-950/40 !text-sky-300 hover:!bg-sky-900/60 !border !border-sky-800/80 font-bold"
                 >
                   <RotateCcw size={13} class={`mr-1 text-sky-400 ${reenviando() ? "animate-spin" : ""}`} />
-                  {reenviando() ? "Reenviando..." : "Reenviar"}
+                  {reenviando() ? "Reenviando..." : (runSelecionado() as ItemHistorico)?.tipo === "fluxo" ? "Reexecutar fluxo" : "Reenviar"}
                 </Button>
+
+                <Show when={(runSelecionado() as ItemHistorico)?.tipo === "fluxo" && (runSelecionado() as ItemHistorico)?.flow}>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={retomarFluxo}
+                    disabled={reenviando()}
+                    title="Retomar fluxo falho do último nó ok (mesmo exec_id)"
+                    class="!bg-indigo-950/40 !text-indigo-300 hover:!bg-indigo-900/60 !border !border-indigo-800/80 font-bold"
+                  >
+                    <GitBranch size={13} class="mr-1 text-indigo-400" />
+                    Retomar
+                  </Button>
+                </Show>
 
                 <Show when={runSelecionado()!.status === "executando"}>
                   <Button
@@ -1060,8 +1231,80 @@ export const HistoricoView: Component = () => {
               <span>{logRun().split("\n").length} linhas capturadas</span>
             </div>
 
-            {/* Corpo: Chat ao Vivo, Terminal Raw ou Telemetria Granular */}
+            {/* Corpo: Fluxo, Chat ao Vivo, Terminal Raw ou Telemetria Granular */}
             <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <Show when={modoVisualizacao() === "fluxo"}>
+                <div class="flex-1 overflow-y-auto scrollbar-thin p-1 space-y-3">
+                  <Show when={carregandoFluxo()}>
+                    <div class="py-12 text-center text-xs text-zinc-400">
+                      <RefreshCw size={18} class="animate-spin mx-auto mb-2 text-indigo-400" />
+                      Carregando timeline do fluxo...
+                    </div>
+                  </Show>
+                  <Show when={!carregandoFluxo() && entradaFluxo()}>
+                    <div class="bg-zinc-950/70 border border-zinc-800 rounded-xl p-3 text-xs">
+                      <span class="text-[10px] uppercase font-mono font-bold tracking-wider text-zinc-500 block mb-1">Entrada do fluxo:</span>
+                      <pre class="font-sans text-zinc-300 whitespace-pre-wrap select-text max-h-24 overflow-y-auto">{entradaFluxo()}</pre>
+                    </div>
+                  </Show>
+                  <Show when={!carregandoFluxo() && nosFluxo().length === 0}>
+                    <div class="py-12 text-center text-xs text-zinc-500 bg-zinc-950/40 rounded-xl border border-zinc-800/80 p-6">
+                      <GitBranch size={24} class="mx-auto mb-2 text-zinc-600" />
+                      <p class="font-medium text-zinc-400">Nenhum nó registrado para esta execução</p>
+                      <p class="text-[11px] text-zinc-500 mt-1">O fluxo pode ainda estar iniciando ou o registro foi arquivado.</p>
+                    </div>
+                  </Show>
+                  <Show when={!carregandoFluxo() && nosFluxo().length > 0}>
+                    <div class="space-y-2">
+                      <For each={nosFluxo()}>
+                        {(no, idx) => (
+                          <div class={`rounded-xl border text-xs p-3 flex items-center justify-between gap-3 ${
+                            no.status === "ok"
+                              ? "bg-zinc-900/60 border-zinc-800/80"
+                              : no.status === "falhou"
+                              ? "bg-rose-950/20 border-rose-900/50"
+                              : "bg-zinc-950/60 border-zinc-800/60"
+                          }`}>
+                            <div class="flex items-center gap-2.5 min-w-0">
+                              <span class="text-zinc-500 font-mono text-[10px] w-6">#{String(idx() + 1).padStart(2, "0")}</span>
+                              {no.status === "ok" ? <CheckCircle2 size={14} class="text-emerald-400 flex-shrink-0" />
+                                : no.status === "falhou" ? <XCircle size={14} class="text-rose-400 flex-shrink-0" />
+                                : <Clock size={14} class="text-zinc-500 flex-shrink-0" />}
+                              <div class="min-w-0">
+                                <div class="font-mono font-semibold text-zinc-200 truncate">{no.id}</div>
+                                <div class="text-[10px] text-zinc-500 font-mono">{no.tipo}{no.exec_id ? ` · ${no.exec_id}` : ""}</div>
+                              </div>
+                            </div>
+                            <div class="flex items-center gap-2 flex-shrink-0">
+                              <span class={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold ${
+                                no.status === "ok" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                                : no.status === "falhou" ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                                : "bg-zinc-800 text-zinc-400 border border-zinc-700"
+                              }`}>{no.status === "ok" ? "ok" : no.status === "falhou" ? "falhou" : "não executado"}</span>
+                              <Show when={no.exec_id}>
+                                <button
+                                  type="button"
+                                  onClick={() => setSearchParams({ run: no.exec_id })}
+                                  class="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono text-[10px] hover:bg-zinc-700 cursor-pointer"
+                                  title={`Abrir execução ${no.exec_id} no histórico`}
+                                >
+                                  ver exec →
+                                </button>
+                              </Show>
+                            </div>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                  <Show when={!carregandoFluxo() && contextoFinalFluxo()}>
+                    <div class="bg-zinc-950/70 border border-zinc-800 rounded-xl p-3 text-xs">
+                      <span class="text-[10px] uppercase font-mono font-bold tracking-wider text-zinc-500 block mb-1">Contexto final / como foi:</span>
+                      <pre class="font-sans text-zinc-300 whitespace-pre-wrap select-text max-h-64 overflow-y-auto leading-relaxed">{contextoFinalFluxo()}</pre>
+                    </div>
+                  </Show>
+                </div>
+              </Show>
               <Show when={modoVisualizacao() === "chat"}>
                 <div class="flex-1 overflow-y-auto scrollbar-thin pr-1 pb-2">
                   <LogChatViewer

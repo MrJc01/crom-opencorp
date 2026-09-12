@@ -1,106 +1,79 @@
 import { test, expect } from "@playwright/test";
-import { logado, seederEmpresaBasica, api, esperarNavegacao, esperarElementoTexto } from "./helpers.js";
+import { logado, seederEmpresaBasica, api, esperarElementoTexto } from "./helpers.js";
 
-/** Título/id único por run — o seeder roda em todo beforeEach e não limpa estado */
-const sufixo = Date.now().toString(36);
+const HDR = { authorization: "Bearer test-e2e", "content-type": "application/json" };
 
-test.describe("CRUD via UI (F2)", () => {
+test.describe("CRUD via UI", () => {
   test.beforeEach(async ({ page }) => {
     logado(page, "test-e2e");
     await seederEmpresaBasica(api(page), "test-e2e");
     await page.goto("/");
-    await esperarNavegacao(page, "home");
+    await esperarElementoTexto(page, "Painel de Operações");
   });
 
-  test("Excluir task: drawer → Excluir → modal → task some do kanban", async ({ page }) => {
-    const titulo = `Task excluir e2e-${sufixo}`;
-    const resp = await api(page).post("/tasks", {
-      headers: { authorization: "Bearer test-e2e", "content-type": "application/json" },
+  test("Excluir task: drawer → Excluir (confirm) → some do kanban", async ({ page }) => {
+    const titulo = `Task excluir e2e ${Date.now()}`;
+    await api(page).post("/tasks", {
+      headers: HDR,
       data: { titulo, descricao: "criada para exclusão", coluna: "backlog", prioridade: "media" },
     });
-    if (resp.status() >= 400) throw new Error(`seed task falhou: ${resp.status()}`);
+    await page.goto("/tasks");
+    await esperarElementoTexto(page, "Quadro Kanban");
+    await page.locator('input[placeholder="Buscar tarefas..."]').fill(titulo);
+    await page.getByText(titulo).first().click();
+    await esperarElementoTexto(page, "Detalhes da Tarefa");
 
-    await page.click('.nav-item[data-view="tasks"]');
-    await page.waitForURL("**/#/tasks");
-
-    const card = page.locator(".task-card", { hasText: titulo }).first();
-    await expect(card).toBeVisible();
-    await card.click();
-
-    const drawer = page.locator("#drawer");
-    await expect(drawer).toHaveClass(/open/);
-    await expect(drawer).toContainText(titulo);
-
-    await drawer.locator('button:has-text("Excluir task")').click();
-
-    const modalOk = page.locator(".modal-ok");
-    await expect(modalOk).toBeVisible();
-    await modalOk.click();
-
-    await expect(drawer).not.toHaveClass(/open/);
-    await expect(page.locator(".task-card", { hasText: titulo })).toHaveCount(0);
+    page.once("dialog", (d) => d.accept());
+    await page.getByRole("button", { name: "Excluir", exact: true }).last().click();
+    await expect(page.getByText(titulo)).toHaveCount(0, { timeout: 10000 });
   });
 
-  test("Editar fluxo: cria pela UI com 2 passos → Editar → renomeia → Salvar → card atualizado", async ({ page }) => {
-    const nomeOriginal = `Fluxo e2e-${sufixo}`;
-    const nomeNovo = `Fluxo renomeado e2e-${sufixo}`;
+  test("Criar fluxo pela UI → abre o canvas do novo fluxo", async ({ page }) => {
+    const nome = `Fluxo e2e ${Date.now()}`;
+    await page.goto("/fluxos");
+    await esperarElementoTexto(page, "Fluxos");
+    await page.getByRole("button", { name: "Adicionar Fluxo" }).click();
+    await esperarElementoTexto(page, "Criar Novo Fluxo");
 
-    await page.click('.nav-item[data-view="fluxos"]');
-    await page.waitForURL("**/#/fluxos");
+    await page.locator('input[placeholder="ex: Publicação Editorial de Conteúdo"]').fill(nome);
+    // ID é sugerido automaticamente a partir do nome
+    await page.getByRole("button", { name: "Criar Fluxo" }).click();
 
-    // Criação via UI (template pipeline: 2 passos task_create)
-    await page.locator('button:has-text("Pipeline")').first().click();
-    const form = page.locator("#form-novo-flow");
-    await expect(form).toBeVisible();
-    await page.fill("#flow-id", `e2e-flow-${sufixo}`);
-    await page.fill("#flow-nome", nomeOriginal);
-    const addPasso = page.locator('button:has-text("passo")').first();
-    const passos = page.locator("#flow-passos .flow-passo");
-    // Pipeline já vem com 1 linha inicial — só adiciona a segunda
-    await passos.first().locator("select").first().selectOption("task_create");
-    await passos.first().locator(".flow-titulo").fill("Passo um");
-    await addPasso.click();
-    await passos.nth(1).locator("select").first().selectOption("task_create");
-    await passos.nth(1).locator(".flow-titulo").fill("Passo dois");
-    await form.locator('button[type="submit"]').click();
-
-    const cardFluxo = page.locator("#view-fluxos .card", { hasText: nomeOriginal }).first();
-    await expect(cardFluxo).toBeVisible();
-
-    // Edição: renomeia e salva
-    await cardFluxo.locator('button:has-text("Editar")').click();
-    const formEdicao = page.locator("#form-novo-flow");
-    await expect(formEdicao).toBeVisible();
-    await page.fill("#flow-nome", nomeNovo);
-    await formEdicao.locator('button[type="submit"]').click();
-
-    await expect(page.locator("#view-fluxos")).toContainText(nomeNovo);
+    // Canvas abre (botão voltar + nome no editor)
+    await esperarElementoTexto(page, "Voltar para Fluxos");
+    await expect(page.getByText(nome).first()).toBeVisible({ timeout: 10000 });
   });
 
-  test("Reunião no Secretário: pauta + check-list de agentes → Convocar limpa o form", async ({ page }) => {
-    // Semeia agentes para o check-list (seeder não cria agentes)
-    const respA = await api(page).post("/agents", {
-      headers: { authorization: "Bearer test-e2e", "content-type": "application/json" },
-      data: { id: "ag-convite-a" },
+  test("Excluir fluxo pela UI (confirm) → some da lista", async ({ page }) => {
+    const fid = `flow-excluir-${Date.now().toString(36)}`;
+    await api(page).post("/flows", {
+      headers: HDR,
+      data: { id: fid, nome: `Flow excluir ${fid}`, nos: [{ id: "gatilho", tipo: "manual", config: {} }], arestas: [] },
     });
-    if (respA.status() >= 400 && respA.status() !== 409) throw new Error(`seed agente falhou: ${respA.status()}`);
+    await page.goto("/fluxos");
+    await esperarElementoTexto(page, "Fluxos");
+    await page.locator('input[placeholder="Pesquisar fluxos..."]').fill(fid);
+    await expect(page.getByText(fid).first()).toBeVisible({ timeout: 10000 });
 
-    // Reuniões saiu do navbar (P-13) — navegação direta pela rota (aba do Secretário)
-    await page.evaluate(() => { window.location.hash = "#/reunioes"; });
-    await page.waitForURL("**/#/reunioes");
-    await esperarElementoTexto(page, "Reuniões");
+    page.once("dialog", (d) => d.accept());
+    await page.locator('button[title="Excluir fluxo"]').first().click();
+    await expect(page.getByText(fid)).toHaveCount(0, { timeout: 10000 });
+  });
 
-    // Check-list de agentes presente (Etapa E)
-    const seletor = page.locator("#reuniao-seletor-agentes");
-    await expect(seletor).toBeVisible();
-    const checkboxes = seletor.locator('input[type="checkbox"]');
-    await expect(checkboxes.first()).toBeAttached();
+  test("Reunião: pauta + agente → Abrir Sala limpa o form e abre a sala", async ({ page }) => {
+    const pauta = `Pauta de lançamento e2e ${Date.now()}`;
+    await page.goto("/reunioes");
+    await page.locator('button[title="Convocar nova reunião"]').click();
+    await esperarElementoTexto(page, "Convocar Nova Reunião Multi-Agente");
 
-    await page.fill("#reuniao-pauta", `Pauta de lançamento e2e-${sufixo}`);
-    await checkboxes.first().check();
-    await page.locator('button:has-text("Convocar")').click();
+    await page.locator('textarea[placeholder="Ex: Alinhar lançamento da nova home e definir responsabilidade de cada agente..."]').fill(pauta);
+    // seleciona o primeiro agente da mesa
+    const agentes = page.locator("div", { has: page.locator("span", { hasText: /^@/ }) });
+    await agentes.first().click();
 
-    // POST /meetings responde 202 (iniciado em background) → form é limpo
-    await expect(page.locator("#reuniao-pauta")).toHaveValue("");
+    await page.getByRole("button", { name: "Abrir Sala de Chat" }).click();
+    // modal fecha e a sala abre com a pauta
+    await expect(page.getByText("Convocar Nova Reunião Multi-Agente")).toHaveCount(0, { timeout: 15000 });
+    await expect(page.getByText(pauta).first()).toBeVisible({ timeout: 15000 });
   });
 });

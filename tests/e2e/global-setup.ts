@@ -46,7 +46,10 @@ export default async function globalSetup(): Promise<void> {
     execFileSync("git", ["config", "user.email", "e2e@opencorp.local"], { cwd: wsDir, stdio: "ignore" });
     // Cria arquivo de seed que pode ser modificado nos testes de diff/restore
     await writeFile(join(wsDir, "teste-git.txt"), "conteudo original do arquivo\n");
-    const gitignoreContent = `*.db\n*.db-wal\n*.db-shm\n.opencorp/*.db\nlogs/\n*.log\n*.jsonl\n.opencorp/events.jsonl\n.opencorp/logs/\n.opencorp/cron/\nnode_modules/\n.venv/\n__pycache__/\n*.pyc\n.opencorp/sessions/\n.opencorp/approvals/*.json\n.opencorp/tokens.json\n.opencode\n.opencorp/opencode/\n.opencorp/opencode-data/\n.opencorp/teams/\n.opencorp/apps/\n`;
+    // .gitignore do workspace e2e: ignora TODOS os artefatos de runtime para que
+    // os testes de git (/git status limpo) sejam herméticos mesmo com a suíte
+    // inteira criando flows, registros, notificações, reuniões e tasks.
+    const gitignoreContent = `*.db\n*.db-wal\n*.db-shm\n.opencorp/*.db\nlogs/\n*.log\n*.jsonl\n.opencorp/events.jsonl\n.opencorp/logs/\n.opencorp/cron/\nnode_modules/\n.venv/\n__pycache__/\n*.pyc\n.opencorp/sessions/\n.opencorp/approvals/*.json\n.opencorp/tokens.json\n.opencode\n.opencorp/opencode/\n.opencorp/opencode-data/\n.opencorp/teams/\n.opencorp/apps/\n.opencorp/flows/\n.opencorp/registries/\n.opencorp/notifications.json\n.opencorp/scheduler*.db*\n.opencorp/worktrees/\n`;
     await writeFile(join(wsDir, ".gitignore"), gitignoreContent);
     execFileSync("git", ["add", "-A"], { cwd: wsDir, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "feat(workspace): seed inicial para testes e2e"], { cwd: wsDir, stdio: "ignore" });

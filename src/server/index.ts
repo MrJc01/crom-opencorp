@@ -93,7 +93,7 @@ const ROUTES: DefinicaoRota[] = [
   { method: "POST", path: "/agents/semear-catalogo", descricao: "Semeia agentes do catálogo no workspace (idempotente; nascem desativados)" },
   { method: "POST", path: "/agents/:id/run", descricao: "Executa agente com ordem (409 se desativado)", corpo: true },
   { method: "GET", path: "/sessions", descricao: "Lista execuções/sessões" },
-  { method: "GET", path: "/historico", descricao: "Histórico unificado (execuções + tasks + rotinas + conversas da secretária) — query: agente, tipo, limite" },
+  { method: "GET", path: "/historico", descricao: "Histórico unificado (execuções + fluxos + tasks + rotinas + conversas da secretária) — query: agente, tipo, limite" },
   { method: "GET", path: "/execucoes", descricao: "Ledger unificado de execuções com gatilho (query: agente, gatilho, origem, status, limite)" },
   { method: "POST", path: "/execucoes/:id/retry", descricao: "Reenvia (clona) uma execução com os mesmos parâmetros originais (agente, ordem, modelo)" },
   { method: "GET", path: "/sessions/:id/log", descricao: "Retorna log de uma execução" },
@@ -122,7 +122,7 @@ const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/flows/:id", descricao: "Obtém detalhes de um flow" },
   { method: "GET", path: "/flows/:id/export", descricao: "Exporta flow em formato JSON (suporta query ?download=1)" },
   { method: "GET", path: "/flows/:id/status", descricao: "Última execução do flow (status por nó)" },
-  { method: "POST", path: "/flows/:id/run", descricao: "Executa um flow", corpo: true },
+  { method: "POST", path: "/flows/:id/run", descricao: "Executa um flow (202 com exec_id rastreável no /historico?tipo=fluxo)", corpo: true },
   { method: "POST", path: "/flows/:id/resume", descricao: "Retoma execução falha do último nó ok (corpo: { exec_id })", corpo: true },
   { method: "GET", path: "/webhooks", descricao: "Lista todos os webhooks ativos (nós webhook em flows, com URLs de trigger)" },
   { method: "GET", path: "/components", descricao: "Lista componentes reutilizáveis do marketplace no workspace" },
@@ -1969,6 +1969,35 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               itens.push({ id: t.id, tipo: "task", titulo: t.titulo, agente: resp, quando: t.criado_em || null, status: t.coluna });
             }
           }
+          if (!tipo || tipo === "fluxo" || tipo === "flow") {
+            // Execuções de fluxos (FlowStore grava em registries/execucoes com extras.tipo="flow")
+            try {
+              const metas = await registros.listar(ws.path, "execucoes");
+              for (const m of metas) {
+                const ex = (m.extras ?? {}) as Record<string, unknown>;
+                if (ex.tipo !== "flow") continue;
+                const flowId = typeof ex.flow === "string" ? ex.flow : String(m.criado_por || "").replace(/^flow:/, "");
+                if (agente && !(String(m.criado_por || "").includes(agente) || flowId === agente)) continue;
+                const nos = Array.isArray(ex.nos) ? ex.nos as Array<{ status?: string }> : [];
+                const ok = nos.filter((n) => n.status === "ok").length;
+                const gat = (ex.gatilho ?? {}) as { tipo?: string; origem?: string };
+                itens.push({
+                  id: m.id,
+                  tipo: "fluxo",
+                  titulo: typeof ex.nome === "string" && ex.nome ? `${ex.nome} (${flowId})` : `Fluxo ${flowId}`,
+                  agente: `flow:${flowId}`,
+                  quando: m.criado_em || null,
+                  status: typeof ex.status === "string" ? ex.status : "concluido",
+                  gatilho: typeof gat.tipo === "string" && gat.origem ? { tipo: gat.tipo, origem: gat.origem } : { tipo: "flow", origem: flowId },
+                  flow: flowId,
+                  nos_total: nos.length,
+                  nos_ok: ok,
+                  contexto_final: typeof ex.contexto_final === "string" ? String(ex.contexto_final).slice(0, 500) : undefined,
+                  entrada: typeof ex.entrada === "string" ? String(ex.entrada).slice(0, 300) : undefined,
+                } as any);
+              }
+            } catch { /* sem categoria execucoes — continua */ }
+          }
           if (!tipo || tipo === "rotina") {
             const jobs = await scheduler.listar();
             for (const j of jobs.filter((j) => j.workspace === ws.id)) {
@@ -3062,10 +3091,16 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         const mFlowRun = /^\/flows\/([^/]+)\/run$/.exec(rota);
         if (mFlowRun && req.method === "POST") {
           const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as { entrada?: string; model?: string };
+          const corpo = (await lerCorpo(req)) as { entrada?: string; model?: string; gatilho?: string };
           const flowId = decodeURIComponent(mFlowRun[1]!);
-          void flows.executar(ws.path, flowId, { entrada: corpo.entrada, model: corpo.model }).catch(() => undefined);
-          enviar(res, 202, { status: "iniciado", flow: flowId });
+          const execId = `exec-${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
+          let gatilho: { tipo: string; origem: string } | undefined;
+          if (typeof corpo.gatilho === "string" && corpo.gatilho.includes(":")) {
+            const [tipo, ...resto] = corpo.gatilho.split(":");
+            if (tipo && resto.length) gatilho = { tipo, origem: resto.join(":") };
+          }
+          void flows.executar(ws.path, flowId, { entrada: corpo.entrada, model: corpo.model, execId, gatilho: gatilho as any }).catch(() => undefined);
+          enviar(res, 202, { status: "iniciado", flow: flowId, exec_id: execId });
           return;
         }
         const mFlowWebhook = /^\/flows\/([^/]+)\/webhook$/.exec(rota);
@@ -3084,10 +3119,11 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const rawCorpo = await lerCorpo(req);
           const flowId = decodeURIComponent(mFlowWebhook[1]!);
           const entradaStr = typeof rawCorpo === "string" ? rawCorpo : JSON.stringify(rawCorpo ?? {});
-          void flows.executar(ws.path, flowId, { entrada: entradaStr }).catch((err) => {
+          const execId = `exec-${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
+          void flows.executar(ws.path, flowId, { entrada: entradaStr, execId, gatilho: { tipo: "webhook", origem: flowId } as any }).catch((err) => {
             console.error(`[flows] erro ao executar webhook do flow ${flowId}:`, err);
           });
-          enviar(res, 202, { ok: true, status: "iniciado", flow: flowId, gatilho: "webhook" });
+          enviar(res, 202, { ok: true, status: "iniciado", flow: flowId, gatilho: "webhook", exec_id: execId });
           return;
         }
         const mFlowResume = /^\/flows\/([^/]+)\/resume$/.exec(rota);
