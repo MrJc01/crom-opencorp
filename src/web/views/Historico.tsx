@@ -36,6 +36,15 @@ import { fetchApi, wsAtivo } from "../lib/context";
 import { showToast } from "../ui/Toast";
 import { LogChatViewer } from "../components/chat/LogChatViewer";
 
+export interface FilhaHistorico {
+  id: string;
+  no?: string;
+  volta?: number;
+  agente?: string;
+  status?: string;
+  quando?: string | null;
+}
+
 export interface ItemHistorico {
   id: string;
   tipo: "execucao" | "task" | "rotina" | "conversa" | "fluxo";
@@ -54,6 +63,8 @@ export interface ItemHistorico {
   nos_ok?: number;
   contexto_final?: string;
   entrada?: string;
+  reuniao?: string;
+  filhas?: FilhaHistorico[];
 }
 
 export interface NoFluxoInfo {
@@ -107,6 +118,7 @@ export const HistoricoView: Component = () => {
   const [reenviando, setReenviando] = createSignal(false);
   const [tempoRealAtivo, setTempoRealAtivo] = createSignal(true);
   const [ultimaAtualizacao, setUltimaAtualizacao] = createSignal<string>("");
+  const [gruposAbertos, setGruposAbertos] = createSignal<Set<string>>(new Set());
 
   // Estados de Diff de Arquivos
   const [diffRun, setDiffRun] = createSignal<string>("");
@@ -467,6 +479,10 @@ export const HistoricoView: Component = () => {
       return;
     }
     if (item.tipo === "conversa") {
+      if (item.reuniao) {
+        navigate(`/reunioes?reuniao=${encodeURIComponent(item.reuniao)}`);
+        return;
+      }
       navigate(`/secretario`);
       return;
     }
@@ -476,6 +492,15 @@ export const HistoricoView: Component = () => {
     }
     // execucao e fluxo abrem o visualizador com ?run=
     setSearchParams({ run: item.id });
+  };
+
+  const alternarGrupo = (id: string) => {
+    setGruposAbertos((prev) => {
+      const novo = new Set(prev);
+      if (novo.has(id)) novo.delete(id);
+      else novo.add(id);
+      return novo;
+    });
   };
 
   const fecharLog = () => {
@@ -1025,75 +1050,161 @@ export const HistoricoView: Component = () => {
               const hitl = item.status === "hitl_pendente";
               const falhou = item.status === "falhou";
               const cancelado = item.status === "cancelado";
+              const temFilhas = Boolean(item.filhas && item.filhas.length > 0);
+              const grupoAberto = () => gruposAbertos().has(item.id);
 
               return (
-                <div
-                  onClick={() => selecionarItem(item)}
-                  class={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between gap-4 text-xs shadow-xs ${
-                    searchParams.run === item.id
-                      ? "bg-zinc-800/60 border-zinc-600 ring-1 ring-zinc-600/40"
-                      : emAndamento
-                      ? "bg-zinc-900/80 border-zinc-700/80 hover:border-zinc-600"
-                      : "bg-zinc-900/60 border-zinc-800/80 hover:border-zinc-700"
-                  }`}
-                >
-                  <div class="flex items-center gap-3 min-w-0">
-                    <div class="flex-shrink-0">
-                      {emAndamento ? (
-                        <div class="h-3.5 w-3.5 rounded-full bg-emerald-500 animate-ping" />
-                      ) : ok ? (
-                        <CheckCircle2 size={16} class="text-emerald-400" />
-                      ) : hitl ? (
-                        <AlertTriangle size={16} class="text-amber-400 animate-pulse" />
-                      ) : falhou ? (
-                        <XCircle size={16} class="text-rose-400" />
-                      ) : cancelado ? (
-                        <StopCircle size={16} class="text-zinc-500" />
-                      ) : (
-                        <Clock size={16} class="text-zinc-500" />
-                      )}
-                    </div>
-
-                    <div class="min-w-0">
-                      <div class="flex items-center gap-2 flex-wrap">
-                        {badgeTipo(item.tipo)}
-                        <Show when={item.agente}>
-                          <span class="font-semibold text-zinc-100 font-mono">
-                            @{item.agente}
-                          </span>
-                        </Show>
-                        <span class="text-[10px] text-zinc-500 font-mono">({item.id})</span>
-                        <Show when={item.status}>
-                          <span class="text-[10px] text-zinc-400 capitalize">· {item.status}</span>
-                        </Show>
+                <>
+                  <div
+                    onClick={() => selecionarItem(item)}
+                    class={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between gap-4 text-xs shadow-xs ${
+                      searchParams.run === item.id
+                        ? "bg-zinc-800/60 border-zinc-600 ring-1 ring-zinc-600/40"
+                        : emAndamento
+                        ? "bg-zinc-900/80 border-zinc-700/80 hover:border-zinc-600"
+                        : "bg-zinc-900/60 border-zinc-800/80 hover:border-zinc-700"
+                    }`}
+                  >
+                    <div class="flex items-center gap-3 min-w-0">
+                      <div class="flex-shrink-0">
+                        {emAndamento ? (
+                          <div class="h-3.5 w-3.5 rounded-full bg-emerald-500 animate-ping" />
+                        ) : ok ? (
+                          <CheckCircle2 size={16} class="text-emerald-400" />
+                        ) : hitl ? (
+                          <AlertTriangle size={16} class="text-amber-400 animate-pulse" />
+                        ) : falhou ? (
+                          <XCircle size={16} class="text-rose-400" />
+                        ) : cancelado ? (
+                          <StopCircle size={16} class="text-zinc-500" />
+                        ) : (
+                          <Clock size={16} class="text-zinc-500" />
+                        )}
                       </div>
 
-                      <div class="text-[11px] text-zinc-300 truncate max-w-xl mt-0.5 font-sans">
-                        {item.titulo || item.ordem || "Registro de atividade no sistema"}
-                      </div>
-                      <Show when={item.tipo === "fluxo" && item.nos_total}>
-                        <div class="text-[10px] text-indigo-300/80 font-mono mt-0.5">
-                          {item.nos_ok ?? 0}/{item.nos_total} nós ok{item.flow ? ` · ${item.flow}` : ""}
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          {badgeTipo(item.tipo)}
+                          <Show when={item.agente}>
+                            <span class="font-semibold text-zinc-100 font-mono">
+                              @{item.agente}
+                            </span>
+                          </Show>
+                          <span class="text-[10px] text-zinc-500 font-mono">({item.id})</span>
+                          <Show when={item.status}>
+                            <span class="text-[10px] text-zinc-400 capitalize">· {item.status}</span>
+                          </Show>
+                          <Show when={temFilhas}>
+                            <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                              {item.filhas!.length} {item.filhas!.length === 1 ? "filho" : "filhos"}
+                            </span>
+                          </Show>
                         </div>
-                      </Show>
-                    </div>
-                  </div>
 
-                  <div class="text-right text-[11px] text-zinc-400 font-mono flex-shrink-0 flex items-center gap-3">
-                    <div>
-                      {item.duracao_ms ? (
-                        <div>{(item.duracao_ms / 1000).toFixed(1)}s</div>
-                      ) : item.custo_usd ? (
-                        <div>US$ {Number(item.custo_usd).toFixed(4)}</div>
-                      ) : null}
-                      <div class="text-[10px] text-zinc-500">
-                        {item.quando ? new Date(item.quando).toLocaleTimeString("pt-BR") : ""}
+                        <div class="text-[11px] text-zinc-300 truncate max-w-xl mt-0.5 font-sans">
+                          {item.titulo || item.ordem || "Registro de atividade no sistema"}
+                        </div>
+                        <Show when={item.tipo === "fluxo" && item.nos_total}>
+                          <div class="text-[10px] text-indigo-300/80 font-mono mt-0.5">
+                            {item.nos_ok ?? 0}/{item.nos_total} nós ok{item.flow ? ` · ${item.flow}` : ""}
+                          </div>
+                        </Show>
                       </div>
                     </div>
 
-                    <ArrowRight size={14} class="text-zinc-600 hover:text-zinc-300" />
+                    <div class="text-right text-[11px] text-zinc-400 font-mono flex-shrink-0 flex items-center gap-3">
+                      <div>
+                        {item.duracao_ms ? (
+                          <div>{(item.duracao_ms / 1000).toFixed(1)}s</div>
+                        ) : item.custo_usd ? (
+                          <div>US$ {Number(item.custo_usd).toFixed(4)}</div>
+                        ) : null}
+                        <div class="text-[10px] text-zinc-500">
+                          {item.quando ? new Date(item.quando).toLocaleTimeString("pt-BR") : ""}
+                        </div>
+                      </div>
+
+                      <Show when={temFilhas}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            alternarGrupo(item.id);
+                          }}
+                          class="flex items-center gap-1 px-2 py-1 rounded-lg border border-zinc-700/70 bg-zinc-900 text-[10px] font-mono text-zinc-300 hover:bg-zinc-800 cursor-pointer"
+                          title="Expandir execuções agrupadas"
+                        >
+                          {grupoAberto() ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          {item.filhas!.length}
+                        </button>
+                      </Show>
+
+                      <ArrowRight size={14} class="text-zinc-600 hover:text-zinc-300" />
+                    </div>
                   </div>
-                </div>
+
+                  <Show when={temFilhas && grupoAberto()}>
+                    <div class="ml-4 pl-4 border-l-2 border-zinc-700/60 space-y-1.5">
+                      <For each={item.filhas}>
+                        {(filha) => {
+                          const fOk = filha.status === "concluido" || filha.status === "feito";
+                          const fFalhou = filha.status === "falhou";
+                          const fExecutando = filha.status === "executando";
+                          const fCancelado = filha.status === "cancelado";
+                          return (
+                            <div
+                              onClick={() => setSearchParams({ run: filha.id })}
+                              class="p-2.5 rounded-lg border bg-zinc-950/60 border-zinc-800/70 hover:border-zinc-700 cursor-pointer flex items-center justify-between gap-3 text-xs"
+                            >
+                              <div class="flex items-center gap-2.5 min-w-0">
+                                <div class="flex-shrink-0">
+                                  {fExecutando ? (
+                                    <RefreshCw size={13} class="text-indigo-400 animate-spin" />
+                                  ) : fOk ? (
+                                    <CheckCircle2 size={13} class="text-emerald-400" />
+                                  ) : fFalhou ? (
+                                    <XCircle size={13} class="text-rose-400" />
+                                  ) : fCancelado ? (
+                                    <StopCircle size={13} class="text-zinc-500" />
+                                  ) : (
+                                    <Clock size={13} class="text-zinc-500" />
+                                  )}
+                                </div>
+                                <span class="font-mono font-semibold text-zinc-200 truncate">
+                                  {filha.no ?? filha.id}
+                                </span>
+                                <Show when={filha.volta !== undefined}>
+                                  <span class="text-[10px] text-zinc-500 font-mono">volta {filha.volta}</span>
+                                </Show>
+                                <Show when={filha.agente}>
+                                  <span class="text-[10px] text-zinc-500 font-mono">@{filha.agente}</span>
+                                </Show>
+                              </div>
+                              <div class="flex items-center gap-2 flex-shrink-0">
+                                <span class="text-[10px] text-zinc-500 font-mono">{filha.id}</span>
+                                <span
+                                  class={`px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold ${
+                                    fOk
+                                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                                      : fFalhou
+                                      ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                                      : fExecutando
+                                      ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40"
+                                      : fCancelado
+                                      ? "bg-zinc-800 text-zinc-400 border border-zinc-700"
+                                      : "bg-zinc-800 text-zinc-400 border border-zinc-700"
+                                  }`}
+                                >
+                                  {filha.status ?? "—"}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        }}
+                      </For>
+                    </div>
+                  </Show>
+                </>
               );
             }}
           </For>

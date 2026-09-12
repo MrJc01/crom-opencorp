@@ -58,6 +58,28 @@ export type NoFlow = z.infer<typeof nosFlowSchema>;
 export type ArestaFlow = z.infer<typeof arestaFlowSchema>;
 export type Flow = z.infer<typeof flowSchema>;
 
+// ── Juiz do loop (F2-T01) ────────────────────────────────────────────
+// Regras que encerram um nó "loop" antes do teto de max_iteracoes:
+// - "sem-melhora": a saída ficou idêntica nas últimas `limiar` voltas (default 2);
+// - "condicao": regex (`padrao`) casando com o contexto;
+// - "orcamento": custo_usd OU segundos acumulados do loop;
+// - "juiz-llm": declarado, comportamento TODO (não implementado nesta entrega).
+export const regraJuizSchema = z.object({
+  tipo: z.enum(["sem-melhora", "orcamento", "condicao", "juiz-llm"]),
+  limiar: z.number().int().positive().optional(),
+  padrao: z.string().optional(),
+  custo_usd: z.number().nonnegative().optional(),
+  segundos: z.number().nonnegative().optional(),
+});
+
+export const juizLoopSchema = z.object({
+  a_partir_da_volta: z.number().int().positive().optional(),
+  regras: z.array(regraJuizSchema).min(1),
+});
+
+export type RegraJuiz = z.infer<typeof regraJuizSchema>;
+export type JuizLoop = z.infer<typeof juizLoopSchema>;
+
 export interface FlowExport {
   version: number;
   exported_at: string;
@@ -67,7 +89,7 @@ export interface FlowExport {
 export interface NoExecInfo {
   id: string;
   tipo: string;
-  status: "ok" | "falhou" | "nao-executado" | "executando";
+  status: "ok" | "falhou" | "nao-executado" | "executando" | "skip";
   exec_id: string | null;
 }
 
@@ -492,6 +514,37 @@ export class FlowStore {
         if (config.saida_final && !porId.has(config.saida_final as string)) {
           throw new FlowError(`flow inválido${onde("")}: nó "loop" "${no.id}" aponta para saida_final inexistente "${config.saida_final}"`);
         }
+        // F2-T01: juiz do loop — valida schema + requisitos específicos por regra.
+        if (config.juiz !== undefined) {
+          const juizParsed = juizLoopSchema.safeParse(config.juiz);
+          if (!juizParsed.success) {
+            const iss = juizParsed.error.issues[0]!;
+            throw new FlowError(
+              `flow inválido${onde("")}: nó "loop" "${no.id}" tem config.juiz inválido (campo "${iss.path.join(".")}"): ${iss.message}`,
+            );
+          }
+          for (const regra of juizParsed.data.regras) {
+            if (regra.tipo === "condicao") {
+              if (typeof regra.padrao !== "string" || regra.padrao.length === 0) {
+                throw new FlowError(
+                  `flow inválido${onde("")}: nó "loop" "${no.id}" — regra "condicao" exige "padrao" (regex)`,
+                );
+              }
+              try {
+                new RegExp(regra.padrao);
+              } catch {
+                throw new FlowError(
+                  `flow inválido${onde("")}: nó "loop" "${no.id}" — regra "condicao" tem regex inválida "${regra.padrao}"`,
+                );
+              }
+            }
+            if (regra.tipo === "orcamento" && regra.custo_usd === undefined && regra.segundos === undefined) {
+              throw new FlowError(
+                `flow inválido${onde("")}: nó "loop" "${no.id}" — regra "orcamento" exige "custo_usd" ou "segundos"`,
+              );
+            }
+          }
+        }
       }
       if (no.tipo === "cron") {
         if (typeof config.expressao_cron !== "string" || config.expressao_cron.trim().length === 0) {
@@ -765,6 +818,11 @@ export class FlowStore {
     const sessoesPorNo: Record<string, string> = {};
     let totalPassos = 0;
     const TETO_SEGURANCA_PASSOS = 100;
+    // F2-T01: acumulado de custo/tempo (execuções de agentes) para a regra
+    // "orcamento" do juiz do loop — base por loop capturada na 1ª volta.
+    let custoAcumulado = 0;
+    let tempoAcumuladoMs = 0;
+    const orcamentoLoop = new Map<string, { custo: number; tempo: number }>();
 
     try {
       while (filaNos.length > 0) {
@@ -798,6 +856,27 @@ export class FlowStore {
         // Se o nó não é do tipo loop e já ultrapassou o teto padrão sem estar num loop declarado
         const tetoNo = typeof (no.config as any)?.max_iteracoes === "number" ? (no.config as any).max_iteracoes : 10;
         if (no.tipo !== "loop" && voltaAtual > tetoNo) {
+          // F2-T01: fim do "skip silencioso" — em vez de `continue` sem rastro,
+          // o nó é marcado como pulado e o evento é emitido + registrado no journal.
+          await marcarNo(no.id, "skip");
+          eventBus.emit("flow-no", {
+            flow: flowId,
+            no: no.id,
+            status: "skip",
+            volta: voltaAtual,
+            teto: tetoNo,
+            motivo: "teto_no_atingido",
+          });
+          await this.registros.anexarEvento(wsPath, "execucoes", execId, {
+            ts: this.agora().toISOString(),
+            por: `flow:${flowId}`,
+            evento: "no-skip",
+            no: no.id,
+            volta: voltaAtual,
+            teto: tetoNo,
+            motivo: "teto_no_atingido",
+            resumo: `nó "${no.id}" pulado na volta ${voltaAtual} (teto ${tetoNo})`,
+          });
           continue;
         }
 
@@ -811,17 +890,70 @@ export class FlowStore {
             condicao_parada?: string;
             retornar_para?: string;
             saida_final?: string;
+            juiz?: JuizLoop;
           };
           const teto = Math.max(1, config.max_iteracoes ?? 5);
-          const parouPorCondicao = Boolean(config.condicao_parada && contexto.includes(config.condicao_parada));
+
+          // Baseline de custo/tempo na 1ª volta (para a regra "orcamento").
+          if (voltaAtual === 1) {
+            orcamentoLoop.set(no.id, { custo: custoAcumulado, tempo: tempoAcumuladoMs });
+          }
+
+          // Grava a saída desta volta ANTES de avaliar o juiz (sem-melhora compara voltas).
+          saidasPorNo[no.id] = contexto;
+          saidasPorNo[`${no.id}#${voltaAtual}`] = contexto;
+
+          const juiz = config.juiz;
+          const aPartirDaVolta = juiz?.a_partir_da_volta ?? 1;
+          let motivoJuiz: "condicao" | "sem_melhora" | "orcamento" | null = null;
+          if (voltaAtual >= aPartirDaVolta) {
+            // Retrocompatibilidade: condicao_parada é sinônimo de regra "condicao".
+            if (config.condicao_parada && contexto.includes(config.condicao_parada)) {
+              motivoJuiz = "condicao";
+            } else if (juiz) {
+              for (const regra of juiz.regras) {
+                if (regra.tipo === "condicao") {
+                  if (regra.padrao && new RegExp(regra.padrao).test(contexto)) {
+                    motivoJuiz = "condicao";
+                    break;
+                  }
+                } else if (regra.tipo === "sem-melhora") {
+                  const limiar = regra.limiar ?? 2;
+                  if (voltaAtual >= limiar) {
+                    const ultimas: string[] = [];
+                    for (let v = voltaAtual - limiar + 1; v <= voltaAtual; v++) {
+                      ultimas.push(saidasPorNo[`${no.id}#${v}`] ?? "");
+                    }
+                    if (ultimas.every((s) => s === ultimas[0]) && ultimas[0]!.trim().length > 0) {
+                      motivoJuiz = "sem_melhora";
+                      break;
+                    }
+                  }
+                } else if (regra.tipo === "orcamento") {
+                  const base = orcamentoLoop.get(no.id) ?? { custo: custoAcumulado, tempo: tempoAcumuladoMs };
+                  const custoLoop = custoAcumulado - base.custo;
+                  const segundosLoop = (tempoAcumuladoMs - base.tempo) / 1000;
+                  if (
+                    (regra.custo_usd !== undefined && custoLoop >= regra.custo_usd) ||
+                    (regra.segundos !== undefined && segundosLoop >= regra.segundos)
+                  ) {
+                    motivoJuiz = "orcamento";
+                    break;
+                  }
+                } else if (regra.tipo === "juiz-llm") {
+                  // TODO(F2-T01): juiz-llm — avaliar o loop via um LLM dedicado.
+                  // Não implementado nesta entrega (regra aceita, nunca dispara).
+                  continue;
+                }
+              }
+            }
+          }
           const atingiuTeto = voltaAtual >= teto;
-          const encerrar = parouPorCondicao || atingiuTeto;
+          const encerrar = motivoJuiz !== null || atingiuTeto;
+          const motivoEncerramento = motivoJuiz ?? (atingiuTeto ? "teto_atingido" : null);
           const tsIteracao = this.agora();
 
           await marcarNo(no.id, "ok");
-          saidasPorNo[no.id] = contexto;
-          // Histórico indexado por iteração — ex.: saidasPorNo["loop-revisao#2"]
-          saidasPorNo[`${no.id}#${voltaAtual}`] = contexto;
           eventBus.emit("flow-no", {
             flow: flowId,
             no: no.id,
@@ -829,6 +961,7 @@ export class FlowStore {
             volta: voltaAtual,
             teto,
             encerrado: encerrar,
+            motivo: motivoEncerramento,
           });
 
           // ── Journal: persistir snapshot de cada iteração do loop ──
@@ -840,9 +973,9 @@ export class FlowStore {
             volta: voltaAtual,
             teto,
             encerrado: encerrar,
-            motivo_encerramento: parouPorCondicao ? "condicao_parada" : atingiuTeto ? "teto_atingido" : null,
+            motivo_encerramento: motivoEncerramento,
             contexto_preview: contexto.slice(0, 500),
-            resumo: `loop "${no.id}" volta ${voltaAtual}/${teto}${encerrar ? " (encerrado)" : ""}`,
+            resumo: `loop "${no.id}" volta ${voltaAtual}/${teto}${encerrar ? ` (encerrado: ${motivoEncerramento})` : ""}`,
           });
 
           if (encerrar) {
@@ -988,6 +1121,8 @@ export class FlowStore {
             }
           }
           contexto = contextoNovo;
+          custoAcumulado += resultado.custo_usd ?? 0;
+          tempoAcumuladoMs += resultado.duracao_ms ?? 0;
           // F1-T03: guarda o id da sessão/execução deste nó para descendentes.
           // Em "reaproveitar", o id sintético (o que o motor conhece como sessão
           // contínua) é preservado em vez de sobrescrito a cada volta do loop.
@@ -1013,6 +1148,8 @@ export class FlowStore {
             if (r.exit_code !== 0) {
               throw new FlowError(`passo "${agente}" falhou — exec ${r.id}, exit ${r.exit_code}`);
             }
+            custoAcumulado += r.custo_usd ?? 0;
+            tempoAcumuladoMs += r.duracao_ms ?? 0;
             return limparCaptura(r.captura ?? "");
           };
           const falharNo = async (erro: unknown): Promise<never> => {
@@ -1217,6 +1354,8 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
             if (resultado.exit_code !== 0) {
               throw new FlowError(`exit ${resultado.exit_code}`);
             }
+            custoAcumulado += resultado.custo_usd ?? 0;
+            tempoAcumuladoMs += resultado.duracao_ms ?? 0;
             const captura = limparCaptura(resultado.captura ?? "");
             escolha = rotulos.find((r) => captura.includes(r)) ?? null;
           } catch (erro) {

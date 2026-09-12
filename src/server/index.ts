@@ -1996,6 +1996,74 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           const limite = Math.min(Number(url.searchParams.get("limite")) || 200, 500);
           const itens: Array<{ id: string; tipo: string; titulo: string; agente: string; quando: string | null; status?: string; gatilho?: { tipo: string; origem: string } }> = [];
 
+          // F2-T02 — agrupamento: execs de nó (`flow:X` + `no:Y`) e turnos de reunião
+          // (`reuniao:Y`) viram `filhas` do item pai em vez de itens planos.
+          type FilhaHistorico = { id: string; no?: string; volta?: number; agente: string; quando: string; status: string };
+          const metasExecucoes: MetaRegistro[] = await (async () => {
+            try {
+              return await registros.listar(ws.path, "execucoes");
+            } catch {
+              return [];
+            }
+          })();
+          const filhosPorFlow = new Map<string, MetaRegistro[]>();
+          const filhosPorReuniao = new Map<string, MetaRegistro[]>();
+          for (const m of metasExecucoes) {
+            const tags = m.tags ?? [];
+            const noTag = tags.find((t) => t.startsWith("no:"));
+            const flowTag = tags.find((t) => t.startsWith("flow:"));
+            const reuniaoTag = tags.find((t) => t.startsWith("reuniao:"));
+            if (noTag && flowTag) {
+              const flowId = flowTag.slice("flow:".length);
+              const lista = filhosPorFlow.get(flowId) ?? [];
+              lista.push(m);
+              filhosPorFlow.set(flowId, lista);
+            } else if (reuniaoTag) {
+              const roomId = reuniaoTag.slice("reuniao:".length);
+              const lista = filhosPorReuniao.get(roomId) ?? [];
+              lista.push(m);
+              filhosPorReuniao.set(roomId, lista);
+            }
+          }
+          const montarFilhas = (filhos: MetaRegistro[], ordemNos?: Array<{ id?: string }>): FilhaHistorico[] => {
+            const idxNo = new Map<string, number>();
+            (ordemNos ?? []).forEach((n, i) => {
+              if (n.id) idxNo.set(n.id, i);
+            });
+            const ordenados = filhos
+              .map((m) => {
+                const ex = (m.extras ?? {}) as Record<string, unknown>;
+                const noId = (m.tags ?? []).find((t) => t.startsWith("no:"))?.slice("no:".length);
+                return { m, ex, noId, quando: m.criado_em };
+              })
+              .sort((a, b) => {
+                const ia = a.noId ? (idxNo.get(a.noId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+                const ib = b.noId ? (idxNo.get(b.noId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+                if (ia !== ib) return ia - ib;
+                return a.quando.localeCompare(b.quando);
+              });
+            const contagem = new Map<string, number>();
+            return ordenados.map((x) => {
+              let volta: number | undefined;
+              if (x.noId) {
+                contagem.set(x.noId, (contagem.get(x.noId) ?? 0) + 1);
+                volta = contagem.get(x.noId);
+              }
+              return {
+                id: x.m.id,
+                ...(x.noId ? { no: x.noId } : {}),
+                ...(volta !== undefined ? { volta } : {}),
+                agente: x.m.criado_por,
+                quando: x.quando,
+                status: typeof x.ex.status === "string" ? x.ex.status : "executando",
+              };
+            });
+          };
+          // ids de execs que viraram filhas (não devem aparecer como exec plana)
+          const idsFilhas = new Set<string>();
+          for (const fs of filhosPorFlow.values()) for (const m of fs) idsFilhas.add(m.id);
+          for (const fs of filhosPorReuniao.values()) for (const m of fs) idsFilhas.add(m.id);
+
           if (!tipo || tipo === "execucao") {
             const execs = (await sessoes.listarExecucoes(ws.path, agente ? { agente } : undefined)) as Array<{
               id: string;
@@ -2018,6 +2086,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               // Flows têm item próprio tipo=fluxo (abaixo) — sem isso cada flow
               // aparecia 2x e o modal abria a cópia "execucao" (chat bugado).
               if (ex?.tipo === "flow") continue;
+              // Exec de nó/turno já agrupada como filha de fluxo/reunião (F2-T02).
+              if (idsFilhas.has(e.id)) continue;
               itens.push({
                 id: e.id,
                 tipo: "execucao",
@@ -2050,9 +2120,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 if (ex.tipo !== "flow") continue;
                 const flowId = typeof ex.flow === "string" ? ex.flow : String(m.criado_por || "").replace(/^flow:/, "");
                 if (agente && !(String(m.criado_por || "").includes(agente) || flowId === agente)) continue;
-                const nos = Array.isArray(ex.nos) ? ex.nos as Array<{ status?: string }> : [];
+                const nos = Array.isArray(ex.nos) ? ex.nos as Array<{ id?: string; status?: string }> : [];
                 const ok = nos.filter((n) => n.status === "ok").length;
                 const gat = (ex.gatilho ?? {}) as { tipo?: string; origem?: string };
+                const filhas = montarFilhas(filhosPorFlow.get(flowId) ?? [], nos);
                 itens.push({
                   id: m.id,
                   tipo: "fluxo",
@@ -2066,6 +2137,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   nos_ok: ok,
                   contexto_final: typeof ex.contexto_final === "string" ? String(ex.contexto_final).slice(0, 500) : undefined,
                   entrada: typeof ex.entrada === "string" ? String(ex.entrada).slice(0, 300) : undefined,
+                  filhas,
                 } as any);
               }
             } catch { /* sem categoria execucoes — continua */ }
@@ -2086,6 +2158,25 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 itens.push({ id: c.id, tipo: "conversa", titulo: "Conversa — " + c.agente, agente: c.agente, quando: c.inicio, status: c.status });
               }
             }
+            // reuniões: item pai (tipo conversa) com filhas (turnos/moderadores) — tag `reuniao:Y`
+            try {
+              const salas = await meetings.listar(ws.path);
+              for (const sala of salas) {
+                if (agente) continue; // reuniões não pertencem a um agente específico
+                const filhas = montarFilhas(filhosPorReuniao.get(sala.id) ?? []);
+                itens.push({
+                  id: sala.id,
+                  tipo: "conversa",
+                  titulo: `Reunião — ${sala.pauta || sala.id}`,
+                  agente: "reuniao",
+                  quando: sala.criado_em || null,
+                  status: sala.status === "em-andamento" ? "executando" : "concluida",
+                  gatilho: { tipo: "reuniao", origem: sala.id },
+                  reuniao: sala.id,
+                  filhas,
+                } as any);
+              }
+            } catch { /* sem reuniões — continua */ }
           }
 
           itens.sort((a, b) => (b.quando ?? "").localeCompare(a.quando ?? ""));
