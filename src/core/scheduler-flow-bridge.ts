@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { opencorpHome } from "../utils/paths.js";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
+import { validarCron, proximoCron, extrairFlowRunDeArgs } from "./scheduler.js";
 import type { Flow } from "./flow-store.js";
 
 export interface SincronizacaoResultado {
@@ -12,8 +13,44 @@ export interface SincronizacaoResultado {
   workspacesAfetados: string[];
 }
 
-function normalizarId(nome: string): string {
-  return nome
+/** Abre o scheduler.db garantindo diretório e tabelas (mesmo DDL do Scheduler). */
+async function garantirBanco(homeDir: string): Promise<Database.Database> {
+  const caminho = resolve(homeDir, ".opencorp", "scheduler.db");
+  await mkdirRecursive(join(homeDir, ".opencorp"));
+  const db = new Database(caminho);
+  db.pragma("journal_mode = WAL");
+  db.pragma("busy_timeout = 5000");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS jobs (
+      id TEXT PRIMARY KEY,
+      nome TEXT NOT NULL,
+      agenda_tipo TEXT NOT NULL,
+      agenda_valor TEXT NOT NULL,
+      args TEXT NOT NULL,
+      workspace TEXT NOT NULL DEFAULT '',
+      ativo INTEGER NOT NULL DEFAULT 1,
+      graca_min INTEGER NOT NULL DEFAULT 5,
+      ultima_exec TEXT,
+      proxima_exec TEXT,
+      criado_em TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS job_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id TEXT NOT NULL,
+      job_nome TEXT NOT NULL DEFAULT '',
+      workspace TEXT NOT NULL DEFAULT '',
+      iniciado_em TEXT NOT NULL,
+      fim_em TEXT,
+      resultado TEXT NOT NULL DEFAULT '',
+      erro TEXT,
+      pulado INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs (job_id, iniciado_em);
+  `);
+  return db;
+}
+
+function normalizarId(nome: string): string {  return nome
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -72,6 +109,9 @@ export async function sincronizarJobsParaFluxos(homeDir: string = opencorpHome()
       args = [String(job.args)];
     }
 
+    // Jobs de flow ("flow run <id>") já são a fonte agendada — não geram espelho
+    if (extrairFlowRunDeArgs(args)) continue;
+
     // Cron expression
     const cronExpr = job.agenda_tipo === "cron" ? job.agenda_valor : "* * * * *";
 
@@ -120,6 +160,7 @@ export async function sincronizarJobsParaFluxos(homeDir: string = opencorpHome()
     const flowObj: Flow = {
       id: flowId,
       nome: job.nome || flowId,
+      auto_agendar: false,
       nos: [
         {
           id: "gatilho-cron",
@@ -175,8 +216,9 @@ export async function sincronizarJobsParaFluxos(homeDir: string = opencorpHome()
 }
 
 /**
- * Quando um Flow com nó de gatilho cron é salvo ou atualizado na interface,
- * sincroniza com o scheduler.db para que o daemon de background execute-o.
+ * Fonte única (Etapa 12.2): fluxo com nó `cron` + `auto_agendar:true` ⟺ 1 job
+ * `flow:<id>` (args ["flow","run","<id>"], agenda do nó cron). Flag off ou sem
+ * nó cron → remove o job. Idempotente.
  */
 export async function sincronizarFluxoParaScheduler(
   wsPath: string,
@@ -184,85 +226,95 @@ export async function sincronizarFluxoParaScheduler(
   homeDir: string = opencorpHome()
 ): Promise<void> {
   const cronNo = flow.nos.find((n) => n.tipo === "cron");
+  const expressao = (cronNo?.config as { expressao_cron?: unknown } | undefined)?.expressao_cron;
+  const expressaoCron = typeof expressao === "string" ? expressao.trim() : "";
+  const nomeJob = `flow:${flow.id}`;
   const wsNome = basename(wsPath);
-  const dbPath = resolve(homeDir, ".opencorp", "scheduler.db");
-  if (!existsSync(dbPath)) return;
+  const deveAgendar = flow.auto_agendar === true && expressaoCron.length > 0;
+  if (deveAgendar) validarCron(expressaoCron);
 
-  let db: Database.Database;
+  const db = await garantirBanco(homeDir);
   try {
-    db = new Database(dbPath);
-  } catch {
-    return;
-  }
-
-  try {
-    const jobId = (cronNo?.config as any)?.job_id || `sch-${flow.id}`;
-    const expressaoCron = (cronNo?.config as any)?.expressao_cron;
-
-    if (!cronNo || !expressaoCron) {
-      // Se não tem cron, desativa qualquer job associado a este flow
-      db.prepare("UPDATE jobs SET ativo = 0 WHERE (id = ? OR nome = ?) AND workspace = ?").run(jobId, flow.id, wsNome);
+    const existentes = db.prepare("SELECT id FROM jobs WHERE nome = ? AND workspace = ? ORDER BY id").all(nomeJob, wsNome) as { id: string }[];
+    if (!deveAgendar) {
+      if (existentes.length > 0) {
+        db.prepare("DELETE FROM jobs WHERE nome = ? AND workspace = ?").run(nomeJob, wsNome);
+      }
       return;
     }
-
-    // Identifica o que executar
-    const scriptNo = flow.nos.find((n) => n.tipo === "script");
-    const agenteNo = flow.nos.find((n) => n.tipo === "agente");
-    let args: string[];
-
-    if (scriptNo && (scriptNo.config as any)?.comando) {
-      args = String((scriptNo.config as any).comando).split(" ");
-    } else if (agenteNo && (agenteNo.config as any)?.agente) {
-      args = ["agent", "run", String((agenteNo.config as any).agente), String((agenteNo.config as any).ordem || "")];
-    } else {
-      args = ["flow", "run", flow.id, "--workspace", wsNome];
+    const args = JSON.stringify(["flow", "run", flow.id]);
+    let proxima: string;
+    try {
+      proxima = proximoCron(expressaoCron, new Date()).toISOString();
+    } catch {
+      proxima = new Date().toISOString();
     }
-
-    const existente = db.prepare("SELECT id FROM jobs WHERE id = ? OR (nome = ? AND workspace = ?)").get(jobId, flow.id, wsNome) as { id: string } | undefined;
-
-    if (existente) {
-      db.prepare(
-        "UPDATE jobs SET agenda_tipo = 'cron', agenda_valor = ?, args = ?, ativo = 1, nome = ? WHERE id = ?"
-      ).run(expressaoCron, JSON.stringify(args), flow.nome || flow.id, existente.id);
-    } else {
+    if (existentes.length === 0) {
       const agora = new Date().toISOString();
       db.prepare(
         `INSERT INTO jobs (id, nome, agenda_tipo, agenda_valor, args, workspace, ativo, graca_min, ultima_exec, proxima_exec, criado_em)
          VALUES (@id, @nome, 'cron', @agenda_valor, @args, @workspace, 1, 5, null, @proxima_exec, @criado_em)`
       ).run({
-        id: jobId,
-        nome: flow.nome || flow.id,
+        id: nomeJob,
+        nome: nomeJob,
         agenda_valor: expressaoCron,
-        args: JSON.stringify(args),
+        args,
         workspace: wsNome,
-        proxima_exec: agora,
+        proxima_exec: proxima,
         criado_em: agora,
       });
+      return;
     }
-  } catch (err) {
-    console.error("[scheduler-flow-bridge] erro ao sincronizar fluxo para scheduler:", err);
+    const [mantido, ...sobras] = existentes;
+    for (const s of sobras) db.prepare("DELETE FROM jobs WHERE id = ?").run(s.id);
+    db.prepare("UPDATE jobs SET agenda_tipo = 'cron', agenda_valor = ?, args = ?, ativo = 1 WHERE id = ?").run(
+      expressaoCron, args, mantido!.id
+    );
   } finally {
     db.close();
   }
 }
 
 /**
- * Remove job associado ao excluir flow.
+ * Remove o job `flow:<id>` (e o legado `sch-<id>`) ao excluir o flow.
+ * O histórico em job_runs é preservado.
  */
 export async function removerJobDoScheduler(
   wsPath: string,
   flowId: string,
   homeDir: string = opencorpHome()
 ): Promise<void> {
-  const wsNome = basename(wsPath);
   const dbPath = resolve(homeDir, ".opencorp", "scheduler.db");
   if (!existsSync(dbPath)) return;
-
   try {
     const db = new Database(dbPath);
-    db.prepare("UPDATE jobs SET ativo = 0 WHERE (nome = ? OR id = ?) AND workspace = ?").run(flowId, `sch-${flowId}`, wsNome);
-    db.close();
+    try {
+      db.prepare("DELETE FROM jobs WHERE (nome = ? OR id = ?) AND workspace = ?").run(`flow:${flowId}`, `sch-${flowId}`, basename(wsPath));
+    } finally {
+      db.close();
+    }
   } catch {
     // Silencioso em cleanup
   }
+}
+
+/**
+ * Bridge legado (Etapa 12.3): converte um job do scheduler em flow de 1 nó
+ * (gatilho manual, auto_agendar:false). Puro — não toca no job original.
+ */
+export function converterJobParaFlow(job: { id: string; nome: string; args: string[] }): Flow {
+  const id = `convertido-${job.id}`.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "convertido-job";
+  return {
+    id,
+    nome: `convertido-${job.id}`,
+    auto_agendar: false,
+    nos: [
+      {
+        id: "gatilho",
+        tipo: "manual",
+        config: { origem: `schedule:${job.id}`, comando: job.args.join(" ") },
+      },
+    ],
+    arestas: [],
+  };
 }

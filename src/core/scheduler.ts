@@ -31,6 +31,7 @@ export interface OpcoesScheduler {
   executar?: (job: Job) => Promise<string>;
   binPath?: string;
   reconciliar?: () => Promise<string[]>;
+  flowExecutar?: (wsPath: string, flowId: string, opts: { entrada?: string; model?: string; gatilho?: { tipo: string; origem: string } }) => Promise<{ execId: string; status: string; contextoFinal: string }>;
 }
 
 interface LinhaJob {
@@ -99,10 +100,17 @@ function gerarId(): string {
 }
 
 /**
- * Gatilho do ledger unificado: se o job roda um `agent run` ou `flow run`, ele deve se
- * auto-declarar como ativação "cron" de origem <jobId> (retorna o valor do
- * flag --gatilho; vazio quando o job não é agent/flow run).
+ * Fusão scheduler→fluxo (Etapa 12.1): job `flow run <id> [...]` roda in-process
+ * via FlowStore.executar(). Retorna o flowId ou null (caminho legado/spawn).
  */
+export function extrairFlowRunDeArgs(args: string[]): string | null {
+  if (args[0] === "flow" && args[1] === "run" && typeof args[2] === "string" && args[2].length > 0) {
+    return args[2];
+  }
+  return null;
+}
+
+/** Gatilho do ledger unificado: job `agent run`/`flow run` auto-declara ativação "cron" de origem <jobId>. */
 export function argsComGatilhoCron(job: { id: string; args: string[] }): string {
   if (job.args[0] === "agent" && job.args[1] === "run") return `cron:${job.id}`;
   if (job.args[0] === "flow" && job.args[1] === "run") return `cron:${job.id}`;
@@ -245,6 +253,7 @@ export class Scheduler {
   private readonly agora: () => Date;
   private readonly executarFn: (job: Job) => Promise<string>;
   private readonly reconciliarFn: (() => Promise<string[]>) | null;
+  private readonly flowExecutarFn: NonNullable<OpcoesScheduler["flowExecutar"]> | null;
   private db: Database.Database | null = null;
   private timer: NodeJS.Timeout | null = null;
   private keepAlive: NodeJS.Timeout | null = null;
@@ -254,7 +263,8 @@ export class Scheduler {
     this.agora = opcoes.agora ?? (() => new Date());
     this.executarFn =
       opcoes.executar ??
-      (async (job) => this.executarSpawn(job));
+      (async (job) => this.executarComDelegacao(job));
+    this.flowExecutarFn = opcoes.flowExecutar ?? null;
     this.reconciliarFn = opcoes.reconciliar ?? null;
   }
 
@@ -478,6 +488,44 @@ export class Scheduler {
   async excluir(id: string): Promise<void> {
     this.obter(id);
     (await this.banco()).prepare("DELETE FROM jobs WHERE id = ?").run(id);
+  }
+
+  private async executarComDelegacao(job: Job): Promise<string> {
+    if (extrairFlowRunDeArgs(job.args) === null) return this.executarSpawn(job);
+    return this.executarFlowInProcess(job);
+  }
+
+  /**
+   * Etapa 12.1: job ["flow","run",<id>,...extras] executa in-process via
+   * FlowStore.executar() (mesma instância/config do server). claim/graça/
+   * catch-up e job_runs+ledger `execucoes` seguem no tick() e no FlowStore.
+   */
+  private async executarFlowInProcess(job: Job): Promise<string> {
+    const flowId = extrairFlowRunDeArgs(job.args) as string;
+    const extras = job.args.slice(3);
+    const wsPath = isAbsolute(job.workspace)
+      ? job.workspace
+      : job.workspace
+        ? join(this.homeDir, "workspaces", job.workspace)
+        : this.homeDir;
+    let entrada: string | undefined;
+    let model: string | undefined;
+    let gatilho: { tipo: string; origem: string } = { tipo: "cron", origem: job.id };
+    for (let i = 0; i < extras.length; i++) {
+      if (extras[i] === "--entrada" && i + 1 < extras.length) entrada = extras[++i];
+      else if (extras[i] === "--model" && i + 1 < extras.length) model = extras[++i]!;
+      else if (extras[i] === "--gatilho" && i + 1 < extras.length) {
+        const texto = extras[++i]!;
+        const idx = texto.indexOf(":");
+        if (idx > 0) gatilho = { tipo: texto.slice(0, idx), origem: texto.slice(idx + 1) };
+      }
+    }
+    const executar = this.flowExecutarFn ?? (async (ws: string, id: string, opts: { entrada?: string; model?: string; gatilho?: { tipo: string; origem: string } }) => {
+      const { FlowStore } = await import("./flow-store.js");
+      return new FlowStore({ homeDir: this.homeDir }).executar(ws, id, opts);
+    });
+    const r = await executar(wsPath, flowId, { entrada, model, gatilho });
+    return `flow ${flowId} exec ${r.execId} (${r.status})`;
   }
 
   private async executarSpawn(job: Job): Promise<string> {

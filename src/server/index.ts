@@ -3392,6 +3392,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
             id?: string; nome?: string;
             nos?: Flow["nos"];
             arestas?: Flow["arestas"];
+            auto_agendar?: boolean;
           };
           const flowId = (corpo.id ?? "").trim();
           const jaExiste = flowId ? existsSync(flows.caminho(ws.path, flowId)) : false;
@@ -3404,6 +3405,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
               nome: corpo.nome ?? atual.nome,
               nos: corpo.nos,
               arestas: corpo.arestas ?? [],
+              auto_agendar: corpo.auto_agendar ?? atual.auto_agendar ?? false,
             });
             eventBus.emit("flow-salvo", { flow: flowId });
             enviar(res, 200, await flows.obter(ws.path, flowId));
@@ -3411,14 +3413,23 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           }
 
           // com grafo no corpo (editor da web), valida e salva inteiro — senão cria só o gatilho
-          const f = Array.isArray(corpo.nos) && corpo.nos.length > 0
-            ? await flows.salvarComId(ws.path, {
-                id: flowId,
-                nome: corpo.nome ?? flowId,
-                nos: corpo.nos,
-                arestas: corpo.arestas ?? [],
-              })
-            : await flows.criar(ws.path, flowId, corpo.nome ?? flowId);
+          if (Array.isArray(corpo.nos) && corpo.nos.length > 0) {
+            const f = await flows.salvarComId(ws.path, {
+              id: flowId,
+              nome: corpo.nome ?? flowId,
+              nos: corpo.nos,
+              arestas: corpo.arestas ?? [],
+              auto_agendar: corpo.auto_agendar ?? false,
+            });
+            enviar(res, 201, f);
+            return;
+          }
+          const f = await flows.criar(ws.path, flowId, corpo.nome ?? flowId);
+          if (corpo.auto_agendar === true) {
+            await flows.salvar(ws.path, { ...f, auto_agendar: true });
+            enviar(res, 201, await flows.obter(ws.path, flowId));
+            return;
+          }
           enviar(res, 201, f);
           return;
         }
@@ -3465,7 +3476,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
             return;
           }
           const atual = await flows.obter(ws.path, flowId); // 404 se não existe
-          await flows.salvar(ws.path, { ...corpo, id: flowId, nome: String(corpo.nome ?? atual.nome) } as Parameters<typeof flows.salvar>[1]);          eventBus.emit("flow-salvo", { flow: flowId });
+          await flows.salvar(ws.path, { ...corpo, id: flowId, nome: String(corpo.nome ?? atual.nome), auto_agendar: typeof corpo.auto_agendar === "boolean" ? corpo.auto_agendar : (atual.auto_agendar ?? false) } as Parameters<typeof flows.salvar>[1]);          eventBus.emit("flow-salvo", { flow: flowId });
           enviar(res, 200, await flows.obter(ws.path, flowId));
           return;
         }

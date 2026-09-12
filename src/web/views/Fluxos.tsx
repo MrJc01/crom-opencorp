@@ -78,6 +78,7 @@ export interface FluxoCompleto {
   id: string;
   nome: string;
   descricao?: string;
+  auto_agendar?: boolean;
   nos: NoGrafo[];
   arestas: ArestaGrafo[];
 }
@@ -221,6 +222,99 @@ export const FluxosView: Component = () => {
 
   /** Última execução de cada flow (status/quando) — sem isso a lista é catálogo cego. */
   const [statusFluxos, setStatusFluxos] = createSignal<Record<string, { status: string; em: string; execId: string }>>({});
+  const [autoAgendar, setAutoAgendar] = createSignal<Record<string, boolean>>({});
+  const [jobsAgenda, setJobsAgenda] = createSignal<any[]>([]);
+
+  const temCronFlow = (f: any): boolean => {
+    if (Array.isArray(f.gatilhos)) return f.gatilhos.some((g: any) => g?.tipo === "cron");
+    if (Array.isArray(f.nos)) return f.nos.some((n: any) => n?.tipo === "cron");
+    return f.gatilho === "cron";
+  };
+
+  const cronResumo = (f: any): string => {
+    if (Array.isArray(f.gatilhos)) {
+      const g = f.gatilhos.find((x: any) => x?.tipo === "cron");
+      if (g?.detalhe) return String(g.detalhe);
+    }
+    if (Array.isArray(f.nos)) {
+      const n = f.nos.find((x: any) => x?.tipo === "cron");
+      const v = (n?.config as any)?.expressao_cron;
+      if (typeof v === "string" && v) return v;
+    }
+    return "—";
+  };
+
+  const fluxosAgendados = createMemo(() => fluxos().filter((f) => temCronFlow(f)));
+
+  const carregarJobsAgenda = async () => {
+    try {
+      setJobsAgenda((await fetchApi<any[]>("/schedules")) || []);
+    } catch {
+      setJobsAgenda([]);
+    }
+  };
+
+  const carregarAutoAgendar = async () => {
+    const faltantes = untrack(() => fluxosAgendados()).filter((f: any) => !(f.id in autoAgendar())).slice(0, 40);
+    if (faltantes.length === 0) return;
+    const pares = await Promise.all(
+      faltantes.map(async (f: any) => {
+        try {
+          const det = await fetchApi<any>(`/flows/${encodeURIComponent(f.id)}`);
+          return [f.id, Boolean(det?.auto_agendar)] as const;
+        } catch {
+          return [f.id, false] as const;
+        }
+      })
+    );
+    setAutoAgendar((prev) => {
+      const next = { ...prev };
+      for (const [id, v] of pares) next[id] = v;
+      return next;
+    });
+  };
+
+  const alternarAutoAgendar = async (f: any, valor: boolean) => {
+    setAutoAgendar((prev) => ({ ...prev, [f.id]: valor }));
+    try {
+      const completo = await fetchApi<any>(`/flows/${encodeURIComponent(f.id)}`);
+      await fetchApi(`/flows/${encodeURIComponent(f.id)}`, {
+        method: "PUT",
+        body: JSON.stringify({ ...completo, auto_agendar: valor }),
+      });
+      showToast(
+        valor ? `Agendamento automático ativado para "${f.nome || f.id}"` : `Agendamento automático desativado para "${f.nome || f.id}"`,
+        "sucesso"
+      );
+      const ativo = fluxoAtivo();
+      if (ativo && ativo.id === f.id) setFluxoAtivo({ ...ativo, auto_agendar: valor });
+      if (untrack(filtroTipo) === "cron") void carregarJobsAgenda();
+    } catch (err: any) {
+      setAutoAgendar((prev) => ({ ...prev, [f.id]: !valor }));
+      showToast(`Erro ao alternar agendamento: ${err.message}`, "erro");
+    }
+  };
+
+  const executarAgora = async (f: { id: string; nome?: string }, e?: MouseEvent) => {
+    if (e) e.stopPropagation();
+    try {
+      const res = await fetchApi<{ exec_id?: string }>(`/flows/${encodeURIComponent(f.id)}/run`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      showToast(`Execução do fluxo "${f.nome || f.id}" iniciada (exec_id ${res?.exec_id ?? "—"})`, "sucesso");
+    } catch (err: any) {
+      showToast(`Erro ao executar: ${err.message}`, "erro");
+    }
+  };
+
+  createEffect(() => {
+    const total = fluxos().length;
+    if (filtroTipo() === "cron" && !fluxoAtivo() && total > 0) {
+      void carregarJobsAgenda();
+      void carregarAutoAgendar();
+    }
+  });
   const carregarStatusFluxos = async (lista: any[]) => {
     const alvos = (lista || []).slice(0, 40);
     const pares = await Promise.all(
@@ -636,6 +730,52 @@ export const FluxosView: Component = () => {
       nos: f.nos.map((n) => (n.id === no.id ? noAtualizado : n)),
     };
     setFluxoAtivo(workflowAtualizado);
+  };
+
+  // Nós ancestrais (caminho direto até o nó selecionado) — usados pelo seletor
+  // session_from, que só aceita ancestrais do mesmo fluxo (paridade com o backend).
+  const nosAncestrais = createMemo(() => {
+    const f = fluxoAtivo();
+    const no = noSelecionado();
+    if (!f || !no) return [] as NoGrafo[];
+    const antecessoresDe = (id: string) =>
+      (f.arestas || []).filter((a) => a.para === id).map((a) => a.de);
+    const visitados = new Set<string>();
+    const fila = [...antecessoresDe(no.id)];
+    while (fila.length > 0) {
+      const atual = fila.shift()!;
+      if (visitados.has(atual)) continue;
+      visitados.add(atual);
+      for (const p of antecessoresDe(atual)) fila.push(p);
+    }
+    return (f.nos || []).filter((n) => visitados.has(n.id));
+  });
+
+  // Helpers para a UI do juiz do loop (config.juiz: { a_partir_da_volta, regras[] }).
+  const setJuizCampo = (campo: string, valor: any) => {
+    const juiz = noSelecionado()?.config?.juiz ?? {};
+    atualizarConfigNo("juiz", { ...juiz, [campo]: valor });
+  };
+
+  const adicionarRegraJuiz = () => {
+    const juiz = noSelecionado()?.config?.juiz ?? {};
+    const regras = Array.isArray(juiz.regras) ? juiz.regras : [];
+    atualizarConfigNo("juiz", { ...juiz, regras: [...regras, { tipo: "sem-melhora", limiar: 2 }] });
+  };
+
+  const removerRegraJuiz = (idx: number) => {
+    const juiz = noSelecionado()?.config?.juiz ?? {};
+    const regras = Array.isArray(juiz.regras) ? [...juiz.regras] : [];
+    regras.splice(idx, 1);
+    atualizarConfigNo("juiz", regras.length > 0 ? { ...juiz, regras } : undefined);
+  };
+
+  const setRegraJuiz = (idx: number, campo: string, valor: any) => {
+    const juiz = noSelecionado()?.config?.juiz ?? {};
+    const regras = Array.isArray(juiz.regras) ? [...juiz.regras] : [];
+    if (!regras[idx]) return;
+    regras[idx] = { ...regras[idx], [campo]: valor };
+    atualizarConfigNo("juiz", { ...juiz, regras });
   };
 
   // Disparar Execução
@@ -1169,6 +1309,36 @@ export const FluxosView: Component = () => {
             </div>
           </div>
 
+          <Show when={filtroTipo() === "cron"}>
+            <section data-testid="lista-jobs" class="rounded-xl bg-zinc-900/70 border border-zinc-800/80 p-4 space-y-2">
+              <div class="flex items-center justify-between">
+                <h2 class="text-sm font-bold text-zinc-100">Jobs do scheduler</h2>
+                <span class="text-[11px] font-mono text-zinc-500">{jobsAgenda().length} job(s)</span>
+              </div>
+              <Show
+                when={jobsAgenda().length > 0}
+                fallback={<p class="text-xs text-zinc-500">Nenhum job ativo no scheduler.</p>}
+              >
+                <ul class="space-y-1">
+                  <For each={jobsAgenda().slice(0, 20)}>
+                    {(j: any) => (
+                      <li class="flex items-center justify-between gap-2 text-xs text-zinc-300 font-mono">
+                        <span class="truncate">{j.nome || j.id}</span>
+                        <span class="text-[10px] text-zinc-500 flex-shrink-0">
+                          {j.agenda_tipo || j.agenda?.tipo || ""} {j.agenda_valor || j.agenda?.valor || ""}
+                        </span>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </Show>
+            </section>
+            <div data-testid="secao-fluxos-agendados" class="flex items-center justify-between pt-1">
+              <h2 class="text-sm font-bold text-zinc-100">Fluxos agendados</h2>
+              <span class="text-[11px] font-mono text-zinc-500">{fluxosAgendados().length} fluxo(s) com gatilho cron</span>
+            </div>
+          </Show>
+
           <div class="flex-1 overflow-y-auto min-h-0 space-y-2.5 pr-1 scrollbar-thin">
             <For
               each={fluxosFiltrados()}
@@ -1246,6 +1416,35 @@ export const FluxosView: Component = () => {
                       <p class="text-xs text-zinc-400 line-clamp-1">
                         {f.descricao || "Pipeline autônomo com nós de agentes, scripts do workspace e governança."}
                       </p>
+
+                      <Show when={filtroTipo() === "cron"}>
+                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1" onClick={(e) => e.stopPropagation()}>
+                          <span data-testid={`trigger-${f.id}`} class="text-[11px] font-mono text-sky-300">
+                            Gatilho cron: {cronResumo(f)}
+                          </span>
+                          <label class="flex items-center gap-1.5 text-[11px] text-zinc-300 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              data-testid={`toggle-auto-${f.id}`}
+                              checked={autoAgendar()[f.id] ?? false}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                void alternarAutoAgendar(f, e.currentTarget.checked);
+                              }}
+                              class="accent-orange-500 h-3.5 w-3.5"
+                            />
+                            Agendar automaticamente
+                          </label>
+                          <button
+                            type="button"
+                            data-testid={`executar-agora-${f.id}`}
+                            onClick={(e) => executarAgora(f, e)}
+                            class="px-2 py-0.5 rounded-lg bg-zinc-800 hover:bg-orange-600 hover:text-white text-zinc-300 text-[11px] font-medium transition-colors cursor-pointer"
+                          >
+                            Executar agora
+                          </button>
+                        </div>
+                      </Show>
                     </div>
                   </div>
 
@@ -1284,6 +1483,7 @@ export const FluxosView: Component = () => {
                     <Button
                       size="xs"
                       variant="primary"
+                      data-testid={`abrir-editor-${f.id}`}
                       class="bg-orange-600 hover:bg-orange-500 text-white font-bold text-[11px]"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1363,6 +1563,26 @@ export const FluxosView: Component = () => {
                 <span class="hidden sm:inline ml-1">Adicionar Node</span>
                 <span class="sm:hidden ml-1">Node</span>
               </Button>
+
+              <label
+                class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-950 border border-zinc-800 text-[11px] text-zinc-300 cursor-pointer"
+                title="Cria job no scheduler (PUT auto_agendar)"
+              >
+                <input
+                  type="checkbox"
+                  data-testid="toggle-auto-detalhe"
+                  checked={fluxoAtivo()?.auto_agendar ?? false}
+                  onChange={(e) => {
+                    const f = fluxoAtivo();
+                    if (!f) return;
+                    const atualizado: FluxoCompleto = { ...f, auto_agendar: e.currentTarget.checked };
+                    void salvarAlteracoesWorkflow(atualizado);
+                  }}
+                  class="accent-orange-500 h-3.5 w-3.5"
+                />
+                <span class="hidden sm:inline">Agendar automaticamente (cria job no scheduler)</span>
+                <span class="sm:hidden">Auto-agendar</span>
+              </label>
 
               {/* Zoom Controls (Ocultos em telas menores para não quebrar a barra) */}
               <div class="hidden xl:flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5 text-xs text-zinc-400">

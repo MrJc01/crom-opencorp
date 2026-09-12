@@ -57,6 +57,7 @@ export const flowSchema = z.object({
   nome: z.string().min(1),
   nos: z.array(nosFlowSchema).min(1),
   arestas: z.array(arestaFlowSchema).default([]),
+  auto_agendar: z.boolean().default(false),
 });
 
 export type NoFlow = z.infer<typeof nosFlowSchema>;
@@ -151,13 +152,14 @@ export class FlowStore {
       nome: nome.trim(),
       nos: [{ id: "gatilho", tipo: "manual", config: {} }],
       arestas: [],
+      auto_agendar: false,
     };
     await this.salvar(wsPath, flow);
     return flow;
   }
 
   /** POST com grafo completo (editor da web): 409 se id existe + validação semântica do grafo */
-  async salvarComId(wsPath: string, bruto: { id: string; nome: string; nos: Flow["nos"]; arestas: Flow["arestas"] }): Promise<Flow> {
+  async salvarComId(wsPath: string, bruto: { id: string; nome: string; nos: Flow["nos"]; arestas: Flow["arestas"]; auto_agendar?: boolean }): Promise<Flow> {
     const id = validarIdFlow(bruto.id);
     if (existsSync(this.caminho(wsPath, id))) {
       throw new FlowError(`flow "${id}" já existe (${this.caminho(wsPath, id)})`);
@@ -170,6 +172,7 @@ export class FlowStore {
       nome: bruto.nome.trim(),
       nos: bruto.nos,
       arestas: bruto.arestas,
+      auto_agendar: bruto.auto_agendar ?? false,
     };
     await this.salvar(wsPath, flow);
     return flow;
@@ -182,6 +185,7 @@ export class FlowStore {
     arestas: number;
     gatilhos: Array<{ tipo: string; detalhe?: string }>;
     temLoop: boolean;
+    auto_agendar: boolean;
   }[]> {
     try {
       await sincronizarJobsParaFluxos(this.homeDir);
@@ -197,6 +201,7 @@ export class FlowStore {
       arestas: number;
       gatilhos: Array<{ tipo: string; detalhe?: string }>;
       temLoop: boolean;
+      auto_agendar: boolean;
     }[] = [];
     for (const f of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
       try {
@@ -215,6 +220,7 @@ export class FlowStore {
           arestas: flow.arestas.length,
           gatilhos,
           temLoop,
+          auto_agendar: flow.auto_agendar ?? false,
         });
       } catch {
         continue;
@@ -645,15 +651,14 @@ export class FlowStore {
   }
 
   async salvar(wsPath: string, flow: Flow): Promise<void> {
-    this.validarTexto(JSON.stringify(flow), `flow "${flow.id}" (salvar)`);
-    this.validarSemantica(flow, " (salvar)");
+    const normalizado = this.validarTexto(JSON.stringify(flow), `flow "${flow.id}" (salvar)`);
     await mkdirRecursive(this.dir(wsPath));
     await writeFileAtomic(
       this.caminho(wsPath, flow.id),
-      `${JSON.stringify(flow, null, 2)}\n`,
+      `${JSON.stringify(normalizado, null, 2)}\n`,
     );
     try {
-      await sincronizarFluxoParaScheduler(wsPath, flow, this.homeDir);
+      await sincronizarFluxoParaScheduler(wsPath, normalizado, this.homeDir);
     } catch {
       /* não interrompe salvar */
     }

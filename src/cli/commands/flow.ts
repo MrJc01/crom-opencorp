@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Command } from "commander";
 import { FlowStore } from "../../core/flow-store.js";
+import { Scheduler } from "../../core/scheduler.js";
+import { converterJobParaFlow } from "../../core/scheduler-flow-bridge.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
 import { parseGatilho } from "../../schemas/gatilho.js";
 
@@ -311,6 +313,29 @@ function wsDe(opts: { workspace?: string }): string | undefined {
           if (wh.config_url) console.log(`     Destino: ${wh.config_url}`);
           console.log();
         }
+      }),
+    );
+
+  flow
+    .command("from-schedule")
+    .argument("<jobId>", "id do job do scheduler a converter (o job original é preservado)")
+    .option("-w, --workspace <id>", "workspace destino do flow (padrão: ativo)")
+    .description("converte um job legado (agent run | node script) em flow de 1 nó (gatilho manual, auto_agendar:false)")
+    .action((jobId: string, opts: { workspace?: string }) =>
+      comErros(async () => {
+        const ws = await manager.resolver(wsDe(opts));
+        const job = await new Scheduler().obter(jobId);
+        const convertido = converterJobParaFlow({ id: job.id, nome: job.nome, args: job.args });
+        try {
+          await store.obter(ws.path, convertido.id);
+          console.error(`erro: flow "${convertido.id}" já existe — nada foi criado`);
+          process.exitCode = 1;
+          return;
+        } catch {
+          /* não existe — segue */
+        }
+        await store.salvar(ws.path, convertido);
+        console.log(convertido.id);
       }),
     );
 }
