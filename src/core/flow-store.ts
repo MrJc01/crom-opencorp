@@ -281,6 +281,45 @@ export class FlowStore {
         throw new FlowError(`flow inválido${onde("")}: aresta aponta para nó inexistente "${a.para}"`);
       }
     }
+    // Grafo reverso (quem aponta para quem) — arestas explícitas + implícitas de
+    // condicao/decisao/loop. Base para validar `session_from` (nó ancestral
+    // topológico) em nós "agente" com session_mode continuar|duplicar.
+    const reverso = new Map<string, Set<string>>();
+    for (const no of flow.nos) reverso.set(no.id, new Set());
+    const ligar = (de: string, para: string): void => {
+      if (porId.has(de) && porId.has(para) && de !== para) reverso.get(para)!.add(de);
+    };
+    for (const a of flow.arestas) ligar(a.de, a.para);
+    for (const no of flow.nos) {
+      const c = (no.config ?? {}) as Record<string, unknown>;
+      if (no.tipo === "condicao") {
+        if (typeof c.entao === "string") ligar(no.id, c.entao);
+        if (typeof c.senao === "string") ligar(no.id, c.senao);
+      } else if (no.tipo === "decisao") {
+        for (const o of (c.opcoes as { proximo: string }[] | undefined) ?? []) {
+          if (typeof o.proximo === "string") ligar(no.id, o.proximo);
+        }
+      } else if (no.tipo === "loop") {
+        if (typeof c.retornar_para === "string") ligar(no.id, c.retornar_para);
+        if (typeof c.saida_final === "string") ligar(no.id, c.saida_final);
+      }
+    }
+    const ehAncestral = (anc: string, noId: string): boolean => {
+      if (anc === noId) return false;
+      const visitados = new Set<string>();
+      const pilha = [noId];
+      while (pilha.length > 0) {
+        const atual = pilha.pop()!;
+        for (const p of reverso.get(atual) ?? []) {
+          if (p === anc) return true;
+          if (!visitados.has(p)) {
+            visitados.add(p);
+            pilha.push(p);
+          }
+        }
+      }
+      return false;
+    };
     const gatilhos = flow.nos.filter((n) => n.tipo === "manual" || n.tipo === "cron" || n.tipo === "webhook");
     if (gatilhos.length === 0) {
       throw new FlowError(
@@ -295,6 +334,39 @@ export class FlowStore {
         }
         if (typeof config.ordem !== "string" || config.ordem.length === 0) {
           throw new FlowError(`flow inválido${onde("")}: nó "agente" "${no.id}" precisa de config.ordem`);
+        }
+        // F1-T03: seletor de sessão do nó agente.
+        const sessionMode = config.session_mode as string | undefined;
+        if (
+          sessionMode !== undefined &&
+          !["nova", "reaproveitar", "continuar", "duplicar"].includes(sessionMode)
+        ) {
+          throw new FlowError(
+            `flow inválido${onde("")}: nó "agente" "${no.id}" tem session_mode inválido "${sessionMode}" (use nova|reaproveitar|continuar|duplicar)`,
+          );
+        }
+        const sessionFrom = config.session_from as string | undefined;
+        if (sessionFrom !== undefined) {
+          if (typeof sessionFrom !== "string" || sessionFrom.length === 0) {
+            throw new FlowError(
+              `flow inválido${onde("")}: nó "agente" "${no.id}" tem config.session_from inválido`,
+            );
+          }
+          if (!porId.has(sessionFrom)) {
+            throw new FlowError(
+              `flow inválido${onde("")}: nó "agente" "${no.id}" → session_from "${sessionFrom}" aponta para nó inexistente (use um nó ancestral do mesmo flow)`,
+            );
+          }
+          if (!ehAncestral(sessionFrom, no.id)) {
+            throw new FlowError(
+              `flow inválido${onde("")}: nó "agente" "${no.id}" → session_from "${sessionFrom}" não é um nó ancestral (só é permitido continuar/duplicar a sessão de um nó anterior na mesma cadeia)`,
+            );
+          }
+        }
+        if ((sessionMode === "continuar" || sessionMode === "duplicar") && !sessionFrom) {
+          throw new FlowError(
+            `flow inválido${onde("")}: nó "agente" "${no.id}" com session_mode "${sessionMode}" exige config.session_from (id de um nó ancestral)`,
+          );
         }
       }
       if (no.tipo === "saida") {
@@ -790,8 +862,10 @@ export class FlowStore {
             agente: string;
             ordem: string;
             resposta_arquivo?: string;
-            session_mode?: "nova" | "reaproveitar";
+            session_mode?: "nova" | "reaproveitar" | "continuar" | "duplicar";
+            session_from?: string;
           };
+          const sessionMode: "nova" | "reaproveitar" | "continuar" | "duplicar" = config.session_mode ?? "nova";
           // Interpolação estilo n8n ($json, {{$input}}, {{$node["id"]}}, {{entrada}})
           let ordemBase = config.ordem
             .replaceAll("{{entrada}}", contexto)
@@ -824,26 +898,76 @@ export class FlowStore {
             : ordemBase;
 
           let sessionId: string | undefined = undefined;
-          if (config.session_mode === "reaproveitar") {
+          if (sessionMode === "reaproveitar") {
             if (!sessoesPorNo[no.id]) {
               sessoesPorNo[no.id] = `sess-${flowId}-${no.id}-${Date.now().toString(36)}`;
             }
             sessionId = sessoesPorNo[no.id];
           }
 
+          // F1-T03: continuar/duplicar derivam da sessão do nó ancestral
+          // (session_from) resolvida em sessoesPorNo. Sem ancestral resolvido,
+          // cai defensivamente em "nova" (nó segue executando normalmente).
+          let continuadaDe: string | undefined = undefined;
+          let duplicarDe: string | undefined = undefined;
+          if (sessionMode === "continuar" || sessionMode === "duplicar") {
+            const ancestral = config.session_from as string | undefined;
+            const sessaoAncestral = ancestral ? sessoesPorNo[ancestral] : undefined;
+            if (!ancestral || !sessaoAncestral) {
+              console.warn(
+                `[flow:${flowId}] nó "${no.id}" (${sessionMode}): session_from "${ancestral ?? ""}" sem sessão resolvida em sessoesPorNo — seguindo como "nova"`,
+              );
+            } else if (sessionMode === "continuar") {
+              sessionId = sessaoAncestral;
+              continuadaDe = sessaoAncestral;
+            } else {
+              duplicarDe = sessaoAncestral;
+            }
+          }
+
           let resultado: ResultadoRun;
           try {
-            resultado = await this.sessoes.rodar({
-              agente: config.agente,
-              ordem,
-              model: opts.model,
-              session: sessionId,
-              workspaceDir: wsPath,
-              referencias: [execId],
-              tipo: "flow-no",
-              tags: [`flow:${flowId}`, `no:${no.id}`],
-              gatilho: { tipo: "dependencia", origem: `flow:${flowId}/${no.id}` },
-            });
+            if (duplicarDe) {
+              const sessoesExt = this.sessoes as SessaoFlow & {
+                duplicar?: (id: string, opts: { prompt?: string; model?: string; tags?: string[]; workspaceDir?: string }) => Promise<ResultadoRun>;
+              };
+              if (sessoesExt.duplicar) {
+                resultado = await sessoesExt.duplicar(duplicarDe, {
+                  prompt: ordem,
+                  ...(opts.model ? { model: opts.model } : {}),
+                  tags: [`flow:${flowId}`, `no:${no.id}`],
+                  workspaceDir: wsPath,
+                });
+              } else {
+                // TODO(F1-T03): quando SessionManager.duplicar não estiver disponível,
+                // duplicar via rodar com fork_de (snapshot) preservando a ordem do nó.
+                resultado = await this.sessoes.rodar({
+                  agente: config.agente,
+                  ordem,
+                  model: opts.model,
+                  fork_de: duplicarDe,
+                  session_from_ancestral: duplicarDe,
+                  workspaceDir: wsPath,
+                  referencias: [execId],
+                  tipo: "flow-no",
+                  tags: [`flow:${flowId}`, `no:${no.id}`],
+                  gatilho: { tipo: "dependencia", origem: `flow:${flowId}/${no.id}` },
+                });
+              }
+            } else {
+              resultado = await this.sessoes.rodar({
+                agente: config.agente,
+                ordem,
+                model: opts.model,
+                ...(sessionId ? { session: sessionId } : {}),
+                ...(continuadaDe ? { continuada_de: continuadaDe, session_from_ancestral: continuadaDe } : {}),
+                workspaceDir: wsPath,
+                referencias: [execId],
+                tipo: "flow-no",
+                tags: [`flow:${flowId}`, `no:${no.id}`],
+                gatilho: { tipo: "dependencia", origem: `flow:${flowId}/${no.id}` },
+              });
+            }
           } catch (erro) {
             await marcarNo(no.id, "falhou", null);
             throw new FlowError(`nó "${no.id}" (agente) falhou: ${msg(erro)}`);
@@ -864,6 +988,12 @@ export class FlowStore {
             }
           }
           contexto = contextoNovo;
+          // F1-T03: guarda o id da sessão/execução deste nó para descendentes.
+          // Em "reaproveitar", o id sintético (o que o motor conhece como sessão
+          // contínua) é preservado em vez de sobrescrito a cada volta do loop.
+          if (sessionMode !== "reaproveitar") {
+            sessoesPorNo[no.id] = resultado.id;
+          }
           eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok", exec_id: resultado.id });
           await marcarNo(no.id, "ok", resultado.id);
         } else if (no.tipo === "fanout" || no.tipo === "review" || no.tipo === "debate") {

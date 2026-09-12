@@ -74,9 +74,67 @@ function normalizarArgsAgenda(args: unknown): string[] {
  *  mensagens. Se o ocupante anterior perdeu o cliente (res morta — aba fechada,
  *  F5), o novo POST despeja o órfão e assume (evita 409 eterno por loop zumbi). */
 const streamsSecretarioAtivos = new Map<string, { res: { destroyed: boolean; writableEnded: boolean } }>();
+
+/** F1-T03: fila FIFO por sessão para POSTs que chegaram com a sessão ocupada.
+ *  Cada entrada tem dono (res), lease de expiração e a função que a executa
+ *  quando a vez chega. O POST responde 429 { erro, posicao } e roda depois.
+ *  O lease evita prender para sempre um cliente que já desistiu. */
+interface StreamEnfileirado {
+  sessaoId: string;
+  res: ServerResponse;
+  run: () => void | Promise<void>;
+  expiraEm: number;
+  timer: NodeJS.Timeout | null;
+}
+const filaStreamsSecretario = new Map<string, StreamEnfileirado[]>();
+const LEASE_STREAM_MS = 60_000;
+
+function enfileirarStreamSecretario(
+  sessaoId: string,
+  res: ServerResponse,
+  run: () => void | Promise<void>,
+): number {
+  const lista = filaStreamsSecretario.get(sessaoId) ?? [];
+  const posicao = lista.length;
+  const entrada: StreamEnfileirado = { sessaoId, res, run, expiraEm: Date.now() + LEASE_STREAM_MS, timer: null };
+  entrada.timer = setTimeout(() => {
+    removerDaFilaStream(sessaoId, entrada);
+    try {
+      if (!res.destroyed && !res.writableEnded) {
+        res.writeHead(503, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" });
+        res.end(JSON.stringify({ erro: "tempo de espera na fila esgotado — tente novamente" }));
+      }
+    } catch {
+      /* cliente já saiu */
+    }
+  }, LEASE_STREAM_MS);
+  lista.push(entrada);
+  filaStreamsSecretario.set(sessaoId, lista);
+  return posicao;
+}
+
+function removerDaFilaStream(sessaoId: string, entrada: StreamEnfileirado): void {
+  const lista = filaStreamsSecretario.get(sessaoId);
+  if (!lista) return;
+  const idx = lista.indexOf(entrada);
+  if (idx >= 0) lista.splice(idx, 1);
+  if (lista.length === 0) filaStreamsSecretario.delete(sessaoId);
+  if (entrada.timer) clearTimeout(entrada.timer);
+}
+
 function liberarStreamSecretario(sessaoId: string, res: { destroyed: boolean; writableEnded: boolean }): void {
   if (streamsSecretarioAtivos.get(sessaoId)?.res === res) {
     streamsSecretarioAtivos.delete(sessaoId);
+    // F1-T03: dá a vez ao próximo da fila imediatamente (síncrono — evita corrida
+    // de dois POSTs assumirem a mesma sessão).
+    const lista = filaStreamsSecretario.get(sessaoId);
+    const proximo = lista?.[0];
+    if (proximo) {
+      removerDaFilaStream(sessaoId, proximo);
+      void Promise.resolve()
+        .then(() => proximo.run())
+        .catch(() => undefined);
+    }
   }
 }
 
@@ -5330,7 +5388,11 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         // em tempo real — por isso o POST fica em voo e a resposta é polada (700ms) e diffada ao cliente.
         if (rota === "/secretario/conversa/stream" && req.method === "POST") {
           let chaveStreamRegistrada: string | undefined;
+          // F1-T03: quando o POST roda a partir da fila (já respondeu 429), o `res`
+          // está encerrado — os eventos SSE viram no-op e a mensagem é enviada ao
+          // opencode em segundo plano, preservando a ordem da conversa.
           const sse = (evento: string, data: unknown): void => {
+            if (res.writableEnded) return;
             res.write(`event: ${evento}\ndata: ${JSON.stringify(data)}\n\n`);
           };
           try {
@@ -5342,21 +5404,31 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               return;
             }
 
-            // Anti duplo-run: página + dock compartilham o store; se já há
-            // stream em voo para esta sessão, recusa antes de abrir o SSE —
-            // exceto se o ocupante é órfão (cliente morto), que é despejado.
             const sessaoCandidata = corpo.sessao_id || url.searchParams.get("sessao") || undefined;
-            if (sessaoCandidata) {
-              const ocupante = streamsSecretarioAtivos.get(sessaoCandidata);
-              if (ocupante) {
-                if (ocupante.res.destroyed || ocupante.res.writableEnded) {
-                  streamsSecretarioAtivos.delete(sessaoCandidata);
-                } else {
-                  enviar(res, 409, { erro: "sessão ocupada em outra execução — aguarde concluir ou pare a execução atual" });
-                  return;
+
+            // F1-T03: corpo do stream extraído para ser reexecutável pela fila.
+            // A reserva da sessão é atômica (sem await entre check e registro),
+            // evitando que dois POSTs concorrentes assumam a mesma sessão.
+            const executarStream = async (): Promise<void> => {
+              const emSegundoPlano = res.writableEnded;
+              try {
+                // Anti duplo-run: página + dock compartilham o store. Se já há
+                // stream em voo para esta sessão, despeja órfão (cliente morto)
+                // e assume; se o ocupante está vivo, enfileira e responde 429.
+                if (sessaoCandidata) {
+                  const ocupante = streamsSecretarioAtivos.get(sessaoCandidata);
+                  if (ocupante) {
+                    if (ocupante.res.destroyed || ocupante.res.writableEnded) {
+                      streamsSecretarioAtivos.delete(sessaoCandidata);
+                    } else {
+                      const posicao = enfileirarStreamSecretario(sessaoCandidata, res, executarStream);
+                      enviar(res, 429, { erro: "sessão ocupada em outra execução — requisição enfileirada", posicao });
+                      return;
+                    }
+                  }
+                  streamsSecretarioAtivos.set(sessaoCandidata, { res });
+                  chaveStreamRegistrada = sessaoCandidata;
                 }
-              }
-            }
 
             // FAST-PATH: Comandos Git Slash (/git status, /git diff, /git restore, /git log)
             if (/^(\/git|\/restore|\/descartar|\/status-git|\/rollback)/i.test(mensagemBruta)) {
@@ -5364,13 +5436,15 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               const { processarComandoGitSecretario } = await import("../core/secretario-git-slash.js");
               const resultadoGit = await processarComandoGitSecretario(mensagemBruta, ws.path, ws.id);
               if (resultadoGit.tratado) {
-                res.writeHead(200, {
-                  "content-type": "text/event-stream; charset=utf-8",
-                  "cache-control": "no-cache",
-                  "connection": "keep-alive",
-                  "access-control-allow-origin": "*",
-                  "x-accel-buffering": "no",
-                });
+                if (!res.headersSent && !res.writableEnded) {
+                  res.writeHead(200, {
+                    "content-type": "text/event-stream; charset=utf-8",
+                    "cache-control": "no-cache",
+                    "connection": "keep-alive",
+                    "access-control-allow-origin": "*",
+                    "x-accel-buffering": "no",
+                  });
+                }
                 const sId = corpo.sessao_id || url.searchParams.get("sessao") || `sessao-git-${Date.now()}`;
                 sse("inicio", { sessao_id: sId });
                 sse("delta", {
@@ -5384,6 +5458,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   gitStatus: resultadoGit.gitStatus,
                   gitDiff: resultadoGit.gitDiff,
                 });
+                if (chaveStreamRegistrada) liberarStreamSecretario(chaveStreamRegistrada, res);
                 res.end();
                 return;
               }
@@ -5394,13 +5469,15 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             const contexto = (Array.isArray(corpo.contexto) ? corpo.contexto : []).map((c) => String(c).replace(/^@/, "").slice(0, 120)).filter(Boolean).slice(0, 8);
             const mensagem = contexto.length ? `${mensagemBruta}\n\n(Contexto referenciado pelo usuário: ${contexto.map((c) => "@" + c).join(" ")})` : mensagemBruta;
 
-            res.writeHead(200, {
-              "content-type": "text/event-stream; charset=utf-8",
-              "cache-control": "no-cache",
-              "connection": "keep-alive",
-              "access-control-allow-origin": "*",
-              "x-accel-buffering": "no",
-            });
+            if (!res.headersSent && !res.writableEnded) {
+              res.writeHead(200, {
+                "content-type": "text/event-stream; charset=utf-8",
+                "cache-control": "no-cache",
+                "connection": "keep-alive",
+                "access-control-allow-origin": "*",
+                "x-accel-buffering": "no",
+              });
+            }
 
             const baseUrl = `http://127.0.0.1:${porta}`;
             const agente = corpo.agente ?? "secretario-exec";
@@ -5435,8 +5512,16 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             sse("inicio", { sessao_id: sessaoId });
             // espelho no eventBus → todas as abas abertas (SSE /events) sincronizam o chat
             eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "inicio" });
-            streamsSecretarioAtivos.set(sessaoId, { res });
-            chaveStreamRegistrada = sessaoId;
+            // Move a reserva para a chave final quando uma sessão nova foi criada
+            // (o POST reservou a candidata; a real pode ter outro id no opencode).
+            if (chaveStreamRegistrada && chaveStreamRegistrada !== sessaoId) {
+              streamsSecretarioAtivos.delete(chaveStreamRegistrada);
+              streamsSecretarioAtivos.set(sessaoId, { res });
+              chaveStreamRegistrada = sessaoId;
+            } else if (!chaveStreamRegistrada) {
+              streamsSecretarioAtivos.set(sessaoId, { res });
+              chaveStreamRegistrada = sessaoId;
+            }
 
             // Formato opencode ≥1.18 — tipos estruturais em core/opencode-server.ts
             const baseUrlSessao = `${baseUrl}/session/${sessaoId}`;
@@ -5567,8 +5652,9 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
 
               while (Date.now() - inicioTentativa < tentativaTimeoutMs) {
                 await sleep(700);
-                // Se o cliente desconectar (refresh de página), encerra apenas o stream SSE sem matar o agente em background
-                if (res.destroyed || res.writableEnded) {
+                // Se o cliente desconectar (refresh de página), encerra apenas o stream SSE sem matar o agente em background.
+                // Em segundo plano (POST enfileirado que já respondeu 429), segue até concluir a mensagem no opencode.
+                if (!emSegundoPlano && (res.destroyed || res.writableEnded)) {
                   liberarStreamSecretario(sessaoId, res);
                   return;
                 }
@@ -5791,7 +5877,23 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             res.end();
             void sincronizarSessaoNoCorp(porta, sessaoId);
             return;
+              } catch (erro) {
+                if (chaveStreamRegistrada) liberarStreamSecretario(chaveStreamRegistrada, res);
+                if (!res.headersSent) {
+                  if (erro instanceof SecretarioError) {
+                    enviar(res, erro.status ?? 409, { erro: erro.message });
+                  } else {
+                    enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
+                  }
+                } else {
+                  sse("erro", { erro: erro instanceof Error ? erro.message : String(erro) });
+                  res.end();
+                }
+              }
+            };
+            await executarStream();
           } catch (erro) {
+            // erro no parse do corpo (antes de entrar no stream)
             if (chaveStreamRegistrada) liberarStreamSecretario(chaveStreamRegistrada, res);
             if (!res.headersSent) {
               if (erro instanceof SecretarioError) {
@@ -5803,7 +5905,6 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               sse("erro", { erro: erro instanceof Error ? erro.message : String(erro) });
               res.end();
             }
-            return;
           }
         }
 
