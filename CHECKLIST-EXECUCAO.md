@@ -116,13 +116,32 @@ Arquivos por tarefa (sem sobreposição):
 
 - [ ] **F6-T01 Nó ad-hoc + herança total** — schema (`agente?` opcional,
   `prompt_sistema`+`model` inline) + herança (system/model/tools/permissions/budget/
-  skills) quando com agente. Aceite: nó sem `.md` executa; com agente = mesma saída
-  que `rodar` direto. E2E: caso em `fluxo-sessao.spec.ts`. Gate: ciclo.
+  skills) quando com agente. **Inclui nó LLM-direto sem `.md`** (hoje inexistente).
+  Aceite: nó sem `.md` executa; com agente = mesma saída que `rodar` direto.
+  E2E: caso em `fluxo-sessao.spec.ts`. Gate: ciclo.
 
 - [ ] **F6-T02 Prova de isolamento** — E2E `tests/e2e/isolamento-workspaces.spec.ts`:
   agente do ws-A não lê/escreve no ws-B, por harness instalado (opencode, claude,
   agy, copilot, codex, cursor). Aceite: matriz verde nos instalados; ausente = skip
   explícito (não falha). Gate: e2e do arquivo.
+
+## Lote 8 — Join de múltiplas entradas (barreira) + multi-turno
+
+- [ ] **F10-T01 Join/barreira de múltiplas entradas** — `src/core/flow-store.ts`:
+  grau de entrada + `contadorPendente`/`bufferEntradas`; só executa quando TODOS os
+  predecessores terminarem; contexto mesclado (concat) ou regra `primeira|última|
+  concat|sintese`; config `join: all|any` (default `all` para >1 entrada, `any`
+  preserva legado). Contexto por-aresta (acaba com o `contexto` global compartilhado).
+  Aceite: nó com 2 entradas roda 1x (não 2x) com contexto concatenado; `join: any`
+  mantém comportamento antigo.
+  E2E novo: `tests/e2e/web/fluxo-join.spec.ts` (fanout → 2 ramos → join → nó final).
+  Gate: ciclo + regressão `fluxos.spec.ts`/`fluxo-sessao.spec.ts`/`fluxo-juiz.spec.ts`.
+
+- [ ] **F10-T02 Multi-turno explícito no nó agente** — além de `loop`/`review`/
+  `debate`, permitir `turnos: N` (1..5) no nó `agente` com `session_mode:
+  reaproveitar` reutilizando `sessoesPorNo[no.id]` a cada turno (mesmo agente,
+  mesmo contexto evoluído). Aceite: nó agente com `turnos: 3` reaproveita a sessão
+  3x e o journal registra cada turno. E2E: caso em `fluxo-sessao.spec.ts`. Gate: ciclo.
 
 ## Lote 7 — Grupos de agentes (verificar + fechar lacunas da Fase 9)
 

@@ -136,11 +136,32 @@ Pack = pasta ou `.corp` (tar.gz) com `asset.json`
 
 - Nó `agente` com `agente?` opcional: sem agente → `prompt_sistema` + `model` inline;
   com agente → herda tudo (system, model, tools, permissions, budget, `skills[]`).
+  **Hoje NÃO existe nó LLM-direto sem `.md`** (verificado: `flow-store.ts:353-359`
+  exige `config.agente`; nenhum tipo `llm/modelo/prompt`). Multi-turno no nó agente
+  hoje só via `loop`/`review`/`debate`; `session_mode` já cobre `reaproveitar/
+  continuar/duplicar`.
 - Ficha do agente (consultável isolada, por categoria): sessões (`listarSessoes`
   por prefixo — já existe), execuções (campo `agente` no ledger), tasks
   (`responsavel`), custos/falhas (telemetria por agente). Exposta via `@agente/*`
   + endpoint/CLI (`oc agent ficha <id>`). O frontmatter `memory.reads` continua
   declarando o que o agente pode lembrar.
+
+## Fase 10 — Join de múltiplas entradas (barreira)
+
+**Hoje NÃO existe barreira** (verificado): `filaNos` é FIFO simples
+(`flow-store.ts:807,828-829`); ao terminar, cada nó enfileira todos os alvos das
+arestas de saída (`1620-1624`). Nó com 2+ arestas de entrada executa **N vezes**
+(uma por aresta), com o contexto de cada predecessor; o último a terminar sobrescreve
+o estado. O mapa `reverso` (`309-328`) já calcula as entradas, mas só é usado para
+`session_from`.
+
+- Implementar "esperar todas as entradas" (estilo n8n "Wait for all incoming"):
+  grau de entrada por nó + `contadorPendente`/`bufferEntradas`; só enfileirar/executar
+  quando o contador zerar, com contexto mesclado (concatenação) — ou regra explícita
+  (`primeira | última | concat | sintese`). Contexto por-aresta em vez do `contexto`
+  compartilhado (`800,831`).
+- Config por nó: `join: "all" | "any"` (default `all` para >1 entrada, `any` para
+  manter comportamento antigo em fluxos legados).
 
 ## Fase 8 — Isolamento de motores (prova)
 
