@@ -163,4 +163,5 @@ Arquivos por tarefa (sem sobreposição):
 | Ciclo | Data | Escopo | E2E | Vitest | Doctor | Commit |
 |---|---|---|---|---|---|---|
 | 0 | 2026-09-12 | Fase 0 + plano | 281/281 | 803 | OK | `2e579cd` |
+| 1 | 2026-09-12 | Lote 1 (F1-T01..T03) | 281 + 6 novas | 811 | — | `9d59f7c`,`b56cb5f` |
 | | | | | | | |
