@@ -56,11 +56,16 @@ export interface PromptInputProps {
   onMudarAgente?: (ag: any) => void;
   agentesLista?: Array<{ id: string; role?: string }>;
   refTextarea?: (el: HTMLTextAreaElement) => void;
+  /** Id do textarea (default `chat-input`; único por superfície montada). */
+  id?: string;
 }
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   let textareaRef!: HTMLTextAreaElement;
   let fileInputRef!: HTMLInputElement;
+  /** Prefixo dos ids dos botões derivado do id do textarea (evita duplicados com 2 superfícies). */
+  const prefixoBotoes = () =>
+    props.id && props.id !== "chat-input" ? `${props.id.replace(/-input$/, "")}-` : "";
 
   // Estado do Autocomplete (/ @ !)
   const [modoMenu, setModoMenu] = createSignal<"slash" | "at" | "bang" | null>(null);
@@ -722,8 +727,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
       {/* Input de Texto */}
       <textarea
-        id="chat-input"
-        data-testid="chat-input"
+        id={props.id || "chat-input"}
+        data-testid={props.id || "chat-input"}
         ref={(el) => {
           textareaRef = el;
           props.refTextarea?.(el);
@@ -871,8 +876,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           >
             <button
               type="button"
-              id="btn-enfileirar"
-              data-testid="btn-enfileirar"
+              id={`${prefixoBotoes()}btn-enfileirar`}
+              data-testid={`${prefixoBotoes()}btn-enfileirar`}
               onClick={dispararEnvio}
               class="flex items-center gap-1.5 px-3 h-8 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-all active:scale-95 shadow-md cursor-pointer text-xs"
               title="Adicionar prompt à fila de espera (Enter)"
@@ -885,8 +890,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
           <Show when={!props.carregando}>
             <button
-              id="btn-enviar"
-              data-testid="btn-enviar"
+              id={`${prefixoBotoes()}btn-enviar`}
+              data-testid={`${prefixoBotoes()}btn-enviar`}
               onClick={dispararEnvio}
               disabled={!valorTexto().trim() && listaAnexos().length === 0}
               class="flex items-center justify-center h-8 w-8 rounded-full bg-zinc-100 text-zinc-950 font-bold transition-all disabled:opacity-30 disabled:pointer-events-none hover:bg-white active:scale-95 shadow-md cursor-pointer"

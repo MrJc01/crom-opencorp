@@ -67,7 +67,7 @@ export interface FlowExport {
 export interface NoExecInfo {
   id: string;
   tipo: string;
-  status: "ok" | "falhou" | "nao-executado";
+  status: "ok" | "falhou" | "nao-executado" | "executando";
   exec_id: string | null;
 }
 
@@ -302,6 +302,14 @@ export class FlowStore {
         if (typeof registro !== "string" || registro.split("/").length !== 2 || registro.split("/")[0]!.length === 0 || registro.split("/")[1]!.length === 0) {
           throw new FlowError(
             `flow inválido${onde("")}: nó "saida" "${no.id}" precisa de config.registro no formato "categoria/id" (ex.: "documentos/relatorios")`,
+          );
+        }
+        // Categoria "execucoes" é o ledger de execuções — um nó saída ali
+        // polui o Histórico com um item fantasma (ex.: id "resultado" preso
+        // em "executando"). Use "resultados/<id>".
+        if (registro.split("/")[0] === "execucoes") {
+          throw new FlowError(
+            `flow inválido${onde("")}: nó "saida" "${no.id}" não pode gravar na categoria "execucoes" (ledger reservado) — use "resultados/<id>"`,
           );
         }
       }
@@ -584,7 +592,7 @@ export class FlowStore {
     wsPath: string,
     flowId: string,
     opts: { entrada?: string; model?: string; execId?: string; retomar?: boolean; gatilho?: { tipo: string; origem: string } } = {},
-  ): Promise<{ execId: string; status: "concluido" | "falhou"; nos: NoExecInfo[]; contextoFinal: string }> {
+  ): Promise<{ execId: string; status: "concluido" | "falhou" | "cancelado"; nos: NoExecInfo[]; contextoFinal: string }> {
     const flow = await this.obter(wsPath, flowId);
     await this.registros.garantirCategorias(wsPath);
     const retomando = opts.retomar && opts.execId
@@ -607,6 +615,16 @@ export class FlowStore {
       extras.nos = nosInfo;
       meta.extras = extras;
       await this.registros.salvarMeta(wsPath, "execucoes", execId, meta);
+    };
+
+    /** Operador cancelou no meio (POST /execucoes/:id/cancelar marca o meta) → para no próximo nó. */
+    const foiCancelado = async (): Promise<boolean> => {
+      try {
+        const meta = await this.registros.lerMeta(wsPath, "execucoes", execId);
+        return (meta.extras as Record<string, unknown> | undefined)?.status === "cancelado";
+      } catch {
+        return false;
+      }
     };
 
     if (retomando) {
@@ -655,7 +673,7 @@ export class FlowStore {
     }).catch(() => undefined);
 
     let contexto = retomando ? retomando.contexto : stripAnsi(entrada);
-    let status: "concluido" | "falhou" = "concluido";
+    let status: "concluido" | "falhou" | "cancelado" = "concluido";
     let motivo: string | null = null;
     let noFalha: string | null = null;
     let noAnterior: NoFlow | undefined = undefined;
@@ -683,9 +701,23 @@ export class FlowStore {
         contexto = item.contexto;
         noAnterior = item.noAnterior;
 
+        if (await foiCancelado()) {
+          status = "cancelado";
+          motivo = "cancelado pelo operador no meio da execução";
+          filaNos.length = 0;
+          break;
+        }
+
         totalPassos++;
         if (totalPassos > TETO_SEGURANCA_PASSOS) {
           throw new FlowError(`teto de segurança atingido (${TETO_SEGURANCA_PASSOS} passos) — loop infinito interrompido`);
+        }
+
+        // Timeline ao vivo: nó atual aparece como "executando" até terminar
+        try {
+          await marcarNo(no.id, "executando");
+        } catch {
+          /* meta ainda não persistida — segue */
         }
 
         const voltaAtual = (iteracoesPorNo[no.id] || 0) + 1;
@@ -1370,7 +1402,7 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
 
     await this.registros.eventoAuditoria(wsPath, {
       por: `flow:${flowId}`,
-      evento: status === "concluido" ? "flow_concluido" : "flow_falhou",
+      evento: status === "concluido" ? "flow_concluido" : status === "cancelado" ? "flow_cancelado" : "flow_falhou",
       flow_id: flowId,
       exec_id: execId,
       status,

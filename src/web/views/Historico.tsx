@@ -59,7 +59,7 @@ export interface ItemHistorico {
 export interface NoFluxoInfo {
   id: string;
   tipo: string;
-  status: "ok" | "falhou" | "nao-executado";
+  status: "ok" | "falhou" | "nao-executado" | "executando";
   exec_id: string | null;
 }
 
@@ -102,7 +102,7 @@ export const HistoricoView: Component = () => {
   const [runSelecionado, setRunSelecionado] = createSignal<any | null>(null);
   const [logRun, setLogRun] = createSignal<string>("");
   const [carregandoLog, setCarregandoLog] = createSignal(false);
-  const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal" | "telemetria" | "diff" | "fluxo">("chat");
+  const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal" | "telemetria" | "diff" | "fluxo" | "resultado">("chat");
   const [encerrando, setEncerrando] = createSignal(false);
   const [reenviando, setReenviando] = createSignal(false);
   const [tempoRealAtivo, setTempoRealAtivo] = createSignal(true);
@@ -225,7 +225,9 @@ export const HistoricoView: Component = () => {
     }
   };
 
-  const buscarLog = async (runId: string) => {
+  const LOG_VAZIO = "(Nenhuma saída de log capturada para esta execução)";
+
+  const buscarLog = async (runId: string, ehFluxo = false) => {
     try {
       const res = await fetchApi<{ id: string; log: string }>(
         `/sessions/${encodeURIComponent(runId)}/log`
@@ -234,13 +236,71 @@ export const HistoricoView: Component = () => {
     } catch {}
 
     try {
-      const reg = await fetchApi<{ conteudo?: string }>(
+      const reg = await fetchApi<{ conteudo?: string; meta?: { extras?: any } }>(
         `/registries/execucoes/${encodeURIComponent(runId)}`
       );
       if (reg?.conteudo && reg.conteudo.trim()) return reg.conteudo;
+      const ctx = reg?.meta?.extras?.contexto_final;
+      if (typeof ctx === "string" && ctx.trim()) return ctx;
     } catch {}
 
-    return "(Nenhuma saída de log capturada para esta execução)";
+    return LOG_VAZIO;
+  };
+
+  const recarregarFluxo = async (runId: string, flowId: string | undefined, r?: ItemHistorico | null, silencioso = false) => {
+    if (!flowId) {
+      // Sem flowId não há /flows/:id/execucoes — tenta ao menos o registro
+      try {
+        const reg = await fetchApi<{ meta?: { extras?: any } }>(
+          `/registries/execucoes/${encodeURIComponent(runId)}`
+        );
+        const ex = reg?.meta?.extras || {};
+        if (Array.isArray(ex.nos)) setNosFluxo(ex.nos);
+        if (typeof ex.contexto_final === "string" && ex.contexto_final.trim()) {
+          setContextoFinalFluxo(ex.contexto_final);
+          if (logRun() === LOG_VAZIO) setLogRun(ex.contexto_final);
+        }
+        if (typeof ex.entrada === "string") setEntradaFluxo(ex.entrada);
+        if (ex.status) setRunSelecionado((prev: any) => (prev && prev.id === runId ? { ...prev, status: ex.status } : prev));
+      } catch {}
+      return;
+    }
+    if (!silencioso) setCarregandoFluxo(true);
+    try {
+      const execs = await fetchApi<Array<{ execId: string; status: string; nos: NoFluxoInfo[]; contextoFinal: string; entrada?: string }>>(
+        `/flows/${encodeURIComponent(flowId)}/execucoes`
+      );
+      const atual = (execs || []).find((e) => e.execId === runId) || (execs || [])[0];
+      if (atual) {
+        setNosFluxo(atual.nos || []);
+        if (atual.contextoFinal) {
+          setContextoFinalFluxo(atual.contextoFinal);
+          if (logRun() === LOG_VAZIO || !logRun().trim()) setLogRun(atual.contextoFinal);
+        }
+        if (atual.entrada) setEntradaFluxo(atual.entrada);
+        if (r && !(r as ItemHistorico).contexto_final && atual.contextoFinal) {
+          setRunSelecionado((prev: any) => (prev ? { ...prev, contexto_final: atual.contextoFinal, entrada: atual.entrada, status: atual.status } : prev));
+        } else {
+          setRunSelecionado((prev: any) => (prev && prev.id === runId ? { ...prev, status: atual.status } : prev));
+        }
+      }
+      // Completa pelo registro quando a lista vem vazia/parcial
+      if (nosFluxo().length === 0 || !contextoFinalFluxo().trim()) {
+        const reg = await fetchApi<{ meta?: { extras?: any } }>(
+          `/registries/execucoes/${encodeURIComponent(runId)}`
+        );
+        const ex = reg?.meta?.extras || {};
+        if (Array.isArray(ex.nos) && (ex.nos as unknown[]).length > nosFluxo().length) setNosFluxo(ex.nos);
+        if (typeof ex.contexto_final === "string" && ex.contexto_final.trim() && !contextoFinalFluxo().trim()) {
+          setContextoFinalFluxo(ex.contexto_final);
+          if (logRun() === LOG_VAZIO) setLogRun(ex.contexto_final);
+        }
+        if (typeof ex.entrada === "string" && !entradaFluxo()) setEntradaFluxo(ex.entrada);
+        if (ex.status) setRunSelecionado((prev: any) => (prev && prev.id === runId ? { ...prev, status: ex.status } : prev));
+      }
+    } catch {} finally {
+      if (!silencioso) setCarregandoFluxo(false);
+    }
   };
 
   const abrirLogPorId = async (runId: string) => {
@@ -308,46 +368,18 @@ export const HistoricoView: Component = () => {
     setRunSelecionado(r);
     setModoVisualizacao(r.tipo === "fluxo" ? "fluxo" : "chat");
 
-    const textoLog = await buscarLog(runId);
+    // Reseta antes de buscar (evita vazar log/contexto do run anterior)
+    setLogRun("Carregando log da execução...");
+    setNosFluxo([]);
+    setContextoFinalFluxo((r as ItemHistorico).contexto_final || "");
+    setEntradaFluxo((r as ItemHistorico).entrada || "");
+
+    const textoLog = await buscarLog(runId, r.tipo === "fluxo");
     setLogRun(textoLog);
     setCarregandoLog(false);
 
     // Fluxo: carregar timeline por nó (status + contexto final + entrada)
-    setNosFluxo([]);
-    setContextoFinalFluxo((r as ItemHistorico).contexto_final || "");
-    setEntradaFluxo((r as ItemHistorico).entrada || "");
-    if (r.tipo === "fluxo") {
-      const flowId = (r as ItemHistorico).flow;
-      setCarregandoFluxo(true);
-      try {
-        if (flowId) {
-          const execs = await fetchApi<Array<{ execId: string; status: string; nos: NoFluxoInfo[]; contextoFinal: string; entrada?: string }>>(
-            `/flows/${encodeURIComponent(flowId)}/execucoes`
-          );
-          const atual = (execs || []).find((e) => e.execId === runId) || (execs || [])[0];
-          if (atual) {
-            setNosFluxo(atual.nos || []);
-            if (atual.contextoFinal) setContextoFinalFluxo(atual.contextoFinal);
-            if (atual.entrada) setEntradaFluxo(atual.entrada);
-            if (!(r as ItemHistorico).contexto_final && atual.contextoFinal) {
-              setRunSelecionado((prev: any) => (prev ? { ...prev, contexto_final: atual.contextoFinal, entrada: atual.entrada } : prev));
-            }
-            if (atual.contextoFinal && !logRun().trim()) setLogRun(atual.contextoFinal);
-          }
-        }
-        // Fallback: extras do registro trazem nos + contexto
-        if (nosFluxo().length === 0) {
-          const reg = await fetchApi<{ meta?: { extras?: any } }>(
-            `/registries/execucoes/${encodeURIComponent(runId)}`
-          );
-          const ex = reg?.meta?.extras || {};
-          if (Array.isArray(ex.nos)) setNosFluxo(ex.nos);
-          if (ex.contexto_final && !contextoFinalFluxo()) setContextoFinalFluxo(String(ex.contexto_final));
-          if (ex.entrada && !entradaFluxo()) setEntradaFluxo(String(ex.entrada));
-        }
-      } catch {}
-      setCarregandoFluxo(false);
-    }
+    await recarregarFluxo(runId, (r as ItemHistorico).flow, r as ItemHistorico);
 
     // Carregar ações/spans granulares de telemetria para esta sessão
     setCarregandoAcoes(true);
@@ -380,27 +412,50 @@ export const HistoricoView: Component = () => {
     }
 
     if (r.status === "executando") {
+      const ehFluxo = r.tipo === "fluxo";
+      const flowId = ehFluxo ? (r as ItemHistorico).flow : undefined;
       let pollCount = 0;
+      let pollTravado = false;
       liveLogInterval = setInterval(async () => {
-        pollCount++;
-        const atualizado = await buscarLog(runId);
-        setLogRun(atualizado);
+        if (pollTravado) return;
+        pollTravado = true;
+        try {
+          pollCount++;
+          const atualizado = await buscarLog(runId, ehFluxo);
+          setLogRun(atualizado);
 
-        if (pollCount % 2 === 0) {
-          try {
-            const reg = await fetchApi<{ meta?: { extras?: any } }>(
-              `/registries/execucoes/${encodeURIComponent(runId)}`
-            );
-            const st = reg?.meta?.extras?.status;
+          if (ehFluxo) {
+            // Timeline do fluxo acompanha nó a nó até a finalização
+            await recarregarFluxo(runId, flowId, null, true);
+            const st = runSelecionado()?.status;
             if (st && st !== "executando") {
-              setRunSelecionado((prev: any) => prev ? { ...prev, status: st } : null);
               if (liveLogInterval) {
                 clearInterval(liveLogInterval);
                 liveLogInterval = null;
               }
               void carregarHistorico();
             }
-          } catch {}
+            return;
+          }
+
+          if (pollCount % 2 === 0) {
+            try {
+              const reg = await fetchApi<{ meta?: { extras?: any } }>(
+                `/registries/execucoes/${encodeURIComponent(runId)}`
+              );
+              const st = reg?.meta?.extras?.status;
+              if (st && st !== "executando") {
+                setRunSelecionado((prev: any) => prev ? { ...prev, status: st } : null);
+                if (liveLogInterval) {
+                  clearInterval(liveLogInterval);
+                  liveLogInterval = null;
+                }
+                void carregarHistorico();
+              }
+            } catch {}
+          }
+        } finally {
+          pollTravado = false;
         }
       }, 2500);
     }
@@ -439,13 +494,21 @@ export const HistoricoView: Component = () => {
     setSearchParams({ run: undefined });
   };
 
+  const textoParaExportar = () => {
+    const run = runSelecionado() as ItemHistorico | null;
+    if (run?.tipo === "fluxo" && contextoFinalFluxo().trim()) {
+      return `Fluxo ${run.flow || run.id}\nExecução ${run.id} (${run.status})\n\n${contextoFinalFluxo()}`;
+    }
+    return logRun();
+  };
+
   const copiarLog = () => {
-    navigator.clipboard.writeText(logRun());
-    showToast("Log copiado para a área de transferência!", "sucesso");
+    navigator.clipboard.writeText(textoParaExportar());
+    showToast("Conteúdo copiado para a área de transferência!", "sucesso");
   };
 
   const baixarLog = () => {
-    const blob = new Blob([logRun()], { type: "text/plain;charset=utf-8" });
+    const blob = new Blob([textoParaExportar()], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -603,11 +666,16 @@ export const HistoricoView: Component = () => {
     if (!run?.flow) return;
     setReenviando(true);
     try {
-      const res = await fetchApi<{ status?: string; exec?: string }>(
+      const res = await fetchApi<{ status?: string; exec_id?: string; exec?: string; erro?: string }>(
         `/flows/${encodeURIComponent(run.flow)}/resume`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ exec_id: run.id }) } as any
       );
-      showToast(`Fluxo retomando (${res?.exec ?? run.id})`, "sucesso");
+      if (res?.erro) {
+        showToast(`Não retomado: ${res.erro}`, "aviso");
+        return;
+      }
+      showToast(`Fluxo retomando (${res?.exec_id ?? res?.exec ?? run.id})`, "sucesso");
+      setModoVisualizacao("fluxo");
       void carregarHistorico();
     } catch (e: any) {
       showToast(`Erro ao retomar fluxo: ${e.message || String(e)}`, "erro");
@@ -804,6 +872,7 @@ export const HistoricoView: Component = () => {
               <option value="executando" class="bg-zinc-900">Executando</option>
               <option value="concluido" class="bg-zinc-900">Concluído</option>
               <option value="falhou" class="bg-zinc-900">Falhou</option>
+              <option value="cancelado" class="bg-zinc-900">Cancelado</option>
               <option value="feito" class="bg-zinc-900">Feito (Task)</option>
               <option value="hitl_pendente" class="bg-zinc-900">HITL Pendente</option>
             </select>
@@ -955,6 +1024,7 @@ export const HistoricoView: Component = () => {
               const ok = item.status === "concluido" || item.status === "feito" || item.status === "concluida";
               const hitl = item.status === "hitl_pendente";
               const falhou = item.status === "falhou";
+              const cancelado = item.status === "cancelado";
 
               return (
                 <div
@@ -977,6 +1047,8 @@ export const HistoricoView: Component = () => {
                         <AlertTriangle size={16} class="text-amber-400 animate-pulse" />
                       ) : falhou ? (
                         <XCircle size={16} class="text-rose-400" />
+                      ) : cancelado ? (
+                        <StopCircle size={16} class="text-zinc-500" />
                       ) : (
                         <Clock size={16} class="text-zinc-500" />
                       )}
@@ -1036,9 +1108,16 @@ export const HistoricoView: Component = () => {
             <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 pb-3 flex-shrink-0">
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
-                  <Terminal size={17} class="text-emerald-400" />
+                  <Show
+                    when={(runSelecionado() as ItemHistorico)?.tipo === "fluxo"}
+                    fallback={<Terminal size={17} class="text-emerald-400" />}
+                  >
+                    <GitBranch size={17} class="text-indigo-400" />
+                  </Show>
                   <h2 class="text-sm font-bold text-zinc-100 font-mono truncate">
-                    Execução: {runSelecionado()!.id}
+                    {(runSelecionado() as ItemHistorico)?.tipo === "fluxo"
+                      ? `Fluxo: ${(runSelecionado() as ItemHistorico)?.flow || runSelecionado()!.id}`
+                      : `Execução: ${runSelecionado()!.id}`}
                   </h2>
                   <Show when={runSelecionado()!.status === "executando"}>
                     <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse">
@@ -1089,9 +1168,63 @@ export const HistoricoView: Component = () => {
 
               {/* Controles e Alternador de Visão */}
               <div class="flex items-center gap-2 flex-wrap">
-                {/* Switcher Chat / Telemetria / Terminal */}
+                {/* Switcher: circuito+resultado para fluxos; chat/telemetria/terminal/diff para agentes */}
                 <div class="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800">
-                  <Show when={(runSelecionado() as ItemHistorico)?.tipo === "fluxo"}>
+                  <Show
+                    when={(runSelecionado() as ItemHistorico)?.tipo === "fluxo"}
+                    fallback={
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setModoVisualizacao("chat")}
+                          class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                            modoVisualizacao() === "chat"
+                              ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
+                              : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          <MessageSquare size={13} class="text-zinc-400" />
+                          <span>Chat ao Vivo</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setModoVisualizacao("telemetria")}
+                          class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                            modoVisualizacao() === "telemetria"
+                              ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
+                              : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          <Activity size={13} class="text-sky-400" />
+                          <span>Telemetria {acoesRun().length > 0 ? `(${acoesRun().length})` : ""}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setModoVisualizacao("terminal")}
+                          class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                            modoVisualizacao() === "terminal"
+                              ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
+                              : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          <Terminal size={13} class="text-emerald-400" />
+                          <span>Terminal Raw</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setModoVisualizacao("diff")}
+                          class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                            modoVisualizacao() === "diff"
+                              ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
+                              : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          <GitCommit size={13} class="text-amber-400" />
+                          <span>Diff de Arquivos {arquivosDiff().length > 0 ? `(${arquivosDiff().length})` : ""}</span>
+                        </button>
+                      </>
+                    }
+                  >
                     <button
                       type="button"
                       onClick={() => setModoVisualizacao("fluxo")}
@@ -1102,57 +1235,21 @@ export const HistoricoView: Component = () => {
                       }`}
                     >
                       <GitBranch size={13} class="text-indigo-400" />
-                      <span>Fluxo {nosFluxo().length > 0 ? `(${nosFluxo().length})` : ""}</span>
+                      <span>Circuito {nosFluxo().length > 0 ? `(${nosFluxo().length})` : ""}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModoVisualizacao("resultado")}
+                      class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                        modoVisualizacao() === "resultado"
+                          ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      <FileText size={13} class="text-emerald-400" />
+                      <span>Resultado</span>
                     </button>
                   </Show>
-                  <button
-                    type="button"
-                    onClick={() => setModoVisualizacao("chat")}
-                    class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
-                      modoVisualizacao() === "chat"
-                        ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
-                        : "text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    <MessageSquare size={13} class="text-zinc-400" />
-                    <span>Chat ao Vivo</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setModoVisualizacao("telemetria")}
-                    class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
-                      modoVisualizacao() === "telemetria"
-                        ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
-                        : "text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    <Activity size={13} class="text-sky-400" />
-                    <span>Telemetria {acoesRun().length > 0 ? `(${acoesRun().length})` : ""}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setModoVisualizacao("terminal")}
-                    class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
-                      modoVisualizacao() === "terminal"
-                        ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
-                        : "text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    <Terminal size={13} class="text-emerald-400" />
-                    <span>Terminal Raw</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setModoVisualizacao("diff")}
-                    class={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
-                      modoVisualizacao() === "diff"
-                        ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/60"
-                        : "text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    <GitCommit size={13} class="text-amber-400" />
-                    <span>Diff de Arquivos {arquivosDiff().length > 0 ? `(${arquivosDiff().length})` : ""}</span>
-                  </button>
                 </div>
 
                 <Button size="xs" variant="ghost" onClick={copiarLog} title="Copiar log bruto">
@@ -1166,17 +1263,19 @@ export const HistoricoView: Component = () => {
                   size="xs"
                   variant="ghost"
                   onClick={() => {
-                    const run = runSelecionado();
-                    if (run?.agente) {
+                    const run = runSelecionado() as ItemHistorico | null;
+                    if (run?.tipo === "fluxo" && run.flow) {
+                      navigate(`/fluxos?fluxo=${encodeURIComponent(run.flow)}`);
+                    } else if (run?.agente) {
                       navigate(`/agentes?agente=${encodeURIComponent(run.agente)}`);
                     } else {
                       navigate("/config");
                     }
                   }}
-                  title="Configurar agente ou parâmetros"
+                  title={(runSelecionado() as ItemHistorico)?.tipo === "fluxo" ? "Abrir fluxo no Studio" : "Configurar agente ou parâmetros"}
                   class="text-zinc-400 hover:text-zinc-100"
                 >
-                  <Settings size={13} class="mr-1" /> Configurar
+                  <Settings size={13} class="mr-1" /> {(runSelecionado() as ItemHistorico)?.tipo === "fluxo" ? "Studio" : "Configurar"}
                 </Button>
 
                 <Button
@@ -1191,7 +1290,7 @@ export const HistoricoView: Component = () => {
                   {reenviando() ? "Reenviando..." : (runSelecionado() as ItemHistorico)?.tipo === "fluxo" ? "Reexecutar fluxo" : "Reenviar"}
                 </Button>
 
-                <Show when={(runSelecionado() as ItemHistorico)?.tipo === "fluxo" && (runSelecionado() as ItemHistorico)?.flow}>
+                <Show when={(runSelecionado() as ItemHistorico)?.tipo === "fluxo" && (runSelecionado() as ItemHistorico)?.flow && runSelecionado()!.status === "falhou"}>
                   <Button
                     size="xs"
                     variant="ghost"
@@ -1228,7 +1327,12 @@ export const HistoricoView: Component = () => {
             {/* Sub-barra informativa */}
             <div class="flex items-center justify-between text-[11px] text-zinc-400 px-1 font-mono flex-shrink-0">
               <span>URL: <code class="text-emerald-400">/historico?run={runSelecionado()!.id}</code></span>
-              <span>{logRun().split("\n").length} linhas capturadas</span>
+              <Show
+                when={(runSelecionado() as ItemHistorico)?.tipo === "fluxo"}
+                fallback={<span>{logRun().split("\n").length} linhas capturadas</span>}
+              >
+                <span>{nosFluxo().filter((n) => n.status === "ok").length}/{nosFluxo().length} nós concluídos</span>
+              </Show>
             </div>
 
             {/* Corpo: Fluxo, Chat ao Vivo, Terminal Raw ou Telemetria Granular */}
@@ -1263,12 +1367,15 @@ export const HistoricoView: Component = () => {
                               ? "bg-zinc-900/60 border-zinc-800/80"
                               : no.status === "falhou"
                               ? "bg-rose-950/20 border-rose-900/50"
+                              : no.status === "executando"
+                              ? "bg-indigo-950/30 border-indigo-800/60"
                               : "bg-zinc-950/60 border-zinc-800/60"
                           }`}>
                             <div class="flex items-center gap-2.5 min-w-0">
                               <span class="text-zinc-500 font-mono text-[10px] w-6">#{String(idx() + 1).padStart(2, "0")}</span>
                               {no.status === "ok" ? <CheckCircle2 size={14} class="text-emerald-400 flex-shrink-0" />
                                 : no.status === "falhou" ? <XCircle size={14} class="text-rose-400 flex-shrink-0" />
+                                : no.status === "executando" ? <RefreshCw size={14} class="text-indigo-400 animate-spin flex-shrink-0" />
                                 : <Clock size={14} class="text-zinc-500 flex-shrink-0" />}
                               <div class="min-w-0">
                                 <div class="font-mono font-semibold text-zinc-200 truncate">{no.id}</div>
@@ -1279,8 +1386,9 @@ export const HistoricoView: Component = () => {
                               <span class={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold ${
                                 no.status === "ok" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
                                 : no.status === "falhou" ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                                : no.status === "executando" ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 animate-pulse"
                                 : "bg-zinc-800 text-zinc-400 border border-zinc-700"
-                              }`}>{no.status === "ok" ? "ok" : no.status === "falhou" ? "falhou" : "não executado"}</span>
+                              }`}>{no.status === "ok" ? "ok" : no.status === "falhou" ? "falhou" : no.status === "executando" ? "executando" : "não executado"}</span>
                               <Show when={no.exec_id}>
                                 <button
                                   type="button"
@@ -1305,7 +1413,7 @@ export const HistoricoView: Component = () => {
                   </Show>
                 </div>
               </Show>
-              <Show when={modoVisualizacao() === "chat"}>
+              <Show when={modoVisualizacao() === "chat" && (runSelecionado() as ItemHistorico)?.tipo !== "fluxo"}>
                 <div class="flex-1 overflow-y-auto scrollbar-thin pr-1 pb-2">
                   <LogChatViewer
                     log={logRun()}
@@ -1316,6 +1424,40 @@ export const HistoricoView: Component = () => {
                     gatilho={runSelecionado()?.gatilho}
                     duracaoMs={runSelecionado()?.duracao_ms}
                   />
+                </div>
+              </Show>
+
+              <Show when={modoVisualizacao() === "resultado" && (runSelecionado() as ItemHistorico)?.tipo === "fluxo"}>
+                <div class="flex-1 overflow-y-auto scrollbar-thin p-1 space-y-3">
+                  <Show when={entradaFluxo()}>
+                    <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3.5">
+                      <div class="text-[10px] uppercase font-mono font-bold tracking-wider text-zinc-500 mb-1.5">Entrada</div>
+                      <div class="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed select-text">{entradaFluxo()}</div>
+                    </div>
+                  </Show>
+                  <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3.5">
+                    <div class="text-[10px] uppercase font-mono font-bold tracking-wider text-zinc-500 mb-1.5">
+                      Resultado · {(runSelecionado() as ItemHistorico)?.flow}
+                    </div>
+                    <Show
+                      when={contextoFinalFluxo().trim()}
+                      fallback={<div class="text-xs text-zinc-500">Fluxo ainda executando — acompanhe pela aba Circuito.</div>}
+                    >
+                      <div class="text-xs text-zinc-200 whitespace-pre-wrap leading-relaxed select-text max-h-[50vh] overflow-y-auto scrollbar-thin">{contextoFinalFluxo()}</div>
+                    </Show>
+                  </div>
+                  <For each={nosFluxo().filter((n) => n.exec_id)}>
+                    {(no) => (
+                      <button
+                        type="button"
+                        onClick={() => setSearchParams({ run: no.exec_id })}
+                        class="w-full text-left rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/60 px-3 py-2 text-xs text-zinc-300 font-mono cursor-pointer flex items-center justify-between gap-2"
+                      >
+                        <span class="truncate">{no.id} · {no.tipo}</span>
+                        <span class="text-zinc-500 flex-shrink-0">ver exec →</span>
+                      </button>
+                    )}
+                  </For>
                 </div>
               </Show>
 

@@ -153,8 +153,9 @@ test.describe("Histórico — Modal com Layout do Secretário e Encerramento", (
       await btnEncerrar.click();
       // Toast de encerramento
       await expect(page.locator("text=encerrada com sucesso").first()).toBeVisible({ timeout: 10000 });
-      // Status muda para cancelado
-      await expect(page.locator("text=cancelado").first()).toBeVisible({ timeout: 10000 });
+      // Status muda para cancelado (dentro do modal, não o <option> do filtro)
+      const modal = page.locator("div.fixed.inset-0").last();
+      await expect(modal.getByText("cancelado", { exact: true })).toBeVisible({ timeout: 10000 });
     }
 
     // Tecla Escape fecha o modal sem deixar órfãos

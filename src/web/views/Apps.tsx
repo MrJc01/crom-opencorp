@@ -114,17 +114,19 @@ export const AppsView: Component = () => {
       const res = await fetchApi<any>(`/api/apps/${encodeURIComponent(app.id)}/chat`, {
         method: "POST",
         body: JSON.stringify({ mensagem: texto }),
-      }).catch(() => null);
+      });
+      if (!res) throw new Error("resposta vazia do backend");
 
       setMensagensApp((prev) => [
         ...prev,
         {
           role: "assistant",
           content: `Alterações processadas para o app **${app.titulo}**!\n\n${res?.resposta || "Arquivos atualizados. Recarregue o preview ao lado para conferir as modificações."}`,
-          iframeUrl: app.entryUrl,
+          iframeUrl: getIframeUrl(app),
         },
       ]);
     } catch (err: any) {
+      showToast(`Falha no chat do app: ${err.message}`, "erro");
       setMensagensApp((prev) => [
         ...prev,
         {

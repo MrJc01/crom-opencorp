@@ -135,6 +135,8 @@ export interface UniversalChatProps {
   valorPrompt?: string;
   onValorPromptChange?: (v: string) => void;
   refTextarea?: (el: HTMLTextAreaElement) => void;
+  /** Id do textarea (evita `id` duplicado com duas superfícies montadas). */
+  inputId?: string;
 
   // Infinite Scroll para cima (histórico paginado)
   temMaisMensagensAnteriores?: boolean;

@@ -173,6 +173,22 @@ describe("ApprovalsStore — fluxo completo", () => {
     expect(err2).toBeInstanceOf(ApprovalError);
     const err3 = await store.rejeitar(home, p1.id, "  ").catch(() => undefined);
     void err3;
+
+    // Motivo vazio não trava: aplica default em vez de 500 (pendência sumia nunca)
+    const p3 = await store.criar(home, {
+      ordem: "execute: npm publish",
+      agente: "executor-padrao",
+      modelo: "opencode/hy3-free",
+      padrao: "npm publish",
+      origem: "pre-voo",
+      motivo_guard: "casa com hitl_patterns",
+      workspace_id: "corp-sec",
+      workspace_path: home,
+      exec_id: "exec-3",
+    });
+    const semMotivo = await store.rejeitar(home, p3.id, "   ");
+    expect(semMotivo.status).toBe("rejeitado");
+    expect(semMotivo.motivo_rejeicao).toContain("operador");
   });
 });
 

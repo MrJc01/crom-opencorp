@@ -1,1216 +1,99 @@
-import { type Component, createSignal, onMount, onCleanup, createEffect, For, Show } from "solid-js";
+import { type Component, createSignal, createEffect, For, Show } from "solid-js";
 import {
-  Plus,
-  History,
-  Bot,
-  Sparkles,
   AlertCircle,
-  Users,
-  ArrowDown,
   Cpu,
   X,
   Check,
   Play,
   RefreshCw,
-  Zap,
-  Settings2,
 } from "lucide-solid";
-import { useNavigate } from "@solidjs/router";
 import { UniversalChat } from "../components/chat/UniversalChat";
-import type { ChatMensagem, PromptFilaItem, PaginacaoMensagens } from "../components/chat/types";
-import type { Anexo } from "../components/chat/PromptInput";
-import { HistoricoModal, type SessaoResumo } from "../components/chat/HistoricoModal";
+import { HistoricoModal } from "../components/chat/HistoricoModal";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
-import { showToast } from "../ui/Toast";
-import { fetchApi, wsAtivo, headers } from "../lib/context";
+import { useChat, MODELOS_SUGERIDOS } from "../lib/chat/store";
 
-function reconciliarMensagens(antigas: ChatMensagem[], novas: ChatMensagem[]): ChatMensagem[] {
-  if (!antigas || antigas.length === 0) return novas;
-  if (!novas || novas.length === 0) return [];
-
-  const resultado: ChatMensagem[] = [];
-  for (let i = 0; i < novas.length; i++) {
-    const n = novas[i];
-    const a = antigas[i];
-
-    if (
-      a &&
-      a.role === n.role &&
-      a.content === n.content &&
-      a.pensamento === n.pensamento &&
-      a.concluida === n.concluida &&
-      a.hitl?.id === n.hitl?.id &&
-      (a.passos?.length ?? 0) === (n.passos?.length ?? 0) &&
-      (a.acoes?.length ?? 0) === (n.acoes?.length ?? 0)
-    ) {
-      // Preserva a referência original da mensagem antiga: SolidJS não remonta o DOM
-      resultado.push(a);
-    } else {
-      resultado.push(n);
-    }
-  }
-  return resultado;
+/** Sincroniza `?sessao=` da URL com o store (deep-link preservado). */
+function sincronizarUrlSessao(id: string | null) {
+  try {
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set("sessao", id);
+    else url.searchParams.delete("sessao");
+    window.history.replaceState({}, "", url.toString());
+  } catch {}
 }
 
 export const SecretarioView: Component = () => {
-  const navigate = useNavigate();
-  const [sessoes, setSessoes] = createSignal<SessaoResumo[]>([]);
-  const sessaoInicial = () => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      return params.get("sessao") || localStorage.getItem("opencorp_secretario_sessao") || null;
-    } catch {
-      return null;
-    }
-  };
-  const [sessaoAtivaId, setSessaoAtivaIdRaw] = createSignal<string | null>(sessaoInicial());
-  const setSessaoAtivaId = (id: string | null) => {
-    setSessaoAtivaIdRaw(id);
-    try {
-      if (id) {
-        localStorage.setItem("opencorp_secretario_sessao", id);
-        const url = new URL(window.location.href);
-        url.searchParams.set("sessao", id);
-        window.history.replaceState({}, "", url.toString());
-      } else {
-        localStorage.removeItem("opencorp_secretario_sessao");
-        const url = new URL(window.location.href);
-        url.searchParams.delete("sessao");
-        window.history.replaceState({}, "", url.toString());
-      }
-    } catch {}
-  };
-  const [mensagens, setMensagens] = createSignal<ChatMensagem[]>([]);
-  const [inputValor, setInputValor] = createSignal("");
-  const [anexos, setAnexos] = createSignal<Anexo[]>([]);
-  const [filaPrompts, setFilaPrompts] = createSignal<PromptFilaItem[]>([]);
-  let processandoFila = false;
-  const [alertaFalhas, setAlertaFalhas] = createSignal<string | null>(null);
-
-  const verificarAlertasFalhas = async () => {
-    try {
-      const r = await fetchApi<{ total_acoes: number; total_falhas: number; agentes: Array<{ agente: string; total: number; falhas: number }> }>("/telemetria/resumo").catch(() => null);
-      if (!r || r.total_acoes < 3) { setAlertaFalhas(null); return; }
-      const taxa = r.total_falhas / r.total_acoes;
-      const pior = [...(r.agentes || [])].sort((a, b) => b.falhas - a.falhas)[0];
-      if (r.total_falhas >= 3 && taxa >= 0.3) {
-        setAlertaFalhas(`⚠️ ${r.total_falhas} falhas em ${r.total_acoes} ações (${(taxa * 100).toFixed(0)}%)${pior ? ` — agente @${pior.agente} com ${pior.falhas} falha(s)` : ""}. Considere revisar o prompt ou trocar o modelo.`);
-      } else {
-        setAlertaFalhas(null);
-      }
-    } catch {
-      setAlertaFalhas(null);
-    }
-  };
-  const [agente, setAgente] = createSignal<string>("secretario-exec");
-  const [carregando, setCarregando] = createSignal(false);
+  const chat = useChat();
   const [historicoAberto, setHistoricoAberto] = createSignal(false);
-  const [decorridoSegundos, setDecorridoSegundos] = createSignal(0);
-  const [mostrarBotaoFim, setMostrarBotaoFim] = createSignal(false);
-
-  // ── Paginação de mensagens ──
-  const [totalMensagensServidor, setTotalMensagensServidor] = createSignal(0);
-  const [temMaisMensagensAnteriores, setTemMaisMensagensAnteriores] = createSignal(false);
-  const [carregandoAnteriores, setCarregandoAnteriores] = createSignal(false);
-  let ultimoHash = "";
-
-  // Configuração lateral de Agente, Motor e Modelo
   const [configLateralAberta, setConfigLateralAberta] = createSignal(false);
-  const [listaAgentes, setListaAgentes] = createSignal<Array<{ id: string; role: string; model: string; harness?: string; engine?: string; rotation?: string[] }>>([
-    {
-      id: "secretario-exec",
-      role: "Secretário Executivo",
-      model: "opencode-go/glm-5.3-flash",
-      harness: "opencode",
-    },
-  ]);
-  const [listaMotores, setListaMotores] = createSignal<Array<{ id: string; name: string; installed: boolean; version?: string }>>([]);
-  const [agenteConfig, setAgenteConfig] = createSignal<string>("secretario-exec");
-  const [motorConfig, setMotorConfig] = createSignal<string>("opencode");
-  const [modeloConfig, setModeloConfig] = createSignal<string>("");
-  const [rotacaoConfig, setRotacaoConfig] = createSignal<string>("");
-  const [testandoMotor, setTestandoMotor] = createSignal(false);
-  const [resultadoTeste, setResultadoTeste] = createSignal<{ ok: boolean; msg: string; latencyMs?: number } | null>(null);
-  const [salvandoConfig, setSalvandoConfig] = createSignal(false);
 
-  const modelosSugeridos: Record<string, string[]> = {
-    antigravity: [
-      "google/gemini-3.8-flash-high",
-      "google/gemini-3.7-flash-high",
-      "google/gemini-3.1-pro-high",
-      "claude-sonnet-4-6",
-    ],
-    copilot: [
-      "github/gpt-4o",
-      "github/claude-3.5-sonnet",
-      "github/o3-mini",
-    ],
-    opencode: [
-      "opencode-go/glm-5.3-flash",
-      "opencode-go/glm-5.3",
-      "opencode/nemotron-3-ultra-free",
-      "opencode/nemotron-3.5-lightning-free",
-      "opencode/big-pickle",
-    ],
-    "claude-code": [
-      "claude-3-7-sonnet-20250219",
-      "claude-3-5-sonnet-20241022",
-    ],
-    cursor: ["cursor-fast", "cursor-small"],
-    "crom-agente": ["crom-default"],
-  };
-
-  const carregarAgentesEMotores = async () => {
-    try {
-      const ags = await fetchApi<any[]>(`/agents?workspace=${encodeURIComponent(wsAtivo())}`);
-      if (Array.isArray(ags) && ags.length > 0) {
-        setListaAgentes(ags);
-        const enc = ags.find((a) => a.id === agente());
-        if (enc && !modeloConfig()) {
-          if (enc.model) setModeloConfig(enc.model);
-          if (enc.harness || enc.engine) setMotorConfig(enc.harness || enc.engine);
-        }
-      }
-    } catch {}
-
-    try {
-      const mots = await fetchApi<any[]>("/engines");
-      if (Array.isArray(mots) && mots.length > 0) setListaMotores(mots);
-    } catch {}
-  };
+  createEffect(() => {
+    sincronizarUrlSessao(chat.sessaoAtivaId());
+  });
 
   const abrirPainelLateral = async () => {
-    await carregarAgentesEMotores();
-    const agAtual = agente();
-    setAgenteConfig(agAtual);
-    const enc = listaAgentes().find((a) => a.id === agAtual);
-    if (enc) {
-      setMotorConfig(enc.harness || (enc as any).engine || "opencode");
-      setModeloConfig(enc.model || "");
-      const rot = enc.rotation || (enc as any).model_fallback || [];
-      setRotacaoConfig(Array.isArray(rot) ? rot.join("\n") : "");
-    }
-    setResultadoTeste(null);
+    await chat.abrirPainelLateral();
     setConfigLateralAberta(true);
   };
 
-  const aoMudarAgenteConfig = (agId: string) => {
-    setAgenteConfig(agId);
-    setResultadoTeste(null);
-    const enc = listaAgentes().find((a) => a.id === agId);
-    if (enc) {
-      setMotorConfig(enc.harness || (enc as any).engine || "opencode");
-      setModeloConfig(enc.model || "");
-      const rot = enc.rotation || (enc as any).model_fallback || [];
-      setRotacaoConfig(Array.isArray(rot) ? rot.join("\n") : "");
-    }
-  };
-
-  const aoMudarMotorConfig = (motId: string) => {
-    setMotorConfig(motId);
-    setResultadoTeste(null);
-    const sug = modelosSugeridos[motId];
-    if (sug && sug.length > 0 && !modeloConfig().trim()) {
-      setModeloConfig(sug[0]!);
-    }
-  };
-
-  const testarMotorConexao = async () => {
-    setTestandoMotor(true);
-    setResultadoTeste(null);
-    const t0 = Date.now();
+  const salvarEFechar = async () => {
     try {
-      const agId = agenteConfig();
-      const motId = motorConfig();
-      if (agId === "secretario-exec" || agId === "secretario") {
-        const [motorRes, statusRes] = await Promise.all([
-          fetchApi<any>(`/api/motores/${encodeURIComponent(motId)}/test`, { method: "POST" }).catch(() => null),
-          fetchApi<{ rodando?: boolean; porta?: number }>("/secretario/status").catch(() => null),
-        ]);
-        const t = Date.now() - t0;
-        const motorOk = motorRes?.ok || motorRes?.health?.healthy;
-        const secOk = statusRes?.rodando;
-        if (motorOk && secOk) {
-          const statusTxt = motorRes?.health?.statusText || "OK";
-          setResultadoTeste({ ok: true, msg: `Motor "${motId}" ativo (${statusTxt}) · Secretário rodando na porta ${statusRes.porta} (${t}ms).`, latencyMs: t });
-          showToast(`Motor ${motId} verificado com sucesso!`, "sucesso");
-        } else {
-          const partes: string[] = [];
-          if (!motorOk) partes.push(`Motor "${motId}" não respondeu`);
-          if (!secOk) partes.push("Secretário (OpenCode) não está rodando");
-          setResultadoTeste({ ok: false, msg: partes.join(" · ") + ` (${t}ms)`, latencyMs: t });
-        }
-      } else {
-        await fetchApi(`/agents/${encodeURIComponent(agId)}/run?workspace=${encodeURIComponent(wsAtivo())}`, {
-          method: "POST",
-          body: JSON.stringify({
-            ordem: "ping de verificação de motor",
-            engine: motId,
-            model: modeloConfig().trim() || undefined,
-          }),
-        });
-        const t = Date.now() - t0;
-        setResultadoTeste({
-          ok: true,
-          msg: `Motor "${motId}" ativo e respondendo (${t}ms).`,
-          latencyMs: t,
-        });
-        showToast(`Motor ${motId} verificado com sucesso!`, "sucesso");
-      }
-    } catch (e: any) {
-      setResultadoTeste({
-        ok: false,
-        msg: `Falha ao acionar motor: ${e?.message || e}`,
-        latencyMs: Date.now() - t0,
-      });
-    } finally {
-      setTestandoMotor(false);
-    }
-  };
-
-  const salvarConfigLateral = async () => {
-    setSalvandoConfig(true);
-    try {
-      const rot = rotacaoConfig()
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      await fetchApi(`/agents/${encodeURIComponent(agenteConfig())}?workspace=${encodeURIComponent(wsAtivo())}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          harness: motorConfig(),
-          model: modeloConfig().trim() || undefined,
-          rotation: rot,
-        }),
-      });
-
-      setAgente(agenteConfig() as any);
-      await carregarAgentesEMotores();
-      showToast(`Agente @${agenteConfig()} atualizado com motor ${motorConfig()}!`, "sucesso");
+      await chat.salvarConfigLateral();
       setConfigLateralAberta(false);
-    } catch (e: any) {
-      showToast(`Erro ao salvar: ${e?.message || e}`, "erro");
-    } finally {
-      setSalvandoConfig(false);
-    }
-  };
-
-  let textareaRef: HTMLTextAreaElement | undefined;
-  let abortController: AbortController | null = null;
-  let timerInterval: any = null;
-
-  // Canal de sincronização instantânea entre abas/guias gêmeas do navegador
-  let syncChannel: BroadcastChannel | null = null;
-  if (typeof window !== "undefined" && "BroadcastChannel" in window) {
-    try {
-      syncChannel = new BroadcastChannel("opencorp_chat_sync");
-    } catch {}
-  }
-
-  const SUGESTOES = [
-    "O que aconteceu hoje?",
-    "Como está o board de tasks?",
-    "Qual o custo acumulado de LLM hoje?",
-    "Rodar auditoria rápida do site",
-  ];
-
-  const scrollFim = (_forcar = false) => {};
-
-
-  const carregarSessoes = async () => {
-    try {
-      const status = await fetchApi<{ rodando?: boolean }>("/secretario/status").catch(() => null);
-      if (status && !status.rodando) {
-        await fetchApi("/secretario/start", { method: "POST" }).catch(() => null);
-      }
-      const listaRaw = await fetchApi<any[]>("/secretario/sessoes");
-      const lista: SessaoResumo[] = (listaRaw || []).map((s) => ({
-        id: s.id,
-        titulo: s.titulo_real || s.title || s.titulo || `Conversa ${s.id.slice(0, 8)}`,
-        criado_em: s.time?.created || s.created || s.criado_em,
-        atualizado_em: s.time?.updated || s.updated || s.atualizado_em,
-        mensagens_count: s.summary?.files,
-      }));
-      setSessoes(lista);
-      const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-      const urlSessaoId = params?.get("sessao");
-      const ativa = urlSessaoId || sessaoAtivaId();
-      if (ativa && lista.some((s) => s.id === ativa)) {
-        selecionarSessao(ativa);
-      } else if (lista.length > 0 && !sessaoAtivaId()) {
-        selecionarSessao(lista[0].id);
-      }
-    } catch (err) {
-      console.error("Erro ao carregar sessões do secretário:", err);
-    }
-  };
-
-  let monitorTimeout: any = null;
-  let streamingAtivo = false;
-
-  const pararMonitoramento = () => {
-    if (monitorTimeout) {
-      clearTimeout(monitorTimeout);
-      monitorTimeout = null;
-    }
-  };
-
-  const retomarMonitoramento = (sessaoId: string) => {
-    pararMonitoramento();
-    setCarregando(true);
-    let tentativasSemMudanca = 0;
-    let ultimoHash = "";
-
-    if (!timerInterval) {
-      timerInterval = setInterval(() => {
-        setDecorridoSegundos((s) => s + 1);
-      }, 1000);
-    }
-
-    const tick = async () => {
-      if (sessaoAtivaId() !== sessaoId) {
-        pararMonitoramento();
-        setCarregando(false);
-        if (timerInterval) {
-          clearInterval(timerInterval);
-          timerInterval = null;
-        }
-        return;
-      }
-      if (streamingAtivo) {
-        monitorTimeout = setTimeout(tick, 1000);
-        return;
-      }
-      try {
-        const msgs = await fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(sessaoId)}/mensagens`);
-        if (streamingAtivo) {
-          monitorTimeout = setTimeout(tick, 1000);
-          return;
-        }
-        if (!Array.isArray(msgs)) {
-          monitorTimeout = setTimeout(tick, 1000);
-          return;
-        }
-
-        const ult = msgs[msgs.length - 1];
-        // Hash de mudança para re-renderização
-        const hash = msgs.length + ":" + (ult?.content?.length ?? 0) + ":" + (ult?.pensamento?.length ?? 0) + ":" + (ult?.acoes?.length ?? 0) + ":" + (ult?.passos?.length ?? 0) + ":" + ult?.concluida;
-        if (hash !== ultimoHash) {
-          ultimoHash = hash;
-          tentativasSemMudanca = 0;
-          setMensagens((prev) => reconciliarMensagens(prev, msgs));
-          setTimeout(() => scrollFim(false), 30);
-        } else {
-          tentativasSemMudanca++;
-        }
-
-        // Se a última mensagem for do assistente e estiver concluída, encerra monitoramento
-        if (ult && ult.role === "assistant" && ult.concluida === true) {
-          pararMonitoramento();
-          setCarregando(false);
-          if (timerInterval) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-          }
-          return;
-        }
-
-        // Se o backend não reportar a sessão como executando e a mensagem for do usuário ou já concluída
-        const sessaoOcupadaNoTick = sessoes().find((s) => s.id === sessaoId && (s as any).executando);
-        if (!sessaoOcupadaNoTick && ult && (ult.concluida === true || ult.role === "user")) {
-          tentativasSemMudanca++;
-          if (tentativasSemMudanca >= 2) {
-            pararMonitoramento();
-            setCarregando(false);
-            if (timerInterval) {
-              clearInterval(timerInterval);
-              timerInterval = null;
-            }
-            return;
-          }
-        }
-
-        if (tentativasSemMudanca > 1800) { // ~30 minutos sem nenhuma alteração
-          const sessaoOcupada = sessoes().find((s) => s.id === sessaoId && (s as any).executando);
-          if (sessaoOcupada || (ult && ult.role === "assistant" && ult.concluida === false)) {
-            tentativasSemMudanca = 0;
-            monitorTimeout = setTimeout(tick, 1500);
-            return;
-          }
-          setMensagens((prev) => {
-            const u = prev[prev.length - 1];
-            if (u && u.role === "assistant") {
-              return [...prev.slice(0, -1), { ...u, concluida: true }];
-            }
-            return prev;
-          });
-          pararMonitoramento();
-          setCarregando(false);
-          if (timerInterval) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-          }
-          return;
-        }
-      } catch {
-        // ignora erros pontuais de conexão
-      }
-      monitorTimeout = setTimeout(tick, 1000);
-    };
-
-    // Primeiro tick imediato, depois a cada 1s
-    tick();
-  };
-
-  const selecionarSessao = async (id: string) => {
-    pararMonitoramento();
-    if (abortController) {
-      abortController.abort();
-      abortController = null;
-    }
-    setSessaoAtivaId(id);
-    try {
-      // Carrega apenas os últimos 2 turnos inicialmente (paginação)
-      const respPag = await fetchApi<any>(`/secretario/sessoes/${encodeURIComponent(id)}/mensagens?turnos=2`);
-
-      let lista: ChatMensagem[] = [];
-      let paginacao: PaginacaoMensagens | null = null;
-
-      if (respPag && typeof respPag === "object" && "mensagens" in respPag) {
-        // Resposta paginada: { mensagens: [...], paginacao: {...} }
-        lista = Array.isArray(respPag.mensagens) ? respPag.mensagens : [];
-        paginacao = respPag.paginacao || null;
-      } else if (Array.isArray(respPag)) {
-        // Fallback: resposta sem paginação (array direto)
-        lista = respPag;
-      }
-
-      setMensagens(lista);
-
-      if (paginacao) {
-        setTotalMensagensServidor(paginacao.total_mensagens);
-        setTemMaisMensagensAnteriores(paginacao.tem_mais);
-      } else {
-        setTotalMensagensServidor(lista.length);
-        setTemMaisMensagensAnteriores(false);
-      }
-
-      setTimeout(() => scrollFim(true), 50);
-
-      const ult = lista[lista.length - 1];
-      const sessaoOcupada = sessoes().find((s) => s.id === id && (s as any).executando);
-      const emAndamento = Boolean(sessaoOcupada) || (ult && ult.role === "assistant" && ult.concluida === false);
-
-      if (emAndamento) {
-        setCarregando(true);
-        const criadoMs = ult?.criado_em ? new Date(ult.criado_em).getTime() : Date.now();
-        const decorridoInicial = Math.max(0, Math.floor((Date.now() - criadoMs) / 1000));
-        setDecorridoSegundos(decorridoInicial);
-
-        if (timerInterval) clearInterval(timerInterval);
-        timerInterval = setInterval(() => {
-          setDecorridoSegundos((s) => s + 1);
-        }, 1000);
-        retomarMonitoramento(id);
-      } else {
-        setCarregando(false);
-        if (timerInterval) {
-          clearInterval(timerInterval);
-          timerInterval = null;
-        }
-      }
     } catch {
-      setMensagens([]);
-      setTotalMensagensServidor(0);
-      setTemMaisMensagensAnteriores(false);
-      setCarregando(false);
+      // erro já exibido via toast no store
     }
-  };
-
-  const carregarMensagensAnteriores = async () => {
-    const sid = sessaoAtivaId();
-    if (!sid || carregandoAnteriores() || !temMaisMensagensAnteriores()) return;
-
-    setCarregandoAnteriores(true);
-    try {
-      // Encontra o menor indice_global das mensagens atualmente carregadas
-      const msgsAtuais = mensagens();
-      let menorIndice = Infinity;
-      for (const m of msgsAtuais) {
-        if (m.indice_global !== undefined && m.indice_global < menorIndice) {
-          menorIndice = m.indice_global;
-        }
-      }
-
-      const antesDoIndice = menorIndice === Infinity ? undefined : menorIndice;
-      let urlAnterior = `/secretario/sessoes/${encodeURIComponent(sid)}/mensagens?turnos=2`;
-      if (antesDoIndice !== undefined) {
-        urlAnterior += `&antes_do_indice=${antesDoIndice}`;
-      }
-
-      const respPag = await fetchApi<any>(urlAnterior);
-
-      let anteriores: ChatMensagem[] = [];
-      let paginacao: PaginacaoMensagens | null = null;
-
-      if (respPag && typeof respPag === "object" && "mensagens" in respPag) {
-        anteriores = Array.isArray(respPag.mensagens) ? respPag.mensagens : [];
-        paginacao = respPag.paginacao || null;
-      } else if (Array.isArray(respPag)) {
-        anteriores = respPag;
-      }
-
-      if (anteriores.length > 0) {
-        // Prepende mensagens anteriores às atuais
-        setMensagens((prev) => [...anteriores, ...prev]);
-      }
-
-      if (paginacao) {
-        setTotalMensagensServidor(paginacao.total_mensagens);
-        setTemMaisMensagensAnteriores(paginacao.tem_mais);
-      } else {
-        setTemMaisMensagensAnteriores(false);
-      }
-    } catch {
-      // Silenciosamente ignora erros de carregamento
-    } finally {
-      setCarregandoAnteriores(false);
-    }
-  };
-
-  const novaConversa = () => {
-    pararMonitoramento();
-    if (abortController) {
-      abortController.abort();
-      setCarregando(false);
-    }
-    setSessaoAtivaId(null);
-    setMensagens([]);
-    setInputValor("");
-    setAnexos([]);
-    setTotalMensagensServidor(0);
-    setTemMaisMensagensAnteriores(false);
-    showToast("Nova conversa iniciada", "info");
-  };
-
-  const excluirSessao = async (id: string) => {
-    try {
-      await fetchApi(`/secretario/sessoes/${encodeURIComponent(id)}`, { method: "DELETE" });
-      setSessoes((prev) => prev.filter((s) => s.id !== id));
-      if (sessaoAtivaId() === id) {
-        novaConversa();
-      }
-      showToast("Conversa excluída", "sucesso");
-    } catch {
-      showToast("Falha ao excluir conversa", "erro");
-    }
-  };
-
-  const pararStream = () => {
-    const sid = sessaoAtivaId();
-    if (sid) {
-      void fetchApi(`/sessions/${encodeURIComponent(sid)}/abort`, { method: "POST" }).catch(() => null);
-      void fetchApi(`/secretario/sessoes/${encodeURIComponent(sid)}/abort`, { method: "POST" }).catch(() => null);
-    }
-    pararMonitoramento();
-    if (abortController) {
-      abortController.abort();
-      abortController = null;
-    }
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      timerInterval = null;
-    }
-    setCarregando(false);
-    setMensagens((prev) => {
-      const ult = prev[prev.length - 1];
-      if (ult && ult.role === "assistant" && ult.concluida === false) {
-        return [...prev.slice(0, -1), { ...ult, concluida: true, content: ult.content || "(interrompido pelo usuário)" }];
-      }
-      return prev;
-    });
-    showToast("Agente interrompido com sucesso", "aviso");
-  };
-
-  const editarPrompt = async (indice: number) => {
-    const m = mensagens()[indice];
-    if (!m || m.role !== "user") return;
-
-    pararMonitoramento();
-    if (carregando()) {
-      pararStream();
-    }
-
-    const textoPrompt = m.content || "";
-    const indiceGlobal = m.indice_global !== undefined ? m.indice_global : indice;
-
-    // 1. Restaura texto no input e foca imediatamente
-    setInputValor(textoPrompt);
-    const elTextarea = textareaRef || (document.getElementById("chat-input") as HTMLTextAreaElement | null);
-    if (elTextarea) {
-      textareaRef = elTextarea;
-      elTextarea.value = textoPrompt;
-      elTextarea.focus();
-      const len = textoPrompt.length;
-      try {
-        elTextarea.setSelectionRange(len, len);
-      } catch {}
-      elTextarea.style.height = "auto";
-      const scrollH = elTextarea.scrollHeight;
-      const novaAltura = Math.max(38, Math.min(scrollH, 220));
-      elTextarea.style.height = `${novaAltura}px`;
-      elTextarea.style.overflowY = scrollH > 220 ? "auto" : "hidden";
-      elTextarea.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-
-    // 2. Trunca no backend se houver sessão ativa usando o índice global correto
-    const sid = sessaoAtivaId();
-    if (sid) {
-      try {
-        await fetchApi(`/secretario/sessoes/${encodeURIComponent(sid)}/truncar`, {
-          method: "POST",
-          body: JSON.stringify({ manter_ate: indiceGlobal }),
-        });
-      } catch (err: any) {
-        showToast("Falha ao truncar no servidor: " + err.message, "aviso");
-      }
-    }
-
-    // 3. Trunca mensagens localmente (mantém anteriores a este turno)
-    ultimoHash = "";
-    setMensagens((prev) => prev.slice(0, indice));
-
-    showToast("Prompt restaurado para edição!", "sucesso");
-  };
-
-  const adicionarFila = (texto: string, anexosRecebidos?: Anexo[]) => {
-    const item: PromptFilaItem = {
-      id: `flw_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      texto,
-      anexos: anexosRecebidos,
-      criadoEm: Date.now(),
-    };
-    setFilaPrompts((prev) => [...prev, item]);
-  };
-
-  const removerFila = (id: string) => {
-    setFilaPrompts((prev) => prev.filter((i) => i.id !== id));
-    showToast("Prompt removido da fila", "info");
-  };
-
-  const editarFila = (id: string) => {
-    const item = filaPrompts().find((i) => i.id === id);
-    if (!item) return;
-    setFilaPrompts((prev) => prev.filter((i) => i.id !== id));
-    setInputValor(item.texto);
-    if (item.anexos) setAnexos(item.anexos);
-    const elTextarea = textareaRef || (document.getElementById("chat-input") as HTMLTextAreaElement | null);
-    if (elTextarea) {
-      textareaRef = elTextarea;
-      elTextarea.value = item.texto;
-      elTextarea.focus();
-      const len = item.texto.length;
-      try {
-        elTextarea.setSelectionRange(len, len);
-      } catch {}
-      elTextarea.style.height = "auto";
-      const scrollH = elTextarea.scrollHeight;
-      const novaAltura = Math.max(38, Math.min(scrollH, 220));
-      elTextarea.style.height = `${novaAltura}px`;
-      elTextarea.style.overflowY = scrollH > 220 ? "auto" : "hidden";
-      elTextarea.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-    showToast("Prompt devolvido para edição!", "sucesso");
-  };
-
-  const adiantarFila = async (id: string) => {
-    const item = filaPrompts().find((i) => i.id === id);
-    if (!item) return;
-    setFilaPrompts((prev) => prev.filter((i) => i.id !== id));
-    if (carregando()) {
-      pararStream();
-      await new Promise((r) => setTimeout(r, 250));
-    }
-    setInputValor(item.texto);
-    if (item.anexos) setAnexos(item.anexos);
-    showToast("Adiantando prompt da fila...", "info");
-    await enviarMensagem();
-  };
-
-  // Disparo sequencial automático quando o turno atual do assistente terminar
-  createEffect(() => {
-    const estaCarregando = carregando();
-    const fila = filaPrompts();
-    if (!estaCarregando && fila.length > 0 && !processandoFila) {
-      processandoFila = true;
-      const proximo = fila[0];
-      setFilaPrompts((prev) => prev.slice(1));
-      setTimeout(async () => {
-        setInputValor(proximo.texto);
-        if (proximo.anexos) setAnexos(proximo.anexos);
-        await enviarMensagem();
-        processandoFila = false;
-      }, 350);
-    }
-  });
-
-  const enviarMensagem = async () => {
-    pararMonitoramento();
-    const texto = inputValor().trim();
-    const imgs = anexos().map((a) => a.url);
-    if (!texto && imgs.length === 0) return;
-
-    // Interceptação rápida do comando /clear na interface
-    if (texto === "/clear") {
-      setMensagens([]);
-      setInputValor("");
-      setAnexos([]);
-      showToast("Histórico de mensagens da tela limpo", "info");
-      return;
-    }
-
-    // Se havia mensagem do assistente pendente, fecha antes do novo envio
-    setMensagens((prev) => {
-      const ult = prev[prev.length - 1];
-      if (ult && ult.role === "assistant" && ult.concluida === false) {
-        return [...prev.slice(0, -1), { ...ult, concluida: true }];
-      }
-      return prev;
-    });
-
-    const sid = sessaoAtivaId();
-
-    // Adiciona mensagem do usuário
-    const msgUsuario: ChatMensagem = {
-      role: "user",
-      content: texto,
-      imagens: imgs.length > 0 ? imgs : undefined,
-    };
-
-    // Mensagem inicial do assistente com indicador de carregando
-    const msgAssistente: ChatMensagem = {
-      role: "assistant",
-      content: "",
-      pensamento: "",
-      concluida: false,
-      acoes: [],
-    };
-
-    setMensagens((prev) => [...prev, msgUsuario, msgAssistente]);
-    setInputValor("");
-    setAnexos([]);
-    setCarregando(true);
-    streamingAtivo = true;
-    setDecorridoSegundos(0);
-
-    if (sid) {
-      try { syncChannel?.postMessage({ tipo: "mensagem_enviada", sessao_id: sid }); } catch {}
-    }
-
-    setTimeout(scrollFim, 30);
-
-    timerInterval = setInterval(() => {
-      setDecorridoSegundos((s) => s + 1);
-    }, 1000);
-
-    abortController = new AbortController();
-
-    try {
-      const urlStream = sid
-        ? `/secretario/conversa/stream?sessao=${encodeURIComponent(sid)}&workspace=${encodeURIComponent(wsAtivo())}`
-        : `/secretario/conversa/stream?workspace=${encodeURIComponent(wsAtivo())}`;
-
-      const corpoEnvio: any = {
-        mensagem: texto,
-        prompt: texto,
-        agente: agente(),
-        imagens: imgs,
-      };
-      if (sid) corpoEnvio.sessao_id = sid;
-
-      const resp = await fetch(urlStream, {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify(corpoEnvio),
-        signal: abortController.signal,
-      });
-
-      if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status}`);
-      }
-
-      const reader = resp.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) throw new Error("Stream indisponível");
-
-      let buffer = "";
-      let currentEvent = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const linhas = buffer.split("\n");
-        buffer = linhas.pop() ?? "";
-
-        for (const linha of linhas) {
-          const trimmed = linha.trim();
-
-          // SSE: "event: <tipo>"
-          if (trimmed.startsWith("event: ")) {
-            currentEvent = trimmed.slice(7).trim();
-            continue;
-          }
-
-          // SSE: "data: <json>"
-          if (!trimmed.startsWith("data: ")) {
-            // Linha vazia = fim do evento SSE (reset)
-            if (trimmed === "") currentEvent = "";
-            continue;
-          }
-
-          const jsonStr = trimmed.slice(6).trim();
-          if (jsonStr === "[DONE]") continue;
-
-          try {
-            const payload = JSON.parse(jsonStr);
-            const evtType = currentEvent || payload.tipo || "";
-
-            // Atualizar sessaoAtivaId com o ID real do servidor
-            if (evtType === "inicio" && payload.sessao_id) {
-              setSessaoAtivaId(payload.sessao_id);
-              try { syncChannel?.postMessage({ tipo: "mensagem_enviada", sessao_id: payload.sessao_id }); } catch {}
-            }
-
-            setMensagens((prev) => {
-              const ultIdx = prev.length - 1;
-              if (ultIdx < 0) return prev;
-              const assistente = { ...prev[ultIdx] };
-
-              if (payload.gitStatus) {
-                assistente.gitStatus = payload.gitStatus;
-              }
-              if (payload.gitDiff) {
-                assistente.gitDiff = payload.gitDiff;
-              }
-
-              if (evtType === "status" || evtType === "fallback_modelo") {
-                if (payload.aviso) {
-                  showToast(payload.aviso, "aviso");
-                  const passos = [...(assistente.passos || [])];
-                  passos.push({
-                    tipo: "texto",
-                    texto: `\n> [Aviso] *${payload.aviso}*\n\n`,
-                  });
-                  assistente.passos = passos;
-                }
-              } else if (evtType === "passos" && Array.isArray(payload.passos)) {
-                // payload.passos é a ordem cronológica fiel gerada pelo backend (pensamento -> acao -> pensamento -> texto)
-                assistente.passos = payload.passos;
-
-                const textoPassos = payload.passos
-                  .filter((p: any) => p.tipo === "texto")
-                  .map((p: any) => p.texto || "")
-                  .join("\n\n");
-                if (textoPassos) {
-                  assistente.content = textoPassos;
-                }
-              } else if (evtType === "delta") {
-                let deltaTxt = payload.delta || payload.texto || "";
-                if (deltaTxt.includes("<think>") || deltaTxt.includes("</think>")) {
-                  const thinkMatch = /<think>([\s\S]*?)(?:<\/think>|$)/i.exec(deltaTxt);
-                  if (thinkMatch) {
-                    const pTxt = thinkMatch[1] ?? "";
-                    assistente.pensamento = (assistente.pensamento || "") + pTxt;
-                    deltaTxt = deltaTxt.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "");
-                  }
-                }
-                if (deltaTxt) {
-                  assistente.content += deltaTxt;
-                  const passos = [...(assistente.passos || [])];
-                  const ultP = passos[passos.length - 1];
-                  if (ultP && ultP.tipo === "texto") {
-                    if (!ultP.texto?.endsWith(deltaTxt)) {
-                      ultP.texto = (ultP.texto || "") + deltaTxt;
-                    }
-                  } else {
-                    passos.push({ tipo: "texto", texto: deltaTxt });
-                  }
-                  assistente.passos = passos;
-                }
-              } else if (evtType === "pensamento") {
-                const deltaTxt = payload.delta || payload.pensamento || payload.texto || "";
-                if (deltaTxt) {
-                  assistente.pensamento = (assistente.pensamento || "") + deltaTxt;
-                  const passos = [...(assistente.passos || [])];
-                  const ultP = passos[passos.length - 1];
-                  // Anexa ao ÚLTIMO passo de pensamento ativo, ou cria novo passo sem agrupar tudo no primeiro
-                  if (ultP && ultP.tipo === "pensamento") {
-                    if (!ultP.texto?.endsWith(deltaTxt)) {
-                      ultP.texto = (ultP.texto || "") + deltaTxt;
-                    }
-                  } else {
-                    passos.push({ tipo: "pensamento", texto: deltaTxt });
-                  }
-                  assistente.passos = passos;
-                }
-              } else if (evtType === "acao") {
-                const passos = [...(assistente.passos || [])];
-                if (Array.isArray(payload.itens) && payload.itens.length > 0) {
-                  for (const item of payload.itens) {
-                    passos.push({
-                      tipo: "acao",
-                      ferramenta: item.ferramenta || item.tool || "ferramenta",
-                      resumo: item.resumo || item.summary || "executando...",
-                      sucesso: item.sucesso !== false,
-                    });
-                  }
-                } else if (payload.ferramenta) {
-                  passos.push({
-                    tipo: "acao",
-                    ferramenta: payload.ferramenta,
-                    resumo: payload.resumo || "executando...",
-                    sucesso: payload.sucesso !== false,
-                  });
-                }
-                assistente.passos = passos;
-              } else if (evtType === "hitl") {
-                assistente.hitl = payload.hitl || payload;
-              } else if (evtType === "fim") {
-                assistente.concluida = true;
-                if (payload.resposta && !assistente.content) {
-                  assistente.content = payload.resposta;
-                }
-                if (payload.gitStatus) {
-                  assistente.gitStatus = payload.gitStatus;
-                }
-                if (payload.gitDiff) {
-                  assistente.gitDiff = payload.gitDiff;
-                }
-              } else if (evtType === "erro") {
-                assistente.concluida = true;
-                const msgErro = payload.erro || payload.mensagem || "Erro desconhecido";
-                showToast(`Erro no Secretário: ${msgErro}`, "erro");
-                assistente.content = assistente.content
-                  ? `${assistente.content}\n\n> **Erro no Secretário**: ${msgErro}`
-                  : `> **Erro no Secretário**: ${msgErro}`;
-              }
-
-              return [...prev.slice(0, ultIdx), assistente];
-            });
-
-            scrollFim(false);
-          } catch {}
-
-          currentEvent = "";
-        }
-      }
-    } catch (err: any) {
-      if (err.name !== "AbortError") {
-        showToast("Erro na comunicação com o modelo: " + err.message, "erro");
-        setMensagens((prev) => {
-          const ultIdx = prev.length - 1;
-          if (ultIdx < 0) return prev;
-          const assistente = { ...prev[ultIdx], concluida: true, content: prev[ultIdx].content || `(erro: ${err.message})` };
-          return [...prev.slice(0, ultIdx), assistente];
-        });
-      }
-    } finally {
-      streamingAtivo = false;
-      abortController = null;
-      void carregarSessoes();
-      const sidFinal = sessaoAtivaId();
-      if (sidFinal) {
-        try { syncChannel?.postMessage({ tipo: "mensagem_concluida", sessao_id: sidFinal }); } catch {}
-        void fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(sidFinal)}/mensagens`)
-          .then((msgsFinais) => {
-            if (Array.isArray(msgsFinais) && msgsFinais.length > 0) {
-              setMensagens((prev) => reconciliarMensagens(prev, msgsFinais));
-              const ult = msgsFinais[msgsFinais.length - 1];
-              if (ult && (ult.concluida === false || ult.role === "user")) {
-                retomarMonitoramento(sidFinal);
-                return;
-              }
-            }
-            if (timerInterval) {
-              clearInterval(timerInterval);
-              timerInterval = null;
-            }
-            setCarregando(false);
-          })
-          .catch(() => {
-            if (timerInterval) {
-              clearInterval(timerInterval);
-              timerInterval = null;
-            }
-            setCarregando(false);
-          });
-      } else {
-        if (timerInterval) {
-          clearInterval(timerInterval);
-          timerInterval = null;
-        }
-        setCarregando(false);
-      }
-    }
-  };
-
-  const aprovarHitl = async (hitlId: string) => {
-    try {
-      await fetchApi(`/secretario/hitl/${encodeURIComponent(hitlId)}/aprovar`, { method: "POST" });
-      showToast("Ação autorizada com sucesso", "sucesso");
-      setMensagens((prev) =>
-        prev.map((m) => (m.hitl?.id === hitlId ? { ...m, hitl: undefined } : m))
-      );
-    } catch (err: any) {
-      showToast("Erro ao aprovar ação: " + err.message, "erro");
-    }
-  };
-
-  const rejeitarHitl = async (hitlId: string, motivo: string) => {
-    try {
-      await fetchApi(`/secretario/hitl/${encodeURIComponent(hitlId)}/rejeitar`, {
-        method: "POST",
-        body: JSON.stringify({ motivo }),
-      });
-      showToast("Ação rejeitada", "info");
-      setMensagens((prev) =>
-        prev.map((m) => (m.hitl?.id === hitlId ? { ...m, hitl: undefined } : m))
-      );
-    } catch (err: any) {
-      showToast("Erro ao rejeitar ação: " + err.message, "erro");
-    }
-  };
-
-  onMount(() => {
-    void carregarSessoes();
-    void carregarAgentesEMotores();
-    void verificarAlertasFalhas();
-    const timerAlertas = setInterval(() => void verificarAlertasFalhas(), 60000);
-
-    // Sincronização entre abas gêmeas via BroadcastChannel
-    if (syncChannel) {
-      syncChannel.onmessage = (ev) => {
-        const d = ev.data;
-        if (!d) return;
-        if (d.sessao_id && d.sessao_id === sessaoAtivaId()) {
-          if (!streamingAtivo) {
-            retomarMonitoramento(d.sessao_id);
-          }
-        } else if (d.tipo === "nova_sessao" || d.tipo === "sessao_deletada") {
-          void carregarSessoes();
-        }
-      };
-    }
-
-    // Ao focar na aba, recarrega mensagens caso tenham chegado da outra guia
-    const onFoco = () => {
-      const sid = sessaoAtivaId();
-      if (sid && !streamingAtivo && !temMaisMensagensAnteriores()) {
-        void fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(sid)}/mensagens`)
-          .then((msgs) => {
-            if (Array.isArray(msgs) && msgs.length > 0) {
-              setMensagens((prev) => reconciliarMensagens(prev, msgs));
-              const ult = msgs[msgs.length - 1];
-              if (ult && (ult.concluida === false || ult.role === "user")) {
-                retomarMonitoramento(sid);
-              }
-            }
-          })
-          .catch(() => null);
-      }
-    };
-    window.addEventListener("focus", onFoco);
-
-    // Evento SSE do servidor disparado por outra aba ou processo
-    const onSseSecretario = (e: Event) => {
-      const d = (e as CustomEvent).detail;
-      const sid = d?.dados?.sessao_id || d?.sessao_id;
-      if (sid && sid === sessaoAtivaId() && !streamingAtivo) {
-        retomarMonitoramento(sid);
-      }
-    };
-    window.addEventListener("secretario:mensagem", onSseSecretario);
-
-    onCleanup(() => {
-      window.removeEventListener("focus", onFoco);
-      window.removeEventListener("secretario:mensagem", onSseSecretario);
-      clearInterval(timerAlertas);
-      if (syncChannel) {
-        try { syncChannel.close(); } catch {}
-      }
-    });
-  });
-
-  createEffect(() => {
-    void wsAtivo();
-    void carregarSessoes();
-    void carregarAgentesEMotores();
-  });
-
-  onCleanup(() => {
-    pararMonitoramento();
-    if (abortController) abortController.abort();
-    if (timerInterval) clearInterval(timerInterval);
-  });
-
-  const decorridoFmt = () => {
-    const s = decorridoSegundos();
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   };
 
   return (
     <div class="flex flex-col h-full w-full overflow-hidden bg-zinc-950 relative">
-      <Show when={alertaFalhas()}>
+      <Show when={chat.alertaFalhas()}>
         <div class="mx-3 mt-2 px-3 py-2 rounded-xl bg-amber-950/50 border border-amber-700/50 text-[12px] text-amber-200 flex items-center gap-2">
           <AlertCircle size={14} class="text-amber-400 flex-shrink-0" />
-          <span class="flex-1">{alertaFalhas()}</span>
-          <button type="button" onClick={() => setAlertaFalhas(null)} class="text-amber-400 hover:text-amber-200 cursor-pointer" title="Dispensar">
+          <span class="flex-1">{chat.alertaFalhas()}</span>
+          <button type="button" onClick={chat.dispensarAlertaFalhas} class="text-amber-400 hover:text-amber-200 cursor-pointer" title="Dispensar">
             <X size={13} />
           </button>
         </div>
       </Show>
       <UniversalChat
-        mensagens={mensagens()}
-        carregando={carregando()}
+        mensagens={chat.mensagens()}
+        carregando={chat.carregando()}
         agente={{
-          id: agente(),
-          nome: agente(),
-          modelo: modeloConfig() || "opencode-go/glm-5.3-flash",
-          status: carregando() ? "executando" : undefined,
+          id: chat.agente(),
+          nome: chat.agente(),
+          modelo: chat.modeloConfig() || "opencode-go/glm-5.3-flash",
+          status: chat.carregando() ? "executando" : undefined,
         }}
-        decorridoFmt={decorridoFmt()}
+        decorridoFmt={chat.decorridoFmt()}
         podeEnviarPrompt={true}
-        valorPrompt={inputValor()}
-        onValorPromptChange={setInputValor}
-        refTextarea={(el) => {
-          textareaRef = el;
-        }}
+        valorPrompt={chat.inputValor()}
+        onValorPromptChange={chat.setInputValor}
+        refTextarea={chat.refTextareaPara("pagina")}
+        inputId="chat-input"
         onEnviarPrompt={async (texto, anexosRecebidos) => {
-          if (anexosRecebidos) setAnexos(anexosRecebidos);
-          setInputValor(texto);
-          await enviarMensagem();
+          if (anexosRecebidos) chat.setAnexos(anexosRecebidos);
+          chat.setInputValor(texto);
+          await chat.enviarMensagem();
         }}
-        onEditarPrompt={editarPrompt}
-        filaPrompts={filaPrompts()}
-        onAdicionarFila={adicionarFila}
-        onRemoverFila={removerFila}
-        onEditarFila={editarFila}
-        onAdiantarFila={adiantarFila}
-        onAprovarHitl={aprovarHitl}
-        onRejeitarHitl={rejeitarHitl}
-        onNovaSessao={novaConversa}
+        onEditarPrompt={(i) => void chat.editarPrompt(i, "pagina")}
+        filaPrompts={chat.filaPrompts()}
+        onAdicionarFila={chat.adicionarFila}
+        onRemoverFila={chat.removerFila}
+        onEditarFila={(id) => chat.editarFila(id, "pagina")}
+        onAdiantarFila={(id) => void chat.adiantarFila(id)}
+        onAprovarHitl={(id) => void chat.aprovarHitl(id)}
+        onRejeitarHitl={(id, m) => void chat.rejeitarHitl(id, m)}
+        onNovaSessao={() => { chat.novaConversa(); }}
         onAbrirHistorico={() => setHistoricoAberto(true)}
-        onAbrirConfiguracoes={abrirPainelLateral}
-        onParar={pararStream}
-        temMaisMensagensAnteriores={temMaisMensagensAnteriores()}
-        carregandoAnteriores={carregandoAnteriores()}
-        onCarregarAnteriores={carregarMensagensAnteriores}
-        totalMensagens={totalMensagensServidor()}
-        sugestoesRapidas={SUGESTOES.map((s) => ({ rotulo: s, prompt: s }))}
+        onAbrirConfiguracoes={() => void abrirPainelLateral()}
+        onParar={chat.pararStream}
+        temMaisMensagensAnteriores={chat.temMaisMensagensAnteriores()}
+        carregandoAnteriores={chat.carregandoAnteriores()}
+        onCarregarAnteriores={() => void chat.carregarMensagensAnteriores()}
+        totalMensagens={chat.totalMensagensServidor()}
+        sugestoesRapidas={chat.sugestoes}
         iframeConfig={{
           habilitado: true,
           aberto: false,
@@ -1221,11 +104,11 @@ export const SecretarioView: Component = () => {
       <HistoricoModal
         open={historicoAberto()}
         onOpenChange={setHistoricoAberto}
-        sessoes={sessoes()}
-        sessaoAtivaId={sessaoAtivaId()}
-        onSelecionarSessao={selecionarSessao}
-        onNovaConversa={novaConversa}
-        onExcluirSessao={excluirSessao}
+        sessoes={chat.sessoes()}
+        sessaoAtivaId={chat.sessaoAtivaId()}
+        onSelecionarSessao={(id) => { void chat.selecionarSessao(id); setHistoricoAberto(false); }}
+        onNovaConversa={() => { chat.novaConversa(); setHistoricoAberto(false); }}
+        onExcluirSessao={(id) => void chat.excluirSessao(id)}
       />
 
       {/* Drawer Lateral de Configuração de Agente / Motor / Modelo */}
@@ -1261,10 +144,10 @@ export const SecretarioView: Component = () => {
               <label class="font-medium text-zinc-300 block">Agente do Workspace</label>
               <select
                 class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500/80 cursor-pointer"
-                value={agenteConfig()}
-                onChange={(e) => aoMudarAgenteConfig(e.currentTarget.value)}
+                value={chat.agenteConfig()}
+                onChange={(e) => chat.aoMudarAgenteConfig(e.currentTarget.value)}
               >
-                <For each={listaAgentes()}>
+                <For each={chat.listaAgentes()}>
                   {(ag) => (
                     <option value={ag.id}>
                       {ag.id} — {ag.role || ag.id} ({ag.harness || (ag as any).engine || "opencode"})
@@ -1310,15 +193,15 @@ export const SecretarioView: Component = () => {
                   ]}
                 >
                   {(mot) => {
-                    const ativo = () => motorConfig() === mot.id;
+                    const ativo = () => chat.motorConfig() === mot.id;
                     const inst = () => {
-                      const enc = listaMotores().find((m) => m.id === mot.id);
+                      const enc = chat.listaMotores().find((m) => m.id === mot.id);
                       return enc ? enc.installed : true;
                     };
                     return (
                       <button
                         type="button"
-                        onClick={() => aoMudarMotorConfig(mot.id)}
+                        onClick={() => chat.aoMudarMotorConfig(mot.id)}
                         class={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start justify-between ${
                           ativo()
                             ? "bg-emerald-950/30 border-emerald-500/80 text-emerald-200 shadow-sm"
@@ -1359,17 +242,17 @@ export const SecretarioView: Component = () => {
                 type="text"
                 class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500/80"
                 placeholder="ex.: google/gemini-3.8-flash-high ou gpt-4o"
-                value={modeloConfig()}
-                onInput={(e) => setModeloConfig(e.currentTarget.value)}
+                value={chat.modeloConfig()}
+                onInput={(e) => chat.setModeloConfig(e.currentTarget.value)}
               />
 
               {/* Sugestões Rápidas de Modelos */}
               <div class="flex flex-wrap gap-1 pt-1">
-                <For each={modelosSugeridos[motorConfig()] || []}>
+                <For each={MODELOS_SUGERIDOS[chat.motorConfig()] || []}>
                   {(mod) => (
                     <button
                       type="button"
-                      onClick={() => setModeloConfig(mod)}
+                      onClick={() => chat.setModeloConfig(mod)}
                       class="px-2 py-0.5 rounded-full bg-zinc-800/80 hover:bg-zinc-700 text-[10px] font-mono text-zinc-300 border border-zinc-700/60 cursor-pointer transition-colors"
                     >
                       {mod.split("/").pop()}
@@ -1388,8 +271,8 @@ export const SecretarioView: Component = () => {
                 rows={3}
                 class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500/80 scrollbar-thin resize-none"
                 placeholder="1 modelo por linha para rotação de fallback"
-                value={rotacaoConfig()}
-                onInput={(e) => setRotacaoConfig(e.currentTarget.value)}
+                value={chat.rotacaoConfig()}
+                onInput={(e) => chat.setRotacaoConfig(e.currentTarget.value)}
               />
               <p class="text-[11px] text-zinc-500">
                 Modelos acionados automaticamente caso o principal atinja limites de quota ou erro.
@@ -1403,35 +286,35 @@ export const SecretarioView: Component = () => {
                 <Button
                   size="xs"
                   variant="secondary"
-                  onClick={testarMotorConexao}
-                  disabled={testandoMotor()}
+                  onClick={() => void chat.testarMotorConexao()}
+                  disabled={chat.testandoMotor()}
                 >
-                  <Show when={testandoMotor()} fallback={<Play size={12} class="mr-1 text-emerald-400" />}>
+                  <Show when={chat.testandoMotor()} fallback={<Play size={12} class="mr-1 text-emerald-400" />}>
                     <RefreshCw size={12} class="mr-1 animate-spin text-emerald-400" />
                   </Show>
-                  {testandoMotor() ? "Testando..." : "Testar Conexão"}
+                  {chat.testandoMotor() ? "Testando..." : "Testar Conexão"}
                 </Button>
               </div>
 
-              <Show when={resultadoTeste()}>
+              <Show when={chat.resultadoTeste()}>
                 <div
                   class={`p-2.5 rounded-lg border text-xs flex items-start gap-2 ${
-                    resultadoTeste()!.ok
+                    chat.resultadoTeste()!.ok
                       ? "bg-emerald-950/20 border-emerald-800/60 text-emerald-300"
                       : "bg-rose-950/20 border-rose-800/60 text-rose-300"
                   }`}
                 >
                   <Show
-                    when={resultadoTeste()!.ok}
+                    when={chat.resultadoTeste()!.ok}
                     fallback={<AlertCircle size={15} class="shrink-0 mt-0.5 text-rose-400" />}
                   >
                     <Check size={15} class="shrink-0 mt-0.5 text-emerald-400" />
                   </Show>
                   <div class="space-y-0.5">
-                    <p class="font-medium">{resultadoTeste()!.msg}</p>
-                    <Show when={resultadoTeste()!.latencyMs !== undefined}>
+                    <p class="font-medium">{chat.resultadoTeste()!.msg}</p>
+                    <Show when={chat.resultadoTeste()!.latencyMs !== undefined}>
                       <p class="text-[10px] text-zinc-400 font-mono">
-                        Latência: {resultadoTeste()!.latencyMs}ms
+                        Latência: {chat.resultadoTeste()!.latencyMs}ms
                       </p>
                     </Show>
                   </div>
@@ -1454,8 +337,7 @@ export const SecretarioView: Component = () => {
                 size="xs"
                 variant="secondary"
                 onClick={() => {
-                  setAgente(agenteConfig() as any);
-                  showToast(`Secretário direcionado para @${agenteConfig()}`, "info");
+                  chat.aplicarAgenteAoChat();
                   setConfigLateralAberta(false);
                 }}
                 title="Apenas direciona o chat atual para este agente"
@@ -1465,13 +347,13 @@ export const SecretarioView: Component = () => {
               <Button
                 size="xs"
                 variant="primary"
-                onClick={salvarConfigLateral}
-                disabled={salvandoConfig()}
+                onClick={() => void salvarEFechar()}
+                disabled={chat.salvandoConfig()}
               >
-                <Show when={salvandoConfig()} fallback={<Check size={13} class="mr-1" />}>
+                <Show when={chat.salvandoConfig()} fallback={<Check size={13} class="mr-1" />}>
                   <RefreshCw size={13} class="mr-1 animate-spin" />
                 </Show>
-                {salvandoConfig() ? "Salvando..." : "Salvar no Agente"}
+                {chat.salvandoConfig() ? "Salvando..." : "Salvar no Agente"}
               </Button>
             </div>
           </div>

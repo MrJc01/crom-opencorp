@@ -17,8 +17,29 @@ const [sseConnected, setSseConnected] = createSignal(false);
 const [notificacoesNaoLidas, setNotificacoesNaoLidas] = createSignal(0);
 const [autenticado, setAutenticado] = createSignal(true); // default true para servidores sem token
 const [sidebarMobileAberta, setSidebarMobileAberta] = createSignal(false);
+const DOCK_KEY = "oc-secretario-dock";
+const dockAbertoInicial = (() => {
+  try {
+    const salvo = localStorage.getItem(DOCK_KEY);
+    if (salvo !== null) return salvo !== "0";
+  } catch {}
+  try {
+    // Mobile começa fechado (dock vira overlay); desktop começa aberto
+    return window.innerWidth >= 1024;
+  } catch {
+    return true;
+  }
+})();
+const [dockSecretarioAberto, setDockSecretarioAbertoSignal] = createSignal<boolean>(dockAbertoInicial);
 
-export { token, wsAtivo, workspaces, sseConnected, notificacoesNaoLidas, autenticado, setAutenticado, sidebarMobileAberta, setSidebarMobileAberta };
+export function setDockSecretarioAberto(aberto: boolean) {
+  setDockSecretarioAbertoSignal(aberto);
+  try {
+    localStorage.setItem(DOCK_KEY, aberto ? "1" : "0");
+  } catch {}
+}
+
+export { token, wsAtivo, workspaces, sseConnected, notificacoesNaoLidas, autenticado, setAutenticado, sidebarMobileAberta, setSidebarMobileAberta, dockSecretarioAberto };
 
 
 export function setToken(novoToken: string) {

@@ -136,7 +136,7 @@ export async function sincronizarJobsParaFluxos(homeDir: string = opencorpHome()
           id: "saida",
           tipo: "saida",
           config: {
-            registro: "execucoes/resultado",
+            registro: "resultados/resultado",
           },
           pos: { x: 540, y: 120 },
         },

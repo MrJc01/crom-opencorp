@@ -124,3 +124,47 @@ describe("zombie-reaper não toca fluxos em andamento (B: sem falso falhou)", ()
     expect((depoisSessao.extras as any)?.status).toBe("falhou");
   });
 });
+
+describe("saída nunca polui o ledger (regressão execucoes/resultado)", () => {
+  it("validarTexto rejeita saida na categoria execucoes", async () => {
+    const { FlowStore } = await import("../src/core/flow-store.js");
+    const store = new FlowStore();
+    expect(() =>
+      store.validarTexto(
+        JSON.stringify({
+          id: "ruim",
+          nome: "Ruim",
+          nos: [
+            { id: "gatilho", tipo: "manual", config: {} },
+            { id: "saida", tipo: "saida", config: { registro: "execucoes/resultado" } },
+          ],
+          arestas: [{ de: "gatilho", para: "saida" }],
+        }),
+        "ruim",
+      ),
+    ).toThrow(/ledger reservado/);
+  });
+
+  it("listarExecucoes ignora registros avulsos sem tag sessao", async () => {
+    const { wsPath } = await (async () => {
+      const { mkdtemp } = await import("node:fs/promises");
+      const { tmpdir } = await import("node:os");
+      const { join } = await import("node:path");
+      const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+      const home = await mkdtemp(join(tmpdir(), "opencorp-noses-"));
+      const ws = await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-noses");
+      return { wsPath: ws.path, home };
+    })();
+    const { RegistryStore } = await import("../src/core/registry-store.js");
+    const { SessionManager } = await import("../src/core/session-manager.js");
+    const registros = new RegistryStore();
+    await registros.criar(wsPath, {
+      categoria: "execucoes",
+      id: "resultado",
+      descricao: "saída de flow",
+      criadoPor: "flow:x",
+    });
+    const sessoes = new SessionManager();
+    expect(await sessoes.listarExecucoes(wsPath)).toEqual([]);
+  });
+});

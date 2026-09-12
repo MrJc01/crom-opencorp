@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, For, Show } from "solid-js";
+import { type Component, createSignal, createEffect, onMount, For, Show } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import {
   Bell,
@@ -15,7 +15,7 @@ import {
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
-import { fetchApi, setBadgeNotificacoes } from "../lib/context";
+import { fetchApi, setBadgeNotificacoes, wsAtivo } from "../lib/context";
 
 export const NotificacoesView: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -77,6 +77,12 @@ export const NotificacoesView: Component = () => {
   };
 
   onMount(() => {
+    void carregarNotificacoes();
+  });
+
+  // Badge do Topbar travava no workspace anterior — recarrega ao trocar
+  createEffect(() => {
+    wsAtivo();
     void carregarNotificacoes();
   });
 
@@ -235,6 +241,7 @@ export const NotificacoesView: Component = () => {
                                         body: acao.corpo ? JSON.stringify(acao.corpo) : undefined,
                                       });
                                       showToast(`Ação "${acao.label}" executada com sucesso!`, "sucesso");
+                                      void carregarNotificacoes();
                                     } catch (err: any) {
                                       showToast(`Erro na ação: ${err.message}`, "erro");
                                     }

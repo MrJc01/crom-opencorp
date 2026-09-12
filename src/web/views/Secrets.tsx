@@ -401,7 +401,11 @@ export const SecretsView: Component = () => {
     setCarregando(true);
     try {
       const lista = await fetchApi<any[]>("/secrets");
-      setSecrets(lista || []);
+      // API pode devolver string[] (só nomes) — normaliza para objetos
+      const normalizada = (lista || []).map((s: any) =>
+        typeof s === "string" ? { nome: s, origem: "global" } : s
+      );
+      setSecrets(normalizada);
     } catch {
       setSecrets([]);
     } finally {
@@ -517,6 +521,12 @@ export const SecretsView: Component = () => {
 
   const identificarTipoNome = (nome: string): SecretTemplate => {
     const n = nome.toLowerCase();
+    // Prefixo app:<tipo>: primeiro — substring genérica ("git" em "widget-key") errava o tipo
+    const mApp = /^app:([a-z0-9_-]+):/.exec(n);
+    if (mApp) {
+      const porTipo = TEMPLATES_SECRETS.find((t) => t.id === mApp[1]);
+      if (porTipo) return porTipo;
+    }
     if (n.includes("wp") || n.includes("wordpress")) {
       return TEMPLATES_SECRETS.find((t) => t.id === "wordpress")!;
     }

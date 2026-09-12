@@ -39,12 +39,23 @@ test.describe("E2E — Fluxo de Autenticação e Modal de Login", () => {
   });
 
   test("token válido deve autenticar com sucesso e liberar acesso ao sistema", async ({ page }) => {
-    await page.route("**/workspaces*", (route) => {
+    // Mock amplo: com o token válido, TODA a API responde (o app dispara
+    // dezenas de fetches de fundo após o login; qualquer 401 real reabriria
+    // o modal e o teste viraria corrida).
+    await page.route("**/*", (route) => {
+      const url = new URL(route.request().url());
+      // Documentos e assets estáticos sempre passam (são públicos)
+      if (route.request().resourceType() === "document") return route.continue();
+      if (/\.[a-z0-9]+$/i.test(url.pathname)) return route.continue();
+      if (url.pathname === "/events") return route.abort();
       const auth = route.request().headers()["authorization"];
-      if (auth === "Bearer token-secreto-valido") {
+      if (auth !== "Bearer token-secreto-valido") {
+        return route.fulfill({ status: 401, json: { erro: "Não autorizado" } });
+      }
+      if (url.pathname === "/workspaces") {
         return route.fulfill({ status: 200, json: [{ id: "ws-principal", path: "/tmp/ws" }] });
       }
-      return route.fulfill({ status: 401, json: { erro: "Não autorizado" } });
+      return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
     await page.goto(`/home`);
@@ -53,7 +64,9 @@ test.describe("E2E — Fluxo de Autenticação e Modal de Login", () => {
     await page.fill("#login-token", "token-secreto-valido");
     await page.click("#login-btn");
 
-    // Modal de login deve sumir
+    // Modal de login deve sumir e permanecer fora
+    await expect(page.locator("#login-screen")).toBeHidden({ timeout: 5000 });
+    await page.waitForTimeout(3000);
     await expect(page.locator("#login-screen")).toBeHidden({ timeout: 5000 });
 
     // Verifica que o token foi gravado no localStorage

@@ -63,7 +63,7 @@ test.describe("Apps e Segredos (E2E)", () => {
 
     // Alterna para 'Só Chat'
     await page.locator("button:has-text('Só Chat')").click();
-    await expect(page.locator("textarea, input[placeholder*='Peça para a IA']")).toBeVisible();
+    await expect(page.locator("main").locator("textarea, input[placeholder*='Peça para a IA']")).toBeVisible();
 
     // Alterna para 'Os Dois'
     await page.locator("button:has-text('Os Dois')").click();

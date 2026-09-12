@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, createEffect, Show, For } from "solid-js";
+import { type Component, createSignal, onCleanup, createEffect, Show, For } from "solid-js";
 import { useLocation, A } from "@solidjs/router";
 import {
   Radio,
@@ -26,7 +26,7 @@ import {
   Zap,
   Container,
 } from "lucide-solid";
-import { sseConnected, wsAtivo, setWsAtivo, workspaces, fetchApi, notificacoesNaoLidas, setSidebarMobileAberta } from "../lib/context";
+import { sseConnected, wsAtivo, setWsAtivo, workspaces, fetchApi, notificacoesNaoLidas, setSidebarMobileAberta, dockSecretarioAberto, setDockSecretarioAberto } from "../lib/context";
 import { ModalConfigIsolamento } from "./ModalConfigIsolamento";
 
 interface StatusInfo {
@@ -98,6 +98,16 @@ export const Topbar: Component = () => {
     carregarDriverInfo();
   });
 
+  // Hover card vivo: recarrega enquanto aberto (antes congelava no 1º hover)
+  createEffect(() => {
+    if (!hoverCard()) return;
+    void carregarStatus();
+    const t = window.setInterval(() => {
+      if (hoverCard()) void carregarStatus();
+    }, 5000);
+    onCleanup(() => window.clearInterval(t));
+  });
+
   const getBreadcrumb = () => {
     const p = location.pathname.replace(/^\//, "") || "home";
     const mapa: Record<string, string> = {
@@ -132,11 +142,13 @@ export const Topbar: Component = () => {
           fetchApi<any[]>("/execucoes?limite=6"),
           fetchApi<any[]>("/schedules"),
           fetchApi<any[]>("/tasks"),
-          fetchApi<any[]>("/approvals")
+          fetchApi<any[]>("/approvals"),
+          fetchApi<any[]>("/historico?tipo=fluxo&limite=6"),
+          fetchApi<any[]>("/meetings")
         );
       }
 
-      const [st, hl, execs, jobs, tasks, aprovs] = await Promise.allSettled(calls);
+      const [st, hl, execs, jobs, tasks, aprovs, hFluxos, reunioes] = await Promise.allSettled(calls);
 
       const getVal = <T,>(r: PromiseSettledResult<T> | undefined, def: T): T =>
         r && r.status === "fulfilled" ? r.value : def;
@@ -147,11 +159,26 @@ export const Topbar: Component = () => {
       const dJobs = getVal(jobs, []);
       const dTasks = getVal(tasks, []);
       const dAprovs = getVal(aprovs, []);
+      const dFluxosHist: any[] = Array.isArray(getVal(hFluxos, [])) ? getVal(hFluxos, []) : [];
+      const dReunioes: any[] = Array.isArray(getVal(reunioes, [])) ? getVal(reunioes, []) : [];
 
-      // 1. Executando agora ou última execução (considera jobs de background e Secretário)
+      // 1. Executando agora: agentes + fluxos + secretário + reunião ao vivo
       const secExec = dStatus?.secretario_executando;
+      const fluxoExec = dFluxosHist.find((f: any) => f.status === "executando");
+      const reuniaoViva = dReunioes.find((m: any) => {
+        const s = String(m.status || "");
+        return s === "em-andamento" || s === "em_andamento";
+      });
       const emAndamento =
         dExecs.find((e: any) => e.status === "executando") ||
+        (fluxoExec ? {
+          id: fluxoExec.id,
+          agente: fluxoExec.agente || `flow:${fluxoExec.flow || "?"}`,
+          ordem: fluxoExec.titulo || `Fluxo ${fluxoExec.flow || ""} em execução`,
+          inicio: fluxoExec.quando || new Date().toISOString(),
+          status: "executando",
+          tipo: "fluxo",
+        } : null) ||
         (secExec ? {
           id: secExec.id,
           agente: secExec.agente || "secretario-exec",
@@ -159,8 +186,20 @@ export const Topbar: Component = () => {
           inicio: secExec.inicio || new Date().toISOString(),
           status: "executando",
           tipo: "secretario",
+        } : null) ||
+        (reuniaoViva ? {
+          id: reuniaoViva.id,
+          agente: "mesa-reuniao",
+          ordem: reuniaoViva.pauta || `Reunião ${reuniaoViva.id} ao vivo`,
+          inicio: reuniaoViva.criado_em || reuniaoViva.atualizado_em || new Date().toISOString(),
+          status: "executando",
+          tipo: "reuniao",
         } : null);
-      const ultima = dExecs.length > 0 ? dExecs[0] : null;
+      const candUltima = [
+        dExecs.length > 0 ? dExecs[0] : null,
+        ...dFluxosHist.slice(0, 1),
+      ].filter(Boolean).sort((a: any, b: any) => String(b.quando || b.inicio || "").localeCompare(String(a.quando || a.inicio || "")));
+      const ultima = candUltima.length > 0 ? candUltima[0] : null;
 
       // 2. Próxima rotina programada
       const now = Date.now();
@@ -188,11 +227,15 @@ export const Topbar: Component = () => {
           t.coluna === "em_andamento" ||
           t.coluna === "in_progress",
       );
+      const abertas = dTasks.filter((t: any) => t.coluna !== "feito");
+      const pesoPrioridade = (p: string) => (p === "alta" ? 0 : p === "media" ? 1 : 2);
       const taskPrioritaria =
         tasksAndamento.length > 0
           ? tasksAndamento[0]
-          : dTasks.find((t: any) => t.coluna !== "feito" && t.prioridade === "alta") ||
-            (dTasks.length > 0 ? dTasks[0] : null);
+          : [...abertas].sort((a: any, b: any) =>
+              pesoPrioridade(a.prioridade) - pesoPrioridade(b.prioridade) ||
+              String(a.due || "9999").localeCompare(String(b.due || "9999"))
+            )[0] || null;
 
       setStatusInfo({
         scheduler: dStatus?.scheduler,
@@ -321,6 +364,21 @@ export const Topbar: Component = () => {
 
       {/* Ações e Controles à Direita */}
       <div class="flex items-center gap-2.5">
+        {/* Alternar Secretário lateral (Ctrl+J) — desktop */}
+        <button
+          type="button"
+          data-testid="secretario-toggle"
+          onClick={() => setDockSecretarioAberto(!dockSecretarioAberto())}
+          class={`hidden lg:flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer ${
+            dockSecretarioAberto()
+              ? "bg-emerald-950/30 border-emerald-800/50 text-emerald-300 hover:border-emerald-600/80"
+              : "bg-zinc-900/60 border-zinc-800/60 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700"
+          }`}
+          title="Alternar Secretário lateral (Ctrl+J)"
+        >
+          <Bot size={13} />
+          <span class="font-medium font-mono">secretário</span>
+        </button>
         {/* Central de Notificações com Badge */}
         <A
           href="/notificacoes"
@@ -362,8 +420,8 @@ export const Topbar: Component = () => {
               size={12}
               class={sseConnected() ? "text-emerald-400 animate-pulse" : "text-zinc-500"}
             />
-            <span class="font-medium font-mono">
-              {sseConnected() ? "ao vivo" : "offline"}
+            <span class="font-medium font-mono" title={sseConnected() ? "Canal de eventos conectado" : "Canal de eventos desconectado"}>
+              {sseConnected() ? "stream" : "offline"}
             </span>
             <Show when={statusInfo().executandoAgora}>
               <span class="h-1.5 w-1.5 rounded-full bg-blue-400 animate-ping ml-0.5" />
@@ -430,10 +488,10 @@ export const Topbar: Component = () => {
                           <span>Executando Agora</span>
                         </div>
                         <A
-                          href={exec().tipo === "secretario" ? `/secretario?sessao=${encodeURIComponent(exec().id)}` : `/historico?run=${encodeURIComponent(exec().id)}`}
+                          href={exec().tipo === "secretario" ? `/secretario?sessao=${encodeURIComponent(exec().id)}` : exec().tipo === "reuniao" ? `/reunioes?reuniao=${encodeURIComponent(exec().id)}` : `/historico?run=${encodeURIComponent(exec().id)}`}
                           class="px-2 py-0.5 rounded bg-blue-900/50 hover:bg-blue-800 text-[10px] text-blue-200 border border-blue-700/60 font-mono transition-colors"
                         >
-                          {exec().tipo === "secretario" ? "Ver Chat Ao Vivo →" : "Ver Log →"}
+                          {exec().tipo === "secretario" ? "Ver Chat Ao Vivo →" : exec().tipo === "reuniao" ? "Abrir Sala →" : exec().tipo === "fluxo" ? "Ver Fluxo →" : "Ver Log →"}
                         </A>
                       </div>
 
@@ -523,11 +581,17 @@ export const Topbar: Component = () => {
                 {/* Scheduler */}
                 <div class="p-2 rounded-lg bg-zinc-900/50 border border-zinc-800/60 text-center">
                   <div class="text-zinc-500">Scheduler</div>
-                  <div class="text-emerald-400 font-bold">ativo</div>
+                  <div class={statusInfo().scheduler === false ? "text-rose-400 font-bold" : "text-emerald-400 font-bold"}>
+                    {statusInfo().scheduler === false ? "off" : "ativo"}
+                  </div>
                 </div>
 
                 {/* HITL Aprovações */}
-                <div class="p-2 rounded-lg bg-zinc-900/50 border border-zinc-800/60 text-center">
+                <A
+                  href="/notificacoes"
+                  class="p-2 rounded-lg bg-zinc-900/50 border border-zinc-800/60 text-center hover:border-zinc-700 transition-colors"
+                  title="Ver aprovações pendentes"
+                >
                   <div class="text-zinc-500">Aprovações</div>
                   <div
                     class={
@@ -538,7 +602,7 @@ export const Topbar: Component = () => {
                   >
                     {statusInfo().aprovacoesPendentes || 0} pend.
                   </div>
-                </div>
+                </A>
               </div>
 
               {/* Rodapé com Atalhos Rápidos */}

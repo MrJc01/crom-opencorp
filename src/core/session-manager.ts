@@ -1257,7 +1257,11 @@ export class SessionManager {
 
   async listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<ResumoExecucao[]> {
     const metas = await this.registros.listar(wsPath, "execucoes");
-    const filtradas = metas.filter((meta) => !filtro?.agente || meta.criado_por === filtro.agente);
+    // Só sessões de verdade (tag "sessao"): registros avulsos na categoria
+    // (ex.: saída de flow gravada em execucoes/*) não são execuções e
+    // apareciam como fantasmas "executando" no Histórico.
+    const sessoes = metas.filter((meta) => (meta.tags ?? []).includes("sessao"));
+    const filtradas = sessoes.filter((meta) => !filtro?.agente || meta.criado_por === filtro.agente);
     for (const meta of filtradas) {
       await this.reconciliarZombie(wsPath, meta);
     }

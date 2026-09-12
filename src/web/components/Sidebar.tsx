@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, For, Show } from "solid-js";
+import { type Component, createSignal, createEffect, onMount, onCleanup, For, Show } from "solid-js";
 import { A, useLocation } from "@solidjs/router";
 import {
   Home,
@@ -22,7 +22,7 @@ import {
   Plus,
   X,
 } from "lucide-solid";
-import { wsAtivo, setWsAtivo, workspaces, carregarWorkspaces, sidebarMobileAberta, setSidebarMobileAberta } from "../lib/context";
+import { wsAtivo, setWsAtivo, workspaces, carregarWorkspaces, sidebarMobileAberta, setSidebarMobileAberta, fetchApi } from "../lib/context";
 import { NovoWorkspaceModal } from "./NovoWorkspaceModal";
 
 interface NavItem {
@@ -42,6 +42,21 @@ export const Sidebar: Component = () => {
   const location = useLocation();
   const [colapsado, setColapsado] = createSignal(localStorage.getItem("oc-sidebar-colapsada") === "1");
   const [modalNovoWs, setModalNovoWs] = createSignal(false);
+  const [badgeTasks, setBadgeTasks] = createSignal(0);
+
+  // Badges vivos: tasks em andamento
+  const carregarBadges = async () => {
+    if (!wsAtivo()) {
+      setBadgeTasks(0);
+      return;
+    }
+    try {
+      const tasks = await fetchApi<any[]>("/tasks").catch(() => []);
+      setBadgeTasks(
+        (tasks || []).filter((t: any) => t.coluna === "fazendo" || t.coluna === "em_andamento" || t.coluna === "in_progress").length
+      );
+    } catch {}
+  };
 
   // No mobile drawer (sidebarMobileAberta), a sidebar NUNCA deve ficar colapsada
   const estaColapsado = () => colapsado() && !sidebarMobileAberta();
@@ -50,6 +65,18 @@ export const Sidebar: Component = () => {
     if (workspaces().length === 0) {
       void carregarWorkspaces();
     }
+    void carregarBadges();
+    const timer = setInterval(() => {
+      if (wsAtivo() && typeof document !== "undefined" && !document.hidden) {
+        void carregarBadges();
+      }
+    }, 15000);
+    onCleanup(() => clearInterval(timer));
+  });
+
+  createEffect(() => {
+    wsAtivo();
+    void carregarBadges();
   });
 
   const toggleColapso = () => {
@@ -65,7 +92,7 @@ export const Sidebar: Component = () => {
         { href: "/home", label: "Início", icone: Home },
         { href: "/secretario", label: "Secretário", icone: MessageSquare },
         { href: "/workspace", label: "Workspace", icone: FolderCode },
-        { href: "/tasks", label: "Tasks", icone: CheckSquare },
+        { href: "/tasks", label: "Tasks", icone: CheckSquare, badge: () => badgeTasks() || undefined },
         { href: "/agentes", label: "Agentes", icone: Bot },
         { href: "/reunioes", label: "Reuniões", icone: Users },
       ],

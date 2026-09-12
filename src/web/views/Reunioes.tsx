@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, createEffect, For, Show } from "solid-js";
+import { type Component, createSignal, onMount, onCleanup, createEffect, For, Show } from "solid-js";
 import { useSearchParams, useNavigate } from "@solidjs/router";
 import {
   Users,
@@ -123,20 +123,45 @@ export const ReunioesView: Component = () => {
     }
   });
 
-  // Polling a cada 4s quando em sala ativa para sincronizar mensagens
+  // Normaliza hífen/underscore (backend usa ambos) + trata agendando como viva
+  const normStatus = (s: unknown) => {
+    const n = String(s || "").replace(/-/g, "_");
+    return n;
+  };
+  const salaViva = (s: any) => {
+    const n = normStatus(s?.status);
+    return n === "em_andamento" || n === "agendando";
+  };
+
+  // Polling a cada 4s quando em sala ativa: mensagens + turno/status/ata + lista
   onMount(() => {
     void carregarReunioes();
     pollingInterval = setInterval(() => {
       const ativa = salaAtiva();
-      if (ativa && !enviando() && ativa.status !== "encerrada") {
+      if (ativa && !enviando() && normStatus(ativa.status) !== "encerrada") {
         void fetchApi<any>(`/meetings/${encodeURIComponent(ativa.id)}`).then((est) => {
-          if (est && Array.isArray(est.mensagens) && est.mensagens.length !== mensagens().length) {
+          if (!est) return;
+          if (Array.isArray(est.mensagens) && est.mensagens.length !== mensagens().length) {
             setMensagens(est.mensagens);
             setTimeout(scrollFim, 50);
           }
+          const nova = normStatus(est.status);
+          if (nova && nova !== normStatus(ativa.status)) {
+            setSalaAtiva({ ...ativa, status: est.status });
+          }
+          if (typeof est.turno_atual === "number" && est.turno_atual !== (ativa as any).turno_atual) {
+            setSalaAtiva((s: any) => (s ? { ...s, turno_atual: est.turno_atual } : s));
+          }
+          if (est.ata && est.ata !== (ativa as any).ata) {
+            setSalaAtiva((s: any) => (s ? { ...s, ata: est.ata } : s));
+          }
         }).catch(() => {});
+        void carregarReunioes();
       }
     }, 4000);
+    onCleanup(() => {
+      if (pollingInterval) clearInterval(pollingInterval);
+    });
   });
 
   const criarNovaReuniao = async () => {
@@ -201,6 +226,8 @@ export const ReunioesView: Component = () => {
       setTimeout(scrollFim, 50);
     } catch (err: any) {
       showToast(`Erro ao enviar mensagem: ${err.message}`, "erro");
+      // Rollback da otimista para não deixar mensagem fantasma no feed
+      setMensagens((prev) => prev.filter((m) => m !== msgLocal));
     } finally {
       setEnviando(false);
       setAgenteDigitando(null);
@@ -262,12 +289,12 @@ export const ReunioesView: Component = () => {
               <Show when={salaAtiva()}>
                 <span
                   class={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase ${
-                    salaAtiva()!.status === "em_andamento" || salaAtiva()!.status === "em-andamento"
+                    salaViva(salaAtiva())
                       ? "bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 animate-pulse"
                       : "bg-zinc-800 text-zinc-400 border border-zinc-700"
                   }`}
                 >
-                  {salaAtiva()!.status === "em_andamento" || salaAtiva()!.status === "em-andamento" ? "Ao Vivo" : "Concluída"}
+                  {salaViva(salaAtiva()) ? "Ao Vivo" : normStatus(salaAtiva()!.status) === "agendando" ? "Agendada" : "Concluída"}
                 </span>
               </Show>
             </div>
@@ -292,7 +319,7 @@ export const ReunioesView: Component = () => {
           <Button size="xs" variant="secondary" onClick={() => setModalHistorico(true)} title="Histórico de reuniões">
             <History size={13} class="mr-1" /> Reuniões ({reunioes().length})
           </Button>
-          <Show when={salaAtiva() && (salaAtiva()!.status === "em_andamento" || salaAtiva()!.status === "em-andamento")}>
+          <Show when={salaAtiva() && salaViva(salaAtiva())}>
             <Button
               size="xs"
               variant="secondary"

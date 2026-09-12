@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, createEffect, For, Show } from "solid-js";
+import { type Component, createSignal, onMount, onCleanup, createEffect, For, Show } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import {
   Plus,
@@ -229,7 +229,11 @@ export const TasksView: Component = () => {
 
   const executarTask = async (task: Task, instrucaoExtra?: string) => {
     const rawResp = task.responsavel || "";
+    const semResponsavel = !rawResp.trim();
     const agenteId = rawResp.replace(/^@/, "").replace(/^agente:/, "").trim() || agentes()[0]?.id || "secretario-exec";
+    if (semResponsavel) {
+      showToast(`Task sem responsável — usando @${agenteId} (primeiro do catálogo)`, "aviso");
+    }
     setExecutandoTask(true);
     try {
       let ordem = `Executar tarefa [${task.id}] "${task.titulo}": ${task.descricao || ""}`.trim();
@@ -310,6 +314,13 @@ export const TasksView: Component = () => {
 
   onMount(() => {
     void carregarTasks();
+    // Kanban vivo: agentes/CLI movem tasks fora da tela
+    const timer = setInterval(() => {
+      if (wsAtivo() && typeof document !== "undefined" && !document.hidden) {
+        void carregarTasks();
+      }
+    }, 4000);
+    onCleanup(() => clearInterval(timer));
   });
 
   createEffect(() => {
@@ -324,9 +335,10 @@ export const TasksView: Component = () => {
     { id: "feito", nome: "Concluído", cor: "border-emerald-500 text-emerald-400" },
   ];
 
+  const semPrefixoAgente = (r?: string | null) => String(r || "").replace(/^agente:/, "");
   const tasksFiltradas = () => {
     return tasks().filter((t) => {
-      const matchResp = filtroResponsavel() === "todos" || t.responsavel === filtroResponsavel();
+      const matchResp = filtroResponsavel() === "todos" || semPrefixoAgente(t.responsavel) === filtroResponsavel();
       const matchBusca =
         !busca().trim() ||
         t.titulo.toLowerCase().includes(busca().toLowerCase()) ||
@@ -446,9 +458,11 @@ export const TasksView: Component = () => {
 
                           <div class="flex items-center gap-1.5">
                             <Show when={task.due}>
-                              <span class="flex items-center gap-1 font-mono text-zinc-400">
+                              <span class="flex items-center gap-1 font-mono text-zinc-400" title={String(task.due)}>
                                 <Calendar size={10} />
-                                {new Date(task.due!).toLocaleDateString("pt-BR", { month: "short", day: "numeric" })}
+                                {Number.isNaN(new Date(task.due!).getTime())
+                                  ? String(task.due)
+                                  : new Date(task.due!).toLocaleDateString("pt-BR", { month: "short", day: "numeric" })}
                               </span>
                             </Show>
 

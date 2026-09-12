@@ -55,7 +55,7 @@ test.describe("Navegação SolidJS e Transição entre Views", () => {
     await btnColapso.click();
 
     // A sidebar deve ter largura recolhida (w-16)
-    const aside = page.locator("aside");
+    const aside = page.locator("aside#sidebar-principal");
     await expect(aside).toHaveClass(/md:w-16/);
 
     // Clica para expandir novamente

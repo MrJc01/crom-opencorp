@@ -1,11 +1,14 @@
 import { type Component, onMount, onCleanup, createEffect, Show } from "solid-js";
 import { Router, Route, useLocation, useNavigate, Navigate } from "@solidjs/router";
+import { Bot } from "lucide-solid";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { GlobalTitlebar } from "./components/GlobalTitlebar";
 import { LoginModal } from "./components/LoginModal";
 import { ToastContainer } from "./ui/Toast";
-import { carregarWorkspaces, conectarSSE, wsAtivo, autenticado, sidebarMobileAberta } from "./lib/context";
+import SecretarioDock from "./components/SecretarioDock";
+import { ChatStoreProvider } from "./lib/chat/store";
+import { carregarWorkspaces, conectarSSE, wsAtivo, autenticado, sidebarMobileAberta, dockSecretarioAberto, setDockSecretarioAberto } from "./lib/context";
 
 // Views
 import { SecretarioView } from "./views/Secretario";
@@ -40,6 +43,24 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
     lidarComHash();
     window.addEventListener("hashchange", lidarComHash);
     onCleanup(() => window.removeEventListener("hashchange", lidarComHash));
+
+    // Atalho global Ctrl+J / Cmd+J: alterna o Secretário lateral
+    const aoTeclar = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        setDockSecretarioAberto(!dockSecretarioAberto());
+      }
+    };
+    window.addEventListener("keydown", aoTeclar);
+    onCleanup(() => window.removeEventListener("keydown", aoTeclar));
+
+    // Ao cruzar para viewport mobile, fecha o overlay do dock (padrão de drawer)
+    const mqMobile = window.matchMedia("(max-width: 1023.5px)");
+    const aoMudarViewport = (e: MediaQueryListEvent) => {
+      if (e.matches) setDockSecretarioAberto(false);
+    };
+    mqMobile.addEventListener("change", aoMudarViewport);
+    onCleanup(() => mqMobile.removeEventListener("change", aoMudarViewport));
   });
 
   // Quando não há workspace ativo, rotas restritas a workspaces redirecionam para a home global
@@ -67,10 +88,28 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
         <Show when={wsAtivo()} fallback={<GlobalTitlebar />}>
           <Topbar />
         </Show>
-        <main class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative bg-zinc-950">
-          {props.children}
-        </main>
+        <div class="flex flex-1 min-h-0 overflow-hidden">
+          <main class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative bg-zinc-950">
+            {props.children}
+          </main>
+          <Show when={dockSecretarioAberto() && location.pathname !== "/secretario"}>
+            <SecretarioDock />
+          </Show>
+        </div>
       </div>
+      {/* Botão flutuante do Secretário: abre o chat lateral em qualquer página */}
+      <Show when={location.pathname !== "/secretario" && !dockSecretarioAberto()}>
+        <button
+          type="button"
+          data-testid="secretario-fab"
+          onClick={() => setDockSecretarioAberto(true)}
+          class="fixed bottom-4 right-4 lg:bottom-6 lg:right-6 z-40 h-12 w-12 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950/50 flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer"
+          title="Abrir Secretário (Ctrl+J)"
+          aria-label="Abrir Secretário"
+        >
+          <Bot size={22} />
+        </button>
+      </Show>
       <ToastContainer />
     </div>
   );
@@ -78,7 +117,8 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
 
 export const App: Component = () => {
   return (
-    <Router root={AppLayout}>
+    <ChatStoreProvider>
+      <Router root={AppLayout}>
       <Route path="/" component={HomeView} />
       <Route path="/home" component={HomeView} />
       <Route path="/secretario" component={SecretarioView} />
@@ -95,6 +135,7 @@ export const App: Component = () => {
       <Route path="/notificacoes" component={NotificacoesView} />
       <Route path="/docs" component={DocsView} />
       <Route path="/config" component={ConfigView} />
-    </Router>
+      </Router>
+    </ChatStoreProvider>
   );
 };

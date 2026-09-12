@@ -623,8 +623,10 @@ export const ConfigView: Component = () => {
     const [modificado, setModificado] = createSignal(false);
 
     createEffect(() => {
-      setVal(valorAtual());
-      setModificado(false);
+      // Não sobrescreve digitação em andamento (só sincroniza dado novo vindo do server)
+      if (!modificado()) {
+        setVal(valorAtual());
+      }
     });
 
     const origem = () => item()?.origem || "default";
@@ -1151,6 +1153,9 @@ export const ConfigView: Component = () => {
             onClick={() => {
               setEscopoConfig("global");
               void carregarSettings();
+              void carregarChaves();
+              void carregarTools();
+              void carregarSecrets();
             }}
           >
             <Layers size={13} class="shrink-0" />
@@ -1169,6 +1174,9 @@ export const ConfigView: Component = () => {
               }
               setEscopoConfig("workspace");
               void carregarSettings();
+              void carregarChaves();
+              void carregarTools();
+              void carregarSecrets();
             }}
           >
             <Bot size={13} class="shrink-0" />

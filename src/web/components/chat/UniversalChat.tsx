@@ -489,6 +489,7 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
                 />
 
                 <PromptInput
+                  id={props.inputId}
                   valor={props.valorPrompt !== undefined ? props.valorPrompt : localPrompt()}
                   onInput={(v) => {
                     setLocalPrompt(v);

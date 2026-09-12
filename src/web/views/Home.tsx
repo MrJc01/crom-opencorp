@@ -183,7 +183,26 @@ export const HomeView: Component = () => {
   const execucoesFalhas = () => {
     const fi = falhasIgnoradas();
     const set = fi instanceof Set ? fi : new Set<string>();
-    return execucoes().filter((e: any) => e.status === "falhou" && !set.has(e.id));
+    const deAgentes = execucoes().filter((e: any) => e.status === "falhou" && !set.has(e.id));
+    const deFluxos = ultimosFluxos()
+      .filter((f: any) => f.status === "falhou" && !set.has(f.id))
+      .map((f: any) => ({ ...f, tipo: "fluxo" }));
+    return [...deAgentes, ...deFluxos];
+  };
+
+  // Feed combinado agentes + fluxos ordenado por recência (antes só agentes).
+  const feedCombinado = () => {
+    const deAgentes = execucoes().map((e: any) => ({ ...e, _quando: e.inicio || "" }));
+    const deFluxos = ultimosFluxos().map((f: any) => ({
+      ...f,
+      inicio: f.inicio || f.quando,
+      _quando: f.quando || f.inicio || "",
+      gatilho_tipo: f.gatilho?.tipo || "flow",
+      gatilho_origem: f.gatilho?.origem || f.flow || f.id,
+    }));
+    return [...deAgentes, ...deFluxos]
+      .sort((a: any, b: any) => String(b._quando || "").localeCompare(String(a._quando || "")))
+      .slice(0, 30);
   };
 
   // Ref do container de abas para scroll com setas
@@ -191,7 +210,14 @@ export const HomeView: Component = () => {
 
   const repetirExecucao = async (exec: any) => {
     try {
-      if (exec.gatilho_origem && exec.gatilho_tipo === "cron") {
+      if (exec.tipo === "fluxo" && exec.flow) {
+        const res = await fetchApi<{ exec_id?: string }>(`/flows/${encodeURIComponent(exec.flow)}/run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        showToast(`Fluxo reenviado (${res?.exec_id ?? "?"})!`, "sucesso");
+      } else if (exec.gatilho_origem && exec.gatilho_tipo === "cron") {
         await fetchApi(`/schedules/${encodeURIComponent(exec.gatilho_origem)}/run`, { method: "POST" });
         showToast(`Job ${exec.gatilho_origem} redisparado com sucesso!`, "sucesso");
       } else {
@@ -226,7 +252,7 @@ export const HomeView: Component = () => {
   const carregarDadosHome = async () => {
     if (!wsAtivo()) return;
     try {
-      const [tasks, ags, flows, aprovs, budget, status, jobs, rExecs, sSec, hFluxos] = await Promise.allSettled([
+      const [tasks, ags, flows, aprovs, budget, status, jobs, rExecs, sSec, hFluxos, reunioes] = await Promise.allSettled([
         fetchApi<any[]>("/tasks"),
         fetchApi<any[]>("/agents"),
         fetchApi<any[]>("/flows"),
@@ -236,7 +262,8 @@ export const HomeView: Component = () => {
         fetchApi<any[]>("/schedules"),
         fetchApi<any[]>("/execucoes?limite=30"),
         fetchApi<any[]>("/secretario/sessoes"),
-        fetchApi<any[]>("/historico?tipo=fluxo&limite=10"),
+        fetchApi<any[]>("/historico?tipo=fluxo&limite=30"),
+        fetchApi<any[]>("/meetings"),
       ]);
 
       const getVal = <T>(r: PromiseSettledResult<T>, def: T): T => (r.status === "fulfilled" && r.value != null ? r.value : def);
@@ -258,18 +285,45 @@ export const HomeView: Component = () => {
       setSessoesSecretario(Array.isArray(getVal(sSec, [])) ? getVal(sSec, []) : []);
       const dFluxosHist = Array.isArray(getVal(hFluxos, [])) ? getVal(hFluxos, []) : [];
       setUltimosFluxos(dFluxosHist);
+      const dReunioes = Array.isArray(getVal(reunioes, [])) ? getVal(reunioes, []) : [];
 
-      // Identificar se há algum agente executando agora (background run OU Secretário Executivo)
+      // Executando agora: agentes (ledger) + fluxos (registries) + secretário + reunião ao vivo.
+      // Antes só o ledger era consultado — fluxo/reunião em execução dizia "nada rodando".
+      const fluxoExec = dFluxosHist.find((f: any) => f.status === "executando");
+      const reuniaoViva = dReunioes.find((m: any) => {
+        const st = String(m.status || "");
+        return st === "em-andamento" || st === "em_andamento";
+      });
       const secSessoes = Array.isArray(getVal(sSec, [])) ? getVal(sSec, []) : [];
       const secExec = secSessoes.find((s: any) => s.executando || s.status === "executando") || dStatus?.secretario_executando;
-      const emAndamento = dExecs.find((e: any) => e.status === "executando") || (secExec ? {
-        id: secExec.id,
-        agente: secExec.agent || secExec.agente || "secretario-exec",
-        inicio: secExec.time?.updated ? new Date(secExec.time.updated).toISOString() : secExec.inicio || new Date().toISOString(),
-        ordem: secExec.titulo_real || secExec.title || secExec.titulo || "Conversa com Secretário Executivo em andamento",
-        status: "executando",
-        tipo: "secretario",
-      } : null);
+      const emAndamento = dExecs.find((e: any) => e.status === "executando")
+        || (fluxoExec ? {
+          id: fluxoExec.id,
+          agente: fluxoExec.agente || `flow:${fluxoExec.flow || "?"}`,
+          inicio: fluxoExec.quando || new Date().toISOString(),
+          ordem: fluxoExec.titulo || `Fluxo ${fluxoExec.flow || ""} em execução`,
+          status: "executando",
+          tipo: "fluxo",
+          flow: fluxoExec.flow,
+          nos_total: fluxoExec.nos_total,
+          nos_ok: fluxoExec.nos_ok,
+        } : null)
+        || (secExec ? {
+          id: secExec.id,
+          agente: secExec.agent || secExec.agente || "secretario-exec",
+          inicio: secExec.time?.updated ? new Date(secExec.time.updated).toISOString() : secExec.inicio || new Date().toISOString(),
+          ordem: secExec.titulo_real || secExec.title || secExec.titulo || "Conversa com Secretário Executivo em andamento",
+          status: "executando",
+          tipo: "secretario",
+        } : null)
+        || (reuniaoViva ? {
+          id: reuniaoViva.id,
+          agente: "mesa-reuniao",
+          inicio: reuniaoViva.criado_em || reuniaoViva.atualizado_em || new Date().toISOString(),
+          ordem: reuniaoViva.pauta || `Reunião ${reuniaoViva.id} ao vivo`,
+          status: "executando",
+          tipo: "reuniao",
+        } : null);
       setExecutandoAgora(emAndamento || null);
 
       const hoje = new Date().toISOString().slice(0, 10);
@@ -277,7 +331,7 @@ export const HomeView: Component = () => {
         (t: any) => t.coluna !== "feito" && t.due && String(t.due).slice(0, 10) < hoje
       ).length;
 
-      // Custo: pega do budget ou calcula das últimas execuções
+      // Custo: pega do budget ou calcula das últimas execuções (agentes + fluxos)
       let custoStr = "US$ 0.0000";
       if (dBudget?.estado?.workspace_usd_hoje !== undefined) {
         custoStr = `US$ ${Number(dBudget.estado.workspace_usd_hoje).toFixed(4)}`;
@@ -285,7 +339,10 @@ export const HomeView: Component = () => {
         const custoExecs = dExecs
           .filter((e: any) => e.custo_usd && e.inicio && String(e.inicio).slice(0, 10) === hoje)
           .reduce((acc: number, e: any) => acc + Number(e.custo_usd || 0), 0);
-        if (custoExecs > 0) custoStr = `US$ ${custoExecs.toFixed(4)}`;
+        const custoFluxos = dFluxosHist
+          .filter((f: any) => f.custo_usd && f.quando && String(f.quando).slice(0, 10) === hoje)
+          .reduce((acc: number, f: any) => acc + Number(f.custo_usd || 0), 0);
+        if (custoExecs + custoFluxos > 0) custoStr = `US$ ${(custoExecs + custoFluxos).toFixed(4)}`;
       }
 
       setMetricas({
@@ -390,7 +447,17 @@ export const HomeView: Component = () => {
     if (Array.isArray(args) && args[0] === "agent" && args[1] === "run") {
       return args[2];
     }
-    return "agente";
+    if (Array.isArray(args) && args[0] === "meeting" && args[1] === "iniciar") {
+      return "mesa-reuniao";
+    }
+    if (Array.isArray(args) && args[0] === "flow" && args[1] === "run") {
+      return `flow:${args[2] || "?"}`;
+    }
+    if (Array.isArray(args) && args[0] === "node" && typeof args[1] === "string") {
+      const base = args[1].split("/").pop() || "script";
+      return base.replace(/\.(mjs|cjs|js)$/, "");
+    }
+    return "rotina";
   };
 
   // Lista ordenada das próximas rotinas (futuras)
@@ -408,6 +475,18 @@ export const HomeView: Component = () => {
       })
       .filter((j: any) => j.diffMs >= -5000) // apenas futuras ou disparando agora
       .sort((a: any, b: any) => a.diffMs - b.diffMs);
+  };
+
+  // Rotinas com proxima_exec travada no passado (scheduler parado?) — antes sumiam
+  // em silêncio e o banner declarava "Sistema Autônomo Online".
+  const jobsAtrasados = () => {
+    const now = agoraMs();
+    return schedules()
+      .filter((j: any) => j.ativo !== false && j.proxima_exec)
+      .map((j: any) => ({ ...j, diffMs: new Date(j.proxima_exec).getTime() - now, agente: extrairAgenteJob(j.args) }))
+      .filter((j: any) => j.diffMs < -5000)
+      .sort((a: any, b: any) => a.diffMs - b.diffMs)
+      .slice(0, 5);
   };
 
   const proximoImediato = () => {
@@ -431,12 +510,6 @@ export const HomeView: Component = () => {
         void carregarDadosHome();
       }
     }, 5000);
-  });
-
-  createEffect(() => {
-    if (wsAtivo()) {
-      void carregarDadosHome();
-    }
   });
 
   onCleanup(() => {
@@ -558,22 +631,30 @@ export const HomeView: Component = () => {
                   </span>
                 </div>
                 <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+                  <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono">
+                    {exec().tipo === "fluxo" ? "FLUXO" : exec().tipo === "secretario" ? "SECRETÁRIO" : exec().tipo === "reuniao" ? "REUNIÃO" : "AGENTE"}
+                  </span>
                   <span class="text-sm font-bold text-zinc-100 font-mono">
                     @{exec().agente}
                   </span>
                   <span class="text-xs text-zinc-400 font-mono">
-                    · Gatilho: {exec().gatilho_tipo} ({exec().gatilho_origem || exec().id})
+                    · Gatilho: {exec().gatilho_tipo || exec().tipo} ({exec().gatilho_origem || exec().id})
                   </span>
+                  <Show when={exec().tipo === "fluxo" && exec().nos_total}>
+                    <span class="text-[11px] text-indigo-300/80 font-mono">
+                      · {exec().nos_ok ?? 0}/{exec().nos_total} nós
+                    </span>
+                  </Show>
                 </div>
               </div>
             </div>
 
             <div class="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto">
               <A
-                href={`/historico?run=${encodeURIComponent(exec().id)}`}
+                href={exec().tipo === "secretario" ? `/secretario?sessao=${encodeURIComponent(exec().id)}` : exec().tipo === "reuniao" ? `/reunioes?reuniao=${encodeURIComponent(exec().id)}` : `/historico?run=${encodeURIComponent(exec().id)}`}
                 class="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs text-zinc-200 font-medium transition-colors"
               >
-                Acompanhar Log →
+                {exec().tipo === "secretario" ? "Abrir Chat →" : exec().tipo === "reuniao" ? "Abrir Sala →" : "Acompanhar Log →"}
               </A>
             </div>
           </div>
@@ -684,6 +765,66 @@ export const HomeView: Component = () => {
         }}
       </Show>
 
+      {/* Rotinas atrasadas: proxima_exec no passado = scheduler parado/travado */}
+      <Show when={jobsAtrasados().length > 0}>
+        <div class="p-4 rounded-xl border border-amber-500/50 bg-amber-950/20 space-y-2">
+          <div class="flex items-center gap-2 text-xs font-bold text-amber-300 font-mono">
+            <AlertTriangle size={14} /> {jobsAtrasados().length} rotina(s) atrasada(s) — proxima_exec no passado
+          </div>
+          <For each={jobsAtrasados()}>
+            {(j) => (
+              <div class="flex items-center justify-between gap-3 text-xs bg-black/30 rounded-lg px-3 py-2">
+                <span class="font-mono text-zinc-200 truncate">{j.nome}</span>
+                <span class="font-mono text-amber-300/80 flex-shrink-0">
+                  prevista {new Date(j.proxima_exec).toLocaleTimeString("pt-BR")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => dispararJobAgora(j.id)}
+                  class="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-mono text-[11px] border border-amber-500/40 cursor-pointer flex-shrink-0"
+                >
+                  Rodar agora
+                </button>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+
+      {/* Aprovações HITL pendentes (se a policy travar algo, aparece aqui com 1 clique) */}
+      <Show when={aprovacoes().length > 0}>
+        <div class="p-4 rounded-xl border border-amber-500/50 bg-amber-950/20 space-y-2">
+          <div class="flex items-center gap-2 text-xs font-bold text-amber-300 font-mono">
+            <AlertTriangle size={14} /> {aprovacoes().length} aprovação(ões) humana(s) pendente(s)
+          </div>
+          <For each={aprovacoes().slice(0, 5)}>
+            {(ap: any) => (
+              <div class="flex items-center justify-between gap-3 text-xs bg-black/30 rounded-lg px-3 py-2">
+                <span class="text-zinc-200 truncate" title={ap.ordem || ap.motivo_guard || ap.id}>
+                  {(ap.ordem || ap.motivo_guard || ap.id).slice(0, 160)}
+                </span>
+                <div class="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => responderAprovacao(ap.id, true)}
+                    class="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 font-mono text-[11px] border border-emerald-500/40 cursor-pointer"
+                  >
+                    Aprovar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => responderAprovacao(ap.id, false)}
+                    class="px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-mono text-[11px] border border-rose-500/40 cursor-pointer"
+                  >
+                    Rejeitar
+                  </button>
+                </div>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+
       {/* 5 KPIs de Governança */}
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         {/* Custo do Dia */}
@@ -741,9 +882,18 @@ export const HomeView: Component = () => {
             <Activity size={15} class="text-emerald-400" />
           </div>
           <div class="flex items-center gap-2 mt-1">
-            <span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400">
-              <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Scheduler OK
-            </span>
+            <Show
+              when={metricas().schedulerOk !== false}
+              fallback={
+                <span class="inline-flex items-center gap-1 text-xs font-semibold text-rose-400">
+                  <span class="h-2 w-2 rounded-full bg-rose-400" /> Scheduler OFF
+                </span>
+              }
+            >
+              <span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400">
+                <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Scheduler OK
+              </span>
+            </Show>
           </div>
           <div class="text-[10px] text-zinc-500 mt-1">Rondas 24h ativas</div>
         </div>
@@ -862,7 +1012,7 @@ export const HomeView: Component = () => {
 
           <div class="space-y-2 max-h-80 overflow-y-auto scrollbar-thin pr-1">
             <For
-              each={execucoes()}
+              each={feedCombinado()}
               fallback={
                 <div class="py-8 text-center text-xs text-zinc-500">
                   Nenhuma atividade recente registrada neste workspace.
@@ -896,7 +1046,7 @@ export const HomeView: Component = () => {
                         </span>
                       </div>
                       <div class="text-[10px] text-zinc-500 truncate">
-                        {at.gatilho_tipo || "cron"} · {at.gatilho_origem || at.id}
+                        {at.gatilho_tipo || at.tipo || "manual"} · {at.gatilho_origem || at.id}
                       </div>
                     </div>
                   </div>
@@ -1183,11 +1333,11 @@ export const HomeView: Component = () => {
 
                   <div class="flex items-center gap-2">
                     <A
-                      href={exec().tipo === "secretario" ? `/secretario?sessao=${encodeURIComponent(exec().id)}` : `/historico?run=${encodeURIComponent(exec().id)}`}
+                      href={exec().tipo === "secretario" ? `/secretario?sessao=${encodeURIComponent(exec().id)}` : exec().tipo === "reuniao" ? `/reunioes?reuniao=${encodeURIComponent(exec().id)}` : `/historico?run=${encodeURIComponent(exec().id)}`}
                       class="px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs text-zinc-100 font-bold transition-all shadow-md flex items-center gap-1.5 font-mono cursor-pointer"
                     >
                       <ExternalLink size={13} />
-                      <span>{exec().tipo === "secretario" ? "Ver Chat Ao Vivo →" : "Ver Log ao Vivo"}</span>
+                      <span>{exec().tipo === "secretario" ? "Ver Chat Ao Vivo →" : exec().tipo === "reuniao" ? "Abrir Sala →" : "Ver Log ao Vivo"}</span>
                     </A>
                   </div>
                 </div>
@@ -1444,11 +1594,11 @@ export const HomeView: Component = () => {
                           @{exec.agente}
                         </span>
                         <span class="text-[10px] text-zinc-500 font-mono">
-                          {exec.id} · {exec.inicio ? new Date(exec.inicio).toLocaleTimeString("pt-BR") : ""}
+                          {exec.id} · {(exec.inicio || exec.quando) ? new Date(exec.inicio || exec.quando).toLocaleTimeString("pt-BR") : ""}
                         </span>
                       </div>
                       <p class="text-xs text-zinc-300 font-mono leading-relaxed line-clamp-2">
-                        {exec.ordem || "Sem descrição da ordem"}
+                        {exec.ordem || exec.titulo || "Sem descrição da ordem"}
                       </p>
                       <Show when={exec.duracao_ms}>
                         <div class="text-[10px] text-rose-300 font-mono">

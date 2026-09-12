@@ -50,7 +50,7 @@ test.describe("Navegação Sidebar", () => {
     await page.goto("/home");
     await esperarNavegacao(page, "home");
 
-    const aside = page.locator("aside");
+    const aside = page.locator("aside#sidebar-principal");
     await expect(aside).toBeVisible();
     await expect(aside).toHaveClass(/md:w-60/);
 

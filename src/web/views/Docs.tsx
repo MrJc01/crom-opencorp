@@ -128,12 +128,16 @@ export const DocsView: Component = () => {
     return Array.from(mapa.entries());
   };
 
-  const copiarConteudo = () => {
+  const copiarConteudo = async () => {
     if (!docAtivo()) return;
-    navigator.clipboard.writeText(docAtivo()!.conteudo);
-    setCopiado(true);
-    showToast("Conteúdo Markdown copiado!", "sucesso");
-    setTimeout(() => setCopiado(false), 2000);
+    try {
+      await navigator.clipboard.writeText(docAtivo()!.conteudo);
+      setCopiado(true);
+      showToast("Conteúdo Markdown copiado!", "sucesso");
+      setTimeout(() => setCopiado(false), 2000);
+    } catch {
+      showToast("Não foi possível copiar (permissão do navegador negada)", "erro");
+    }
   };
 
   return (

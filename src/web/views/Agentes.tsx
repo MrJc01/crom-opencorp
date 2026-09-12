@@ -157,16 +157,25 @@ export const AgentesView: Component = () => {
   ]);
   const [moderadorDebate, setModeradorDebate] = createSignal("");
 
+  const [executandoMapa, setExecutandoMapa] = createSignal<Record<string, string>>({});
+
   const carregarTudo = async () => {
     try {
       setCarregando(true);
-      const [listaAgentes, listaTeams, modInfo] = await Promise.all([
+      const [listaAgentes, listaTeams, modInfo, listaExecs] = await Promise.all([
         fetchApi<Agente[]>("/agents").catch(() => []),
         fetchApi<TeamSpec[]>("/teams").catch(() => []),
         fetchApi<any>("/settings/modelos").catch(() => null),
+        fetchApi<any[]>("/execucoes?limite=40").catch(() => []),
       ]);
       setAgentes(listaAgentes || []);
       setTeams(listaTeams || []);
+      // Quem está executando agora (dot AO VIVO nos cards)
+      const mapa: Record<string, string> = {};
+      for (const e of listaExecs || []) {
+        if (e.status === "executando" && e.agente) mapa[e.agente] = e.id;
+      }
+      setExecutandoMapa(mapa);
       if (modInfo?.default_model) setModeloPadraoGlobal(modInfo.default_model);
       if (modInfo?.global_full_access !== undefined) setGlobalFullAccess(Boolean(modInfo.global_full_access));
 
@@ -686,9 +695,9 @@ export const AgentesView: Component = () => {
                   // GET /teams devolve resumo (passos/paralelos/proponentes podem vir como contagem) —
                   // só faz map quando for array (detalhe completo); senão, lista vazia.
                   if (grupo.padrao === "pipeline") return Array.isArray(grupo.passos) ? grupo.passos.map((p) => `@${p.agente}`) : [];
-                  if (grupo.padrao === "fanout") return [...(Array.isArray(grupo.paralelos) ? grupo.paralelos.map((p) => `@${p.agente}`) : []), `@${grupo.sintese?.agente} (síntese)`];
+                  if (grupo.padrao === "fanout") return [...(Array.isArray(grupo.paralelos) ? grupo.paralelos.map((p) => `@${p.agente}`) : []), ...(grupo.sintese?.agente ? [`@${grupo.sintese.agente} (síntese)`] : [])];
                   if (grupo.padrao === "review") return [`@${grupo.executor?.agente} (executor)`, `@${grupo.revisor?.agente} (revisor)`];
-                  if (grupo.padrao === "debate") return [...(Array.isArray(grupo.proponentes) ? grupo.proponentes.map((p) => `@${p.agente}`) : []), `@${grupo.moderador?.agente} (moderador)`];
+                  if (grupo.padrao === "debate") return [...(Array.isArray(grupo.proponentes) ? grupo.proponentes.map((p) => `@${p.agente}`) : []), ...(grupo.moderador?.agente ? [`@${grupo.moderador.agente} (moderador)`] : [])];
                   return [];
                 };
 
@@ -797,6 +806,11 @@ export const AgentesView: Component = () => {
                             {agente.name || agente.id}
                           </h2>
                           <span class="text-xs text-emerald-400 font-mono font-semibold">@{agente.id}</span>
+                          <Show when={executandoMapa()[agente.id]}>
+                            <span class="text-[9px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 flex items-center gap-1 animate-pulse" title="Agente executando agora — ver no Histórico">
+                              <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" /> AO VIVO
+                            </span>
+                          </Show>
                           <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400">
                             {agente.permissions || "level-2"}
                           </span>
@@ -810,7 +824,7 @@ export const AgentesView: Component = () => {
                         {/* Modelo LLM */}
                         <div class="text-[11px] text-zinc-500 font-mono flex items-center gap-1.5 pt-0.5">
                           <span class="text-zinc-500">Modelo:</span>
-                          <span class="text-zinc-400 font-semibold">{agente.model || "openrouter/nvidia/nemotron-3.5-lightning:free"}</span>
+                          <span class="text-zinc-400 font-semibold">{agente.model || modeloPadraoGlobal()}</span>
                         </div>
                       </div>
                     </div>

@@ -69,6 +69,17 @@ function normalizarArgsAgenda(args: unknown): string[] {
   return Array.isArray(args) ? (args as unknown[]).map(String) : String(args ?? "").split(/\s+/).filter(Boolean);
 }
 
+/** Streams `/secretario/conversa/stream` em voo por sessão.
+ *  Anti duplo-run: página + dock compartilham o store e nunca devem empilhar
+ *  mensagens. Se o ocupante anterior perdeu o cliente (res morta — aba fechada,
+ *  F5), o novo POST despeja o órfão e assume (evita 409 eterno por loop zumbi). */
+const streamsSecretarioAtivos = new Map<string, { res: { destroyed: boolean; writableEnded: boolean } }>();
+function liberarStreamSecretario(sessaoId: string, res: { destroyed: boolean; writableEnded: boolean }): void {
+  if (streamsSecretarioAtivos.get(sessaoId)?.res === res) {
+    streamsSecretarioAtivos.delete(sessaoId);
+  }
+}
+
 /** Monta a Agenda a partir de agenda_tipo/agenda_valor do corpo HTTP. */
 function parseAgendaCorpo(corpo: Record<string, unknown>): Agenda {
   return corpo.agenda_tipo === "cron"
@@ -1946,6 +1957,9 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             }
             for (const e of execs.slice(0, limite)) {
               const ex = metaMap.get(e.id);
+              // Flows têm item próprio tipo=fluxo (abaixo) — sem isso cada flow
+              // aparecia 2x e o modal abria a cópia "execucao" (chat bugado).
+              if (ex?.tipo === "flow") continue;
               itens.push({
                 id: e.id,
                 tipo: "execucao",
@@ -3135,10 +3149,39 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             return;
           }
           const flowId = decodeURIComponent(mFlowResume[1]!);
+          // Valida elegibilidade ANTES do 202 (antes: qualquer id recebia
+          // "retomando" e o erro era engolido pelo .catch silencioso).
+          try {
+            const meta = await registros.lerMeta(ws.path, "execucoes", corpo.exec_id);
+            const ex = (meta.extras ?? {}) as Record<string, unknown>;
+            if (ex.tipo !== "flow" || ex.flow !== flowId) {
+              enviar(res, 422, { erro: `execução "${corpo.exec_id}" não pertence ao flow "${flowId}"` });
+              return;
+            }
+            if (ex.status !== "falhou") {
+              enviar(res, 422, { erro: `execução "${corpo.exec_id}" está "${String(ex.status ?? "?")}" — só falhas podem ser retomadas` });
+              return;
+            }
+            const nos = (ex.nos ?? []) as Array<{ status?: string }>;
+            if (!nos.some((n) => n.status !== "ok")) {
+              enviar(res, 422, { erro: `execução "${corpo.exec_id}" não tem nós pendentes para retomar` });
+              return;
+            }
+          } catch (erro) {
+            const msg = erro instanceof Error ? erro.message : String(erro);
+            if (!msg.startsWith("execução")) {
+              enviar(res, 404, { erro: `execução "${corpo.exec_id}" não encontrada` });
+              return;
+            }
+            enviar(res, 422, { erro: msg });
+            return;
+          }
           void flows
             .executar(ws.path, flowId, { model: corpo.model, execId: corpo.exec_id, retomar: true })
-            .catch(() => undefined);
-          enviar(res, 202, { status: "retomando", flow: flowId, exec: corpo.exec_id });
+            .catch((err) => {
+              console.error(`[flows] erro ao retomar ${flowId}/${corpo.exec_id}:`, err);
+            });
+          enviar(res, 202, { status: "retomando", flow: flowId, exec_id: corpo.exec_id });
           return;
         }
 
@@ -5286,6 +5329,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
         // O POST /message do opencode responde só ao concluir; o estado da sessão, porém, é atualizado
         // em tempo real — por isso o POST fica em voo e a resposta é polada (700ms) e diffada ao cliente.
         if (rota === "/secretario/conversa/stream" && req.method === "POST") {
+          let chaveStreamRegistrada: string | undefined;
           const sse = (evento: string, data: unknown): void => {
             res.write(`event: ${evento}\ndata: ${JSON.stringify(data)}\n\n`);
           };
@@ -5296,6 +5340,22 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             if (!mensagemBruta && imagens.length === 0) {
               enviar(res, 400, { erro: "mensagem obrigatória" });
               return;
+            }
+
+            // Anti duplo-run: página + dock compartilham o store; se já há
+            // stream em voo para esta sessão, recusa antes de abrir o SSE —
+            // exceto se o ocupante é órfão (cliente morto), que é despejado.
+            const sessaoCandidata = corpo.sessao_id || url.searchParams.get("sessao") || undefined;
+            if (sessaoCandidata) {
+              const ocupante = streamsSecretarioAtivos.get(sessaoCandidata);
+              if (ocupante) {
+                if (ocupante.res.destroyed || ocupante.res.writableEnded) {
+                  streamsSecretarioAtivos.delete(sessaoCandidata);
+                } else {
+                  enviar(res, 409, { erro: "sessão ocupada em outra execução — aguarde concluir ou pare a execução atual" });
+                  return;
+                }
+              }
             }
 
             // FAST-PATH: Comandos Git Slash (/git status, /git diff, /git restore, /git log)
@@ -5375,6 +5435,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             sse("inicio", { sessao_id: sessaoId });
             // espelho no eventBus → todas as abas abertas (SSE /events) sincronizam o chat
             eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "inicio" });
+            streamsSecretarioAtivos.set(sessaoId, { res });
+            chaveStreamRegistrada = sessaoId;
 
             // Formato opencode ≥1.18 — tipos estruturais em core/opencode-server.ts
             const baseUrlSessao = `${baseUrl}/session/${sessaoId}`;
@@ -5507,6 +5569,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 await sleep(700);
                 // Se o cliente desconectar (refresh de página), encerra apenas o stream SSE sem matar o agente em background
                 if (res.destroyed || res.writableEnded) {
+                  liberarStreamSecretario(sessaoId, res);
                   return;
                 }
 
@@ -5560,6 +5623,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   } else {
                     sse("erro", { erro: `Falha ao conectar com o modelo (${postErro}). Todos os modelos de contingência foram tentados sem sucesso.`, sessao_id: sessaoId });
                     eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
+                    liberarStreamSecretario(sessaoId, res);
                     res.end();
                     return;
                   }
@@ -5669,6 +5733,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             if (!concluida) {
               sse("erro", { erro: "Todos os modelos candidatos esgotaram timeout ou falharam. Tente novamente em instantes.", sessao_id: sessaoId });
               eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
+              liberarStreamSecretario(sessaoId, res);
               res.end();
               return;
             }
@@ -5722,10 +5787,12 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             const respostaFinal = enviado || (totalAcoes > 0 ? "Ação concluída." : "Processamento concluído.");
             sse("fim", { sessao_id: sessaoId, resposta: respostaFinal });
             eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "fim" });
+            liberarStreamSecretario(sessaoId, res);
             res.end();
             void sincronizarSessaoNoCorp(porta, sessaoId);
             return;
           } catch (erro) {
+            if (chaveStreamRegistrada) liberarStreamSecretario(chaveStreamRegistrada, res);
             if (!res.headersSent) {
               if (erro instanceof SecretarioError) {
                 enviar(res, erro.status ?? 409, { erro: erro.message });

@@ -210,12 +210,39 @@ export const FluxosView: Component = () => {
       setAgentes(listaAgentes || []);
       setTasksExistentes(listaTasks || []);
       setComponentes(listaComponentes || []);
+      void carregarStatusFluxos(lista || []);
 
       const urlId = searchParams.fluxo as string;
       if (urlId) {
         void abrirEditorCanvas(urlId);
       }
     } catch {}
+  };
+
+  /** Última execução de cada flow (status/quando) — sem isso a lista é catálogo cego. */
+  const [statusFluxos, setStatusFluxos] = createSignal<Record<string, { status: string; em: string; execId: string }>>({});
+  const carregarStatusFluxos = async (lista: any[]) => {
+    const alvos = (lista || []).slice(0, 40);
+    const pares = await Promise.all(
+      alvos.map(async (f: any) => {
+        try {
+          const st = await fetchApi<{ execId: string; status: string; em: string } | null>(
+            `/flows/${encodeURIComponent(f.id)}/status`
+          );
+          return [f.id, st] as const;
+        } catch {
+          return [f.id, null] as const;
+        }
+      })
+    );
+    setStatusFluxos((prev) => {
+      const next = { ...prev };
+      for (const [id, st] of pares) {
+        if (st) next[id] = { status: st.status, em: st.em, execId: st.execId };
+        else delete next[id];
+      }
+      return next;
+    });
   };
 
   const testarComponenteAtual = async () => {
@@ -306,6 +333,15 @@ export const FluxosView: Component = () => {
   onMount(() => {
     void carregarFluxos();
 
+    // Lista viva: revalida status das últimas execuções (fora do canvas não há polling)
+    const timerStatus = setInterval(() => {
+      if (!fluxoAtivo()) {
+        void carregarStatusFluxos(fluxos());
+      } else {
+        void carregarLogs(fluxoAtivo()!.id);
+      }
+    }, 8000);
+
     const fecharMenu = () => {
       if (menuContexto().aberto) {
         setMenuContexto((prev) => ({ ...prev, aberto: false }));
@@ -334,6 +370,7 @@ export const FluxosView: Component = () => {
     return () => {
       window.removeEventListener("click", fecharMenu);
       window.removeEventListener("keydown", atalhoTeclado);
+      clearInterval(timerStatus);
     };
   });
 
@@ -607,7 +644,7 @@ export const FluxosView: Component = () => {
     if (!f) return;
     setExecutando(true);
     try {
-      await fetchApi(`/flows/${encodeURIComponent(f.id)}/run`, {
+      const res = await fetchApi<{ status?: string; exec_id?: string }>(`/flows/${encodeURIComponent(f.id)}/run`, {
         method: "POST",
         body: JSON.stringify({ entrada: entradaTexto().trim() || undefined }),
       });
@@ -619,6 +656,10 @@ export const FluxosView: Component = () => {
         void carregarLogs(f.id);
         setLogsAberto(true);
       }, 1500);
+      // Link direto para acompanhar andamento e finalização no Histórico
+      if (res?.exec_id) {
+        navigate(`/historico?run=${encodeURIComponent(res.exec_id)}`);
+      }
     } catch (err: any) {
       showToast(`Erro ao rodar: ${err.message}`, "erro");
     } finally {
@@ -1163,6 +1204,29 @@ export const FluxosView: Component = () => {
                             <RefreshCw size={10} /> Loop HLE
                           </span>
                         </Show>
+                        <Show when={statusFluxos()[f.id]}>
+                          {(st) => (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/historico?run=${encodeURIComponent(st().execId)}`);
+                              }}
+                              title={`Última execução: ${st().status} — ver no Histórico`}
+                              class={`text-[10px] font-mono px-1.5 py-0.5 rounded border flex items-center gap-1 cursor-pointer ${
+                                st().status === "executando"
+                                  ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/40 animate-pulse"
+                                  : st().status === "concluido"
+                                  ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
+                                  : st().status === "falhou"
+                                  ? "bg-rose-500/10 text-rose-300 border-rose-500/30"
+                                  : "bg-zinc-800 text-zinc-400 border-zinc-700"
+                              }`}
+                            >
+                              {st().status === "executando" ? "● executando" : st().status}
+                            </button>
+                          )}
+                        </Show>
                         <For each={f.gatilhos || []}>
                           {(g: any) => (
                             <span class={`text-[10px] font-mono px-1.5 py-0.5 rounded flex items-center gap-1 ${
@@ -1251,8 +1315,8 @@ export const FluxosView: Component = () => {
          ───────────────────────────────────────────────────────────── */}
       <Show when={fluxoAtivo()}>
         <div class="flex flex-col h-full w-full overflow-hidden">
-          {/* Topo / Barra de Navegação do Canvas Responsiva */}
-          <div class="h-14 border-b border-zinc-800 bg-zinc-900/90 px-3 sm:px-4 flex items-center justify-between gap-2 sm:gap-4 z-20 shrink-0">
+          {/* Topo / Barra de Navegação do Canvas Responsiva (quebra linha com dock lateral aberto) */}
+          <div class="min-h-14 h-auto py-1 border-b border-zinc-800 bg-zinc-900/90 px-3 sm:px-4 flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20 shrink-0">
             <div class="flex items-center gap-2 sm:gap-3 min-w-0">
               <button
                 type="button"

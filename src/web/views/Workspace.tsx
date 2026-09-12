@@ -65,6 +65,7 @@ export interface TabArquivo {
   tamanho?: number;
   mime?: string;
   tipoMidia?: "video" | "imagem" | "audio" | "outro";
+  workspace?: string;
 }
 
 export interface TabTerminal {
@@ -229,6 +230,7 @@ export const WorkspaceView: Component = () => {
         tamanho: resp?.tamanho,
         mime: resp?.mime,
         tipoMidia: ehVid ? "video" : (ehImg ? "imagem" : (ehAud ? "audio" : "outro")),
+        workspace: wsAtual,
       };
 
       setTabs((prev) => [...prev, novaTab]);
@@ -280,7 +282,10 @@ export const WorkspaceView: Component = () => {
     if (!t) return;
     setSalvando(true);
     try {
-      await fetchApi(`/files?path=${encodeURIComponent(t.caminho)}`, {
+      // Workspace da TAB (não o ativo global) — sem isso salvava no ws errado
+      const wsTab = t.workspace || wsAtivo();
+      const qs = wsTab ? `&workspace=${encodeURIComponent(wsTab)}` : "";
+      await fetchApi(`/files?path=${encodeURIComponent(t.caminho)}${qs}`, {
         method: "PUT",
         body: JSON.stringify({ conteudo: t.editado }),
       });
@@ -382,7 +387,8 @@ export const WorkspaceView: Component = () => {
   const descartarAlteracoesArquivo = async (caminho: string) => {
     fecharMenuContexto();
     try {
-      const res = await fetchApi<{ sucesso: boolean; mensagem: string }>("/workspaces/git/restore", {
+      const wsQs = wsAtivo() ? `?workspace=${encodeURIComponent(wsAtivo())}` : "";
+      const res = await fetchApi<{ sucesso: boolean; mensagem: string }>(`/workspaces/git/restore${wsQs}`, {
         method: "POST",
         body: JSON.stringify({ arquivo: caminho }),
       });

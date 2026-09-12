@@ -1,8 +1,8 @@
 import { type Component, createSignal, For } from "solid-js";
 import { useLocation, useNavigate } from "@solidjs/router";
-import { ArrowLeft, Menu, Building2, ChevronsUpDown } from "lucide-solid";
+import { ArrowLeft, Menu, Building2, ChevronsUpDown, Bot } from "lucide-solid";
 import { NovoWorkspaceModal } from "./NovoWorkspaceModal";
-import { wsAtivo, setWsAtivo, workspaces, setSidebarMobileAberta } from "../lib/context";
+import { wsAtivo, setWsAtivo, workspaces, setSidebarMobileAberta, dockSecretarioAberto, setDockSecretarioAberto } from "../lib/context";
 
 export const GlobalTitlebar: Component = () => {
   const location = useLocation();
@@ -100,6 +100,16 @@ export const GlobalTitlebar: Component = () => {
 
       {/* Rótulo Central / Direita */}
       <div class="flex items-center gap-2 sm:gap-3">
+        <button
+          type="button"
+          data-testid="secretario-toggle"
+          onClick={() => setDockSecretarioAberto(!dockSecretarioAberto())}
+          class="hidden lg:flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-mono border border-zinc-800/80 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors cursor-pointer"
+          title="Alternar Secretário lateral (Ctrl+J)"
+        >
+          <Bot size={13} />
+          {dockSecretarioAberto() ? "ocultar" : "secretário"}
+        </button>
         <span class="hidden sm:inline text-[11px] font-mono text-zinc-500 truncate max-w-[200px]">
           {getSubtitulo()}
         </span>

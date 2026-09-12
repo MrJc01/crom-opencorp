@@ -123,12 +123,12 @@ export class ApprovalsStore {
     if (pendencia.status !== "pendente") {
       throw new ApprovalError(`pendência "${id}" já está "${pendencia.status}"`);
     }
-    if (motivo.trim().length === 0) {
-      throw new ApprovalError("motivo obrigatório no reject (--motivo \"...\")");
-    }
+    // Motivo default em vez de 500: painel/CLI rejeitam sem texto e a
+    // pendência ficava presa para sempre (500 a cada clique).
+    const motivoFinal = motivo.trim().length > 0 ? motivo.trim() : "rejeitado pelo operador (motivo não informado)";
     pendencia.status = "rejeitado";
     pendencia.resolvido_em = new Date().toISOString();
-    pendencia.motivo_rejeicao = motivo.trim();
+    pendencia.motivo_rejeicao = motivoFinal;
     await this.salvar(wsPath, pendencia);
     return pendencia;
   }

@@ -10,6 +10,8 @@ export interface SessaoResumo {
   criado_em?: string | number;
   atualizado_em?: string | number;
   mensagens_count?: number;
+  executando?: boolean;
+  status?: string;
 }
 
 export interface HistoricoModalProps {
@@ -97,8 +99,14 @@ export const HistoricoModal: Component<HistoricoModalProps> = (props) => {
                       <div class="text-xs font-medium truncate">
                         {s.titulo || `Conversa ${s.id.slice(0, 8)}`}
                       </div>
-                      <div class="text-[10px] text-zinc-500">
-                        {s.mensagens_count ? `${s.mensagens_count} mensagens` : "Sessão"}
+                      <div class="text-[10px] text-zinc-500 flex items-center gap-1.5">
+                        <Show
+                          when={s.executando || s.status === "executando"}
+                          fallback={<>{s.mensagens_count ? `${s.mensagens_count} mensagens` : "Sessão"}</>}
+                        >
+                          <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          <span class="text-emerald-400 font-semibold">executando agora</span>
+                        </Show>
                       </div>
                     </div>
                   </div>
