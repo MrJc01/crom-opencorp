@@ -171,6 +171,12 @@ isolados (+ `--sandbox workspace-write` no codex). Ponto fraco: dotfiles/globais
 de cada motor (auth, `~/.claude.json`, caches). Prova: E2E "agente do ws-A não
 alcança arquivo do ws-B" por harness.
 
+**Risco real encontrado (F6-T02)**: harnesses não-opencode herdam `process.env` e
+não isolam XDG — se `XDG_*` apontar para caminhos reais, o loop de XDG em
+`execution-driver.ts` monta-os rw (risco de vazamento para o home real). Não afeta
+isolamento entre workspaces, mas deve ser corrigido (isolar XDG para todos os
+harnesses, não só opencode).
+
 ## Fase 9 — Grupos de agentes (team): verificar e fechar lacunas
 
 Estado (investigado 2026-09-12): `src/core/team-store.ts` (JSON, padrões

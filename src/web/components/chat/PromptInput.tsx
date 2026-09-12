@@ -34,7 +34,9 @@ export interface Anexo {
 export interface AutocompleteItem {
   id: string;
   tipo: "slash" | "at" | "bang";
-  gatilho: string; // ex: "/status" ou "@editor" ou "!oc status"
+  /** Subtipo da menção `@` (taxonomia F3-T01): agente | prompt | arquivo | task. */
+  subtipo?: "agente" | "prompt" | "arquivo" | "task";
+  gatilho: string; // ex: "/status" ou "@agente:secretario-exec" ou "!oc status"
   titulo: string;
   descricao: string;
   categoria: string;
@@ -75,6 +77,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   // Itens dinâmicos para @ (agentes e tasks do workspace)
   const [listaTasks, setListaTasks] = createSignal<any[]>([]);
   const [listaAgentes, setListaAgentes] = createSignal<any[]>([]);
+
+  // F3-T01: estado dos 3 visuais de menção.
+  //  - @agente   → pill de destinatário (não vira texto)
+  //  - @contexto → chip resolvido (arquivo/task)
+  //  - @prompt   → texto editável (Esc desfaz a expansão)
+  const [agenteMencio, setAgenteMencio] = createSignal<string | null>(null);
+  const [valorAntesPrompt, setValorAntesPrompt] = createSignal<string | null>(null);
 
   const valorTexto = () => props.valor || "";
   const listaAnexos = () => props.anexos || [];
@@ -345,92 +354,66 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     }
 
     if (modo === "at") {
-      const itens: AutocompleteItem[] = [
-        {
-          id: "at-sec-exec",
-          tipo: "at",
-          gatilho: "@secretario-exec",
-          titulo: "@secretario-exec",
-          descricao: "Orquestrador autônomo com permissão de executar ferramentas",
-          categoria: "Agente",
-          icone: Bot,
-        },
-        {
-          id: "at-sec",
-          tipo: "at",
-          gatilho: "@secretario",
-          titulo: "@secretario",
-          descricao: "Consultor executivo e analista estratégico",
-          categoria: "Agente",
-          icone: Bot,
-        },
-        {
-          id: "at-editor",
-          tipo: "at",
-          gatilho: "@editor",
-          titulo: "@editor",
-          descricao: "Redator e publicador de artigos no WordPress",
-          categoria: "Agente",
-          icone: Bot,
-        },
-        {
-          id: "at-critico",
-          tipo: "at",
-          gatilho: "@critico-site",
-          titulo: "@critico-site",
-          descricao: "Auditor de qualidade visual, layout e rascunhos",
-          categoria: "Agente",
-          icone: Bot,
-        },
-        {
-          id: "at-pesquisador",
-          tipo: "at",
-          gatilho: "@pesquisador-fontes",
-          titulo: "@pesquisador-fontes",
-          descricao: "Curador de notícias e tendências em tempo real",
-          categoria: "Agente",
-          icone: Bot,
-        },
-        {
-          id: "at-corretor",
-          tipo: "at",
-          gatilho: "@corretor-site",
-          titulo: "@corretor-site",
-          descricao: "Saneador de rascunhos tóxicos e tags quebradas",
-          categoria: "Agente",
-          icone: Bot,
-        },
-        {
-          id: "at-executor",
-          tipo: "at",
-          gatilho: "@executor-padrao",
-          titulo: "@executor-padrao",
-          descricao: "Executor técnico de código e infraestrutura",
-          categoria: "Agente",
-          icone: Bot,
-        },
-      ];
+      const itens: AutocompleteItem[] = [];
 
-      // Tasks ativas carregadas do workspace
-      for (const t of listaTasks().slice(0, 8)) {
+      // ── Agentes (dinâmicos do workspace; fallback aos predefinidos) ──
+      const agentesFallback = [
+        { id: "secretario-exec", role: "Orquestrador autônomo com permissão de executar ferramentas" },
+        { id: "secretario", role: "Consultor executivo e analista estratégico" },
+        { id: "editor", role: "Redator e publicador de artigos no WordPress" },
+        { id: "critico-site", role: "Auditor de qualidade visual, layout e rascunhos" },
+        { id: "pesquisador-fontes", role: "Curador de notícias e tendências em tempo real" },
+        { id: "corretor-site", role: "Saneador de rascunhos tóxicos e tags quebradas" },
+        { id: "executor-padrao", role: "Executor técnico de código e infraestrutura" },
+      ];
+      const agentesVisiveis = listaAgentes().length > 0 ? listaAgentes() : agentesFallback;
+      for (const a of agentesVisiveis.slice(0, 12)) {
         itens.push({
-          id: `at-task-${t.id}`,
+          id: `at-agente-${a.id}`,
           tipo: "at",
-          gatilho: `@${t.id}`,
-          titulo: `@${t.id}`,
-          descricao: `${t.titulo} (${t.coluna})`,
-          categoria: "Task",
-          icone: CheckSquare,
+          subtipo: "agente",
+          gatilho: `@agente:${a.id}`,
+          titulo: `@agente:${a.id}`,
+          descricao: a.role || "Agente do workspace",
+          categoria: "Agente",
+          icone: Bot,
         });
       }
 
-      // Arquivos e pastas úteis
+      // ── Prompt (F3-T02: sem endpoint HTTP ainda — TODO ligar ao PromptStore) ──
+      const chavePrompt = /^prompt:([A-Za-z0-9._-]+)$/i.exec(queryMenu().trim());
+      if (chavePrompt) {
+        itens.push({
+          id: "at-prompt-digitado",
+          tipo: "at",
+          subtipo: "prompt",
+          gatilho: `@prompt:${chavePrompt[1]!}`,
+          titulo: `@prompt:${chavePrompt[1]!}`,
+          descricao: "Expande o prompt salvo para texto editável",
+          categoria: "Prompt",
+          icone: FileText,
+        });
+      } else {
+        itens.push({
+          id: "at-prompt-exemplo",
+          tipo: "at",
+          subtipo: "prompt",
+          gatilho: "@prompt:saudacao-inicial",
+          titulo: "@prompt:saudacao-inicial",
+          descricao: "Digite @prompt:<chave> para expandir um prompt salvo (PromptStore)",
+          categoria: "Prompt",
+          icone: FileText,
+        });
+      }
+
+      // ── Arquivo ──
       itens.push(
         {
           id: "at-file-scripts-wp",
           tipo: "at",
-          gatilho: "@scripts/wp.cjs",
-          titulo: "@scripts/wp.cjs",
+          subtipo: "arquivo",
+          gatilho: "@arquivo:scripts/wp.cjs",
+          titulo: "@arquivo:scripts/wp.cjs",
           descricao: "Script utilitário de integração com WordPress",
           categoria: "Arquivo",
           icone: FileText,
@@ -438,13 +421,28 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         {
           id: "at-file-docs",
           tipo: "at",
-          gatilho: "@docs/",
-          titulo: "@docs/",
+          subtipo: "arquivo",
+          gatilho: "@arquivo:docs/",
+          titulo: "@arquivo:docs/",
           descricao: "Documentação do projeto e manuais técnicos",
-          categoria: "Pasta",
+          categoria: "Arquivo",
           icone: FileText,
         },
       );
+
+      // ── Tasks ativas carregadas do workspace ──
+      for (const t of listaTasks().slice(0, 8)) {
+        itens.push({
+          id: `at-task-${t.id}`,
+          tipo: "at",
+          subtipo: "task",
+          gatilho: `@task:${t.id}`,
+          titulo: `@task:${t.id}`,
+          descricao: `${t.titulo} (${t.coluna})`,
+          categoria: "Task",
+          icone: CheckSquare,
+        });
+      }
 
       return itens;
     }
@@ -467,6 +465,38 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       .slice(0, 10);
   });
 
+  // F3-T01: seções do menu `@` na ordem Agente | Prompt | Arquivo | Task.
+  const secoesAt = createMemo(() => {
+    if (modoMenu() !== "at") return null;
+    const ordem = ["Agente", "Prompt", "Arquivo", "Task"];
+    const grupos = new Map<string, AutocompleteItem[]>();
+    for (const i of itensFiltrados()) {
+      const secao = i.subtipo
+        ? ordem.find((o) => o === i.categoria) ?? i.categoria
+        : i.categoria;
+      const chave = secao || "Outros";
+      if (!grupos.has(chave)) grupos.set(chave, []);
+      grupos.get(chave)!.push(i);
+    }
+    return ordem.filter((s) => grupos.has(s)).map((s) => ({ secao: s, itens: grupos.get(s)! }));
+  });
+
+  // F3-T01: extrai menções de contexto (@arquivo / @task) do texto para chips resolvidos.
+  const chipsContexto = createMemo(() => {
+    const texto = valorTexto();
+    const chips: Array<{ tipo: string; valor: string; label: string }> = [];
+    for (const m of texto.matchAll(/@(arquivo|task):([^\s@]+)/g)) {
+      chips.push({ tipo: m[1]!, valor: m[2]!, label: `${m[1]}:${m[2]}` });
+    }
+    return chips;
+  });
+
+  const removerMençãoDoTexto = (label: string) => {
+    const alvo = `@${label}`;
+    const novo = valorTexto().replace(new RegExp(`@${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`), "").replace(/\s+/g, " ").trim();
+    props.onInput(novo);
+  };
+
   const verificarGatilhos = (texto: string) => {
     // 1. Slash command no início: /query
     const slashMatch = texto.match(/^\/([a-zA-Z0-9_-]*)$/);
@@ -486,8 +516,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       return;
     }
 
-    // 3. Mention anywhere: @query no final da digitação
-    const atMatch = texto.match(/(?:^|\s)@([a-zA-Z0-9_/-]*)$/);
+    // 3. Mention anywhere: @query no final da digitação (suporta @tipo:valor)
+    const atMatch = texto.match(/(?:^|\s)@([a-zA-Z0-9_.:/-]*)$/);
     if (atMatch) {
       setModoMenu("at");
       setQueryMenu(atMatch[1].toLowerCase());
@@ -507,9 +537,25 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     } else if (item.tipo === "bang") {
       props.onInput(`${item.gatilho} `);
     } else if (item.tipo === "at") {
-      // Substitui o @query final pela menção selecionada
-      const novo = atual.replace(/@([a-zA-Z0-9_/-]*)$/, `${item.gatilho} `);
-      props.onInput(novo);
+      const subtipo = item.subtipo ?? "agente";
+
+      if (subtipo === "agente") {
+        // Pill de destinatário: NÃO vira texto — troca o campo `agente` do envio.
+        const id = item.gatilho.replace(/^@agente:/, "");
+        const novo = atual.replace(/@([a-zA-Z0-9_.:/-]*)$/, "").replace(/\s+$/, "");
+        props.onInput(novo);
+        setAgenteMencio(id);
+        props.onMudarAgente?.(id);
+      } else if (subtipo === "prompt") {
+        // Texto editável: injeta @prompt:<chave>; Esc desfaz a expansão.
+        setValorAntesPrompt(atual);
+        const novo = atual.replace(/@([a-zA-Z0-9_.:/-]*)$/, `${item.gatilho} `);
+        props.onInput(novo);
+      } else {
+        // @arquivo / @task → chip resolvido (o token fica no texto; o servidor hidrata).
+        const novo = atual.replace(/@([a-zA-Z0-9_.:/-]*)$/, `${item.gatilho} `);
+        props.onInput(novo);
+      }
     }
 
     setModoMenu(null);
@@ -545,6 +591,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       }
     }
 
+    // Esc desfaz a expansão de @prompt (texto editável volta ao valor anterior).
+    if (e.key === "Escape" && valorAntesPrompt() !== null) {
+      e.preventDefault();
+      props.onInput(valorAntesPrompt() ?? "");
+      setValorAntesPrompt(null);
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       dispararEnvio();
@@ -572,6 +626,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       textareaRef.style.overflowY = "hidden";
     }
     props.onInput?.("");
+    setAgenteMencio(null);
+    setValorAntesPrompt(null);
   };
 
   const handlePaste = (e: ClipboardEvent) => {
@@ -635,7 +691,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 <span class="text-purple-400">/ Comandos Rápidos</span>
               </Show>
               <Show when={modoMenu() === "at"}>
-                <span class="text-emerald-400">@ Menções (Agentes, Tasks, Contexto)</span>
+                <span class="text-emerald-400">@ Menções (Agente · Prompt · Arquivo · Task)</span>
               </Show>
               <Show when={modoMenu() === "bang"}>
                 <span class="text-amber-400">! Comandos de Terminal (Shell)</span>
@@ -648,56 +704,93 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
           {/* Lista de Sugestões */}
           <div class="space-y-0.5">
-            <For each={itensFiltrados()}>
-              {(item, idx) => {
-                const Icone = item.icone || Sparkles;
-                const ativo = () => indiceAtivo() === idx();
-
-                return (
-                  <button
-                    type="button"
-                    onClick={() => selecionarItem(item)}
-                    onMouseEnter={() => setIndiceAtivo(idx())}
-                    class={`w-full px-2.5 py-1.5 rounded-xl flex items-center justify-between gap-3 text-left transition-colors cursor-pointer ${
-                      ativo()
-                        ? "bg-zinc-800 text-zinc-100 shadow-xs"
-                        : "hover:bg-zinc-900/60 text-zinc-300"
-                    }`}
-                  >
-                    <div class="flex items-center gap-2.5 min-w-0">
-                      <div
-                        class={`h-6 w-6 rounded-md flex items-center justify-center flex-shrink-0 ${
-                          item.tipo === "slash"
-                            ? "bg-purple-950/60 text-purple-400 border border-purple-800/60"
-                            : item.tipo === "at"
-                            ? "bg-emerald-950/60 text-emerald-400 border border-emerald-800/60"
-                            : "bg-amber-950/60 text-amber-400 border border-amber-800/60"
-                        }`}
-                      >
-                        <Icone size={13} />
-                      </div>
-                      <div class="min-w-0">
-                        <div class="font-mono text-xs font-bold text-zinc-100 truncate">
-                          {item.titulo}
+            <Show when={secoesAt() !== null} fallback={
+              <For each={itensFiltrados()}>
+                {(item, idx) => {
+                  const Icone = item.icone || Sparkles;
+                  const ativo = () => indiceAtivo() === idx();
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => selecionarItem(item)}
+                      onMouseEnter={() => setIndiceAtivo(idx())}
+                      class={`w-full px-2.5 py-1.5 rounded-xl flex items-center justify-between gap-3 text-left transition-colors cursor-pointer ${
+                        ativo()
+                          ? "bg-zinc-800 text-zinc-100 shadow-xs"
+                          : "hover:bg-zinc-900/60 text-zinc-300"
+                      }`}
+                    >
+                      <div class="flex items-center gap-2.5 min-w-0">
+                        <div
+                          class={`h-6 w-6 rounded-md flex items-center justify-center flex-shrink-0 ${
+                            item.tipo === "slash"
+                              ? "bg-purple-950/60 text-purple-400 border border-purple-800/60"
+                              : item.tipo === "at"
+                              ? "bg-emerald-950/60 text-emerald-400 border border-emerald-800/60"
+                              : "bg-amber-950/60 text-amber-400 border border-amber-800/60"
+                          }`}
+                        >
+                          <Icone size={13} />
                         </div>
-                        <div class="text-[11px] text-zinc-400 truncate leading-snug">
-                          {item.descricao}
+                        <div class="min-w-0">
+                          <div class="font-mono text-xs font-bold text-zinc-100 truncate">{item.titulo}</div>
+                          <div class="text-[11px] text-zinc-400 truncate leading-snug">{item.descricao}</div>
                         </div>
                       </div>
+                      <div class="flex items-center gap-1.5 flex-shrink-0">
+                        <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-900 text-zinc-500 border border-zinc-800">
+                          {item.categoria}
+                        </span>
+                        <Show when={ativo()}>
+                          <CornerDownLeft size={12} class="text-zinc-400" />
+                        </Show>
+                      </div>
+                    </button>
+                  );
+                }}
+              </For>
+            }>
+              <For each={secoesAt()!}>
+                {(secao) => (
+                  <div>
+                    <div class="px-2.5 pt-1 pb-0.5 text-[10px] font-mono uppercase tracking-wider text-zinc-500">
+                      {secao.secao}
                     </div>
-
-                    <div class="flex items-center gap-1.5 flex-shrink-0">
-                      <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-900 text-zinc-500 border border-zinc-800">
-                        {item.categoria}
-                      </span>
-                      <Show when={ativo()}>
-                        <CornerDownLeft size={12} class="text-zinc-400" />
-                      </Show>
-                    </div>
-                  </button>
-                );
-              }}
-            </For>
+                    <For each={secao.itens}>
+                      {(item) => {
+                        const Icone = item.icone || Sparkles;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => selecionarItem(item)}
+                            onMouseEnter={() => {
+                              const idx = itensFiltrados().indexOf(item);
+                              if (idx >= 0) setIndiceAtivo(idx);
+                            }}
+                            class="w-full px-2.5 py-1.5 rounded-xl flex items-center justify-between gap-3 text-left transition-colors cursor-pointer hover:bg-zinc-900/60 text-zinc-300"
+                          >
+                            <div class="flex items-center gap-2.5 min-w-0">
+                              <div class="h-6 w-6 rounded-md flex items-center justify-center flex-shrink-0 bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
+                                <Icone size={13} />
+                              </div>
+                              <div class="min-w-0">
+                                <div class="font-mono text-xs font-bold text-zinc-100 truncate">{item.titulo}</div>
+                                <div class="text-[11px] text-zinc-400 truncate leading-snug">{item.descricao}</div>
+                              </div>
+                            </div>
+                            <div class="flex items-center gap-1.5 flex-shrink-0">
+                              <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-900 text-zinc-500 border border-zinc-800">
+                                {item.categoria}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      }}
+                    </For>
+                  </div>
+                )}
+              </For>
+            </Show>
           </div>
         </div>
       </Show>
@@ -716,6 +809,46 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   onClick={() => props.onRemoverAnexo?.(idx())}
                   class="text-zinc-400 hover:text-rose-400 p-0.5 rounded transition-colors cursor-pointer"
                   title="Remover anexo"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+
+      {/* F3-T01: pill de destinatário (@agente) + chips de contexto (@arquivo/@task) */}
+      <Show when={agenteMencio() !== null || chipsContexto().length > 0}>
+        <div class="flex flex-wrap gap-2 px-1 pb-2 border-b border-zinc-800/80 mb-2">
+          <Show when={agenteMencio() !== null}>
+            <div
+              data-testid="mention-agente-pill"
+              class="flex items-center gap-1.5 px-2 py-1 bg-emerald-950/50 rounded-md border border-emerald-800/60 text-xs text-emerald-200"
+            >
+              <AtSign size={12} class="text-emerald-400" />
+              <span class="text-[11px] font-medium">para @{agenteMencio()}</span>
+              <button
+                onClick={() => setAgenteMencio(null)}
+                class="text-emerald-300 hover:text-rose-400 p-0.5 rounded transition-colors cursor-pointer"
+                title="Remover destinatário"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </Show>
+          <For each={chipsContexto()}>
+            {(chip) => (
+              <div
+                data-testid={`mention-chip-${chip.tipo}`}
+                class="flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700 text-xs text-zinc-200"
+              >
+                <FileText size={12} class="text-zinc-400" />
+                <span class="max-w-[180px] truncate text-[11px] font-medium">{chip.label}</span>
+                <button
+                  onClick={() => removerMençãoDoTexto(chip.label)}
+                  class="text-zinc-400 hover:text-rose-400 p-0.5 rounded transition-colors cursor-pointer"
+                  title="Remover contexto"
                 >
                   <X size={12} />
                 </button>

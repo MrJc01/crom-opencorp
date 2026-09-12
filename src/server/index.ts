@@ -24,6 +24,7 @@ import { migrarTeamsParaFlows } from "../core/flow-migrate.js";
 import { sincronizarJobsParaFluxos } from "../core/scheduler-flow-bridge.js";
 import { MeetingManager, gerarIdReuniao } from "../core/meeting-manager.js";
 import { TaskStore, type Task } from "../core/task-store.js";
+import { PromptStore } from "../core/prompt-store.js";
 import { Scheduler, parseAgendaTask } from "../core/scheduler.js";
 import type { Agenda } from "../core/scheduler.js";
 import { HookStore, type Hook, type AlvoHook, type PayloadHook } from "../core/hook-store.js";
@@ -68,6 +69,19 @@ const COMANDOS_AGENDA = new Set([
 function normalizarArgsAgenda(args: unknown): string[] {
   return Array.isArray(args) ? (args as unknown[]).map(String) : String(args ?? "").split(/\s+/).filter(Boolean);
 }
+
+// ── F3-T01: gramática de menções (@) — mesma regex no cliente (PromptInput) e no
+// servidor (verdade autoritativa). Formas canônicas:
+//   @agente:<id>   → destinatário (troca o campo `agente` do corpo)
+//   @arquivo:<p>   → contexto (lê arquivo, cap KB + citação de fonte)
+//   @task:<id>     → contexto (lê task do board)
+//   @prompt:<chave>→ texto editável (cliente) / resolvido via PromptStore (servidor)
+// Menção simples `@foo` (legado) é tolerada: vira destinatário se `foo` for agente.
+const RE_MENCAO_TIPADA = /@(agente|prompt|arquivo|task):([^\s@]+)/g;
+const RE_MENCAO_SIMPLES = /(?:^|\s)@([A-Za-z0-9][A-Za-z0-9._/-]*)/g;
+/** Cap de conteúdo hidratado por item de contexto (evita estourar o prompt). */
+const CAP_KB_CONTEXTO = 12 * 1024;
+const MAX_ITENS_CONTEXTO = 8;
 
 /** Streams `/secretario/conversa/stream` em voo por sessão.
  *  Anti duplo-run: página + dock compartilham o store e nunca devem empilhar
@@ -856,6 +870,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   void sincronizarJobsParaFluxos(opcoes.homeDir ?? opencorpHome()).catch(() => undefined);
   const meetings = new MeetingManager({ ...base, sessoes: opcoes.sessoes as never });
   const tasks = new TaskStore();
+  const prompts = new PromptStore(base);
   const scheduler = new Scheduler({ homeDir: opcoes.homeDir });
   const apps = new AppStore();
   const teams = new TeamStore();
@@ -905,6 +920,246 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
 
   // OpencodeServerManager para o secretário (injetaável para testes)
   const opencodeServer = opcoes.opencodeServer ?? new OpencodeServerManager({ homeDir: opcoes.homeDir });
+
+  // ── F3-T01: texto de ajuda dos comandos `/` (fast-path whitelist) ──
+  function textoAjudaSlash(): string {
+    return `Comandos rápidos disponíveis no chat (somente no início da linha):
+
+- \`/status\`: diagnóstico rápido de serviços, scheduler e tasks em andamento
+- \`/agents\`: catálogo de agentes do workspace
+- \`/schedules\`: rotinas agendadas do scheduler
+- \`/task list\`: quadro Kanban de tarefas
+- \`/task status <id>\`: status detalhado de uma task
+- \`/task run <id>\`: despacha a task para o agente responsável
+- \`/doctor\`: verifica integridade do OpenCode, API, daemon e portas
+- \`/git status|diff|restore|log\`: comandos git do workspace
+- \`/help\`: esta lista
+
+Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondidos aqui.`;
+  }
+
+  function textoAjudaMencoes(): string {
+    return `Menções \`@\` (em qualquer posição da linha):
+
+- \`@agente:<id>\`: troca o destinatário da mensagem (só quando é a única menção)
+- \`@arquivo:<caminho>\`: inclui o conteúdo real do arquivo como contexto
+- \`@task:<id>\`: inclui os dados da task como contexto
+- \`@prompt:<chave>\`: expande o prompt salvo para texto editável`;
+  }
+
+  // ── F3-T01: resolver autoritativo de menções `@` (verdade no servidor) ──
+  async function resolverMencoesSecretario(opts: {
+    mensagemBruta: string;
+    corpoContexto?: string[];
+    agenteAtual: string;
+    ws: { id: string; path: string };
+  }): Promise<{ mensagem: string; contexto: string[]; agente: string }> {
+    const { mensagemBruta, corpoContexto, agenteAtual, ws } = opts;
+
+    // Contexto pré-existente (ex.: "localização: /rota") — preservado como estava.
+    const contextoBase = (Array.isArray(corpoContexto) ? corpoContexto : [])
+      .map((c) => String(c).replace(/^@/, "").slice(0, 120))
+      .filter(Boolean)
+      .slice(0, MAX_ITENS_CONTEXTO);
+
+    const tipadas = [...mensagemBruta.matchAll(RE_MENCAO_TIPADA)].map((m) => ({
+      tipo: m[1]!.toLowerCase(),
+      valor: m[2]!,
+    }));
+    // Menções simples só sobre o que sobra depois de remover as tipadas (evita que
+    // "@agente:foo" conte `@agente` como uma segunda menção simples).
+    const semTipadas = mensagemBruta.replace(RE_MENCAO_TIPADA, " ");
+    const simples = [...semTipadas.matchAll(RE_MENCAO_SIMPLES)].map((m) => m[1]!);
+
+    const idsAgentes = new Set((await agentes.listar(ws.path).catch(() => [])).map((a) => a.id));
+    const totalMencoes = tipadas.length + simples.length;
+
+    let agente = agenteAtual;
+    let mensagem = mensagemBruta;
+    const hidratado: string[] = [];
+
+    // @agente → destinatário: só quando é a ÚNICA menção e o agente existe.
+    if (totalMencoes === 1) {
+      let alvoAgente: string | null = null;
+      if (tipadas.length === 1 && tipadas[0]!.tipo === "agente") alvoAgente = tipadas[0]!.valor;
+      else if (simples.length === 1 && idsAgentes.has(simples[0]!)) alvoAgente = simples[0]!;
+      if (alvoAgente && idsAgentes.has(alvoAgente)) {
+        agente = alvoAgente;
+        mensagem = mensagem
+          .replace(RE_MENCAO_TIPADA, "")
+          .replace(RE_MENCAO_SIMPLES, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+    }
+
+    // @arquivo / @task / @prompt → hidratação de conteúdo (cap KB + fonte citada).
+    for (const t of tipadas) {
+      if (t.tipo === "arquivo") {
+        try {
+          const alvo = await resolverCaminhoWorkspace(ws.path, t.valor);
+          const info = await stat(alvo).catch(() => null);
+          if (info && info.isFile()) {
+            const conteudo = await readFile(alvo, "utf8");
+            const cortado = conteudo.length > CAP_KB_CONTEXTO;
+            hidratado.push(
+              `Fonte: arquivo "${t.valor}"\n${conteudo.slice(0, CAP_KB_CONTEXTO)}${cortado ? "\n…(truncado)" : ""}`,
+            );
+          } else {
+            hidratado.push(`Fonte: arquivo "${t.valor}" — não encontrado ou não é um arquivo`);
+          }
+        } catch {
+          hidratado.push(`Fonte: arquivo "${t.valor}" — não encontrado ou não é um arquivo`);
+        }
+      } else if (t.tipo === "task") {
+        const tk = await tasks.obter(ws.path, t.valor).catch(() => null);
+        hidratado.push(
+          tk
+            ? `Fonte: task "${tk.id}" (${tk.titulo}, coluna "${tk.coluna}", responsável "${tk.responsavel || "-"}")\n${tk.descricao || ""}`.trim()
+            : `Fonte: task "${t.valor}" — não encontrada`,
+        );
+      } else if (t.tipo === "prompt") {
+        // TODO(F3-T02): ligar ao PromptStore por completo — por ora resolve a chave
+        // diretamente (PromptStore já existe); cliente só exibe a chave editável.
+        try {
+          const texto = await prompts.get(ws.path, t.valor);
+          hidratado.push(`Fonte: prompt "${t.valor}"\n${texto}`);
+        } catch (erro) {
+          hidratado.push(`Fonte: prompt "${t.valor}" — ${erro instanceof Error ? erro.message : "não encontrado"}`);
+        }
+      }
+    }
+
+    // Remove as menções tipadas (já resolvidas no contexto) do texto final.
+    mensagem = mensagem.replace(RE_MENCAO_TIPADA, "").replace(/\s+/g, " ").trim();
+
+    const contexto = [...contextoBase, ...hidratado].slice(0, MAX_ITENS_CONTEXTO);
+
+    if (hidratado.length > 0) {
+      mensagem = `${mensagem || "(contexto referenciado)"}\n\n[CONTEXTO REFERENCIADO]\n${hidratado.join("\n\n---\n\n")}`;
+    } else if (contextoBase.length > 0) {
+      mensagem = mensagem
+        ? `${mensagem}\n\n(Contexto referenciado pelo usuário: ${contextoBase.map((c) => "@" + c).join(" ")})`
+        : mensagem;
+    }
+
+    return { mensagem, contexto, agente };
+  }
+
+  // ── F3-T01: fast-path de ações `/` (whitelist) — retorna tratado=false se não
+  // for um comando de ação; comandos `/` não-whitelistados NÃO caem no LLM. ──
+  async function processarSlashAcao(
+    mensagem: string,
+    ws: { id: string; path: string },
+  ): Promise<{ tratado: boolean; mensagem: string }> {
+    const pedacos = mensagem.trim().split(/\s+/).filter(Boolean);
+    const token = (pedacos[0] ?? "").toLowerCase();
+
+    if (token === "/help") return { tratado: true, mensagem: `${textoAjudaSlash()}\n\n${textoAjudaMencoes()}` };
+
+    if (token === "/status") {
+      const home = opcoes.homeDir ?? opencorpHome();
+      const linhas: string[] = [];
+      try {
+        const st = await opencodeServer.status();
+        linhas.push(`Secretário (opencode): ${st.rodando ? "rodando" : "parado"}${st.porta ? ` (porta ${st.porta})` : ""}`);
+      } catch {
+        linhas.push("Secretário (opencode): indisponível");
+      }
+      try {
+        const pidInfo = JSON.parse(readFileSync(join(home, ".opencorp", "scheduler.pid"), "utf8")) as { pid?: number };
+        let vivo = false;
+        if (typeof pidInfo.pid === "number") {
+          try { process.kill(pidInfo.pid, 0); vivo = true; } catch { vivo = false; }
+        }
+        linhas.push(`Scheduler (daemon): ${vivo ? "rodando" : "parado"}`);
+      } catch {
+        linhas.push("Scheduler (daemon): parado");
+      }
+      try {
+        const emAndamento = (await tasks.listar(ws.path)).filter((t) => t.coluna === "fazendo" || t.coluna === "bloqueado");
+        linhas.push(`Tasks: ${emAndamento.length} em andamento`);
+      } catch {
+        linhas.push("Tasks: indisponível");
+      }
+      return { tratado: true, mensagem: `Status do workspace "${ws.id}":\n${linhas.map((l) => `- ${l}`).join("\n")}` };
+    }
+
+    if (token === "/agents") {
+      const lista = await agentes.listar(ws.path).catch(() => []);
+      if (lista.length === 0) return { tratado: true, mensagem: "Nenhum agente configurado neste workspace." };
+      return {
+        tratado: true,
+        mensagem: `Agentes do workspace "${ws.id}" (${lista.length}):\n${lista
+          .map((a) => `- @${a.id}${a.role ? ` — ${a.role}` : ""}${a.ativo === false ? " (desativado)" : ""}`)
+          .join("\n")}`,
+      };
+    }
+
+    if (token === "/schedules") {
+      const jobs = await scheduler.listar().catch(() => []);
+      if (jobs.length === 0) return { tratado: true, mensagem: "Nenhuma rotina agendada." };
+      return {
+        tratado: true,
+        mensagem: `Rotinas agendadas (${jobs.length}):\n${jobs
+          .map((j) => `- ${j.nome} (${j.workspace}) — ${j.proxima_exec ? j.proxima_exec.slice(0, 16).replace("T", " ") : "sem próxima execução"}`)
+          .join("\n")}`,
+      };
+    }
+
+    if (token === "/task") {
+      const sub = (pedacos[1] ?? "").toLowerCase();
+      if (sub === "list" || sub === "") {
+        const lista = await tasks.listar(ws.path).catch(() => []);
+        if (lista.length === 0) return { tratado: true, mensagem: "Nenhuma task no quadro." };
+        return {
+          tratado: true,
+          mensagem: `Quadro de tasks (${lista.length}):\n${lista
+            .map((t) => `- ${t.id}: ${t.titulo} [${t.coluna}]`)
+            .join("\n")}`,
+        };
+      }
+      if (sub === "status" || sub === "run") {
+        const id = pedacos[2];
+        if (!id) return { tratado: true, mensagem: `Uso: /task ${sub} <id>` };
+        const tk = await tasks.obter(ws.path, id).catch(() => null);
+        if (!tk) return { tratado: true, mensagem: `Task "${id}" não encontrada no workspace.` };
+        if (sub === "status") {
+          return {
+            tratado: true,
+            mensagem: `Task ${tk.id}: ${tk.titulo}\nColuna: ${tk.coluna} · Prioridade: ${tk.prioridade} · Responsável: ${tk.responsavel || "-"}\n${tk.descricao || ""}`.trim(),
+          };
+        }
+        // /task run <id> — despacha para o agente responsável (fire-and-forget).
+        const agenteTask = (tk.responsavel ?? "").replace(/^agente:/, "").trim() || "executor-padrao";
+        void sessoes
+          .rodar({
+            agente: agenteTask,
+            ordem: `Você é o agente "${agenteTask}" executando a task ${tk.id} no workspace "${ws.id}".\nTítulo: ${tk.titulo}\n${tk.descricao ? `Descrição:\n${tk.descricao}` : ""}\nExecute todas as ações necessárias para resolver esta tarefa.`,
+            workspaceDir: ws.path,
+            gatilho: { tipo: "manual", origem: `task:${tk.id}` },
+          } as OpcoesRun)
+          .catch(() => undefined);
+        return {
+          tratado: true,
+          mensagem: `Task ${tk.id} despachada para o agente @${agenteTask} (execução em andamento).`,
+        };
+      }
+      return { tratado: true, mensagem: `Subcomando de task não reconhecido. Use /task list, /task status <id> ou /task run <id>.` };
+    }
+
+    if (token === "/doctor") {
+      const { runDoctor } = await import("../core/doctor.js");
+      const r = await runDoctor({ homeDir: opcoes.homeDir ?? opencorpHome(), workspacePath: ws.path });
+      const linhas = r.checks.map((c) => `- [${c.status === "ok" ? "OK" : c.status.toUpperCase()}] ${c.label}${c.detail ? ` — ${c.detail}` : ""}`);
+      return {
+        tratado: true,
+        mensagem: `Doctor (${r.ok ? "tudo ok" : "há pendências"}):\n${linhas.join("\n")}`,
+      };
+    }
+
+    return { tratado: false, mensagem: "" };
+  }
 
   async function detectarOpencodeInfo(homeDir: string) {
     let pathEncontrado: string | null = null;
@@ -5327,10 +5582,40 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               }
             }
 
+            // FAST-PATH: ações `/` whitelistadas (status, agents, task, doctor…).
+            if (/^\//.test(mensagemBruta)) {
+              const ws = await resolverWs(url);
+              const acao = await processarSlashAcao(mensagemBruta, ws);
+              if (acao.tratado) {
+                enviar(res, 200, {
+                  ok: true,
+                  sessao_id: corpo.sessao_id || `sessao-acao-${Date.now()}`,
+                  resposta: acao.mensagem,
+                  content: acao.mensagem,
+                });
+                return;
+              }
+              // Comando `/` não-whitelistado NUNCA cai no LLM — ajuda legível.
+              enviar(res, 200, {
+                ok: true,
+                sessao_id: corpo.sessao_id || `sessao-acao-${Date.now()}`,
+                resposta: `Comando "${mensagemBruta.split(/\s+/)[0]}" não reconhecido.\n\n${textoAjudaSlash()}`,
+                content: `Comando "${mensagemBruta.split(/\s+/)[0]}" não reconhecido.\n\n${textoAjudaSlash()}`,
+              });
+              return;
+            }
+
+            const ws = await resolverWs(url);
+            // F3-T01: resolver autoritativo de menções @ + destinatário (verdade no servidor).
+            const resolvido = await resolverMencoesSecretario({
+              mensagemBruta,
+              corpoContexto: corpo.contexto,
+              agenteAtual: corpo.agente ?? "secretario",
+              ws,
+            });
+            const mensagem = resolvido.mensagem;
+            const agenteResolvido = resolvido.agente;
             const porta = await portaOpencodeOuErro();
-            // Contexto @ do composer (Etapa 2): menciona os alvos; conteúdo dos arquivos na Etapa 3.
-            const contexto = (Array.isArray(corpo.contexto) ? corpo.contexto : []).map((c) => String(c).replace(/^@/, "").slice(0, 120)).filter(Boolean).slice(0, 8);
-            const mensagem = contexto.length ? `${mensagemBruta}\n\n(Contexto referenciado pelo usuário: ${contexto.map((c) => "@" + c).join(" ")})` : mensagemBruta;
             let sessaoId = corpo.sessao_id;
             const baseUrl = `http://127.0.0.1:${porta}`;
 
@@ -5351,7 +5636,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                 headers: { "content-type": "application/json" },
                 body: JSON.stringify({
                   title: mensagem.slice(0, 60),
-                  agent: corpo.agente,
+                  agent: agenteResolvido,
                 }),
                 signal: AbortSignal.timeout(10000),
               });
@@ -5407,7 +5692,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
                   headers: { "content-type": "application/json" },
                   body: JSON.stringify({
                     sessionID: sessaoId,
-                    agent: corpo.agente ?? "secretario",
+                    agent: agenteResolvido ?? "secretario",
                     ...(modelPayload ? { model: modelPayload } : {}),
                     parts: [
                       { type: "text", text: mensagemComWs },
@@ -5463,7 +5748,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             }
 
             void sincronizarSessaoNoCorp(porta, sessaoId);
-            enviar(res, 200, { sessao_id: sessaoId, resposta: respostaTexto });
+            enviar(res, 200, { sessao_id: sessaoId, resposta: respostaTexto, agente: agenteResolvido });
           } catch (erro) {
             if (erro instanceof SecretarioError) {
               enviar(res, erro.status ?? 409, { erro: erro.message });
@@ -5555,10 +5840,40 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               }
             }
 
-            const porta = await portaOpencodeOuErro();
-            // Contexto @ do composer (Etapa 2): menciona os alvos; conteúdo dos arquivos na Etapa 3.
-            const contexto = (Array.isArray(corpo.contexto) ? corpo.contexto : []).map((c) => String(c).replace(/^@/, "").slice(0, 120)).filter(Boolean).slice(0, 8);
-            const mensagem = contexto.length ? `${mensagemBruta}\n\n(Contexto referenciado pelo usuário: ${contexto.map((c) => "@" + c).join(" ")})` : mensagemBruta;
+            // FAST-PATH: ações `/` whitelistadas (status, agents, task, doctor…).
+            if (/^\//.test(mensagemBruta)) {
+              const ws = await resolverWs(url);
+              const acao = await processarSlashAcao(mensagemBruta, ws);
+              const respostaAcao = acao.tratado
+                ? acao.mensagem
+                : `Comando "${mensagemBruta.split(/\s+/)[0]}" não reconhecido.\n\n${textoAjudaSlash()}`;
+              if (!res.headersSent && !res.writableEnded) {
+                res.writeHead(200, {
+                  "content-type": "text/event-stream; charset=utf-8",
+                  "cache-control": "no-cache",
+                  "connection": "keep-alive",
+                  "access-control-allow-origin": "*",
+                  "x-accel-buffering": "no",
+                });
+              }
+              const sId = corpo.sessao_id || url.searchParams.get("sessao") || `sessao-acao-${Date.now()}`;
+              sse("inicio", { sessao_id: sId });
+              sse("delta", { delta: respostaAcao });
+              sse("fim", { content: respostaAcao, resposta: respostaAcao });
+              if (chaveStreamRegistrada) liberarStreamSecretario(chaveStreamRegistrada, res);
+              res.end();
+              return;
+            }
+
+            const ws = await resolverWs(url);
+            // F3-T01: resolver autoritativo de menções @ + destinatário (verdade no servidor).
+            const resolvido = await resolverMencoesSecretario({
+              mensagemBruta,
+              corpoContexto: corpo.contexto,
+              agenteAtual: corpo.agente ?? "secretario-exec",
+              ws,
+            });
+            const mensagem = resolvido.mensagem;
 
             if (!res.headersSent && !res.writableEnded) {
               res.writeHead(200, {
@@ -5570,8 +5885,9 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               });
             }
 
+            const porta = await portaOpencodeOuErro();
             const baseUrl = `http://127.0.0.1:${porta}`;
-            const agente = corpo.agente ?? "secretario-exec";
+            const agente = resolvido.agente ?? "secretario-exec";
             let sessaoId = corpo.sessao_id || url.searchParams.get("sessao") || undefined;
 
             // Se sessaoId foi informado, verifica se ela realmente existe no opencode
@@ -5600,9 +5916,9 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
               const sessionData = (await createRes.json()) as { id: string };
               sessaoId = sessionData.id;
             }
-            sse("inicio", { sessao_id: sessaoId });
+            sse("inicio", { sessao_id: sessaoId, agente });
             // espelho no eventBus → todas as abas abertas (SSE /events) sincronizam o chat
-            eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "inicio" });
+            eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "inicio", agente });
             // Move a reserva para a chave final quando uma sessão nova foi criada
             // (o POST reservou a candidata; a real pode ter outro id no opencode).
             if (chaveStreamRegistrada && chaveStreamRegistrada !== sessaoId) {
@@ -5962,8 +6278,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
             }
 
             const respostaFinal = enviado || (totalAcoes > 0 ? "Ação concluída." : "Processamento concluído.");
-            sse("fim", { sessao_id: sessaoId, resposta: respostaFinal });
-            eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "fim" });
+            sse("fim", { sessao_id: sessaoId, resposta: respostaFinal, agente });
+            eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "fim", agente });
             liberarStreamSecretario(sessaoId, res);
             res.end();
             void sincronizarSessaoNoCorp(porta, sessaoId);
