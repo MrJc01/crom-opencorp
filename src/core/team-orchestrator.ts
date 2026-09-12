@@ -205,25 +205,29 @@ export class OrquestradorDeTeams {
 
     await this.tasks.definirDependencias(wsPath, raiz.id, subtaskIds);
 
-    const resultados = await Promise.allSettled(
-      paralelos.map(async (p, idx) => {
-        await this.tasks.travar(wsPath, subtaskIds[idx], "orquestrador");
-        try {
-          const ordem = template(p.ordem, { entrada });
-          const rotulo = `fanout/${p.agente}`;
-          const r = await this.executarPasso(wsPath, { id: subtaskIds[idx] }, p, ordem, rotulo, {
-            tipo: "padrao",
-            origem: `team:${spec.id}/${rotulo}`,
-          });
-          passosResultado.push({ agente: p.agente, ...r });
-          return { idx, ok: r.ok };
-        } finally {
-          await this.tasks.liberar(wsPath, subtaskIds[idx], "orquestrador");
-        }
-      })
-    );
+    const resultados = (
+      await Promise.allSettled(
+        paralelos.map(async (p, idx) => {
+          await this.tasks.travar(wsPath, subtaskIds[idx], "orquestrador");
+          try {
+            const ordem = template(p.ordem, { entrada });
+            const rotulo = `fanout/${p.agente}`;
+            const r = await this.executarPasso(wsPath, { id: subtaskIds[idx] }, p, ordem, rotulo, {
+              tipo: "padrao",
+              origem: `team:${spec.id}/${rotulo}`,
+            });
+            passosResultado.push({ agente: p.agente, ...r });
+            return { idx, ok: r.ok };
+          } finally {
+            await this.tasks.liberar(wsPath, subtaskIds[idx], "orquestrador");
+          }
+        })
+      )
+    ).map((r, i) => ({ i, r }));
 
-    const falhas = resultados.filter((r) => r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok));
+    const falhas = resultados.filter(
+      ({ r }) => r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok)
+    );
 
     if (falhas.length > 0) {
       await this.tasks.mover(wsPath, raiz.id, "bloqueado");
@@ -232,11 +236,11 @@ export class OrquestradorDeTeams {
         corpo: `fanout com falhas (${falhas.length}/${paralelos.length}) — escala humano`,
         tipo: "sistema",
       });
-      for (const r of resultados) {
+      for (const { i, r } of resultados) {
         if (r.status === "fulfilled" && r.value.ok) {
-          await this.tasks.mover(wsPath, subtaskIds[r.value.idx], "feito");
+          await this.tasks.mover(wsPath, subtaskIds[i], "feito");
         } else {
-          await this.tasks.mensagem(wsPath, subtaskIds[resultados.indexOf(r)], {
+          await this.tasks.mensagem(wsPath, subtaskIds[i], {
             autor: "orquestrador",
             corpo: "subtask falhou — mantida em fazendo para inspeção",
             tipo: "sistema",

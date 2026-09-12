@@ -206,6 +206,57 @@ describe("OrquestradorDeTeams — fanout", () => {
     const msgSistema = chatFail.find((m) => m.tipo === "sistema" && m.corpo.includes("subtask falhou"));
     expect(msgSistema).toBeDefined();
   });
+
+  it("2+ paralelos falhando ao mesmo tempo → cada erro atribuído à subtask correta; ok vai para 'feito'", async () => {
+    const spec = await teamStore.criar(wsPath, {
+      id: "fanout-multifail",
+      titulo: "Fanout com múltiplas falhas",
+      padrao: "fanout",
+      paralelos: [
+        { agente: "ok", ordem: "faça OK" },
+        { agente: "fail1", ordem: "faça FAIL1" },
+        { agente: "fail2", ordem: "faça FAIL2" },
+      ],
+    });
+
+    const exec = criarExecutorFake({
+      ok: () => "sucesso",
+      fail1: () => { throw new Error("boom1"); },
+      fail2: () => { throw new Error("boom2"); },
+    });
+
+    const orq = new OrquestradorDeTeams({ executores: exec, agora: () => new Date((relogio += 60_000)) });
+    const res = await orq.executar(wsPath, "fanout-multifail", "entrada");
+
+    expect(res.status_final).toBe("bloqueado");
+
+    const raiz = await store.obter(wsPath, res.task_id);
+    expect(raiz.coluna).toBe("bloqueado");
+
+    const subtasks = await store.listar(wsPath);
+    const filhas = subtasks.filter((t) => t.task_pai === raiz.id);
+    expect(filhas.length).toBe(3);
+
+    const okTask = filhas.find((f) => f.responsavel === "agente:ok");
+    const fail1Task = filhas.find((f) => f.responsavel === "agente:fail1");
+    const fail2Task = filhas.find((f) => f.responsavel === "agente:fail2");
+    expect(okTask?.coluna).toBe("feito");
+    expect(fail1Task?.coluna).toBe("fazendo");
+    expect(fail2Task?.coluna).toBe("fazendo");
+
+    const chatOk = await store.chat(wsPath, okTask!.id);
+    expect(chatOk.find((m) => m.corpo.includes("subtask falhou"))).toBeUndefined();
+
+    const chatFail1 = await store.chat(wsPath, fail1Task!.id);
+    expect(chatFail1.find((m) => m.tipo === "sistema" && m.corpo.includes("subtask falhou"))).toBeDefined();
+    expect(chatFail1.find((m) => m.tipo === "sistema" && m.corpo.includes("agente fail1") && m.corpo.includes("boom1"))).toBeDefined();
+    expect(chatFail1.find((m) => m.corpo.includes("agente fail2"))).toBeUndefined();
+
+    const chatFail2 = await store.chat(wsPath, fail2Task!.id);
+    expect(chatFail2.find((m) => m.tipo === "sistema" && m.corpo.includes("subtask falhou"))).toBeDefined();
+    expect(chatFail2.find((m) => m.tipo === "sistema" && m.corpo.includes("agente fail2") && m.corpo.includes("boom2"))).toBeDefined();
+    expect(chatFail2.find((m) => m.corpo.includes("agente fail1"))).toBeUndefined();
+  });
 });
 
 describe("OrquestradorDeTeams — review", () => {

@@ -38,6 +38,10 @@ export const nosFlowSchema = z.object({
   ]),
   config: z.record(z.string(), z.unknown()).default({}),
   pos: z.object({ x: z.number(), y: z.number() }).optional(),
+  // F10-T01: barreira de junção para nós com múltiplas entradas.
+  // "all" = esperar TODAS as arestas de entrada antes de executar (concatena o
+  // contexto); "any" = executa a cada entrada (comportamento legado).
+  join: z.enum(["all", "any"]).optional(),
 });
 
 export const arestaFlowSchema = z.object({
@@ -805,6 +809,39 @@ export class FlowStore {
     const saidasPorNo: Record<string, string> = {};
 
     const filaNos: Array<{ no: NoFlow; contexto: string; noAnterior?: NoFlow }> = [];
+
+    // F10-T01: barreira de junção — pré-computa o grau de entrada (forward) de
+    // cada nó e mantém pendências/buffer por nó. Nós com join "all" (default
+    // para grau > 1, exceto quando `join: "any"` é explícito) só entram na fila
+    // quando TODOS os predecessores terminarem, com o contexto mesclado.
+    const grauPorNo = grauEntradaJoin(flow);
+    const pendentesPorNo = new Map<string, number>();
+    const bufferEntradas = new Map<string, string[]>();
+    for (const no of flow.nos) {
+      const grau = grauPorNo.get(no.id) ?? 0;
+      const modo = no.join ?? (grau > 1 ? "all" : "any");
+      if (modo === "all" && grau > 1) {
+        pendentesPorNo.set(no.id, grau);
+        bufferEntradas.set(no.id, []);
+      }
+    }
+    const enfileirar = (prox: NoFlow, ctxPredecessor: string, anterior?: NoFlow): void => {
+      if (pendentesPorNo.has(prox.id)) {
+        bufferEntradas.get(prox.id)!.push(ctxPredecessor);
+        const restante = pendentesPorNo.get(prox.id)! - 1;
+        if (restante <= 0) {
+          const mesclado = bufferEntradas.get(prox.id)!.join("\n\n");
+          bufferEntradas.delete(prox.id);
+          pendentesPorNo.delete(prox.id);
+          filaNos.push({ no: prox, contexto: mesclado, noAnterior: anterior });
+        } else {
+          pendentesPorNo.set(prox.id, restante);
+        }
+      } else {
+        filaNos.push({ no: prox, contexto: ctxPredecessor, noAnterior: anterior });
+      }
+    };
+
     const inicial = retomando
       ? porId(flow, retomando.noId)
       : (flow.nos.find((n) => n.tipo === "manual") ||
@@ -981,12 +1018,12 @@ export class FlowStore {
           if (encerrar) {
             if (config.saida_final) {
               const prox = porId(flow, config.saida_final);
-              if (prox) filaNos.push({ no: prox, contexto, noAnterior: no });
+              if (prox) enfileirar(prox, contexto, no);
             }
           } else {
             if (config.retornar_para) {
               const prox = porId(flow, config.retornar_para);
-              if (prox) filaNos.push({ no: prox, contexto, noAnterior: no });
+              if (prox) enfileirar(prox, contexto, no);
             }
           }
           continue;
@@ -1279,7 +1316,7 @@ export class FlowStore {
           saidasPorNo[no.id] = contexto;
           const proxId = casou ? config.entao : config.senao;
           const prox = porId(flow, proxId);
-          if (prox) filaNos.push({ no: prox, contexto, noAnterior: no });
+          if (prox) enfileirar(prox, contexto, no);
           continue;
         } else if (no.tipo === "task_create") {
           const config = no.config as { titulo: string; descricao?: string; prioridade?: string; responsavel?: string; coluna?: string };
@@ -1382,7 +1419,7 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
           saidasPorNo[no.id] = contexto;
           if (proximoAlvo) {
             const prox = porId(flow, proximoAlvo);
-            if (prox) filaNos.push({ no: prox, contexto, noAnterior: no });
+            if (prox) enfileirar(prox, contexto, no);
           }
           continue;
         } else if (no.tipo === "script" || no.tipo === "componente") {
@@ -1620,7 +1657,7 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
         const saidas = flow.arestas.filter((a) => a.de === no.id);
         for (const s of saidas) {
           const prox = porId(flow, s.para);
-          if (prox) filaNos.push({ no: prox, contexto, noAnterior: no });
+          if (prox) enfileirar(prox, contexto, no);
         }
       }
     } catch (erro) {
@@ -1766,6 +1803,69 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
 
 function porId(flow: Flow, id: string): NoFlow | undefined {
   return flow.nos.find((n) => n.id === id);
+}
+
+/**
+ * Grau de entrada "para frente" de cada nó (F10-T01) — número de arestas
+ * (explícitas + implícitas de condicao/decisao/loop) que chegam ao nó vindas de
+ * um nó que NÃO é alcançável a partir dele. Back-edges (ciclos de loop) são
+ * excluídas do grau: o nó de loop e o seu corpo re-executam a cada volta e não
+ * são pontos de junção — só entram na barreira arestas de ramos paralelos.
+ */
+function grauEntradaJoin(flow: Flow): Map<string, number> {
+  const ids = flow.nos.map((n) => n.id);
+  const porId = new Map(flow.nos.map((n) => [n.id, n]));
+  const adj = new Map<string, string[]>();
+  const rev = new Map<string, string[]>();
+  for (const id of ids) {
+    adj.set(id, []);
+    rev.set(id, []);
+  }
+  const ligar = (de: string, para: string): void => {
+    if (porId.has(de) && porId.has(para) && de !== para) {
+      adj.get(de)!.push(para);
+      rev.get(para)!.push(de);
+    }
+  };
+  for (const a of flow.arestas) ligar(a.de, a.para);
+  for (const no of flow.nos) {
+    const c = (no.config ?? {}) as Record<string, unknown>;
+    if (no.tipo === "condicao") {
+      if (typeof c.entao === "string") ligar(no.id, c.entao);
+      if (typeof c.senao === "string") ligar(no.id, c.senao);
+    } else if (no.tipo === "decisao") {
+      for (const o of (c.opcoes as { proximo: string }[] | undefined) ?? []) {
+        if (typeof o.proximo === "string") ligar(no.id, o.proximo);
+      }
+    } else if (no.tipo === "loop") {
+      if (typeof c.retornar_para === "string") ligar(no.id, c.retornar_para);
+      if (typeof c.saida_final === "string") ligar(no.id, c.saida_final);
+    }
+  }
+  const alcanca = (origem: string): Set<string> => {
+    const vis = new Set<string>();
+    const pilha = [origem];
+    while (pilha.length > 0) {
+      const atual = pilha.pop()!;
+      for (const prox of adj.get(atual) ?? []) {
+        if (!vis.has(prox)) {
+          vis.add(prox);
+          pilha.push(prox);
+        }
+      }
+    }
+    return vis;
+  };
+  const graus = new Map<string, number>();
+  for (const id of ids) {
+    const desc = alcanca(id);
+    let grau = 0;
+    for (const p of rev.get(id) ?? []) {
+      if (!desc.has(p)) grau += 1;
+    }
+    graus.set(id, grau);
+  }
+  return graus;
 }
 
 /** Remove códigos ANSI/escape de terminal (transcripts de exec chegam coloridos) */
