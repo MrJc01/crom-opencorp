@@ -21,6 +21,7 @@ import { opencorpHome, resolvePath } from "../utils/paths.js";
 import { envOpencodeIsolado } from "./opencode-server.js";
 import { SettingsStore } from "./settings-store.js";
 import { engineRegistry } from "./engines/index.js";
+import { CapabilitiesPara } from "./engines/capabilities.js";
 
 export type StatusExecucao = "executando" | "concluido" | "falhou" | "cancelado" | "hitl_pendente";
 
@@ -62,12 +63,71 @@ export interface OpcoesRun {
    * passo de team, turno de reunião, evento ou manual. Vai para extras, ledger (corp.db) e eventos.
    */
   gatilho?: Gatilho;
+  /**
+   * F1-T02 — linhagem agnóstica de sessão (aditivo; vai para extras do registro):
+   * - session_from_ancestral: execução ancestral da qual esta deriva (continuar ou duplicar);
+   * - fork_de: esta execução duplica a sessão indicada (snapshot → nova sessão);
+   * - reidratada_de: nova sessão com o transcript da indicada, sem continuidade nativa;
+   * - continuada_de: reaproveitou a sessão indicada no motor (continuidade nativa).
+   */
+  session_from_ancestral?: string;
+  fork_de?: string;
+  reidratada_de?: string;
+  continuada_de?: string;
 }
 
 export interface ResultadoRun extends RegistroExecucao {
   captura: string;
   custo_usd: number | null;
 }
+
+/**
+ * F1-T02 — snapshot agnóstico de sessão para duplicar/reidratar.
+ * Formato: transcript (chats/<id> → fallback logs/<id>.log → "") + contexto
+ * (agente/modelo/ordem/harness/status) + config (extras da origem sem pid).
+ * Persistido no mirror: evento `snapshot`/`duplicada` no journal da nova
+ * execução + marcadores fork_de/reidratada_de nos extras (meta.json).
+ */
+export interface SnapshotSessao {
+  de: string;
+  em: string;
+  agente: string;
+  modelo: string;
+  ordem: string;
+  harness: string;
+  status_origem: StatusExecucao;
+  transcript: string;
+  fonte_transcript: "chats" | "log" | "vazio";
+  log_path: string | null;
+  extras_origem: Record<string, unknown>;
+}
+
+export interface OpcoesContinuarDuplicar {
+  prompt?: string;
+  model?: string;
+  title?: string;
+  tags?: string[];
+  workspaceId?: string;
+  workspaceDir?: string;
+  timeoutMs?: number;
+}
+
+export interface ResultadoContinuar extends ResultadoRun {
+  continuada_de: string;
+  continuidade_nativa: boolean;
+  aviso?: string;
+}
+
+export interface ResultadoDuplicar extends ResultadoRun {
+  fork_de: string;
+  snapshot: SnapshotSessao;
+}
+
+/** Código de aviso quando o motor não continua sessões (fallback reidratado honesto). */
+export const AVISO_SEM_CONTINUIDADE_NATIVA = "sem-continuidade-nativa";
+
+/** Teto do transcript embutido no prompt reidratado (evita ordens gigantes). */
+export const LIMITE_TRANSCRIPT_REIDRATADO = 4000;
 
 export interface RegistroExecucao {
   id: string;
@@ -745,6 +805,12 @@ export class SessionManager {
         ...(opcoes.tipo ? { tipo: opcoes.tipo } : {}),
         ...(opcoes.gatilho ? { gatilho: opcoes.gatilho } : {}),
         ...(opcoes.retryDe ? { retry: opcoes.retryDe } : {}),
+        // F1-T02: linhagem de sessão (aditivo; continuar/duplicar).
+        ...(opcoes.session ? { session: opcoes.session } : {}),
+        ...(opcoes.session_from_ancestral ? { session_from_ancestral: opcoes.session_from_ancestral } : {}),
+        ...(opcoes.fork_de ? { fork_de: opcoes.fork_de } : {}),
+        ...(opcoes.reidratada_de ? { reidratada_de: opcoes.reidratada_de } : {}),
+        ...(opcoes.continuada_de ? { continuada_de: opcoes.continuada_de } : {}),
       },
     });
     this.registrarNoLedger(ws.path, registro, null);
@@ -814,6 +880,15 @@ export class SessionManager {
     }
 
     const driver = engineRegistry.resolveDriver(harnessEscolhido);
+    // F1-T02: marca o harness efetivo nos extras (base para continuar/duplicar;
+    // best-effort — quando ausente, continuar/duplicar inferem do modelo).
+    try {
+      const metaHarness = await this.registros.lerMeta(ws.path, "execucoes", id);
+      metaHarness.extras = { ...(metaHarness.extras ?? {}), harness: driver.id };
+      await this.registros.salvarMeta(ws.path, "execucoes", id, metaHarness);
+    } catch {
+      /* marca best-effort */
+    }
     let runnerBin: string;
     let args: string[];
     let execEnv: Record<string, string>;
@@ -874,7 +949,9 @@ export class SessionManager {
       const prep = await driver.prepareExecution({
         workspaceId: ws.id,
         workspacePath: ws.path,
-        sessionId: id,
+        // F1-T02: repassa a sessão a continuar aos drivers que aceitam
+        // (ex.: crom-agente usa sessionId como --session); demais ignoram.
+        sessionId: opcoes.session ?? id,
         agentId: ag.frontmatter.id,
         model: modeloEfetivo,
         prompt: ordem,
@@ -1180,6 +1257,265 @@ export class SessionManager {
       if (retry) return retry;
     }
     return { ...registro, captura: textoCaptura, custo_usd: custo };
+  }
+
+  // ── F1-T02: continuar / duplicar (aditivo; rodar não muda de comportamento) ──
+
+  /**
+   * Continua a sessão no motor quando há suporte nativo de ponta a ponta
+   * (opencode via --session; crom-agente via opts.session → --session).
+   * Demais harnesses (mesmo os que declaram continuação na matriz, ex.
+   * claude-code/codex, cujo driver ainda não repassa a sessão) e harnesses sem
+   * suporte (aider, desconhecidos) caem no fallback honesto: sessão nova com o
+   * prompt reidratado `[contexto de <id>]`, extras `reidratada_de` e aviso
+   * `sem-continuidade-nativa` — nunca finge continuação.
+   */
+  async continuar(
+    sessaoId: string,
+    prompt: string,
+    opts: OpcoesContinuarDuplicar = {},
+  ): Promise<ResultadoContinuar> {
+    if (!prompt || prompt.trim().length === 0) {
+      throw new SessionError("ordem vazia — informe o prompt da continuação");
+    }
+    const { wsPath, wsId, meta } = await this.localizarExecucao(sessaoId, opts);
+    const extras = (meta.extras ?? {}) as Record<string, unknown>;
+    const agente = meta.criado_por;
+    const modeloOrigem = String(extras.modelo ?? "");
+    const harness = this.harnessDaExecucao(meta);
+    const capacidade = CapabilitiesPara(harness);
+    // TODO(F1): plugar opts.session nos demais drivers nativos (claude --resume,
+    // codex resume/fork etc.) quando a matriz de capabilities virar flags reais.
+    const repasseNativo = harness === "opencode" || harness === "crom-agente";
+    const modelo = (opts.model ?? modeloOrigem).trim();
+
+    if (capacidade.continuaNativo && repasseNativo) {
+      const r = await this.rodar({
+        agente,
+        ordem: prompt,
+        ...(modelo ? { model: modelo } : {}),
+        session: sessaoId,
+        continuada_de: sessaoId,
+        session_from_ancestral: sessaoId,
+        ...(opts.title ? { title: opts.title } : {}),
+        ...(opts.tags ? { tags: opts.tags } : {}),
+        workspaceDir: wsPath,
+        workspaceId: wsId,
+        ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      });
+      try {
+        await this.registros.anexarEvento(wsPath, "execucoes", r.id, {
+          ts: new Date().toISOString(),
+          por: "opencorp",
+          evento: "continuada",
+          resumo: `continuação nativa de ${sessaoId} no motor ${harness} (session repassada)`,
+          continuada_de: sessaoId,
+          harness,
+        });
+      } catch {
+        /* journal best-effort */
+      }
+      return { ...r, continuada_de: sessaoId, continuidade_nativa: true };
+    }
+
+    // Fallback honesto: sessão nova + prompt reidratado com o transcript.
+    const snapshot = await this.montarSnapshot(wsPath, meta);
+    const ordemReidratada = this.montarPromptReidratado(sessaoId, snapshot, prompt);
+    const r = await this.rodar({
+      agente,
+      ordem: ordemReidratada,
+      ...(modelo ? { model: modelo } : {}),
+      reidratada_de: sessaoId,
+      session_from_ancestral: sessaoId,
+      ...(opts.title ? { title: opts.title } : {}),
+      tags: [...(opts.tags ?? []), "reidratada"],
+      workspaceDir: wsPath,
+      workspaceId: wsId,
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    });
+    const motivo = capacidade.continuaNativo
+      ? `o motor "${harness}" declara continuação nativa (${capacidade.como}), mas o driver ainda não repassa a sessão`
+      : `o motor "${harness}" não continua sessões nativamente`;
+    const aviso = `${AVISO_SEM_CONTINUIDADE_NATIVA}: ${motivo} — nova sessão reidratada a partir do transcript de ${sessaoId}`;
+    try {
+      await this.registros.anexarEvento(wsPath, "execucoes", r.id, {
+        ts: new Date().toISOString(),
+        por: "opencorp",
+        evento: "reidratada",
+        resumo: aviso,
+        reidratada_de: sessaoId,
+        harness,
+      });
+    } catch {
+      /* journal best-effort */
+    }
+    return { ...r, continuada_de: sessaoId, continuidade_nativa: false, aviso };
+  }
+
+  /**
+   * Duplica a sessão: snapshot (transcript + contexto + config) → sessão nova
+   * com extras `fork_de`. Sempre agnóstico — nunca finge continuação, mesmo em
+   * motor com suporte nativo.
+   */
+  async duplicar(
+    sessaoId: string,
+    opts: OpcoesContinuarDuplicar = {},
+  ): Promise<ResultadoDuplicar> {
+    const { wsPath, wsId, meta } = await this.localizarExecucao(sessaoId, opts);
+    const snapshot = await this.montarSnapshot(wsPath, meta);
+    const ordem = opts.prompt !== undefined && opts.prompt.trim().length > 0 ? opts.prompt : snapshot.ordem;
+    if (!ordem || ordem.trim().length === 0) {
+      throw new SessionError(
+        `a sessão "${sessaoId}" não tem ordem registrada — informe um prompt para duplicar`,
+      );
+    }
+    const modelo = (opts.model ?? snapshot.modelo ?? "").trim();
+    const r = await this.rodar({
+      agente: snapshot.agente,
+      ordem,
+      ...(modelo && modelo !== "-" ? { model: modelo } : {}),
+      fork_de: sessaoId,
+      session_from_ancestral: sessaoId,
+      title: opts.title ?? `fork de ${sessaoId}`,
+      tags: [...(opts.tags ?? []), "fork"],
+      workspaceDir: wsPath,
+      workspaceId: wsId,
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    });
+    try {
+      await this.registros.anexarEvento(wsPath, "execucoes", r.id, {
+        ts: new Date().toISOString(),
+        por: "opencorp",
+        evento: "duplicada",
+        resumo: `fork agnóstico de ${sessaoId} (transcript via ${snapshot.fonte_transcript}, ${snapshot.transcript.length} chars)`,
+        fork_de: sessaoId,
+        snapshot,
+      });
+    } catch {
+      /* journal best-effort */
+    }
+    return { ...r, fork_de: sessaoId, snapshot };
+  }
+
+  /** Localiza a execução no workspace da dica ou em qualquer workspace registrado. */
+  private async localizarExecucao(
+    sessaoId: string,
+    dica?: { workspaceId?: string; workspaceDir?: string },
+  ): Promise<{ wsPath: string; wsId: string; meta: MetaRegistro }> {
+    const candidatos: Array<{ path: string; id: string }> = [];
+    if (dica?.workspaceDir) {
+      candidatos.push({ path: dica.workspaceDir, id: dica.workspaceId ?? "" });
+    }
+    if (dica?.workspaceId) {
+      try {
+        const info = await this.workspaces.resolver(dica.workspaceId);
+        if (info.existe && !candidatos.some((c) => c.path === info.path)) {
+          candidatos.push({ path: info.path, id: info.id });
+        }
+      } catch {
+        /* workspace da dica inválido — cai na busca geral */
+      }
+    }
+    try {
+      for (const w of await this.workspaces.listar()) {
+        if (!candidatos.some((c) => c.path === w.path)) {
+          candidatos.push({ path: w.path, id: w.id });
+        }
+      }
+    } catch {
+      /* sem lista — tenta só os candidatos */
+    }
+    for (const c of candidatos) {
+      try {
+        const meta = await this.registros.lerMeta(c.path, "execucoes", sessaoId);
+        return { wsPath: c.path, wsId: c.id || meta.criado_por, meta };
+      } catch {
+        /* tenta o próximo workspace */
+      }
+    }
+    throw new SessionError(
+      `sessão "${sessaoId}" não encontrada em nenhum workspace (.opencorp/registries/execucoes)`,
+    );
+  }
+
+  /** Harness efetivo da execução: extras.harness → prefixo do modelo → "opencode". */
+  private harnessDaExecucao(meta: MetaRegistro): string {
+    const extras = (meta.extras ?? {}) as Record<string, unknown>;
+    if (typeof extras.harness === "string" && extras.harness.trim().length > 0) {
+      return extras.harness.trim().toLowerCase();
+    }
+    return this.inferirHarness(String(extras.modelo ?? ""));
+  }
+
+  private inferirHarness(modelo: string): string {
+    const m = modelo.trim().toLowerCase();
+    for (const prefixo of [
+      "opencode/",
+      "claude-code/",
+      "antigravity/",
+      "crom-agente/",
+      "crom/",
+      "cursor/",
+      "copilot/",
+      "codex/",
+      "aider/",
+    ]) {
+      if (m.startsWith(prefixo)) {
+        return prefixo === "crom/" ? "crom-agente" : prefixo.slice(0, -1);
+      }
+    }
+    return "opencode";
+  }
+
+  /** Transcript da sessão: chats/<id> (transcript) → logs/<id>.log → vazio. */
+  private async lerTranscriptComFonte(
+    wsPath: string,
+    id: string,
+  ): Promise<{ texto: string; fonte: "chats" | "log" | "vazio" }> {
+    try {
+      const t = await this.transcriptDe(wsPath, id);
+      if (t && t.trim().length > 0) return { texto: t, fonte: "chats" };
+    } catch {
+      /* sem transcript em chats — tenta o log */
+    }
+    try {
+      const t = await this.logDe(wsPath, id);
+      if (t && t.trim().length > 0) return { texto: t, fonte: "log" };
+    } catch {
+      /* sem log — snapshot sem transcript */
+    }
+    return { texto: "", fonte: "vazio" };
+  }
+
+  private async montarSnapshot(wsPath: string, meta: MetaRegistro): Promise<SnapshotSessao> {
+    const extras = (meta.extras ?? {}) as Record<string, unknown>;
+    const { texto, fonte } = await this.lerTranscriptComFonte(wsPath, meta.id);
+    const { pid: _pid, ...extrasSemRuntime } = extras;
+    void _pid;
+    return {
+      de: meta.id,
+      em: new Date().toISOString(),
+      agente: meta.criado_por,
+      modelo: String(extras.modelo ?? "-"),
+      ordem: String(extras.ordem ?? ""),
+      harness: this.harnessDaExecucao(meta),
+      status_origem: (extras.status as StatusExecucao) ?? "executando",
+      transcript: texto,
+      fonte_transcript: fonte,
+      log_path: typeof extras.log === "string" ? extras.log : null,
+      extras_origem: extrasSemRuntime,
+    };
+  }
+
+  private montarPromptReidratado(sessaoId: string, snapshot: SnapshotSessao, prompt: string): string {
+    const trecho =
+      snapshot.transcript.length > LIMITE_TRANSCRIPT_REIDRATADO
+        ? `${snapshot.transcript.slice(0, LIMITE_TRANSCRIPT_REIDRATADO)}\n[…transcript truncado…]`
+        : snapshot.transcript;
+    return (
+      `[contexto de ${sessaoId}] (${snapshot.agente} · ${snapshot.modelo} · fonte: ${snapshot.fonte_transcript})\n` +
+      `${trecho}\n\n--- nova ordem ---\n${prompt}`
+    );
   }
 
   /**

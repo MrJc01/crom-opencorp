@@ -149,6 +149,28 @@ isolados (+ `--sandbox workspace-write` no codex). Ponto fraco: dotfiles/globais
 de cada motor (auth, `~/.claude.json`, caches). Prova: E2E "agente do ws-A não
 alcança arquivo do ws-B" por harness.
 
+## Fase 9 — Grupos de agentes (team): verificar e fechar lacunas
+
+Estado (investigado 2026-09-12): `src/core/team-store.ts` (JSON, padrões
+`pipeline|fanout|review|debate`), `team-orchestrator.ts` (uma sessão POR integrante,
+nunca sessão única; sem transcript compartilhado — contexto flui por concatenação
+`{{entrada}}/{{anterior}}/{{ajustes}}`), síntese/moderador/revisor consolidam.
+Nós `fanout/review/debate` fundidos em `flow-store.ts` (sem kanban). Testes de
+unidade/CLI/API existem (`team-store|team-orchestrator|team-cli|flow-migrate.test.ts`),
+mas **a execução end-to-end nunca foi testada**. Lacunas a fechar:
+
+1. Execução dos nós fundidos `fanout/review/debate` (`flow-store.ts:869-960`)
+   nunca testada end-to-end (só conversão e validação).
+2. Divergência de contrato legacy×fundido: debate fundido ignora `moderador.ordem`;
+   fanout/review não usam `{{anterior}}/{{ajustes}}`. Precisa teste de paridade.
+3. Sem verificação de que a saída completa (não só 1ª linha/600 chars) chega à
+   síntese/moderador em casos longos.
+4. Comportamento "sessões sempre separadas" no grupo não está documentado/testado
+   (grupo não tem `session_mode`).
+5. `team-orchestrator.ts:239` usa `resultados.indexOf(r)` para indexar subtask em
+   falha — bug potencial com múltiplas falhas simultâneas.
+6. Sem teste de `POST /teams/:id/run` de ponta a ponta.
+
 ## Verificação (todo ciclo e final)
 
 Por ciclo: `tsc` + build + specs-alvo do touch + `doctor`. Final: full E2E

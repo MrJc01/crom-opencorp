@@ -124,6 +124,28 @@ Arquivos por tarefa (sem sobreposição):
   agy, copilot, codex, cursor). Aceite: matriz verde nos instalados; ausente = skip
   explícito (não falha). Gate: e2e do arquivo.
 
+## Lote 7 — Grupos de agentes (verificar + fechar lacunas da Fase 9)
+
+- [ ] **F9-T01 Execução E2E dos nós fundidos** — cobrir `flow-store.ts:869-960`
+  (fanout/review/debate) com teste de unidade + E2E `tests/e2e/web/fluxo-fanout-debate.spec.ts`:
+  fanout paralelo + síntese; review loop executor→revisor até `APROVADO`; debate com
+  moderador emitindo `DECISÃO:`. Aceite: 3 padrões executam de ponta a ponta e o
+  journal registra cada sessão (tag `flow:`). Gate: ciclo.
+
+- [ ] **F9-T02 Paridade legacy×fundido** — comparar contratos: debate fundido usa
+  `moderador.ordem` (hoje ignora); fanout/review passam a aceitar `{{anterior}}`/
+  `{{ajustes}}`; saída completa (não só 1ª linha/600 chars) chega à síntese/moderador.
+  Aceite: teste de unidade com saída longa verifica passagem integral. Gate: vitest.
+
+- [ ] **F9-T03 Bug de índice em falhas simultâneas** — `team-orchestrator.ts:239`
+  `resultados.indexOf(r)`: trocar por índice explícito no `Promise.allSettled`.
+  Aceite: teste com 2+ subtasks falhando ao mesmo tempo indexa corretamente. Gate: vitest.
+
+- [ ] **F9-T04 Documentar "sessões sempre separadas" + run por API** — documentar que
+  grupo não tem `session_mode` (1 sessão por integrante) + E2E `POST /teams/:id/run`
+  de ponta a ponta. Aceite: run por API encerra com status final e todas as sessões
+  no ledger. Gate: e2e.
+
 ## Gate final (1 ciclo dedicado, após todos os lotes)
 
 - [ ] **G1** `npx tsc --noEmit` limpo.
