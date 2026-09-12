@@ -3,6 +3,7 @@ import { chmod, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { logado, api } from "../helpers.js";
 import { SessionManager } from "../../../src/core/session-manager.js";
+import { RegistryStore } from "../../../src/core/registry-store.js";
 
 // F1-T03 — seletor de sessão no nó agente (session_mode/session_from) e
 // validação topológica de `session_from` (ancestral). Roda contra o servidor de
@@ -252,5 +253,130 @@ test.describe("Fluxo — seletor de sessão (F1-T03)", () => {
     });
     expect(semFrom.status()).toBeGreaterThanOrEqual(400);
     expect(semFrom.status()).toBeLessThan(500);
+  });
+});
+
+// F6-T01 (nó LLM-direto/ad-hoc) + F10-T02 (multi-turno explícito no nó agente).
+test.describe("Fluxo — nó LLM-direto e multi-turno (F6-T01/F10-T02)", () => {
+  test.beforeEach(async ({ page }) => {
+    logado(page, TOKEN, WS);
+    await garantirBase(api(page));
+    await instalarFakeRunner();
+  });
+
+  test.afterEach(async () => {
+    await removerFakeRunner();
+  });
+
+  test("(a) nó agente SEM agente executa com prompt_sistema + model (LLM-direto)", async ({ page }) => {
+    const sm = new SessionManager({ homeDir: E2E_HOME });
+    const ws = await sm.workspaceDe(WS);
+    await forcarDriverHost(ws.path);
+
+    const flowId = `flux-llm-${Date.now().toString(36)}`;
+    const resCriar = await api(page).post(`/flows?workspace=${WS}`, {
+      headers: HDR,
+      data: {
+        id: flowId,
+        nome: "Fluxo LLM direto",
+        nos: [
+          noManual("inicio"),
+          {
+            id: "ad-hoc",
+            tipo: "agente",
+            config: {
+              prompt_sistema: "Você é um assistente de teste que responde em uma linha.",
+              model: "opencode-go/glm-5.3-flash",
+              ordem: "resuma: {{entrada}}",
+            },
+          },
+        ],
+        arestas: [{ de: "inicio", para: "ad-hoc" }],
+      },
+    });
+    expect(resCriar.status()).toBe(201);
+
+    const resRun = await api(page).post(`/flows/${encodeURIComponent(flowId)}/run?workspace=${WS}`, {
+      headers: HDR,
+      data: { entrada: "contexto e2e llm" },
+    });
+    expect(resRun.status()).toBe(202);
+
+    const fim = await esperarFlowConcluir(page, flowId);
+    expect(fim.status).toBe("concluido");
+    expect(fim.nos.filter((n) => n.status === "ok").length).toBe(2);
+  });
+
+  test("(b) nó com turnos:2 reaproveita a sessão e o journal registra 2 turnos", async ({ page }) => {
+    const sm = new SessionManager({ homeDir: E2E_HOME });
+    const ws = await sm.workspaceDe(WS);
+    await forcarDriverHost(ws.path);
+
+    const flowId = `flux-turnos-${Date.now().toString(36)}`;
+    const resCriar = await api(page).post(`/flows?workspace=${WS}`, {
+      headers: HDR,
+      data: {
+        id: flowId,
+        nome: "Fluxo multi-turno",
+        nos: [
+          noManual("inicio"),
+          {
+            id: "trabalho",
+            tipo: "agente",
+            config: {
+              agente: AGENTE,
+              ordem: "refine: {{entrada}}",
+              session_mode: "reaproveitar",
+              turnos: 2,
+            },
+          },
+        ],
+        arestas: [{ de: "inicio", para: "trabalho" }],
+      },
+    });
+    expect(resCriar.status()).toBe(201);
+
+    const resRun = await api(page).post(`/flows/${encodeURIComponent(flowId)}/run?workspace=${WS}`, {
+      headers: HDR,
+      data: { entrada: "contexto e2e turnos" },
+    });
+    expect(resRun.status()).toBe(202);
+    const runBody = await resRun.json();
+    const execId = String(runBody.exec_id ?? "");
+
+    const fim = await esperarFlowConcluir(page, flowId);
+    expect(fim.status).toBe("concluido");
+
+    const reg = new RegistryStore();
+    const journal = await reg.lerJournal(ws.path, "execucoes", execId);
+    const turnos = journal.filter((e) => e.evento === "no-turno");
+    expect(turnos.length).toBe(2);
+    expect(turnos.map((t) => t.volta as number).sort((a, b) => a - b)).toEqual([1, 2]);
+    expect(turnos.every((t) => t.total === 2)).toBe(true);
+
+    // mesma sessão reaproveitada em ambos os turnos (extras.session idêntico)
+    const ids = turnos.map((t) => String(t.exec_id ?? ""));
+    expect(ids.length).toBe(2);
+    const metas = await Promise.all(ids.map((id) => reg.lerMeta(ws.path, "execucoes", id)));
+    const sessoes = metas.map((m) => ((m.extras ?? {}) as Record<string, unknown>).session);
+    expect(new Set(sessoes.map(String)).size).toBe(1);
+    expect(String(sessoes[0]).length).toBeGreaterThan(0);
+  });
+
+  test("(c) nó agente sem agente e sem prompt_sistema é barrado no salvar (4xx)", async ({ page }) => {
+    const res = await api(page).post(`/flows?workspace=${WS}`, {
+      headers: HDR,
+      data: {
+        id: `flux-inv-llm-${Date.now().toString(36)}`,
+        nome: "Inválido sem agente nem prompt",
+        nos: [
+          noManual("inicio"),
+          { id: "vazio", tipo: "agente", config: { ordem: "sem instruções" } },
+        ],
+        arestas: [{ de: "inicio", para: "vazio" }],
+      },
+    });
+    expect(res.status()).toBeGreaterThanOrEqual(400);
+    expect(res.status()).toBeLessThan(500);
   });
 });

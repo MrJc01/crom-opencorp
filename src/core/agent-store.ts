@@ -11,6 +11,7 @@ import {
 import { AgentError } from "./errors.js";
 import { OpenCodeBridge } from "./opencode-bridge.js";
 import { RegistryStore } from "./registry-store.js";
+import { SkillStore } from "./skill-store.js";
 import { unlink } from "node:fs/promises";
 import { writeFileAtomic } from "../utils/fs-safe.js";
 import { agentSchema } from "../schemas/agent.js";
@@ -58,6 +59,7 @@ export function serializarFrontmatter(ag: Agente): string {
   if (ag.harness_fallback && ag.harness_fallback.length > 0) saida += linhaFrontmatter("harness_fallback", listaInline(ag.harness_fallback));
   if (ag.rotation && ag.rotation.length > 0) saida += linhaFrontmatter("rotation", listaInline(ag.rotation));
   if (ag.model_fallback && ag.model_fallback.length > 0) saida += linhaFrontmatter("model_fallback", listaInline(ag.model_fallback));
+  if (ag.skills && ag.skills.length > 0) saida += linhaFrontmatter("skills", listaInline(ag.skills));
   if (ag.inherits) saida += linhaFrontmatter("inherits", ag.inherits);
   if ((ag as { execution_driver?: string }).execution_driver) saida += linhaFrontmatter("execution_driver", String((ag as { execution_driver?: string }).execution_driver));
   saida += linhaFrontmatter("tools", listaInline(ag.tools));
@@ -79,6 +81,7 @@ export class AgentStore {
   private readonly templatesDir: string;
   private readonly bridge = new OpenCodeBridge();
   private readonly registros = new RegistryStore();
+  private readonly skills = new SkillStore();
 
   constructor(opts: { templatesDir?: string } = {}) {
     this.templatesDir =
@@ -138,6 +141,16 @@ export class AgentStore {
     return path;
   }
 
+  private validarSkillsInstaladas(wsPath: string, skills: string[], id: string): void {
+    if (!skills || skills.length === 0) return;
+    const faltando = skills.filter((s) => !this.skills.existe(wsPath, s));
+    if (faltando.length > 0) {
+      throw new AgentSchemaError(
+        `skill(s) declarada(s) no agente "${id}" mas não instalada(s): ${faltando.join(", ")} — instale com "oc skill instalar <fonte>"`,
+      );
+    }
+  }
+
   private carregarDoArquivo(path: string): AgenteArquivo {
     let conteudo: string;
     try {
@@ -185,6 +198,7 @@ export class AgentStore {
       id,
       model: opts.model ?? fonte.frontmatter.model,
     };
+    this.validarSkillsInstaladas(wsPath, frontmatter.skills ?? [], id);
     const conteudo = serializarAgenteMd(frontmatter, fonte.corpo);
     await writeFileAtomic(destino, conteudo);
     await this.bridge.sincronizarAgente(wsPath, frontmatter, fonte.corpo);
@@ -230,6 +244,7 @@ export class AgentStore {
       harness_fallback?: string[];
       rotation?: string[];
       model_fallback?: string[];
+      skills?: string[];
     },
   ): Promise<Agente> {
     const carregado = await this.carregar(wsPath, id);
@@ -244,6 +259,7 @@ export class AgentStore {
       harness_fallback: mudancas.harness_fallback !== undefined ? mudancas.harness_fallback : carregado.frontmatter.harness_fallback,
       rotation: mudancas.rotation !== undefined ? mudancas.rotation : carregado.frontmatter.rotation,
       model_fallback: mudancas.model_fallback !== undefined ? mudancas.model_fallback : carregado.frontmatter.model_fallback,
+      skills: mudancas.skills !== undefined ? mudancas.skills : carregado.frontmatter.skills,
       budget: {
         ...carregado.frontmatter.budget,
         daily_usd: mudancas.budget_daily_usd ?? carregado.frontmatter.budget.daily_usd,
@@ -255,6 +271,7 @@ export class AgentStore {
       const detalhe = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
       throw new AgentSchemaError(`spec do agente "${id}" inválido — ${detalhe}`);
     }
+    this.validarSkillsInstaladas(wsPath, parsed.data.skills ?? [], id);
     const novoCorpo = mudancas.corpo !== undefined ? mudancas.corpo : carregado.corpo;
     const novoMd = serializarAgenteMd(parsed.data, novoCorpo);
     await writeFileAtomic(this.caminhoExistente(wsPath, id), novoMd);

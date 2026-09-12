@@ -100,9 +100,10 @@ no servidor antes do envio, em bloco estruturado com fontes citadas.
 
 Textos reutilizáveis saem dos `.md` espalhados para um JSON versionável
 (`chave → texto com {{vars}}`), puxado por agentes, nós de fluxo, drawer e `@prompt`.
-**Decisão pendente**: global (`~/.opencorp/prompts.json`) vs por workspace
-(`.opencorp/prompts.json` + fallback global). Proposta: por workspace com fallback
-global (mesmo padrão dos agentes).
+**Decisão D1 (2026-09-12)**: por workspace (`.opencorp/prompts.json`), isolado por
+empresa; NÃO puxa global em runtime por padrão — só na CRIAÇÃO do workspace (seed
+do `~/.opencorp/prompts.json` global). Configuração `settings` permite ativar o
+fallback global em runtime (opcional). `{{vars}}` interpolado.
 
 ## Fase 5 — Skills no agente (multi-seleção)
 

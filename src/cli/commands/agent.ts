@@ -33,8 +33,14 @@ async function comErros(fn: () => Promise<void>): Promise<void> {
   }
 }
 
-function dividirRefSubcorp(ref: string): { subcorpId: string; agenteId: string } {
-  const partes = ref.split("/");
+function dividirLista(bruto: string): string[] {
+  return bruto
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+function dividirRefSubcorp(ref: string): { subcorpId: string; agenteId: string } {  const partes = ref.split("/");
   if (partes.length !== 2 || partes[0]!.length === 0 || partes[1]!.length === 0) {
     throw new AgentError(`referência inválida "${ref}" — use <subcorp>/<agente>`);
   }
@@ -167,6 +173,7 @@ export function registerAgentCommand(program: Command): void {
         console.log(`modelo:       ${r.frontmatter.model}`);
         if (r.frontmatter.inherits) console.log(`inherits:     ${r.frontmatter.inherits}`);
         console.log(`tools:        ${r.frontmatter.tools.join(", ")}`);
+        if (r.frontmatter.skills && r.frontmatter.skills.length) console.log(`skills:       ${r.frontmatter.skills.join(", ")}`);
         console.log(`permissões:   ${r.frontmatter.permissions}`);
         console.log(`orçamento:    daily_usd ${r.frontmatter.budget.daily_usd.toFixed(2)} · max_turns ${r.frontmatter.budget.max_turns}`);
         console.log(`memória:      lê [${r.frontmatter.memory.reads.join(", ")}] · escreve [${r.frontmatter.memory.writes.join(", ")}]`);
@@ -206,6 +213,46 @@ export function registerAgentCommand(program: Command): void {
           console.log(`ok: agente "${id}" sem alterações`);
         }
       }),
+    );
+
+  agent
+    .command("skills")
+    .argument("<id>", "id do agente")
+    .option("--add <skills>", "skills a adicionar (separadas por vírgula)")
+    .option("--remove <skills>", "skills a remover (separadas por vírgula)")
+    .option("--set <skills>", "define a lista exata de skills (separadas por vírgula)")
+    .option("--json", "saída em formato JSON")
+    .description("gerencia as skills declaradas de um agente")
+    .action(
+      (
+        id: string,
+        opts: { add?: string; remove?: string; set?: string; json?: boolean; workspace?: string },
+      ) =>
+        comErros(async () => {
+          const ws = await workspaceAlvoId(opts);
+          const atuais = (await store.carregar(ws.path, id)).frontmatter.skills ?? [];
+          let novas: string[];
+          if (opts.set !== undefined) {
+            novas = dividirLista(opts.set);
+          } else {
+            novas = [...atuais];
+            if (opts.add) {
+              for (const s of dividirLista(opts.add)) {
+                if (!novas.includes(s)) novas.push(s);
+              }
+            }
+            if (opts.remove) {
+              const remover = new Set(dividirLista(opts.remove));
+              novas = novas.filter((s) => !remover.has(s));
+            }
+          }
+          const atualizado = await store.editar(ws.path, id, { skills: novas });
+          if (opts.json) {
+            console.log(JSON.stringify({ id: atualizado.id, skills: atualizado.skills ?? [] }, null, 2));
+            return;
+          }
+          console.log(`ok: agente "${atualizado.id}" com skills: [${(atualizado.skills ?? []).join(", ")}]`);
+        }),
     );
 
   agent

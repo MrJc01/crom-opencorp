@@ -28,6 +28,14 @@ export const agentSchema = z.object({
   rotation: z.array(z.string()).optional(),
   /** Alias para rotation */
   model_fallback: z.array(z.string()).optional(),
+  /** Skills declaradas para o agente (nomes kebab-case instalados em .opencorp/skills/) */
+  skills: z
+    .array(
+      z
+        .string()
+        .regex(ID_AGENTE_RE, "use kebab-case (letras minúsculas, números e hífens)"),
+    )
+    .default([]),
   /** Etapa 5 — agentes de catálogo nascem desativados; legados sem o campo = ativos */
   ativo: z.boolean().default(true),
   /** Driver de execução preferido deste agente (sandbox|host|docker|podman). Sobrescreve o global/workspace. */

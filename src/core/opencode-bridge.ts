@@ -3,6 +3,7 @@ import { join, basename } from "node:path";
 import Database from "better-sqlite3";
 import type { Agente } from "../schemas/agent.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
+import { montarSecaoSkills, SkillStore } from "./skill-store.js";
 
 const TOOLS_OPENCODE = [
   "bash",
@@ -359,10 +360,20 @@ export class OpenCodeBridge {
     // template citam o workspace; sem isto o agente recebe o literal.
     const wsId = basename(wsPath);
     const priming = obterContextoAdaptativo(wsPath, wsId, agente);
-    const corpoFinal = corpo.replaceAll("{{workspace}}", wsId) + "\n" + priming;
+    const secaoSkills = this.montarSkills(wsPath, agente);
+    const corpoFinal = corpo.replaceAll("{{workspace}}", wsId) + secaoSkills + "\n" + priming;
     await writeFileAtomic(destino, gerarAgenteOpencode(agente, corpoFinal));
     this.vincular(wsPath, agente.id, destino);
     return destino;
+  }
+
+  /** Injeta a seção "## Skills" com o markdown instruído de cada skill declarada.
+   *  Skills são instruções em markdown — nunca código executado. */
+  private montarSkills(wsPath: string, agente: Agente): string {
+    const nomes = agente.skills ?? [];
+    if (nomes.length === 0) return "";
+    const skills = new SkillStore().resolverInstaladas(wsPath, nomes);
+    return montarSecaoSkills(skills);
   }
 
   private vincular(wsPath: string, id: string, arquivoFonte: string): void {

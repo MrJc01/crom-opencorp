@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { registerAgentCommand } from "./commands/agent.js";
+import { registerSkillCommand } from "./commands/skill.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerRunCommand } from "./commands/run.js";
 import { registerSessionCommand } from "./commands/session.js";
@@ -98,6 +99,7 @@ export function buildProgram(isOc: boolean = isModoOc()): Command {
   registerTaskCommand(program);
   registerWorkspaceCommands(program);
   registerAgentCommand(program);
+  registerSkillCommand(program);
   registerScheduleCommands(program);
   registerAppCommand(program);
   registerFlowCommand(program);

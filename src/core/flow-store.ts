@@ -355,11 +355,33 @@ export class FlowStore {
     for (const no of flow.nos) {
       const config = (no.config ?? {}) as Record<string, unknown>;
       if (no.tipo === "agente") {
-        if (typeof config.agente !== "string" || config.agente.length === 0) {
-          throw new FlowError(`flow inválido${onde("")}: nó "agente" "${no.id}" precisa de config.agente`);
+        // F6-T01: config.agente opcional — sem ele, o nó é LLM-direto/ad-hoc
+        // (prompt_sistema + model inline). Exige pelo menos um dos dois.
+        const temAgente = typeof config.agente === "string" && config.agente.length > 0;
+        const temPromptSistema = typeof config.prompt_sistema === "string" && config.prompt_sistema.length > 0;
+        if (!temAgente && !temPromptSistema) {
+          throw new FlowError(
+            `flow inválido${onde("")}: nó "agente" "${no.id}" precisa de config.agente OU config.prompt_sistema (nó LLM-direto sem agente)`,
+          );
+        }
+        if (config.agente !== undefined && !temAgente) {
+          throw new FlowError(`flow inválido${onde("")}: nó "agente" "${no.id}" tem config.agente inválido (use uma string não vazia)`);
+        }
+        if (config.prompt_sistema !== undefined && !temPromptSistema) {
+          throw new FlowError(`flow inválido${onde("")}: nó "agente" "${no.id}" tem config.prompt_sistema inválido (use uma string não vazia)`);
+        }
+        if (config.model !== undefined && (typeof config.model !== "string" || config.model.length === 0)) {
+          throw new FlowError(`flow inválido${onde("")}: nó "agente" "${no.id}" tem config.model inválido (use uma string não vazia)`);
         }
         if (typeof config.ordem !== "string" || config.ordem.length === 0) {
           throw new FlowError(`flow inválido${onde("")}: nó "agente" "${no.id}" precisa de config.ordem`);
+        }
+        // F10-T02: multi-turno explícito no nó agente (1..5, default 1).
+        if (
+          config.turnos !== undefined &&
+          (typeof config.turnos !== "number" || !Number.isInteger(config.turnos) || config.turnos < 1 || config.turnos > 5)
+        ) {
+          throw new FlowError(`flow inválido${onde("")}: nó "agente" "${no.id}" tem config.turnos fora de 1..5`);
         }
         // F1-T03: seletor de sessão do nó agente.
         const sessionMode = config.session_mode as string | undefined;
@@ -1029,13 +1051,27 @@ export class FlowStore {
           continue;
         } else if (no.tipo === "agente") {
           const config = no.config as {
-            agente: string;
+            agente?: string;
             ordem: string;
+            prompt_sistema?: string;
+            model?: string;
             resposta_arquivo?: string;
             session_mode?: "nova" | "reaproveitar" | "continuar" | "duplicar";
             session_from?: string;
+            turnos?: number;
           };
-          const sessionMode: "nova" | "reaproveitar" | "continuar" | "duplicar" = config.session_mode ?? "nova";
+          // F6-T01: nó LLM-direto/ad-hoc — sem config.agente usa o executor-padrao
+          // com o prompt_sistema inline; com agente mantém a herança total (atual).
+          const agenteEfetivo = config.agente ?? "executor-padrao";
+          const modelEfetivo = config.model ?? opts.model;
+          // F10-T02: multi-turno explícito (1..5). Default 1 preserva o comportamento atual.
+          const turnos = Math.min(Math.max(Math.round(config.turnos ?? 1), 1), 5);
+          let sessionMode: "nova" | "reaproveitar" | "continuar" | "duplicar" = config.session_mode ?? "nova";
+          // turnos > 1 implicam reaproveitar: múltiplos turnos só fazem sentido
+          // numa sessão contínua com o mesmo contexto evoluído.
+          if (turnos > 1 && sessionMode !== "reaproveitar") {
+            sessionMode = "reaproveitar";
+          }
           // Interpolação estilo n8n ($json, {{$input}}, {{$node["id"]}}, {{entrada}})
           let ordemBase = config.ordem
             .replaceAll("{{entrada}}", contexto)
@@ -1061,11 +1097,13 @@ export class FlowStore {
             ordemBase = `${ordemBase}\n\n[Contexto do nó anterior (${noAnterior.id} - ${noAnterior.tipo})]:\n${contexto}`;
           }
 
+          // F6-T01: prompt_sistema inline vira as instruções do turno (nó LLM-direto).
+          if (typeof config.prompt_sistema === "string" && config.prompt_sistema.trim().length > 0) {
+            ordemBase = `${config.prompt_sistema}\n\n${ordemBase}`;
+          }
+
           // contrato de resposta por ARQUIVO: a resposta limpa fica no sandbox
           const arquivoResposta = config.resposta_arquivo ?? "";
-          const ordem = arquivoResposta
-            ? `${ordemBase}\n\n[contrato de resposta] Salve sua resposta final completa em sandbox/${arquivoResposta} e responda no terminal apenas "ok".`
-            : ordemBase;
 
           let sessionId: string | undefined = undefined;
           if (sessionMode === "reaproveitar") {
@@ -1095,42 +1133,37 @@ export class FlowStore {
             }
           }
 
-          let resultado: ResultadoRun;
-          try {
+          const montarOrdem = (turno: number, contextoAnterior: string): string => {
+            const comContrato = arquivoResposta
+              ? `${ordemBase}\n\n[contrato de resposta] Salve sua resposta final completa em sandbox/${arquivoResposta} e responda no terminal apenas "ok".`
+              : ordemBase;
+            if (turno > 1 && contextoAnterior.trim().length > 0) {
+              return `${comContrato}\n\n[Contexto do turno anterior (${turno - 1}/${turnos})]:\n${contextoAnterior}`;
+            }
+            return comContrato;
+          };
+
+          const executarTurno = async (ordemTurno: string): Promise<ResultadoRun> => {
             if (duplicarDe) {
               const sessoesExt = this.sessoes as SessaoFlow & {
                 duplicar?: (id: string, opts: { prompt?: string; model?: string; tags?: string[]; workspaceDir?: string }) => Promise<ResultadoRun>;
               };
               if (sessoesExt.duplicar) {
-                resultado = await sessoesExt.duplicar(duplicarDe, {
-                  prompt: ordem,
-                  ...(opts.model ? { model: opts.model } : {}),
+                return await sessoesExt.duplicar(duplicarDe, {
+                  prompt: ordemTurno,
+                  ...(modelEfetivo ? { model: modelEfetivo } : {}),
                   tags: [`flow:${flowId}`, `no:${no.id}`],
                   workspaceDir: wsPath,
-                });
-              } else {
-                // TODO(F1-T03): quando SessionManager.duplicar não estiver disponível,
-                // duplicar via rodar com fork_de (snapshot) preservando a ordem do nó.
-                resultado = await this.sessoes.rodar({
-                  agente: config.agente,
-                  ordem,
-                  model: opts.model,
-                  fork_de: duplicarDe,
-                  session_from_ancestral: duplicarDe,
-                  workspaceDir: wsPath,
-                  referencias: [execId],
-                  tipo: "flow-no",
-                  tags: [`flow:${flowId}`, `no:${no.id}`],
-                  gatilho: { tipo: "dependencia", origem: `flow:${flowId}/${no.id}` },
                 });
               }
-            } else {
-              resultado = await this.sessoes.rodar({
-                agente: config.agente,
-                ordem,
-                model: opts.model,
-                ...(sessionId ? { session: sessionId } : {}),
-                ...(continuadaDe ? { continuada_de: continuadaDe, session_from_ancestral: continuadaDe } : {}),
+              // TODO(F1-T03): quando SessionManager.duplicar não estiver disponível,
+              // duplicar via rodar com fork_de (snapshot) preservando a ordem do nó.
+              return await this.sessoes.rodar({
+                agente: agenteEfetivo,
+                ordem: ordemTurno,
+                model: modelEfetivo,
+                fork_de: duplicarDe,
+                session_from_ancestral: duplicarDe,
                 workspaceDir: wsPath,
                 referencias: [execId],
                 tipo: "flow-no",
@@ -1138,36 +1171,69 @@ export class FlowStore {
                 gatilho: { tipo: "dependencia", origem: `flow:${flowId}/${no.id}` },
               });
             }
-          } catch (erro) {
-            await marcarNo(no.id, "falhou", null);
-            throw new FlowError(`nó "${no.id}" (agente) falhou: ${msg(erro)}`);
-          }
-          if (resultado.exit_code !== 0) {
-            eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "falhou", exec_id: resultado.id });
-            await marcarNo(no.id, "falhou", resultado.id);
-            throw new FlowError(
-              `nó "${no.id}" (agente ${config.agente}) falhou — exec ${resultado.id}, exit ${resultado.exit_code}`,
-            );
-          }
-          let contextoNovo = limparCaptura(resultado.captura ?? "");
-          if (arquivoResposta) {
-            const caminhoResposta = join(wsPath, "sandbox", arquivoResposta);
-            if (existsSync(caminhoResposta)) {
-              const doArquivo = readFileSync(caminhoResposta, "utf8").trim();
-              if (doArquivo.length > 0) contextoNovo = stripAnsi(doArquivo);
+            return await this.sessoes.rodar({
+              agente: agenteEfetivo,
+              ordem: ordemTurno,
+              model: modelEfetivo,
+              ...(sessionId ? { session: sessionId } : {}),
+              ...(continuadaDe ? { continuada_de: continuadaDe, session_from_ancestral: continuadaDe } : {}),
+              workspaceDir: wsPath,
+              referencias: [execId],
+              tipo: "flow-no",
+              tags: [`flow:${flowId}`, `no:${no.id}`],
+              gatilho: { tipo: "dependencia", origem: `flow:${flowId}/${no.id}` },
+            });
+          };
+
+          let contextoNovo = "";
+          let ultimoResultado: ResultadoRun | null = null;
+          for (let turno = 1; turno <= turnos; turno++) {
+            let resultado: ResultadoRun;
+            try {
+              resultado = await executarTurno(montarOrdem(turno, contextoNovo));
+            } catch (erro) {
+              await marcarNo(no.id, "falhou", null);
+              throw new FlowError(`nó "${no.id}" (agente) falhou: ${msg(erro)}`);
             }
+            if (resultado.exit_code !== 0) {
+              eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "falhou", exec_id: resultado.id });
+              await marcarNo(no.id, "falhou", resultado.id);
+              throw new FlowError(
+                `nó "${no.id}" (agente ${agenteEfetivo}) falhou — exec ${resultado.id}, exit ${resultado.exit_code}`,
+              );
+            }
+            contextoNovo = limparCaptura(resultado.captura ?? "");
+            if (arquivoResposta) {
+              const caminhoResposta = join(wsPath, "sandbox", arquivoResposta);
+              if (existsSync(caminhoResposta)) {
+                const doArquivo = readFileSync(caminhoResposta, "utf8").trim();
+                if (doArquivo.length > 0) contextoNovo = stripAnsi(doArquivo);
+              }
+            }
+            ultimoResultado = resultado;
+            // F10-T02: journal — cada turno registra a volta T/N.
+            await this.registros.anexarEvento(wsPath, "execucoes", execId, {
+              ts: this.agora().toISOString(),
+              por: `flow:${flowId}`,
+              evento: "no-turno",
+              no: no.id,
+              volta: turno,
+              total: turnos,
+              exec_id: resultado.id,
+              resumo: `nó "${no.id}" turno ${turno}/${turnos} (agente ${agenteEfetivo})`,
+            });
           }
           contexto = contextoNovo;
-          custoAcumulado += resultado.custo_usd ?? 0;
-          tempoAcumuladoMs += resultado.duracao_ms ?? 0;
+          custoAcumulado += ultimoResultado?.custo_usd ?? 0;
+          tempoAcumuladoMs += ultimoResultado?.duracao_ms ?? 0;
           // F1-T03: guarda o id da sessão/execução deste nó para descendentes.
           // Em "reaproveitar", o id sintético (o que o motor conhece como sessão
           // contínua) é preservado em vez de sobrescrito a cada volta do loop.
-          if (sessionMode !== "reaproveitar") {
-            sessoesPorNo[no.id] = resultado.id;
+          if (sessionMode !== "reaproveitar" && ultimoResultado) {
+            sessoesPorNo[no.id] = ultimoResultado.id;
           }
-          eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok", exec_id: resultado.id });
-          await marcarNo(no.id, "ok", resultado.id);
+          eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok", exec_id: ultimoResultado?.id });
+          await marcarNo(no.id, "ok", ultimoResultado?.id ?? null);
         } else if (no.tipo === "fanout" || no.tipo === "review" || no.tipo === "debate") {
           // ── nós da fusão team×fluxo (PLANO-WEB-CRUD F1): padrões de coordenação
           // como nós do grafo — versões CONTEXTUAIS (não criam kanban; contexto flui)
