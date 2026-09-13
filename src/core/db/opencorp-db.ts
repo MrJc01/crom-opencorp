@@ -56,8 +56,12 @@ export interface NovaTaskInput {
   posicao?: number;
   prioridade?: PrioridadeTask;
   responsavel?: string;
+  due?: string | null;
   due_ms?: number | null;
   task_pai_id?: string | null;
+  criado_por?: string;
+  criado_em_ms?: number;
+  atualizado_em_ms?: number;
   labels?: string[];
   bloqueado_por?: string[];
 }
@@ -74,10 +78,13 @@ export interface UpdateTaskInput {
   posicao?: number;
   prioridade?: PrioridadeTask;
   responsavel?: string;
+  due?: string | null;
   due_ms?: number | null;
   task_pai_id?: string | null;
   lock_por?: string | null;
+  lock_expira?: string | null;
   lock_expira_ms?: number | null;
+  atualizado_em_ms?: number;
   labels?: string[];
   bloqueado_por?: string[];
 }
@@ -175,6 +182,20 @@ export class OpencorpDb {
   }
 
   /**
+   * Fecha e remove uma instância específica do cache
+   */
+  static fecharInstancia(workspacePath: string): void {
+    const normalizado = resolve(workspacePath);
+    const inst = OpencorpDb.instancias.get(normalizado);
+    if (inst) {
+      try {
+        inst.fechar();
+      } catch {}
+      OpencorpDb.instancias.delete(normalizado);
+    }
+  }
+
+  /**
    * Limpa cache de instâncias abertas (útil em teardown de testes)
    */
   static limparCache(): void {
@@ -197,21 +218,32 @@ export class OpencorpDb {
 
   // ─── TAREFAS (TASKS) ────────────────────────────────────────────────────────
 
+  proximaPos(coluna: string, workspace?: string): number {
+    const ws = workspace || this.wsId;
+    const r = this.db
+      .prepare("SELECT MAX(posicao) AS m FROM tasks WHERE workspace = ? AND coluna = ?")
+      .get(ws, coluna) as { m: number | null } | undefined;
+    return (r?.m ?? 0) + 1024;
+  }
+
   criarTask(input: NovaTaskInput): TaskComRelacoes {
-    const id = input.id || gerarId("task");
-    const agora = Date.now();
+    const id = input.id || gerarId("tsk");
+    const agora = input.criado_em_ms || Date.now();
     const ws = input.workspace || this.wsId;
     const prioridade = input.prioridade || "media";
     const labels = Array.from(new Set((input.labels || []).map((l) => l.trim()).filter(Boolean))).sort();
     const bloqueadoPor = Array.from(new Set((input.bloqueado_por || []).map((d) => d.trim()).filter(Boolean))).sort();
+    const dueMs = input.due_ms !== undefined ? input.due_ms : input.due ? Date.parse(input.due) || null : null;
+    const dueStr = input.due !== undefined ? input.due : input.due_ms ? new Date(input.due_ms).toISOString() : null;
+    const criadoPor = input.criado_por || "humano";
 
     const tx = this.db.transaction(() => {
       this.db
         .prepare(`
           INSERT INTO tasks
-            (id, workspace, titulo, descricao, coluna, posicao, prioridade, responsavel, due_ms, task_pai_id, lock_por, lock_expira_ms, criado_em_ms, atualizado_em_ms)
+            (id, workspace, titulo, descricao, coluna, posicao, prioridade, responsavel, due, due_ms, task_pai_id, lock_por, lock_expira, lock_expira_ms, criado_por, criado_em_ms, atualizado_em_ms)
           VALUES
-            (@id, @workspace, @titulo, @descricao, @coluna, @posicao, @prioridade, @responsavel, @due_ms, @task_pai_id, NULL, NULL, @criado_em_ms, @atualizado_em_ms)
+            (@id, @workspace, @titulo, @descricao, @coluna, @posicao, @prioridade, @responsavel, @due, @due_ms, @task_pai_id, NULL, NULL, NULL, @criado_por, @criado_em_ms, @atualizado_em_ms)
         `)
         .run({
           id,
@@ -222,10 +254,12 @@ export class OpencorpDb {
           posicao: Number(input.posicao) || 0,
           prioridade,
           responsavel: input.responsavel || "",
-          due_ms: input.due_ms ?? null,
+          due: dueStr,
+          due_ms: dueMs,
           task_pai_id: input.task_pai_id ?? null,
+          criado_por: criadoPor,
           criado_em_ms: agora,
-          atualizado_em_ms: agora,
+          atualizado_em_ms: input.atualizado_em_ms || agora,
         });
 
       const stmtLabel = this.db.prepare("INSERT OR IGNORE INTO task_labels (task_id, label) VALUES (?, ?)");
@@ -250,14 +284,36 @@ export class OpencorpDb {
       posicao: Number(input.posicao) || 0,
       prioridade,
       responsavel: input.responsavel || "",
-      due_ms: input.due_ms ?? null,
+      due: dueStr,
+      due_ms: dueMs,
       task_pai_id: input.task_pai_id ?? null,
       lock_por: null,
+      lock_expira: null,
       lock_expira_ms: null,
+      criado_por: criadoPor,
       criado_em_ms: agora,
-      atualizado_em_ms: agora,
+      atualizado_em_ms: input.atualizado_em_ms || agora,
       labels,
       bloqueado_por: bloqueadoPor,
+    };
+  }
+
+  obterTask(id: string): TaskComRelacoes | undefined {
+    const task = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as TaskRow | undefined;
+    if (!task) return undefined;
+
+    const allLabels = this.db
+      .prepare("SELECT label FROM task_labels WHERE task_id = ? ORDER BY label ASC")
+      .all(id) as Array<{ label: string }>;
+
+    const allDeps = this.db
+      .prepare("SELECT bloqueado_por_task_id FROM task_dependencies WHERE task_id = ?")
+      .all(id) as Array<{ bloqueado_por_task_id: string }>;
+
+    return {
+      ...task,
+      labels: allLabels.map((l) => l.label),
+      bloqueado_por: allDeps.map((d) => d.bloqueado_por_task_id),
     };
   }
 
@@ -302,7 +358,7 @@ export class OpencorpDb {
   }
 
   atualizarTask(id: string, updates: Partial<UpdateTaskInput>): void {
-    const agora = Date.now();
+    const agora = updates.atualizado_em_ms !== undefined ? updates.atualizado_em_ms : Date.now();
     const setClauses: string[] = ["atualizado_em_ms = @agora"];
     const params: Record<string, unknown> = { id, agora };
 
@@ -312,9 +368,11 @@ export class OpencorpDb {
     if (updates.posicao !== undefined) { setClauses.push("posicao = @posicao"); params.posicao = updates.posicao; }
     if (updates.prioridade !== undefined) { setClauses.push("prioridade = @prioridade"); params.prioridade = updates.prioridade; }
     if (updates.responsavel !== undefined) { setClauses.push("responsavel = @responsavel"); params.responsavel = updates.responsavel; }
+    if (updates.due !== undefined) { setClauses.push("due = @due"); params.due = updates.due; }
     if (updates.due_ms !== undefined) { setClauses.push("due_ms = @due_ms"); params.due_ms = updates.due_ms; }
     if (updates.task_pai_id !== undefined) { setClauses.push("task_pai_id = @task_pai_id"); params.task_pai_id = updates.task_pai_id; }
     if (updates.lock_por !== undefined) { setClauses.push("lock_por = @lock_por"); params.lock_por = updates.lock_por; }
+    if (updates.lock_expira !== undefined) { setClauses.push("lock_expira = @lock_expira"); params.lock_expira = updates.lock_expira; }
     if (updates.lock_expira_ms !== undefined) { setClauses.push("lock_expira_ms = @lock_expira_ms"); params.lock_expira_ms = updates.lock_expira_ms; }
 
     const tx = this.db.transaction(() => {

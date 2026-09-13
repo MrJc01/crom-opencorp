@@ -127,9 +127,9 @@ export function migrarWorkspaceParaSchemaConsolidado(
   // Prepara statements de inserção no banco unificado
   const insertTaskStmt = dbDestino.prepare(`
     INSERT OR REPLACE INTO tasks
-      (id, workspace, titulo, descricao, coluna, posicao, prioridade, responsavel, due_ms, task_pai_id, lock_por, lock_expira_ms, criado_em_ms, atualizado_em_ms)
+      (id, workspace, titulo, descricao, coluna, posicao, prioridade, responsavel, due, due_ms, task_pai_id, lock_por, lock_expira, lock_expira_ms, criado_por, criado_em_ms, atualizado_em_ms)
     VALUES
-      (@id, @workspace, @titulo, @descricao, @coluna, @posicao, @prioridade, @responsavel, @due_ms, @task_pai_id, @lock_por, @lock_expira_ms, @criado_em_ms, @atualizado_em_ms)
+      (@id, @workspace, @titulo, @descricao, @coluna, @posicao, @prioridade, @responsavel, @due, @due_ms, @task_pai_id, @lock_por, @lock_expira, @lock_expira_ms, @criado_por, @criado_em_ms, @atualizado_em_ms)
   `);
 
   const insertLabelStmt = dbDestino.prepare(`
@@ -201,10 +201,13 @@ export function migrarWorkspaceParaSchemaConsolidado(
             posicao: Number(t.pos) || 0,
             prioridade,
             responsavel: t.responsavel || "",
+            due: t.due || null,
             due_ms: dueMs,
             task_pai_id: paiId,
             lock_por: t.lock_por || null,
+            lock_expira: t.lock_expira || null,
             lock_expira_ms: lockExpiraMs,
+            criado_por: t.criado_por || "humano",
             criado_em_ms: criadoMs,
             atualizado_em_ms: atualizadoMs,
           });

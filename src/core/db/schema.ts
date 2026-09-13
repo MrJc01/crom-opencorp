@@ -105,16 +105,20 @@ CREATE TABLE IF NOT EXISTS tasks (
   posicao REAL NOT NULL DEFAULT 0,
   prioridade TEXT CHECK(prioridade IN ('baixa', 'media', 'alta')) NOT NULL DEFAULT 'media',
   responsavel TEXT NOT NULL DEFAULT '',
+  due TEXT,
   due_ms INTEGER,
   task_pai_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
   lock_por TEXT,
+  lock_expira TEXT,
   lock_expira_ms INTEGER,
+  criado_por TEXT NOT NULL DEFAULT '',
   criado_em_ms INTEGER NOT NULL,
   atualizado_em_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_kanban ON tasks (workspace, coluna, posicao ASC);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks (task_pai_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_responsavel ON tasks (responsavel, coluna);
+CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks (due_ms);
 `;
 
 export const DDL_TASK_LABELS = `
@@ -246,10 +250,13 @@ export interface TaskRow {
   posicao: number;
   prioridade: PrioridadeTask;
   responsavel: string;
+  due: string | null;
   due_ms: number | null;
   task_pai_id: string | null;
   lock_por: string | null;
+  lock_expira: string | null;
   lock_expira_ms: number | null;
+  criado_por: string;
   criado_em_ms: number;
   atualizado_em_ms: number;
 }
