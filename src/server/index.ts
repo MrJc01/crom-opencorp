@@ -2,11 +2,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { tmpdir } from "node:os";
 import { join, resolve, relative, isAbsolute, dirname, extname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stat, lstat, readlink, readdir, readFile, realpath, open, mkdir, rename, rm, unlink } from "node:fs/promises";
-import { existsSync, rmSync, statSync, readFileSync, writeFileSync, createReadStream } from "node:fs";
+import { existsSync, rmSync, statSync, readFileSync, createReadStream } from "node:fs";
 import { WorkspaceManager } from "../core/workspace-manager.js";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
@@ -22,7 +21,7 @@ import { ComponentStore } from "../core/component-store.js";
 import { registrarBuiltins } from "../core/builtin-components.js";
 import { migrarTeamsParaFlows } from "../core/flow-migrate.js";
 import { sincronizarJobsParaFluxos } from "../core/scheduler-flow-bridge.js";
-import { MeetingManager, gerarIdReuniao } from "../core/meeting-manager.js";
+import { MeetingManager } from "../core/meeting-manager.js";
 import { TaskStore } from "../core/task-store.js";
 import { PromptStore } from "../core/prompt-store.js";
 import { Scheduler } from "../core/scheduler.js";
@@ -33,7 +32,7 @@ import { AppStore } from "../core/app-store.js";
 import { TeamStore } from "../core/team-store.js";
 import { OrquestradorDeTeams } from "../core/team-orchestrator.js";
 import { instalarMencoes } from "../core/mention-runner.js";
-import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError, NotificationError, AgentError, OpencorpError, RegistryError, WorkspaceError, FlowError, ComponentError } from "../core/errors.js";
+import { TaskError, SchedulerError, HookError, AppError, TeamError, NotificationError, AgentError, OpencorpError, RegistryError, WorkspaceError, FlowError, ComponentError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, limparPrefixoWorkspace, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc, type PassoChat } from "../core/opencode-server.js";
 import { SecretsStore, type SecretOrigem } from "../core/secrets-store.js";
@@ -42,7 +41,7 @@ import { engineRegistry, getEngineAuthInstructions, checkEngineAuthStatus, Engin
 import { createRequire } from "node:module";
 import { TelemetryCollector, gerarTraceId, type TraceContext } from "../core/telemetry-collector.js";
 import { processarCors, verificarAutenticacao, extrairTokenBearer, compararTokensSeguro, type OpcoesCors } from "./middleware/index.js";
-import { handleTaskRoutes, handleNotificationRoutes } from "./routes/index.js";
+import { handleTaskRoutes, handleNotificationRoutes, handleMeetingRoutes, handleWorkspaceRoutes } from "./routes/index.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
@@ -1435,91 +1434,19 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           registros,
           sessoes,
           notificacoes,
+          meetings,
+          workspaces,
+          templates,
           homeDir: opcoes.homeDir,
         };
 
+        if (await handleWorkspaceRoutes(routeCtx)) return;
         if (await handleTaskRoutes(routeCtx)) return;
         if (await handleNotificationRoutes(routeCtx)) return;
+        if (await handleMeetingRoutes(routeCtx)) return;
 
-        // ── workspaces ──────────────────────────────────────────────
-        if (rota === "/workspaces" && req.method === "GET") {
-          enviar(res, 200, await workspaces.listar());
-          return;
-        }
-        if (rota === "/workspaces" && req.method === "POST") {
-          const corpo = (await lerCorpo(req)) as {
-            id?: string;
-            template?: string;
-            path?: string;
-            perfil?: { empresa?: string; nicho?: string; publico?: string; tom?: string; tom_evitar?: unknown[]; topicos?: unknown[]; diferenciais?: unknown[] };
-          };
-          const criado = await workspaces.criar(corpo.id ?? "", { template: corpo.template, path: corpo.path });
-          // Perfil editorial opcional → grava .opencorp/projeto.json no workspace
-          // (mesmo schema consumido pelos flows de conteúdo). Compat: sem perfil = comportamento atual.
-          if (corpo.perfil && typeof corpo.perfil === "object") {
-            const p = corpo.perfil;
-            const projeto: Record<string, unknown> = {
-              empresa: String(p.empresa ?? criado.id),
-              nicho: String(p.nicho ?? ""),
-              publico: String(p.publico ?? ""),
-              tom: String(p.tom ?? ""),
-              tom_evitar: Array.isArray(p.tom_evitar) ? p.tom_evitar.map(String) : [],
-              topicos_editoriais: Array.isArray(p.topicos) ? p.topicos.map(String) : [],
-            };
-            if (Array.isArray(p.diferenciais)) projeto.diferenciais = p.diferenciais.map(String);
-            await writeFileAtomic(join(criado.path, ".opencorp", "projeto.json"), `${JSON.stringify(projeto, null, 2)}\n`);
-          }
-          enviar(res, 201, { id: criado.id, caminho: criado.path });
-          return;
-        }
-        if (rota === "/workspaces/import-corp" && req.method === "POST") {
-          const corpo = (await lerCorpo(req)) as {
-            id?: string;
-            nome_arquivo?: string;
-            arquivo_base64: string;
-            path?: string;
-          };
-          if (!corpo.arquivo_base64 || typeof corpo.arquivo_base64 !== "string") {
-            enviar(res, 400, { erro: "arquivo_base64 obrigatório" });
-            return;
-          }
-
-          const nomeLimpo = (corpo.nome_arquivo || "workspace.corp")
-            .replace(/\.corp$/i, "")
-            .toLowerCase()
-            .replace(/[^a-z0-9-]/g, "-")
-            .replace(/-+/g, "-");
-          const idAlvo = (corpo.id ? String(corpo.id).trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-") : "") || nomeLimpo || `ws-${Date.now()}`;
-
-          const tmpPath = join(tmpdir(), `opencorp-import-${Date.now()}-${randomBytes(4).toString("hex")}.corp`);
-          try {
-            const b64Limpo = corpo.arquivo_base64.replace(/^data:[^;]+;base64,/, "");
-            writeFileSync(tmpPath, Buffer.from(b64Limpo, "base64"));
-
-            // 1. Importa como template
-            const templateId = `import-${idAlvo}-${Date.now()}`;
-            await templates.importar(tmpPath, templateId);
-
-            // 2. Cria o workspace com base nesse template importado
-            const criado = await workspaces.criar(idAlvo, { template: templateId, path: corpo.path });
-
-            enviar(res, 201, { ok: true, id: criado.id, caminho: criado.path });
-          } catch (err: any) {
-            enviar(res, 500, { erro: `Falha ao importar .corp: ${err?.message || String(err)}` });
-          } finally {
-            try {
-              if (existsSync(tmpPath)) rmSync(tmpPath, { force: true });
-            } catch {}
-          }
-          return;
-        }
         if (rota === "/templates" && req.method === "GET") {
           enviar(res, 200, await templates.listar());
-          return;
-        }
-        if (rota === "/workspaces/current" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          enviar(res, 200, { id: ws.id, caminho: ws.path });
           return;
         }
 
@@ -3748,121 +3675,6 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           return;
         }
 
-        if (rota === "/meetings" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const disco = await meetings.listar(ws.path);
-          const vivas = meetings.salasVivas(ws.path);
-          const idsVivas = new Set(vivas.map((v) => v.id));
-          enviar(res, 200, [...vivas, ...disco.filter((s) => !idsVivas.has(s.id))]);
-          return;
-        }
-        if (rota === "/meetings" && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as { pauta?: string; agentes?: string; model?: string };
-          const pauta = String(corpo.pauta ?? "").trim();
-          if (pauta.length === 0) {
-            enviar(res, 422, { erro: 'pauta vazia — informe a pauta: POST /meetings { pauta }' });
-            return;
-          }
-          const novoId = gerarIdReuniao();
-          void meetings
-            .iniciar({ pauta, agentes: corpo.agentes, model: corpo.model, workspaceDir: ws.path, workspaceId: ws.id, id: novoId })
-            .catch(() => undefined);
-          enviar(res, 202, { status: "iniciado", id: novoId });
-          return;
-        }
-        const mMeetingGet = /^\/meetings\/([^/]+)$/.exec(rota);
-        if (mMeetingGet && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const meetingId = decodeURIComponent(mMeetingGet[1]!);
-          try {
-            enviar(res, 200, await meetings.estadoSala(ws.path, meetingId));
-          } catch (erro) {
-            if (erro instanceof MeetingError || erro instanceof RegistryError) {
-              enviar(res, 404, { erro: `reunião "${meetingId}" não encontrada` });
-              return;
-            }
-            throw erro;
-          }
-          return;
-        }
-
-        // ── POST /meetings/chat — cria reunião em modo Chat Interativo (espera mensagens do usuário) ──
-        if (rota === "/meetings/chat" && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as { pauta?: string; agentes?: string; model?: string };
-          const pauta = String(corpo.pauta ?? "").trim();
-          if (pauta.length === 0) {
-            enviar(res, 422, { erro: "pauta obrigatória" });
-            return;
-          }
-          try {
-            const sala = await meetings.criarSalaChat({
-              pauta,
-              agentes: corpo.agentes,
-              model: corpo.model,
-              workspaceDir: ws.path,
-              workspaceId: ws.id,
-            });
-            enviar(res, 201, { ok: true, id: sala.id, status: sala.status, participantes: sala.participantes, pauta: sala.pauta });
-          } catch (erro) {
-            enviar(res, 400, { erro: erro instanceof Error ? erro.message : String(erro) });
-          }
-          return;
-        }
-
-        // ── POST /meetings/:id/mensagem — envia mensagem do usuário e dispara respostas dos agentes ──
-        const mMeetingMsg = /^\/meetings\/([^/]+)\/mensagem$/.exec(rota);
-        if (mMeetingMsg && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const meetingId = decodeURIComponent(mMeetingMsg[1]!);
-          const corpo = (await lerCorpo(req)) as {
-            mensagem: string;
-            modo?: "sequencial" | "paralelo" | "direcionado";
-            agente?: string;
-            responder?: boolean;
-          };
-          const texto = String(corpo.mensagem ?? "").trim();
-          if (!texto) {
-            enviar(res, 400, { erro: "mensagem obrigatória" });
-            return;
-          }
-
-          try {
-            // 1. Grava a mensagem do usuário no buffer e histórico da reunião
-            const msgUsuario = await meetings.enviarMensagemGrupo(ws.path, meetingId, "usuario", texto);
-
-            // 2. Se responder !== false, executa as respostas dos agentes chamados
-            let respostas: Array<{ agente: string; texto: string; ts: string }> = [];
-            if (corpo.responder !== false) {
-              respostas = await meetings.responderGrupo(ws.path, meetingId, {
-                modo: corpo.modo || "sequencial",
-                agente: corpo.agente,
-              });
-            }
-
-            const estadoAtual = await meetings.estadoSala(ws.path, meetingId);
-            enviar(res, 200, { ok: true, mensagemUsuario: msgUsuario, respostas, estado: estadoAtual });
-          } catch (erro) {
-            enviar(res, 400, { erro: erro instanceof Error ? erro.message : String(erro) });
-          }
-          return;
-        }
-
-        // ── POST /meetings/:id/concluir — finaliza reunião e gera ata oficial ──
-        const mMeetingConcluir = /^\/meetings\/([^/]+)\/concluir$/.exec(rota);
-        if (mMeetingConcluir && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const meetingId = decodeURIComponent(mMeetingConcluir[1]!);
-          try {
-            const resultado = await meetings.finalizarComAta(ws.path, meetingId);
-            enviar(res, 200, { ok: true, status: resultado.sala.status, ata: resultado.ata, id: meetingId });
-          } catch (erro) {
-            enviar(res, 400, { erro: erro instanceof Error ? erro.message : String(erro) });
-          }
-          return;
-        }
-
         // ── GET /files — lista diretório ou lê arquivo do workspace
         if (rota === "/files" && req.method === "GET") {
           const ws = await resolverWs(url);
@@ -4168,36 +3980,6 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
               enviar(res, 500, { erro: `erro ao renomear: ${erro instanceof Error ? erro.message : String(erro)}` });
             }
           }
-          return;
-        }
-        const mMeetingStop = /^\/meetings\/([^/]+)\/stop$/.exec(rota);
-        if (mMeetingStop && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const meetingId = decodeURIComponent(mMeetingStop[1]!);
-          // sala viva NESTE processo:
-          if (meetings.temSalaViva(meetingId)) {
-            if (meetings.salaVivaEmAndamento(meetingId)) {
-              meetings.solicitarInterrupcao(meetingId);
-              enviar(res, 200, { ok: true, detalhe: `interrupção solicitada para reunião ${meetingId}` });
-              return;
-            }
-            enviar(res, 409, { erro: "nenhuma reunião ativa neste servidor" });
-            return;
-          }
-          const reunioes = await meetings.listar(ws.path);
-          const alvo = reunioes.find((r) => r.id === meetingId);
-          if (!alvo) {
-            enviar(res, 404, { erro: `reunião "${meetingId}" não encontrada` });
-            return;
-          }
-          if (alvo.status !== "em-andamento") {
-            enviar(res, 409, { erro: "nenhuma reunião ativa neste servidor" });
-            return;
-          }
-          // sala de OUTRO processo (CLI/scheduler): marca no disco — o loop dono
-          // confere o status entre turnos e encerra com ata
-          await meetings.encerrar(ws.path, meetingId, "encerrada pelo humano (meeting end)");
-          enviar(res, 200, { ok: true, detalhe: `interrupção solicitada para reunião ${meetingId}` });
           return;
         }
 
