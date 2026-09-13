@@ -166,6 +166,10 @@ export class SandboxDriver implements ExecutionDriver {
       "/home/j/Documentos/GitHub/crom-worker-opencode/node_modules",
       "/home/j/.local/share/myvoice",
       "/usr/local",
+      "/usr/bin/google-chrome",
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+      "/home/j/.cache/ms-playwright",
     ];
     for (const c of caminhosLeituraOpcionais) {
       if (existsSync(c)) {

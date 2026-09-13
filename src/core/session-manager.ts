@@ -180,6 +180,7 @@ export function ehModeloGratuito(modelo: string): boolean {
   const m = modelo.trim().toLowerCase();
   if (m.endsWith(":free")) return true;
   if (m.startsWith("opencode-go/")) return true;
+  if (m.startsWith("codex/")) return true; // custo zero — plano básico já pago
   if (m.startsWith("antigravity/")) return true;
   if (m.startsWith("claude-code/")) return true;
   if (m.includes("free")) return true;
@@ -293,6 +294,11 @@ export const MODELOS_ROTACAO_POR_HARNESS: Record<string, string[]> = {
   "claude-code": [
     "claude-3-7-sonnet-20250219",
     "claude-3-5-sonnet-20241022",
+  ],
+  codex: [
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.6-sol",
   ],
 };
 
@@ -853,7 +859,7 @@ export class SessionManager {
       "opencode";
     let modeloEfetivo = modelo;
 
-    if (modeloEfetivo.startsWith("opencode/") && modeloEfetivo.indexOf("/", "opencode/".length) !== -1) {
+    if (modeloEfetivo.startsWith("opencode/")) {
       harnessEscolhido = "opencode";
       modeloEfetivo = modeloEfetivo.slice("opencode/".length);
     } else if (modeloEfetivo.startsWith("claude-code/")) {
@@ -1524,6 +1530,22 @@ export class SessionManager {
    * 2. Se os modelos do motor se esgotaram ou o motor falhou (crash, processo abortado, erro do binário),
    *    rotaciona para o próximo motor da cadeia de harness (agente ou padrão do sistema).
    */
+  private inferirCategoriaModelo(modelo: string): "codex" | "opencode" | "openrouter" | "bare" {
+    const m = modelo.trim().toLowerCase();
+    if (m.startsWith("codex/")) return "codex";
+    if (m.startsWith("opencode/")) return "opencode";
+    if (m.startsWith("openrouter/")) return "openrouter";
+    return "bare";
+  }
+
+  private listaPorCategoria(lista: string[], categoria: "codex" | "opencode" | "openrouter" | "bare"): string[] {
+    if (categoria === "bare") return lista;
+    return lista.filter((m) => {
+      const c = this.inferirCategoriaModelo(m);
+      return c === categoria;
+    });
+  }
+
   private async tentarRetry(
     ws: { path: string; id: string },
     opcoes: OpcoesRun,
@@ -1536,7 +1558,9 @@ export class SessionManager {
 
     const falhaCreditos = PADRAO_ERRO_CREDITOS.test(captura);
     let lista = await obterListaRotacaoCompleta(this.agentes, ws.path, opcoes.agente, this.homeDir);
+    const categoriaAtual = this.inferirCategoriaModelo(registro.modelo);
     if (falhaCreditos) {
+      lista = this.listaPorCategoria(lista, categoriaAtual);
       lista = lista.filter((m) => ehModeloGratuito(m));
     }
     const proximoModelo = proximoModeloRotacao(lista, registro.modelo);

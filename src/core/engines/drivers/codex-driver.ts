@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import {
   safeExecFile as execFileAsync,
@@ -17,9 +17,12 @@ export class CodexDriver implements EngineDriver {
   category = "cli" as const;
   maintainer = "OpenAI";
   supportedModelsHint = [
-    "o3-mini",
-    "o1",
-    "gpt-4o",
+    "gpt-6-astra",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-reserve",
   ];
 
   async isInstalled(homeDir: string): Promise<EngineInstallStatus> {
@@ -143,10 +146,34 @@ export class CodexDriver implements EngineDriver {
     cwd: string;
   }> {
     const status = await this.isInstalled(opts.homeDir);
-    const bin = status.path || "codex";
+
+    // O binário codex gerenciado é um script Node (shebang #!/usr/bin/env node).
+    // Dentro do bwrap o `node` do host (~/.nvm) não é montado e o kernel falha
+    // o exec do script com ENOENT. Invoca via node explícito (process.execPath,
+    // absoluto — dirsDoBinario monta o dir dele no sandbox).
+    let bin: string;
+    let prefixo: string[];
+    try {
+      const script = status.path ? realpathSync(status.path) : "";
+      if (script.endsWith(".js") && existsSync(script) && process.execPath) {
+        bin = process.execPath;
+        prefixo = [script];
+      } else {
+        bin = status.path || "codex";
+        prefixo = [];
+      }
+    } catch {
+      bin = status.path || "codex";
+      prefixo = [];
+    }
 
     // Execução headless do Codex via subcomando 'exec' com sandbox de workspace
-    const args: string[] = ["exec", "--sandbox", "workspace-write", opts.prompt];
+    // -m respeita codex/<modelo> (custo zero via plano); sem -m usa default do CLI
+    // --skip-git-repo-check: workspaces .opencorp não são repos git confiáveis
+    const args: string[] = [...prefixo, "exec", "--sandbox", "workspace-write", "--skip-git-repo-check"];
+    const modelo = typeof opts.model === "string" ? opts.model.trim() : "";
+    if (modelo.length > 0) args.push("-m", modelo);
+    args.push(opts.prompt);
 
     const creds = resolveEngineCredentials(opts.homeDir);
     const env: Record<string, string> = {
