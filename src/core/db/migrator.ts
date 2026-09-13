@@ -15,10 +15,6 @@ import { existsSync, cpSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   inicializarBancoConsolidado,
-  type SessionRow,
-  type MessageRow,
-  type SpanRow,
-  type TaskRow,
   type StatusSession,
   type RoleMessage,
   type StatusSpan,

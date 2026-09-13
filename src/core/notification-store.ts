@@ -168,10 +168,9 @@ export class NotificationStore {
         mensagem: corpo,
         origem,
         lida: false,
-        acoes: entrada.acoes as Array<Record<string, unknown>>,
+        acoes: (entrada.acoes as unknown as Array<Record<string, unknown>>) ?? [],
         repeticoes: 1,
         criado_em_ms: agoraMs,
-        atualizado_em_ms: null,
       },
       CAP_NOTIFICACOES,
     );

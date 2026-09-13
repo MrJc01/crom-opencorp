@@ -176,6 +176,10 @@ export class CorpDb {
     }
   }
 
+  get workspacePath(): string {
+    return this.wsPath;
+  }
+
   static caminho(wsPath: string): string {
     return join(wsPath, ".opencorp", "corp.db");
   }

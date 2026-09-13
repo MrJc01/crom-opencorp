@@ -271,7 +271,7 @@ export class TaskStore {
     id: string,
     campos: { titulo?: string; descricao?: string; prioridade?: string; due?: string | null },
   ): Promise<Task> {
-    const atual = await this.obter(wsPath, id);
+    await this.obter(wsPath, id);
     if (campos.titulo !== undefined && campos.titulo.trim().length === 0) {
       throw new TaskError("titulo não pode ficar vazio");
     }

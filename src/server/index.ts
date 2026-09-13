@@ -40,11 +40,12 @@ import { taskCreateSchema } from "../schemas/task.js";
 import { SecretsStore, type SecretOrigem } from "../core/secrets-store.js";
 import { completarChatDirect, testarModeloDirect, listarProvedoresStatus } from "../core/llm-client.js";
 import { engineRegistry, getEngineAuthInstructions, checkEngineAuthStatus, EngineAccountStore, WebLoginOrchestrator } from "../core/engines/index.js";
+import { createRequire } from "node:module";
 import { TelemetryCollector, gerarTraceId, type TraceContext } from "../core/telemetry-collector.js";
+import { processarCors, verificarAutenticacao, extrairTokenBearer, compararTokensSeguro, type OpcoesCors } from "./middleware/index.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
-import { createRequire } from "node:module";
 
 const docsRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs");
 
@@ -299,6 +300,7 @@ export interface ApiServerOptions {
   workspace?: string;
   instalarMencoes?: boolean;
   opencodeServer?: OpencodeServerManager;
+  cors?: OpcoesCors;
 }
 
 
@@ -679,12 +681,10 @@ function statusHttpDe(erro: unknown): number {
   return 500;
 }
 
-function enviar(res: ServerResponse, status: number, corpo: unknown): void {
+function enviar(res: ServerResponse, status: number, corpo: unknown, headersExtras?: Record<string, string>): void {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type",
+    ...headersExtras,
   });
   res.end(JSON.stringify(corpo));
 }
@@ -1303,15 +1303,15 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
       const url = new URL(req.url ?? "/", "http://local");
       const rota = url.pathname;
 
-      if (req.method === "OPTIONS") {
-        enviar(res, 204, {});
+      // 1. Processamento de CORS e Preflight OPTIONS
+      if (!processarCors(req, res, opcoes.cors)) {
         return;
       }
       // ── UI estática PÚBLICA (a UI pede o token; os dados continuam protegidos) ──
       if (req.method === "GET" && (rota === "/" || /\.[a-z0-9]+$/i.test(rota)) && rota !== "/events" && !rota.startsWith("/settings/") && rota !== "/doc") {
         const estatico = servirEstatico(rota);
         if (estatico !== null) {
-          res.writeHead(200, { "content-type": estatico.tipo, "access-control-allow-origin": "*", "cache-control": "no-cache" });
+          res.writeHead(200, { "content-type": estatico.tipo, "cache-control": "no-cache" });
           res.end(estatico.corpo);
           return;
         }
@@ -1322,7 +1322,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
       if (req.method === "GET" && querHtml && /^\/(home|tasks|agentes|secretario|workspace|agenda|fluxos|hooks|apps|secrets|reunioes|historico|notificacoes|docs|config|app)(\/.*)?$/.test(rota)) {
         const index = servirEstatico("/");
         if (index) {
-          res.writeHead(200, { "content-type": index.tipo, "access-control-allow-origin": "*", "cache-control": "no-cache" });
+          res.writeHead(200, { "content-type": index.tipo, "cache-control": "no-cache" });
           res.end(index.corpo);
           return;
         }
@@ -1409,15 +1409,15 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
         enviar(res, 200, gerarOpenApiSpec());
         return;
       }
-      const tokenQuery = url.searchParams.get("token") ?? "";
-      const rotaHookPublica = /^\/hooks\/[^/]+\/[^/]+$/.test(rota);
-      const autenticado =
-        semAuth ||
-        (req.headers.authorization ?? "") === `Bearer ${token}` ||
-        tokenQuery === token ||
-        rotaHookPublica; // rota pública de disparo tem auth própria (x-opencorp-token)
-      if (!autenticado) {
-        enviar(res, 401, { erro: "token ausente ou inválido — Authorization: Bearer <token>" });
+
+      // 2. Validação de Autenticação com proteção contra Timing Attacks
+      const auth = verificarAutenticacao(req, url, rota, {
+        tokenEsperado: token,
+        semAuth,
+        permitirTokenQuery: true,
+      });
+      if (!auth.autenticado) {
+        enviar(res, 401, { erro: auth.motivo ?? "token ausente ou inválido — Authorization: Bearer <token>" });
         return;
       }
 
@@ -4670,9 +4670,9 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
 
           if (tipoAuth === "token") {
             const authHeader = String(req.headers["authorization"] ?? "");
-            const bearerToken = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
-            const tokenRecebido = req.headers["x-opencorp-token"] ?? bearerToken ?? url.searchParams.get("token") ?? "";
-            if (tokenRecebido !== secretEsperado) {
+            const bearerToken = extrairTokenBearer(authHeader);
+            const tokenRecebido = String(req.headers["x-opencorp-token"] ?? bearerToken ?? url.searchParams.get("token") ?? "");
+            if (!tokenRecebido || !compararTokensSeguro(tokenRecebido, secretEsperado)) {
               enviar(res, 401, { erro: "token do hook ausente ou inválido (envie via x-opencorp-token, Authorization: Bearer, ou ?token=)" });
               return;
             }

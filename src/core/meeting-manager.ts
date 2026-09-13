@@ -681,7 +681,7 @@ export class MeetingManager {
     try {
       const db = OpencorpDb.obter(ws.path);
       const sessionId = id.startsWith("reuniao-") ? id : `reuniao-${id}`;
-      db.finalizarSessao(sessionId, sala.status === "em-andamento" ? "executando" : "concluido");
+      db.finalizarSessao(sessionId, "concluido");
     } catch {}
 
     // Gera a ata antes de notificar o encerramento da reunião
