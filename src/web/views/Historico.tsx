@@ -190,8 +190,16 @@ export const HistoricoView: Component = () => {
       const job = (jobs || []).find((j) => j.id === jobId) || null;
       // Execuções disparadas por este job: gatilho.origem traz o nome (ex.: yt-pautador-30min)
       const chave = job?.nome || jobId;
+      // Job de fluxo: inclui também os execs dos nós (origem "flow:<id>/<no>")
+      const jobFlowId =
+        Array.isArray(job?.args) && job.args[0] === "flow" && job.args[1] === "run" ? String(job.args[2] || "") : "";
       const execs = itens()
-        .filter((i) => i.gatilho?.origem === chave || i.gatilho?.origem === jobId)
+        .filter(
+          (i) =>
+            i.gatilho?.origem === chave ||
+            i.gatilho?.origem === jobId ||
+            (jobFlowId !== "" && String(i.gatilho?.origem || "").startsWith(`flow:${jobFlowId}/`)),
+        )
         .sort((a, b) => String(b.quando || "").localeCompare(String(a.quando || "")));
       setInfoModal({ kind: "rotina", job, execs, runs: Array.isArray(runs) ? runs.slice(0, 10) : [], carregando: false });
     } catch {
@@ -1725,6 +1733,28 @@ if (typeof document !== "undefined") {
                         Como executa · {(infoModal() as any).job && tipoJob((infoModal() as any).job) === "script" ? "script direto (sem agente)" : tipoJob((infoModal() as any).job)}
                       </span>
                       <code class="font-mono text-[11px] text-zinc-300 break-all select-text">{(infoModal() as any).job && comandoJob((infoModal() as any).job)}</code>
+                      <Show
+                        when={
+                          (infoModal() as any).job &&
+                          tipoJob((infoModal() as any).job) === "fluxo" &&
+                          (infoModal() as any).job.args?.[2]
+                        }
+                      >
+                        <div class="mt-1.5">
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            onClick={() => {
+                              const fid = String((infoModal() as any).job.args[2]);
+                              fecharInfo();
+                              navigate(`/fluxos?fluxo=${encodeURIComponent(fid)}`);
+                            }}
+                            title="Abrir o fluxo que este job agenda"
+                          >
+                            <ExternalLink size={12} class="mr-1" /> Abrir fluxo {(infoModal() as any).job.args[2]} →
+                          </Button>
+                        </div>
+                      </Show>
                       <Show when={(infoModal() as any).job && tipoJob((infoModal() as any).job) === "script"}>
                         <p class="text-[11px] text-zinc-500 mt-1 font-sans">
                           Job de script: roda o comando acima e não gera execução de agente — o rastro está nos disparos do agendador abaixo.

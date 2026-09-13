@@ -183,4 +183,5 @@ Arquivos por tarefa (sem sobreposição):
 |---|---|---|---|---|---|---|
 | 0 | 2026-09-12 | Fase 0 + plano | 281/281 | 803 | OK | `2e579cd` |
 | 1 | 2026-09-12 | Lote 1 (F1-T01..T03) | 281 + 6 novas | 811 | — | `9d59f7c`,`b56cb5f` |
+| 2 | 2026-09-12 | Lote 2 + join + skills/LLM | web 85/85 | 832 | — | F2, F10, F6, F4 commits |
 | | | | | | | |

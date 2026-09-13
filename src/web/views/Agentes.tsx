@@ -27,6 +27,7 @@ import {
   FileText,
   Wand2,
   Loader2,
+  Puzzle,
 } from "lucide-solid";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -49,6 +50,7 @@ export interface Agente {
   harness_fallback?: string[];
   rotation?: string[];
   model_fallback?: string[];
+  skills?: string[];
 }
 
 export interface TeamPasso {
@@ -112,6 +114,10 @@ export const AgentesView: Component = () => {
   const [formAgentePerm, setFormAgentePerm] = createSignal<"level-1" | "level-2" | "level-3">("level-2");
   const [formAgentePrompt, setFormAgentePrompt] = createSignal("");
   const [formAgenteAtivo, setFormAgenteAtivo] = createSignal(true);
+  // Skills do agente (multi-seleção a partir das skills instaladas no workspace)
+  const [formAgenteSkills, setFormAgenteSkills] = createSignal<string[]>([]);
+  const [skillsDisponiveis, setSkillsDisponiveis] = createSignal<{ name: string; description: string }[]>([]);
+  const [carregandoSkills, setCarregandoSkills] = createSignal(false);
 
   // Modal de Criação de Novo Agente
   const [modalCriarAgenteAberto, setModalCriarAgenteAberto] = createSignal(false);
@@ -216,6 +222,24 @@ export const AgentesView: Component = () => {
     void carregarTudo();
   });
 
+  const carregarSkillsDisponiveis = async () => {
+    setCarregandoSkills(true);
+    try {
+      const lista = await fetchApi<{ name: string; description: string }[]>("/skills").catch(() => []);
+      setSkillsDisponiveis(Array.isArray(lista) ? lista : []);
+    } catch {
+      setSkillsDisponiveis([]);
+    } finally {
+      setCarregandoSkills(false);
+    }
+  };
+
+  const toggleSkill = (nome: string) => {
+    setFormAgenteSkills((prev) =>
+      prev.includes(nome) ? prev.filter((s) => s !== nome) : [...prev, nome]
+    );
+  };
+
   const abrirInspecaoAgente = async (ag: Agente) => {
     try {
       setEditandoAgente(false);
@@ -244,6 +268,8 @@ export const AgentesView: Component = () => {
       setFormAgenteHarness(completo.harness || "");
       const rot = completo.rotation || completo.model_fallback || [];
       setFormAgenteRotation(Array.isArray(rot) ? rot.join("\n") : "");
+      setFormAgenteSkills(Array.isArray(completo.skills) ? [...completo.skills] : []);
+      void carregarSkillsDisponiveis();
     } catch (err: any) {
       showToast("Erro ao carregar detalhes do agente: " + err.message, "erro");
     }
@@ -274,6 +300,7 @@ export const AgentesView: Component = () => {
           corpo_prompt: formAgentePrompt(),
           harness: formAgenteHarness().trim() || undefined,
           rotation: rotLista.length > 0 ? rotLista : undefined,
+          skills: formAgenteSkills(),
         }),
       });
 
@@ -1042,6 +1069,23 @@ export const AgentesView: Component = () => {
                         </div>
                       </div>
                     </Show>
+
+                    <Show when={agenteInspecionado()!.skills && agenteInspecionado()!.skills!.length > 0}>
+                      <div class="bg-zinc-950 p-3 rounded-xl border border-zinc-800 space-y-1">
+                        <span class="text-zinc-500 block text-[10px] uppercase font-bold flex items-center gap-1.5">
+                          <Puzzle size={11} class="text-cyan-400" /> Skills Declaradas
+                        </span>
+                        <div class="flex flex-wrap gap-1.5 pt-0.5">
+                          <For each={agenteInspecionado()!.skills!}>
+                            {(s) => (
+                              <span class="px-2 py-0.5 rounded bg-cyan-950/50 border border-cyan-800/50 text-[11px] font-mono text-cyan-300">
+                                {s}
+                              </span>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
                   </div>
                 }
               >
@@ -1167,6 +1211,58 @@ export const AgentesView: Component = () => {
                         />
                       </div>
                     </div>
+                  </div>
+
+                  <div class="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-3">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                        <Puzzle size={13} class="text-cyan-400" />
+                        Skills do Agente
+                      </span>
+                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-950/50 border border-cyan-800/50 text-cyan-400 font-bold">
+                        {formAgenteSkills().length} selecionada(s)
+                      </span>
+                    </div>
+
+                    <Show
+                      when={!carregandoSkills()}
+                      fallback={
+                        <div class="text-[11px] text-zinc-500 flex items-center gap-1.5">
+                          <Loader2 size={12} class="animate-spin" /> Carregando skills instaladas...
+                        </div>
+                      }
+                    >
+                      <Show
+                        when={skillsDisponiveis().length > 0}
+                        fallback={
+                          <p class="text-[11px] text-zinc-500 leading-relaxed">
+                            Nenhuma skill instalada no workspace (.opencorp/skills/). Use{" "}
+                            <span class="font-mono text-cyan-400">oc skill instalar</span> para adicionar.
+                          </p>
+                        }
+                      >
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pr-1 scrollbar-thin">
+                          <For each={skillsDisponiveis()}>
+                            {(skill) => (
+                              <label class="flex items-start gap-2 p-2 rounded-lg bg-zinc-900/60 border border-zinc-800 hover:border-cyan-700 cursor-pointer transition-colors">
+                                <input
+                                  type="checkbox"
+                                  checked={formAgenteSkills().includes(skill.name)}
+                                  onChange={() => toggleSkill(skill.name)}
+                                  class="mt-0.5 rounded bg-zinc-950 border-zinc-700 cursor-pointer"
+                                />
+                                <span class="flex-1 min-w-0">
+                                  <span class="block text-[11px] font-mono text-zinc-200">{skill.name}</span>
+                                  <span class="block text-[10px] text-zinc-500 truncate" title={skill.description}>
+                                    {skill.description}
+                                  </span>
+                                </span>
+                              </label>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
+                    </Show>
                   </div>
 
                   <div>

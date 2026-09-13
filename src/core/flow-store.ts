@@ -1274,14 +1274,17 @@ export class FlowStore {
             try {
               const rodados = await Promise.allSettled(
                 config.paralelos.map((p, i) =>
-                  rodarPasso(p.agente, p.ordem.replaceAll("{{entrada}}", contexto), `/p${i + 1}`).then((s) => `### ${p.agente}\n${s}`),
+                  rodarPasso(p.agente, interpolarPasso(p.ordem, { entrada: contexto, anterior: contexto }), `/p${i + 1}`).then((s) => `### ${p.agente}\n${s}`),
                 ),
               );
               const falhas = rodados.filter((r) => r.status === "rejected");
               if (falhas.length) throw (falhas[0] as PromiseRejectedResult).reason;
               const bruto = rodados.map((r) => (r as PromiseFulfilledResult<string>).value).join("\n\n");
+              // F9-T02: saída COMPLETA (não truncada) dos paralelos chega à síntese.
+              // {{entrada}} preserva o contrato antigo (= saída agregada); {{anterior}}
+              // é a mesma saída agregada (paridade com o orquestrador legado).
               contexto = config.sintese
-                ? await rodarPasso(config.sintese.agente, config.sintese.ordem.replaceAll("{{entrada}}", bruto), "/sintese")
+                ? await rodarPasso(config.sintese.agente, interpolarPasso(config.sintese.ordem, { entrada: bruto, anterior: bruto }), "/sintese")
                 : bruto;
               eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok" });
               await marcarNo(no.id, "ok");
@@ -1295,13 +1298,17 @@ export class FlowStore {
               let ajustes = "";
               let aprovado = false;
               for (let t = 1; t <= turnos && !aprovado; t++) {
-                const ordemExec = config.executor.ordem
-                  .replaceAll("{{entrada}}", contexto)
-                  .replaceAll("{{ajustes}}", ajustes || "(primeira rodada — sem ajustes)");
+                const ordemExec = interpolarPasso(config.executor.ordem, {
+                  entrada: contexto,
+                  anterior: contexto,
+                  ajustes: ajustes || "(primeira rodada — sem ajustes)",
+                });
                 const saidaExecutor = await rodarPasso(config.executor.agente, ordemExec, `/t${t}/exec`);
+                // F9-T02: a saída COMPLETA do executor chega ao revisor ({{entrada}}
+                // e {{anterior}} apontam para ela) — nunca a 1ª linha.
                 const respostaRevisor = await rodarPasso(
                   config.revisor.agente,
-                  `${config.revisor.ordem.replaceAll("{{entrada}}", saidaExecutor)}\n\n[contrato de revisão] Responda NA PRIMEIRA LINHA exatamente "APROVADO" ou "AJUSTES: <o que corrigir>".`,
+                  `${interpolarPasso(config.revisor.ordem, { entrada: saidaExecutor, anterior: saidaExecutor })}\n\n[contrato de revisão] Responda NA PRIMEIRA LINHA exatamente "APROVADO" ou "AJUSTES: <o que corrigir>".`,
                   `/t${t}/rev`,
                 );
                 if (stripAnsi(respostaRevisor).split("\n")[0]?.trim().toUpperCase().startsWith("APROVADO")) {
@@ -1319,18 +1326,21 @@ export class FlowStore {
             }
           } else {
             // debate
-            const config = no.config as { proponentes: Array<{ agente: string; ordem: string }>; moderador: { agente: string } };
+            const config = no.config as { proponentes: Array<{ agente: string; ordem: string }>; moderador: { agente: string; ordem?: string } };
             try {
               const propostas = await Promise.all(
                 config.proponentes.map((p, i) =>
-                  rodarPasso(p.agente, p.ordem.replaceAll("{{entrada}}", contexto), `/prop${i + 1}`).then((s) => `### proposta ${p.agente}\n${s}`),
+                  rodarPasso(p.agente, interpolarPasso(p.ordem, { entrada: contexto, anterior: contexto }), `/prop${i + 1}`).then((s) => `### proposta ${p.agente}\n${s}`),
                 ),
               );
-              contexto = await rodarPasso(
-                config.moderador.agente,
-                `Propostas dos proponentes:\n\n${propostas.join("\n\n")}\n\n[contrato de moderação] Decida e responda começando com "DECISÃO: <escolha>" seguida da justificativa curta.`,
-                "/moderador",
-              );
+              const propostasTexto = propostas.join("\n\n");
+              // F9-T02: moderador.ordem (quando presente) substitui o prompt fixo,
+              // com {{entrada}} = contexto de entrada e {{anterior}} = saída completa
+              // das propostas. Sem ordem, mantém o contrato legado de moderação.
+              const ordemModerador = config.moderador.ordem
+                ? interpolarPasso(config.moderador.ordem, { entrada: contexto, anterior: propostasTexto })
+                : `Propostas dos proponentes:\n\n${propostasTexto}\n\n[contrato de moderação] Decida e responda começando com "DECISÃO: <escolha>" seguida da justificativa curta.`;
+              contexto = await rodarPasso(config.moderador.agente, ordemModerador, "/moderador");
               eventBus.emit("flow-no", { flow: flowId, no: no.id, status: "ok" });
               await marcarNo(no.id, "ok");
             } catch (erro) {
@@ -1970,6 +1980,23 @@ function limparCaptura(texto: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return limpas.length > 0 ? limpas : stripAnsi(texto).trim().slice(0, 2000);
+}
+
+/**
+ * Interpolação de contrato dos nós fanout/review/debate (paridade com o
+ * team-orchestrator legado): `{{entrada}}` é o contexto que chega ao passo,
+ * `{{anterior}}` é a saída do passo anterior (ou o contexto de entrada, quando
+ * não há passo anterior) e `{{ajustes}}` são as correções do revisor. Sem
+ * nenhuma das variáveis no texto, o resultado é idêntico ao original.
+ */
+function interpolarPasso(
+  ordem: string,
+  vars: { entrada: string; anterior?: string; ajustes?: string },
+): string {
+  return ordem
+    .replaceAll("{{entrada}}", vars.entrada)
+    .replaceAll("{{anterior}}", vars.anterior ?? "")
+    .replaceAll("{{ajustes}}", vars.ajustes ?? "");
 }
 
 function validarIdFlow(id: string): string {

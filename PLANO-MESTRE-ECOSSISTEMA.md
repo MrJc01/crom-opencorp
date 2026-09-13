@@ -193,8 +193,11 @@ mas **a execução end-to-end nunca foi testada**. Lacunas a fechar:
    fanout/review não usam `{{anterior}}/{{ajustes}}`. Precisa teste de paridade.
 3. Sem verificação de que a saída completa (não só 1ª linha/600 chars) chega à
    síntese/moderador em casos longos.
-4. Comportamento "sessões sempre separadas" no grupo não está documentado/testado
-   (grupo não tem `session_mode`).
+4. Comportamento "sessões sempre separadas" no grupo: **política de design**: grupo/equipe
+   = sessões sempre separadas (1 sessão por integrante, sem session_mode). Isso já estava
+   anotado como risco XDG, mas precisa ficar explícito como política de design. O campo
+   `sessao_por_integrante` (padrão `true`) controla esse comportamento; quando `false`,
+   usa-se o orchestrador legacy em sessão única.
 5. `team-orchestrator.ts:239` usa `resultados.indexOf(r)` para indexar subtask em
    falha — bug potencial com múltiplas falhas simultâneas.
 6. Sem teste de `POST /teams/:id/run` de ponta a ponta.

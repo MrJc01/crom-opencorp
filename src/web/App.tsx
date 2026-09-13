@@ -15,6 +15,8 @@ import { SecretarioView } from "./views/Secretario";
 import { HomeView } from "./views/Home";
 import { TasksView } from "./views/Tasks";
 import { AgentesView } from "./views/Agentes";
+import { AtivosView } from "./views/Ativos";
+import { AgentCard } from "./components/AgentCard";
 import { WorkspaceView } from "./views/Workspace";
 import { ReunioesView } from "./views/Reunioes";
 import { FluxosView } from "./views/Fluxos";
@@ -67,7 +69,7 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
   createEffect(() => {
     const ws = wsAtivo();
     const rota = location.pathname;
-    const rotasGlobais = ["/", "/home", "/secretario", "/docs", "/config", "/secrets"];
+    const rotasGlobais = ["/", "/home", "/secretario", "/ativos", "/docs", "/config", "/secrets"];
     if (!ws && !rotasGlobais.some((r) => rota === r || rota.startsWith(r + "/"))) {
       navigate("/home", { replace: true });
     }
@@ -122,6 +124,8 @@ export const App: Component = () => {
       <Route path="/" component={HomeView} />
       <Route path="/home" component={HomeView} />
       <Route path="/secretario" component={SecretarioView} />
+      <Route path="/ativos" component={AtivosView} />
+      <Route path="/agente/:id" component={AgentCard} />
       <Route path="/workspace" component={WorkspaceView} />
       <Route path="/tasks" component={TasksView} />
       <Route path="/agentes" component={AgentesView} />
