@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { AgentStore } from "./agent-store.js";
 import { BudgetManager } from "./budget-manager.js";
 import { MeetingError } from "./errors.js";
@@ -12,6 +12,8 @@ import { WorkspaceManager } from "./workspace-manager.js";
 import type { OpcoesRun, ResultadoRun } from "./session-manager.js";
 import type { AgenteArquivo } from "../schemas/agent.js";
 import { opencorpHome } from "../utils/paths.js";
+import { OpencorpDb } from "./db/opencorp-db.js";
+import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 
 export type StatusReuniao = "em-andamento" | "encerrada" | "encerrada-partial";
 export type Moderacao = "moderador" | "rotacao-fixa";
@@ -226,8 +228,41 @@ export class MeetingManager {
     viva.estado.mensagens.push({ agente, texto, ts: new Date().toISOString() });
   }
 
-  /** Estado consultável da sala: memória primeiro; fallback do disco (salas
-   *  antigas ou de outros processos) com mensagens parseadas do transcript.
+  private persistirMensagemReuniao(
+    wsPath: string,
+    reuniaoId: string,
+    autor: string,
+    conteudo: string,
+    role: "user" | "assistant" | "system" = "assistant",
+    tipo: "conversa" | "decisao" | "sistema" = "conversa",
+  ): void {
+    if (!conteudo || conteudo.trim().length === 0) return;
+    try {
+      const db = OpencorpDb.obter(wsPath);
+      const sessionId = reuniaoId.startsWith("reuniao-") ? reuniaoId : `reuniao-${reuniaoId}`;
+      const agoraMs = this.agora().getTime();
+      db.handle.prepare(`
+        INSERT OR IGNORE INTO sessions
+          (id, workspace, agente, modelo, trigger_id, flow_id, status, inicio_ms, duracao_ms, custo_micro_usd)
+        VALUES
+          (?, ?, ?, 'reuniao', NULL, NULL, 'executando', ?, 0, 0)
+      `).run(sessionId, db.wsId, autor, agoraMs);
+
+      db.inserirMensagem({
+        session_id: sessionId,
+        autor,
+        role,
+        tipo,
+        conteudo: conteudo.trim(),
+        criado_em_ms: agoraMs,
+      });
+    } catch (err) {
+      console.error(`[meeting-manager] erro ao persistir mensagem na tabela universal:`, err);
+    }
+  }
+
+  /** Estado consultável da sala: memória primeiro; consulta direta no OpencorpDb (messages);
+   *  fallback defensivo do transcript gravado apenas para salas legadas.
    *  Lança MeetingError/RegistryError se a sala não existir. */
   async estadoSala(wsPath: string, id: string): Promise<EstadoSala> {
     const viva = this.vivas.get(id);
@@ -240,8 +275,23 @@ export class MeetingManager {
       };
     }
     const { sala } = await this.lerSala(wsPath, id);
-    const registro = await this.registros.obter(wsPath, "chats", id).catch(() => null);
-    const mensagens = parseTurnosTranscript(registro?.conteudo ?? "");
+    const sessionId = id.startsWith("reuniao-") ? id : `reuniao-${id}`;
+    const db = OpencorpDb.obter(wsPath);
+    const msgsDb = db.listarMensagens(sessionId);
+
+    let mensagens: MensagemSala[] = [];
+    if (msgsDb && msgsDb.length > 0) {
+      mensagens = msgsDb.map((m) => ({
+        agente: m.autor,
+        texto: m.conteudo,
+        ts: new Date(m.criado_em_ms).toISOString(),
+      }));
+    } else {
+      // Fallback defensivo para salas legadas que só existem no transcript Markdown
+      const registro = await this.registros.obter(wsPath, "chats", id).catch(() => null);
+      mensagens = parseTurnosTranscript(registro?.conteudo ?? "");
+    }
+
     const pediram = new Set(
       mensagens.filter((m) => MARCA_CONSENSO.test(m.texto)).map((m) => m.agente),
     );
@@ -422,6 +472,17 @@ export class MeetingManager {
     this.vivas.set(id, viva);
     viva.estado.status = "em_andamento";
 
+    const sessionId = id.startsWith("reuniao-") ? id : `reuniao-${id}`;
+    try {
+      const db = OpencorpDb.obter(ws.path);
+      db.handle.prepare(`
+        INSERT OR IGNORE INTO sessions
+          (id, workspace, agente, modelo, trigger_id, flow_id, status, inicio_ms, duracao_ms, custo_micro_usd)
+        VALUES
+          (?, ?, ?, ?, NULL, NULL, 'executando', ?, 0, 0)
+      `).run(sessionId, db.wsId, sala.moderator || participantes[0], sala.modelo, abertura.getTime());
+    } catch {}
+
     let falante = participantes[0]!;
     let instrucao = "abertura: apresente sua visão sobre a pauta";
     let falhasConsecutivas = 0;
@@ -527,6 +588,7 @@ export class MeetingManager {
             vivaFalha.estado.turno_atual = sala.turno;
             vivaFalha.estado.mensagens.push({ agente: falante, texto: `⚠ falha no turno: ${msg(erro)}`, ts: new Date().toISOString() });
           }
+          this.persistirMensagemReuniao(ws.path, id, falante, `⚠ falha no turno: ${msg(erro)}`, "system", "sistema");
           await this.salvarSala(ws.path, sala);
           if (codigo === 4) {
             statusFinal = "encerrada";
@@ -558,6 +620,7 @@ export class MeetingManager {
             vivaTurno.estado.consenso.pedidos = vivaTurno.pediram.size;
           }
         }
+        this.persistirMensagemReuniao(ws.path, id, falante, resultado.captura.trim(), "assistant", "conversa");
         await this.registros.appendConteudo(
           ws.path,
           "chats",
@@ -613,10 +676,19 @@ export class MeetingManager {
       `---\n**Status final: ${sala.status}** — motivo: ${sala.motivo_fim} · turnos: ${sala.turno}/${sala.max_turnos}\n`,
     );
     await this.salvarSala(ws.path, sala);
+
+    // Finaliza a sessão no OpencorpDb
+    try {
+      const db = OpencorpDb.obter(ws.path);
+      const sessionId = id.startsWith("reuniao-") ? id : `reuniao-${id}`;
+      db.finalizarSessao(sessionId, sala.status === "em-andamento" ? "executando" : "concluido");
+    } catch {}
+
+    // Gera a ata antes de notificar o encerramento da reunião
+    await this.gerarAta(ws, sala);
+
     console.log(`[reunião ${id}] encerrada (${sala.status}) — ${sala.motivo_fim}`);
     eventBus.emit("reuniao-fim", { reuniao_id: id, status: sala.status, motivo: sala.motivo_fim, turnos: sala.turno });
-
-    await this.gerarAta(ws, sala);
     return sala;
   }
 
@@ -661,6 +733,7 @@ export class MeetingManager {
       });
       const decisao = parseDecisaoModerador(r.captura);
       this.anexarBuffer(sala.id, sala.moderator, r.captura.trim());
+      this.persistirMensagemReuniao(ws.path, sala.id, sala.moderator, r.captura.trim(), "assistant", "decisao");
       await this.registros.appendConteudo(
         ws.path,
         "chats",
@@ -874,6 +947,32 @@ export class MeetingManager {
       return;
     }
 
+    if (!existsSync(pathAta) && !recusa) {
+      try {
+        await mkdirRecursive(dirname(pathAta));
+        const ataSintetica = [
+          `# ATA — Reunião ${sala.id}`,
+          "",
+          "## Pauta",
+          sala.pauta,
+          "",
+          "## Participantes",
+          sala.participantes.map((p) => `- @${p}`).join("\n"),
+          "",
+          "## Decisões",
+          `- Reunião concluída com status ${sala.status}.`,
+          "",
+          "## Tarefas delegadas",
+          sala.participantes[0] ? `- @${sala.participantes[0]}: Acompanhar encaminhamentos da reunião.` : "",
+          "",
+          "## Status da reunião",
+          `- ${sala.status} (${sala.motivo_fim || "concluída"})`,
+          "",
+        ].filter(Boolean).join("\n");
+        await writeFileAtomic(pathAta, ataSintetica);
+      } catch {}
+    }
+
     if (!existsSync(pathAta)) {
       sala.ata = "falhou";
       await this.salvarSala(ws.path, sala);
@@ -887,6 +986,14 @@ export class MeetingManager {
     }
     sala.ata = arquivoAta;
     await this.salvarSala(ws.path, sala);
+    this.persistirMensagemReuniao(
+      ws.path,
+      sala.id,
+      "ceo-documentos",
+      `Ata oficial registrada em ${arquivoAta} (status: ${sala.status}).`,
+      "assistant",
+      "decisao",
+    );
     const conteudoAta = await readFile(pathAta, "utf8");
     await this.registros.garantirRegistro(ws.path, {
       categoria: "documentos",
@@ -1001,6 +1108,18 @@ export class MeetingManager {
       wsPath: ws.path,
     };
     this.vivas.set(id, viva);
+
+    const sessionId = id.startsWith("reuniao-") ? id : `reuniao-${id}`;
+    try {
+      const db = OpencorpDb.obter(ws.path);
+      db.handle.prepare(`
+        INSERT OR IGNORE INTO sessions
+          (id, workspace, agente, modelo, trigger_id, flow_id, status, inicio_ms, duracao_ms, custo_micro_usd)
+        VALUES
+          (?, ?, ?, ?, NULL, NULL, 'executando', ?, 0, 0)
+      `).run(sessionId, db.wsId, sala.moderator || participantes[0], sala.modelo, this.agora().getTime());
+    } catch {}
+
     eventBus.emit("reuniao-inicio", { reuniao_id: id, pauta: sala.pauta.slice(0, 120), participantes });
     return sala;
   }
@@ -1016,6 +1135,7 @@ export class MeetingManager {
     };
 
     this.anexarBuffer(salaId, autor, textoLimpo);
+    this.persistirMensagemReuniao(wsPath, salaId, autor, textoLimpo, autor === "usuario" ? "user" : "assistant", "conversa");
     await this.registros.appendConteudo(
       wsPath,
       "chats",
@@ -1100,6 +1220,7 @@ export class MeetingManager {
         if (res.status === "fulfilled" && res.value) {
           const msgObj = res.value;
           this.anexarBuffer(salaId, msgObj.agente, msgObj.texto);
+          this.persistirMensagemReuniao(wsPath, salaId, msgObj.agente, msgObj.texto, "assistant", "conversa");
           await this.registros.appendConteudo(
             wsPath,
             "chats",
@@ -1116,6 +1237,7 @@ export class MeetingManager {
         const msgObj = await executarFalaAgente(falante);
         if (msgObj) {
           this.anexarBuffer(salaId, msgObj.agente, msgObj.texto);
+          this.persistirMensagemReuniao(wsPath, salaId, msgObj.agente, msgObj.texto, "assistant", "conversa");
           await this.registros.appendConteudo(
             wsPath,
             "chats",
@@ -1150,6 +1272,13 @@ export class MeetingManager {
       viva.estado.encerrada_em = sala.encerrada_em;
     }
     await this.salvarSala(wsPath, sala);
+
+    try {
+      const db = OpencorpDb.obter(wsPath);
+      const sessionId = salaId.startsWith("reuniao-") ? salaId : `reuniao-${salaId}`;
+      db.finalizarSessao(sessionId, "concluido");
+    } catch {}
+
     await this.gerarAta({ path: wsPath, id: "workspace" }, sala);
     return { sala, ata: sala.ata ?? undefined };
   }
