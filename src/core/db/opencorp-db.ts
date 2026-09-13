@@ -135,8 +135,12 @@ export interface NovaNotificacaoInput {
   tipo?: TipoNotification;
   titulo: string;
   mensagem: string;
+  origem?: string;
   lida?: boolean;
+  acoes?: Array<Record<string, unknown>>;
+  repeticoes?: number;
   criado_em_ms?: number;
+  atualizado_em_ms?: number;
 }
 
 // ─── CLASSE DAO PRINCIPAL ─────────────────────────────────────────────────────
@@ -546,11 +550,15 @@ export class OpencorpDb {
 
   // ─── NOTIFICAÇÕES ───────────────────────────────────────────────────────────
 
-  inserirNotificacao(notif: NovaNotificacaoInput): NotificationRow {
+  inserirNotificacao(notif: NovaNotificacaoInput, cap = 100): NotificationRow {
     const id = notif.id || gerarId("notif");
     const criadoMs = notif.criado_em_ms || Date.now();
     const ws = notif.workspace || this.wsId;
     const lida = notif.lida ? 1 : 0;
+    const origem = notif.origem || "painel";
+    const acoesJson = JSON.stringify(notif.acoes || []);
+    const repeticoes = notif.repeticoes !== undefined ? notif.repeticoes : 1;
+    const atualizadoMs = notif.atualizado_em_ms ?? null;
 
     const row: NotificationRow = {
       id,
@@ -558,28 +566,147 @@ export class OpencorpDb {
       tipo: notif.tipo || "info",
       titulo: notif.titulo,
       mensagem: notif.mensagem,
+      origem,
       lida,
+      acoes_json: acoesJson,
+      repeticoes,
       criado_em_ms: criadoMs,
+      atualizado_em_ms: atualizadoMs,
     };
 
-    this.db
-      .prepare(`
-        INSERT INTO notifications (id, workspace, tipo, titulo, mensagem, lida, criado_em_ms)
-        VALUES (@id, @workspace, @tipo, @titulo, @mensagem, @lida, @criado_em_ms)
-      `)
-      .run(row);
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare(`
+          INSERT INTO notifications
+            (id, workspace, tipo, titulo, mensagem, origem, lida, acoes_json, repeticoes, criado_em_ms, atualizado_em_ms)
+          VALUES
+            (@id, @workspace, @tipo, @titulo, @mensagem, @origem, @lida, @acoes_json, @repeticoes, @criado_em_ms, @atualizado_em_ms)
+        `)
+        .run(row);
 
+      // FIFO: estourou o cap -> remove as mais antigas do workspace
+      if (cap > 0) {
+        this.db
+          .prepare(`
+            DELETE FROM notifications
+            WHERE workspace = ?
+              AND id NOT IN (
+                SELECT id FROM notifications
+                WHERE workspace = ?
+                ORDER BY criado_em_ms DESC, rowid DESC
+                LIMIT ?
+              )
+          `)
+          .run(ws, ws, cap);
+      }
+    });
+
+    tx();
     return row;
   }
 
-  listarNotificacoes(workspace?: string, limite = 50): NotificationRow[] {
+  obterNotificacao(id: string): NotificationRow | undefined {
+    return this.db.prepare("SELECT * FROM notifications WHERE id = ?").get(id) as NotificationRow | undefined;
+  }
+
+  buscarNotificacaoRecente(workspace: string, titulo: string, origem: string): NotificationRow | undefined {
+    const rows = this.db
+      .prepare(`
+        SELECT * FROM notifications
+        WHERE workspace = ?
+        ORDER BY criado_em_ms DESC, rowid DESC
+        LIMIT 5
+      `)
+      .all(workspace) as NotificationRow[];
+    return rows.find((r) => r.titulo === titulo && r.origem === origem);
+  }
+
+  atualizarNotificacao(
+    id: string,
+    updates: {
+      mensagem?: string;
+      origem?: string;
+      lida?: number;
+      acoes_json?: string;
+      repeticoes?: number;
+      atualizado_em_ms?: number | null;
+    },
+  ): void {
+    const setClauses: string[] = [];
+    const params: Record<string, unknown> = { id };
+
+    if (updates.mensagem !== undefined) { setClauses.push("mensagem = @mensagem"); params.mensagem = updates.mensagem; }
+    if (updates.origem !== undefined) { setClauses.push("origem = @origem"); params.origem = updates.origem; }
+    if (updates.lida !== undefined) { setClauses.push("lida = @lida"); params.lida = updates.lida; }
+    if (updates.acoes_json !== undefined) { setClauses.push("acoes_json = @acoes_json"); params.acoes_json = updates.acoes_json; }
+    if (updates.repeticoes !== undefined) { setClauses.push("repeticoes = @repeticoes"); params.repeticoes = updates.repeticoes; }
+    if (updates.atualizado_em_ms !== undefined) { setClauses.push("atualizado_em_ms = @atualizado_em_ms"); params.atualizado_em_ms = updates.atualizado_em_ms; }
+
+    if (setClauses.length > 0) {
+      this.db.prepare(`UPDATE notifications SET ${setClauses.join(", ")} WHERE id = @id`).run(params);
+    }
+  }
+
+  listarNotificacoes(
+    workspace?: string,
+    opcoes?: number | { apenasNaoLidas?: boolean; limite?: number },
+  ): NotificationRow[] {
     const ws = workspace || this.wsId;
+    let apenasNaoLidas = false;
+    let limite = 50;
+
+    if (typeof opcoes === "number") {
+      limite = opcoes;
+    } else if (opcoes && typeof opcoes === "object") {
+      if (opcoes.apenasNaoLidas !== undefined) apenasNaoLidas = opcoes.apenasNaoLidas;
+      if (opcoes.limite !== undefined) limite = opcoes.limite;
+    }
+
+    if (apenasNaoLidas) {
+      return this.db
+        .prepare(`
+          SELECT * FROM notifications
+          WHERE workspace = ? AND lida = 0
+          ORDER BY criado_em_ms DESC, rowid DESC
+          LIMIT ?
+        `)
+        .all(ws, Math.max(1, Math.floor(limite))) as NotificationRow[];
+    }
+
     return this.db
-      .prepare("SELECT * FROM notifications WHERE workspace = ? ORDER BY criado_em_ms DESC LIMIT ?")
+      .prepare(`
+        SELECT * FROM notifications
+        WHERE workspace = ?
+        ORDER BY criado_em_ms DESC, rowid DESC
+        LIMIT ?
+      `)
       .all(ws, Math.max(1, Math.floor(limite))) as NotificationRow[];
   }
 
-  marcarNotificacaoComoLida(id: string): void {
+  contarNotificacoes(workspace?: string, apenasNaoLidas = false): number {
+    const ws = workspace || this.wsId;
+    const r = this.db
+      .prepare(`
+        SELECT COUNT(*) AS c FROM notifications
+        WHERE workspace = ? ${apenasNaoLidas ? "AND lida = 0" : ""}
+      `)
+      .get(ws) as { c: number } | undefined;
+    return r?.c ?? 0;
+  }
+
+  marcarNotificacaoComoLida(id: string): NotificationRow | undefined {
     this.db.prepare("UPDATE notifications SET lida = 1 WHERE id = ?").run(id);
+    return this.obterNotificacao(id);
+  }
+
+  marcarTodasNotificacoesLidas(workspace?: string): number {
+    const ws = workspace || this.wsId;
+    const r = this.db.prepare("UPDATE notifications SET lida = 1 WHERE workspace = ? AND lida = 0").run(ws);
+    return r.changes;
+  }
+
+  limparNotificacoes(workspace?: string): void {
+    const ws = workspace || this.wsId;
+    this.db.prepare("DELETE FROM notifications WHERE workspace = ?").run(ws);
   }
 }

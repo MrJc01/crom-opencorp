@@ -5,6 +5,14 @@ import { tmpdir } from "node:os";
 import { encontrarSpecs, extrairVereditoDeConteudo, montarPrompt, extrairEtapaDoNome, extrairSlugDoNome, classificarFalha, filtrarModelosSaudaveis } from "../src/cli/commands/test.ts";
 import { appendEvent, type EventoTeste } from "../src/utils/event-log.ts";
 
+const { spawnMock, unrefMock } = vi.hoisted(() => {
+  const unrefMock = vi.fn();
+  const spawnMock = vi.fn(() => ({ pid: 4242, unref: unrefMock, stdout: { on: vi.fn() }, stderr: { on: vi.fn() }, on: vi.fn() }));
+  return { spawnMock, unrefMock };
+});
+
+vi.mock("node:child_process", () => ({ spawn: spawnMock }));
+
 const raizes: string[] = [];
 
 afterAll(async () => {
@@ -167,14 +175,6 @@ describe("test blind - extração de etapa e slug", () => {
 });
 
 describe("test blind - rotação de modelos (mock spawn)", () => {
-  const { spawnMock, unrefMock } = vi.hoisted(() => {
-    const unrefMock = vi.fn();
-    const spawnMock = vi.fn(() => ({ pid: 4242, unref: unrefMock, stdout: { on: vi.fn() }, stderr: { on: vi.fn() }, on: vi.fn() }));
-    return { spawnMock, unrefMock };
-  });
-
-  vi.mock("node:child_process", () => ({ spawn: spawnMock }));
-
   it("tenta próximo modelo da rotation quando stdout contém 'rate limit'", async () => {
     // Este teste seria mais completo com integração real, mas a lógica de rotação
     // está embutida na função rodarSpecUnica que não é exportada.

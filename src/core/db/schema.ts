@@ -146,8 +146,12 @@ CREATE TABLE IF NOT EXISTS notifications (
   tipo TEXT CHECK(tipo IN ('resumo', 'aviso', 'erro', 'info')) NOT NULL DEFAULT 'info',
   titulo TEXT NOT NULL,
   mensagem TEXT NOT NULL,
+  origem TEXT NOT NULL DEFAULT 'painel',
   lida INTEGER NOT NULL DEFAULT 0,
-  criado_em_ms INTEGER NOT NULL
+  acoes_json TEXT NOT NULL DEFAULT '[]',
+  repeticoes INTEGER NOT NULL DEFAULT 1,
+  criado_em_ms INTEGER NOT NULL,
+  atualizado_em_ms INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_ws_recent ON notifications (workspace, lida, criado_em_ms DESC);
 `;
@@ -279,6 +283,10 @@ export interface NotificationRow {
   tipo: TipoNotification;
   titulo: string;
   mensagem: string;
+  origem: string;
   lida: number;
+  acoes_json: string;
+  repeticoes: number;
   criado_em_ms: number;
+  atualizado_em_ms: number | null;
 }

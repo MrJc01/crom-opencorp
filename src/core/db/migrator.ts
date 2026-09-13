@@ -163,9 +163,9 @@ export function migrarWorkspaceParaSchemaConsolidado(
 
   const insertNotifStmt = dbDestino.prepare(`
     INSERT OR REPLACE INTO notifications
-      (id, workspace, tipo, titulo, mensagem, lida, criado_em_ms)
+      (id, workspace, tipo, titulo, mensagem, origem, lida, acoes_json, repeticoes, criado_em_ms, atualizado_em_ms)
     VALUES
-      (@id, @workspace, @tipo, @titulo, @mensagem, @lida, @criado_em_ms)
+      (@id, @workspace, @tipo, @titulo, @mensagem, @origem, @lida, @acoes_json, @repeticoes, @criado_em_ms, @atualizado_em_ms)
   `);
 
   // Executa toda a migração atomicamente em transação
@@ -458,8 +458,12 @@ export function migrarWorkspaceParaSchemaConsolidado(
               tipo,
               titulo: n.titulo || "Notificação",
               mensagem: n.mensagem || n.corpo || "",
+              origem: n.origem || "painel",
               lida: n.lida ? 1 : 0,
+              acoes_json: JSON.stringify(n.acoes || []),
+              repeticoes: Number(n.repeticoes) || 1,
               criado_em_ms: parseDataParaMs(n.criado_em),
+              atualizado_em_ms: n.atualizado_em ? parseDataParaMs(n.atualizado_em) : null,
             });
             stats.notifications++;
           }

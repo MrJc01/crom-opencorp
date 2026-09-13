@@ -1,9 +1,18 @@
+/**
+ * NotificationStore: Camada de Negócio de Notificações sobre OpencorpDb
+ *
+ * Persiste notificações no banco consolidado `opencorp.db` gerenciado pelo OpencorpDb,
+ * garantindo integridade ACID, consultas indexadas por workspace/status e mantendo
+ * sincronização em disco com o espelho de compatibilidade.
+ */
+
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { NotificationError } from "./errors.js";
 import { eventBus } from "./event-bus.js";
+import { OpencorpDb } from "./db/opencorp-db.js";
+import type { NotificationRow } from "./db/schema.js";
 
 export type TipoNotificacao = "resumo" | "aviso" | "erro" | "info";
 
@@ -46,8 +55,6 @@ const TIPOS: TipoNotificacao[] = ["resumo", "aviso", "erro", "info"];
 /** Cap FIFO: mantém as 100 notificações mais recentes por workspace */
 export const CAP_NOTIFICACOES = 100;
 
-/** Store de notificações do painel — um JSON por workspace
- *  (`<ws>/.opencorp/notifications.json`, array, cap 100 FIFO, write atômico). */
 export class NotificationStore {
   private readonly agora: () => Date;
 
@@ -59,35 +66,52 @@ export class NotificationStore {
     return join(wsPath, ".opencorp", "notifications.json");
   }
 
-  private ler(wsPath: string): Notificacao[] {
-    const path = this.caminho(wsPath);
-    if (!existsSync(path)) return [];
+  private notificationRowParaNotificacao(r: NotificationRow): Notificacao {
+    let acoes: AcaoNotificacao[] | undefined;
     try {
-      const dados = JSON.parse(readFileSync(path, "utf8")) as unknown;
-      if (!Array.isArray(dados)) return [];
-      return dados.filter(
-        (n): n is Notificacao =>
-          !!n && typeof n === "object" && typeof (n as Notificacao).id === "string",
-      );
-    } catch {
-      return [];
-    }
+      const parsed = JSON.parse(r.acoes_json);
+      if (Array.isArray(parsed) && parsed.length > 0) acoes = parsed;
+    } catch {}
+
+    return {
+      id: r.id,
+      titulo: r.titulo,
+      corpo: r.mensagem,
+      tipo: r.tipo as TipoNotificacao,
+      origem: r.origem || "painel",
+      lida: r.lida === 1,
+      criado_em: new Date(r.criado_em_ms).toISOString(),
+      ...(r.atualizado_em_ms ? { atualizado_em: new Date(r.atualizado_em_ms).toISOString() } : {}),
+      ...(acoes ? { acoes } : {}),
+      repeticoes: r.repeticoes || 1,
+    };
   }
 
-  private async salvar(wsPath: string, lista: Notificacao[]): Promise<void> {
+  /**
+   * Sincroniza espelho atômico em disco notifications.json para manter compatibilidade
+   * com ferramentas externas e testes legados.
+   */
+  private async sincronizarJson(wsPath: string): Promise<void> {
+    const db = OpencorpDb.obter(wsPath);
+    const rows = db.listarNotificacoes(db.wsId, { limite: CAP_NOTIFICACOES });
+    const lista = rows.map((r) => this.notificationRowParaNotificacao(r)).reverse();
     await mkdirRecursive(join(wsPath, ".opencorp"));
     await writeFileAtomic(this.caminho(wsPath), `${JSON.stringify(lista, null, 2)}\n`);
   }
 
   /** Lista em ordem cronológica DECRESCENTE (mais recentes primeiro). */
   listar(wsPath: string, opcoes: { apenasNaoLidas?: boolean } = {}): Notificacao[] {
-    const lista = this.ler(wsPath);
-    const filtradas = opcoes.apenasNaoLidas ? lista.filter((n) => !n.lida) : lista;
-    return filtradas.slice().reverse();
+    const db = OpencorpDb.obter(wsPath);
+    const rows = db.listarNotificacoes(db.wsId, {
+      apenasNaoLidas: opcoes.apenasNaoLidas,
+      limite: CAP_NOTIFICACOES,
+    });
+    return rows.map((r) => this.notificationRowParaNotificacao(r));
   }
 
   naoLidas(wsPath: string): number {
-    return this.ler(wsPath).filter((n) => !n.lida).length;
+    const db = OpencorpDb.obter(wsPath);
+    return db.contarNotificacoes(db.wsId, true);
   }
 
   async adicionar(wsPath: string, entrada: EntradaNotificacao): Promise<Notificacao> {
@@ -99,19 +123,29 @@ export class NotificationStore {
     if (!TIPOS.includes(tipo)) {
       throw new NotificationError(`tipo inválido: "${String(tipo)}" — use resumo|aviso|erro|info`, { status: 422 });
     }
-    const lista = this.ler(wsPath);
-    const agoraStr = this.agora().toISOString();
+
+    const db = OpencorpDb.obter(wsPath);
+    const agora = this.agora();
+    const agoraMs = agora.getTime();
     const origem = String(entrada.origem ?? "painel");
 
-    // Deduplicação inteligente: Se a última notificação tiver o mesmo título e mesma origem nos últimos 10min
-    const repetida = lista.slice(-5).reverse().find((item) => item.titulo === titulo && item.origem === origem);
+    // Deduplicação inteligente: Se a última notificação tiver o mesmo título e mesma origem
+    const repetida = db.buscarNotificacaoRecente(db.wsId, titulo, origem);
     if (repetida) {
-      repetida.repeticoes = (repetida.repeticoes ?? 1) + 1;
-      repetida.corpo = corpo;
-      repetida.atualizado_em = agoraStr;
-      repetida.lida = false; // Reabre como não lida
-      if (entrada.acoes) repetida.acoes = entrada.acoes;
-      await this.salvar(wsPath, lista);
+      const novasRepeticoes = (repetida.repeticoes ?? 1) + 1;
+      const acoesJson = entrada.acoes && entrada.acoes.length > 0 ? JSON.stringify(entrada.acoes) : repetida.acoes_json;
+
+      db.atualizarNotificacao(repetida.id, {
+        mensagem: corpo,
+        origem,
+        lida: 0, // Reabre como não lida
+        acoes_json: acoesJson,
+        repeticoes: novasRepeticoes,
+        atualizado_em_ms: agoraMs,
+      });
+
+      await this.sincronizarJson(wsPath);
+
       eventBus.emit("notificacao.nova", {
         id: repetida.id,
         titulo: repetida.titulo,
@@ -119,61 +153,69 @@ export class NotificationStore {
         origem: repetida.origem,
         workspace: wsPath,
       });
-      return repetida;
+
+      const atualizada = db.obterNotificacao(repetida.id)!;
+      return this.notificationRowParaNotificacao(atualizada);
     }
 
-    const n: Notificacao = {
-      id: `not-${Date.now().toString(36)}${randomBytes(3).toString("hex")}`,
-      titulo,
-      corpo,
-      tipo,
-      origem,
-      lida: false,
-      criado_em: agoraStr,
-      ...(entrada.acoes && entrada.acoes.length > 0 ? { acoes: entrada.acoes } : {}),
-      repeticoes: 1,
-    };
-    lista.push(n);
-    // FIFO: estourou o cap → descarta as mais antigas
-    await this.salvar(wsPath, lista.slice(-CAP_NOTIFICACOES));
+    const id = `not-${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
+    const row = db.inserirNotificacao(
+      {
+        id,
+        workspace: db.wsId,
+        tipo,
+        titulo,
+        mensagem: corpo,
+        origem,
+        lida: false,
+        acoes: entrada.acoes as Array<Record<string, unknown>>,
+        repeticoes: 1,
+        criado_em_ms: agoraMs,
+        atualizado_em_ms: null,
+      },
+      CAP_NOTIFICACOES,
+    );
+
+    await this.sincronizarJson(wsPath);
+
     eventBus.emit("notificacao.nova", {
-      id: n.id,
-      titulo: n.titulo,
-      tipo: n.tipo,
-      origem: n.origem,
+      id: row.id,
+      titulo: row.titulo,
+      tipo: row.tipo,
+      origem: row.origem,
       workspace: wsPath,
     });
-    return n;
+
+    return this.notificationRowParaNotificacao(row);
   }
 
   async marcarLida(wsPath: string, id: string): Promise<Notificacao> {
-    const lista = this.ler(wsPath);
-    const n = lista.find((x) => x.id === id);
+    const db = OpencorpDb.obter(wsPath);
+    const n = db.obterNotificacao(id);
     if (!n) {
       throw new NotificationError(`notificação "${id}" não encontrada`, { status: 404 });
     }
-    if (!n.lida) {
-      n.lida = true;
-      await this.salvar(wsPath, lista);
+    if (n.lida === 0) {
+      db.marcarNotificacaoComoLida(id);
+      await this.sincronizarJson(wsPath);
     }
-    return n;
+    const atualizada = db.obterNotificacao(id)!;
+    return this.notificationRowParaNotificacao(atualizada);
   }
 
   /** Marca todas como lidas. @returns quantas foram alteradas. */
   async marcarTodasLidas(wsPath: string): Promise<number> {
-    const lista = this.ler(wsPath);
-    let marcadas = 0;
-    for (const n of lista) {
-      if (!n.lida) {
-        n.lida = true;
-        marcadas++;
-      }
+    const db = OpencorpDb.obter(wsPath);
+    const alteradas = db.marcarTodasNotificacoesLidas(db.wsId);
+    if (alteradas > 0) {
+      await this.sincronizarJson(wsPath);
     }
-    if (marcadas > 0) await this.salvar(wsPath, lista);
-    return marcadas;
+    return alteradas;
   }
 
   async limpar(wsPath: string): Promise<void> {
-    await this.salvar(wsPath, []);
+    const db = OpencorpDb.obter(wsPath);
+    db.limparNotificacoes(db.wsId);
+    await this.sincronizarJson(wsPath);
   }
 }
