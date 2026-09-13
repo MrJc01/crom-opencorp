@@ -13,7 +13,7 @@
  */
 
 import Database from "better-sqlite3";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, symlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   inicializarBancoConsolidado,
@@ -96,9 +96,15 @@ export interface NovaSessaoInput {
   modelo?: string;
   trigger_id?: string | null;
   flow_id?: string | null;
+  gatilho_tipo?: string;
+  gatilho_origem?: string;
   status?: StatusSession;
   inicio_ms?: number;
+  fim_ms?: number | null;
+  duracao_ms?: number | null;
   custo_usd?: number;
+  exit_code?: number | null;
+  erro?: string | null;
 }
 
 export interface NovaMensagemInput {
@@ -118,7 +124,12 @@ export interface NovoSpanInput {
   trace_id: string;
   span_id: string;
   parent_span_id?: string | null;
+  agente?: string;
+  modelo?: string;
+  workspace?: string;
+  tipo_acao?: string;
   ferramenta?: string | null;
+  comando_resumo?: string | null;
   input_json?: string | null;
   output_json?: string | null;
   status?: StatusSpan;
@@ -126,6 +137,7 @@ export interface NovoSpanInput {
   prompt_tokens?: number;
   saida_tokens?: number;
   custo_usd?: number;
+  erro?: string | null;
   criado_em_ms?: number;
 }
 
@@ -170,6 +182,13 @@ export class OpencorpDb {
 
     this.db = new Database(destinoDbPath);
     inicializarBancoConsolidado(this.db);
+
+    // Garante symlink de compatibilidade corp.db se destino existir
+    if (!existsSync(corpDbPath) && existsSync(destinoDbPath)) {
+      try {
+        symlinkSync("opencorp.db", corpDbPath);
+      } catch {}
+    }
   }
 
   /**
@@ -412,6 +431,10 @@ export class OpencorpDb {
     const ws = input.workspace || this.wsId;
     const custoMicroUsd = input.custo_usd !== undefined ? usdToMicroUsd(input.custo_usd) : 0;
     const status = input.status || "executando";
+    const gatilhoTipo = input.gatilho_tipo || "manual";
+    const gatilhoOrigem = input.gatilho_origem || "";
+    const fimMs = input.fim_ms ?? null;
+    const duracaoMs = input.duracao_ms ?? (fimMs && inicioMs ? Math.max(0, fimMs - inicioMs) : null);
 
     const sessao: SessionRow = {
       id,
@@ -420,21 +443,75 @@ export class OpencorpDb {
       modelo: input.modelo || "",
       trigger_id: input.trigger_id ?? null,
       flow_id: input.flow_id ?? null,
+      gatilho_tipo: gatilhoTipo,
+      gatilho_origem: gatilhoOrigem,
       status,
       inicio_ms: inicioMs,
-      fim_ms: null,
-      duracao_ms: null,
+      fim_ms: fimMs,
+      duracao_ms: duracaoMs,
       custo_micro_usd: custoMicroUsd,
-      exit_code: null,
-      erro: null,
+      exit_code: input.exit_code ?? null,
+      erro: input.erro ?? null,
     };
 
     this.db
       .prepare(`
         INSERT INTO sessions
-          (id, workspace, agente, modelo, trigger_id, flow_id, status, inicio_ms, fim_ms, duracao_ms, custo_micro_usd, exit_code, erro)
+          (id, workspace, agente, modelo, trigger_id, flow_id, gatilho_tipo, gatilho_origem, status, inicio_ms, fim_ms, duracao_ms, custo_micro_usd, exit_code, erro)
         VALUES
-          (@id, @workspace, @agente, @modelo, @trigger_id, @flow_id, @status, @inicio_ms, @fim_ms, @duracao_ms, @custo_micro_usd, @exit_code, @erro)
+          (@id, @workspace, @agente, @modelo, @trigger_id, @flow_id, @gatilho_tipo, @gatilho_origem, @status, @inicio_ms, @fim_ms, @duracao_ms, @custo_micro_usd, @exit_code, @erro)
+      `)
+      .run(sessao);
+
+    return sessao;
+  }
+
+  upsertSessao(input: NovaSessaoInput): SessionRow {
+    const id = input.id || gerarId("sess");
+    const inicioMs = input.inicio_ms || Date.now();
+    const ws = input.workspace || this.wsId;
+    const custoMicroUsd = input.custo_usd !== undefined ? usdToMicroUsd(input.custo_usd) : 0;
+    const status = input.status || "executando";
+    const gatilhoTipo = input.gatilho_tipo || "manual";
+    const gatilhoOrigem = input.gatilho_origem || "";
+    const fimMs = input.fim_ms ?? null;
+    const duracaoMs = input.duracao_ms ?? (fimMs && inicioMs ? Math.max(0, fimMs - inicioMs) : null);
+
+    const sessao: SessionRow = {
+      id,
+      workspace: ws,
+      agente: input.agente,
+      modelo: input.modelo || "",
+      trigger_id: input.trigger_id ?? null,
+      flow_id: input.flow_id ?? null,
+      gatilho_tipo: gatilhoTipo,
+      gatilho_origem: gatilhoOrigem,
+      status,
+      inicio_ms: inicioMs,
+      fim_ms: fimMs,
+      duracao_ms: duracaoMs,
+      custo_micro_usd: custoMicroUsd,
+      exit_code: input.exit_code ?? null,
+      erro: input.erro ?? null,
+    };
+
+    this.db
+      .prepare(`
+        INSERT INTO sessions
+          (id, workspace, agente, modelo, trigger_id, flow_id, gatilho_tipo, gatilho_origem, status, inicio_ms, fim_ms, duracao_ms, custo_micro_usd, exit_code, erro)
+        VALUES
+          (@id, @workspace, @agente, @modelo, @trigger_id, @flow_id, @gatilho_tipo, @gatilho_origem, @status, @inicio_ms, @fim_ms, @duracao_ms, @custo_micro_usd, @exit_code, @erro)
+        ON CONFLICT (id) DO UPDATE SET
+          agente = excluded.agente,
+          modelo = excluded.modelo,
+          gatilho_tipo = excluded.gatilho_tipo,
+          gatilho_origem = excluded.gatilho_origem,
+          status = excluded.status,
+          fim_ms = excluded.fim_ms,
+          duracao_ms = excluded.duracao_ms,
+          custo_micro_usd = excluded.custo_micro_usd,
+          exit_code = excluded.exit_code,
+          erro = excluded.erro
       `)
       .run(sessao);
 
@@ -520,9 +597,9 @@ export class OpencorpDb {
     this.db
       .prepare(`
         INSERT INTO spans
-          (id, session_id, trace_id, span_id, parent_span_id, ferramenta, input_json, output_json, status, duracao_ms, prompt_tokens, saida_tokens, custo_micro_usd, criado_em_ms)
+          (id, session_id, trace_id, span_id, parent_span_id, agente, modelo, workspace, tipo_acao, ferramenta, comando_resumo, input_json, output_json, status, duracao_ms, prompt_tokens, saida_tokens, custo_micro_usd, erro, criado_em_ms)
         VALUES
-          (@id, @session_id, @trace_id, @span_id, @parent_span_id, @ferramenta, @input_json, @output_json, @status, @duracao_ms, @prompt_tokens, @saida_tokens, @custo_micro_usd, @criado_em_ms)
+          (@id, @session_id, @trace_id, @span_id, @parent_span_id, @agente, @modelo, @workspace, @tipo_acao, @ferramenta, @comando_resumo, @input_json, @output_json, @status, @duracao_ms, @prompt_tokens, @saida_tokens, @custo_micro_usd, @erro, @criado_em_ms)
       `)
       .run({
         id,
@@ -530,7 +607,12 @@ export class OpencorpDb {
         trace_id: span.trace_id,
         span_id: span.span_id,
         parent_span_id: span.parent_span_id ?? null,
+        agente: span.agente || "",
+        modelo: span.modelo || "",
+        workspace: span.workspace || this.wsId,
+        tipo_acao: span.tipo_acao || "tool",
         ferramenta: span.ferramenta ?? null,
+        comando_resumo: span.comando_resumo ?? null,
         input_json: span.input_json ?? null,
         output_json: span.output_json ?? null,
         status: span.status || "sucesso",
@@ -538,6 +620,7 @@ export class OpencorpDb {
         prompt_tokens: span.prompt_tokens || 0,
         saida_tokens: span.saida_tokens || 0,
         custo_micro_usd: custoMicro,
+        erro: span.erro ?? null,
         criado_em_ms: criadoMs,
       });
   }

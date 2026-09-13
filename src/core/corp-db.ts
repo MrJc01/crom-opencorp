@@ -1,6 +1,8 @@
 import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, symlinkSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { OpencorpDb } from "./db/opencorp-db.js";
+import { inicializarBancoConsolidado } from "./db/schema.js";
 
 export interface LinhaRegistro {
   id: string;
@@ -100,117 +102,87 @@ export interface FiltroTelemetria {
   limite?: number;
 }
 
+function parseDataParaMs(valor?: string | null): number {
+  if (!valor) return Date.now();
+  const parsed = Date.parse(valor);
+  return Number.isNaN(parsed) ? Date.now() : parsed;
+}
+
+function mapSpanRowParaLinhaAcao(r: any): LinhaAcaoAgente {
+  return {
+    id: r.id,
+    trace_id: r.trace_id,
+    span_id: r.span_id,
+    parent_span_id: r.parent_span_id,
+    sessao_id: r.session_id,
+    agente: r.agente || "",
+    modelo: r.modelo || "",
+    workspace: r.workspace || "",
+    tipo_acao: r.tipo_acao || "tool",
+    ferramenta: r.ferramenta,
+    comando_resumo: r.comando_resumo,
+    input_json: r.input_json,
+    output_json: r.output_json,
+    status: r.status,
+    duracao_ms: r.duracao_ms ?? 0,
+    tokens_prompt: r.prompt_tokens ?? 0,
+    tokens_saida: r.saida_tokens ?? 0,
+    custo_usd: r.custo_micro_usd ? Number((r.custo_micro_usd / 1_000_000).toFixed(6)) : 0,
+    erro: r.erro,
+    criado_em: r.criado_em_ms ? new Date(r.criado_em_ms).toISOString() : new Date().toISOString(),
+  };
+}
+
+/**
+ * CorpDb: Fachada e Adaptador de Transição para o Schema Consolidado
+ *
+ * Mapeia transparentemente chamadas legadas para as tabelas universais do OpencorpDb:
+ * - sessoes / execucoes -> sessions (com conversão micro-USD)
+ * - mensagens -> messages
+ * - acoes_agentes -> spans
+ * - registros / journal -> registros / journal
+ */
 export class CorpDb {
+  private readonly opencorp?: OpencorpDb;
   private readonly db: Database.Database;
+  private readonly wsId: string;
+  private readonly wsPath: string;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("busy_timeout = 5000");
-    this.migrar();
+    const dbPathResolvido = resolve(dbPath);
+    if (dirname(dbPathResolvido).endsWith(".opencorp")) {
+      const wsPath = dirname(dirname(dbPathResolvido));
+      this.wsPath = wsPath;
+      this.opencorp = OpencorpDb.obter(wsPath);
+      this.db = this.opencorp.handle;
+      this.wsId = this.opencorp.wsId;
+
+      // Garante symlink de compatibilidade corp.db apontando para opencorp.db
+      const corpDbPath = join(wsPath, ".opencorp", "corp.db");
+      if (!existsSync(corpDbPath)) {
+        try {
+          symlinkSync("opencorp.db", corpDbPath);
+        } catch {}
+      }
+    } else {
+      // Isolamento para diretórios temporários arbitrários em testes unitários
+      this.wsPath = dirname(dbPath);
+      this.wsId = "custom";
+      this.db = new Database(dbPath);
+      this.db.pragma("journal_mode = WAL");
+      this.db.pragma("busy_timeout = 5000");
+      inicializarBancoConsolidado(this.db);
+    }
   }
 
   static caminho(wsPath: string): string {
     return join(wsPath, ".opencorp", "corp.db");
   }
 
-  private migrar(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS registros (
-        id TEXT NOT NULL,
-        categoria TEXT NOT NULL,
-        descricao TEXT NOT NULL DEFAULT '',
-        criado_por TEXT NOT NULL DEFAULT '',
-        criado_em TEXT NOT NULL DEFAULT '',
-        atualizado_em TEXT NOT NULL DEFAULT '',
-        tags TEXT NOT NULL DEFAULT '',
-        conteudo TEXT NOT NULL DEFAULT '',
-        PRIMARY KEY (categoria, id)
-      );
-      CREATE TABLE IF NOT EXISTS journal (
-        registro_id TEXT NOT NULL,
-        categoria TEXT NOT NULL,
-        ts TEXT NOT NULL,
-        por TEXT NOT NULL,
-        evento TEXT NOT NULL,
-        resumo TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS sessoes (
-        id TEXT PRIMARY KEY,
-        agente TEXT NOT NULL DEFAULT '',
-        modelo TEXT NOT NULL DEFAULT '',
-        inicio TEXT NOT NULL DEFAULT '',
-        fim TEXT,
-        custo_usd REAL,
-        status TEXT NOT NULL DEFAULT ''
-      );
-      CREATE TABLE IF NOT EXISTS mensagens (
-        id TEXT PRIMARY KEY,
-        sessao_id TEXT NOT NULL,
-        agente TEXT NOT NULL DEFAULT '',
-        role TEXT NOT NULL,
-        conteudo TEXT NOT NULL DEFAULT '',
-        criado_em TEXT
-      );
-      CREATE TABLE IF NOT EXISTS execucoes (
-        id TEXT PRIMARY KEY,
-        agente TEXT NOT NULL DEFAULT '',
-        modelo TEXT NOT NULL DEFAULT '',
-        gatilho_tipo TEXT NOT NULL DEFAULT 'manual',
-        gatilho_origem TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'executando',
-        inicio TEXT NOT NULL DEFAULT '',
-        fim TEXT,
-        duracao_ms INTEGER,
-        custo_usd REAL,
-        exit_code INTEGER,
-        erro TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_journal_registro ON journal (categoria, registro_id);
-      CREATE INDEX IF NOT EXISTS idx_mensagens_sessao ON mensagens (sessao_id, criado_em);
-      CREATE INDEX IF NOT EXISTS idx_execucoes_gatilho ON execucoes (gatilho_tipo, gatilho_origem);
-      CREATE INDEX IF NOT EXISTS idx_execucoes_agente ON execucoes (agente, inicio);
-
-      -- Tabela de telemetria granular: ações/passos dos agentes com trace context
-      CREATE TABLE IF NOT EXISTS acoes_agentes (
-        id TEXT PRIMARY KEY,
-        trace_id TEXT NOT NULL,
-        span_id TEXT NOT NULL,
-        parent_span_id TEXT,
-        sessao_id TEXT NOT NULL,
-        agente TEXT NOT NULL,
-        modelo TEXT NOT NULL DEFAULT '',
-        workspace TEXT NOT NULL DEFAULT '',
-        tipo_acao TEXT NOT NULL,
-        ferramenta TEXT,
-        comando_resumo TEXT,
-        input_json TEXT,
-        output_json TEXT,
-        status TEXT NOT NULL DEFAULT 'sucesso',
-        duracao_ms INTEGER DEFAULT 0,
-        tokens_prompt INTEGER DEFAULT 0,
-        tokens_saida INTEGER DEFAULT 0,
-        custo_usd REAL DEFAULT 0.0,
-        erro TEXT,
-        criado_em TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_acoes_sessao ON acoes_agentes (sessao_id, criado_em);
-      CREATE INDEX IF NOT EXISTS idx_acoes_agente ON acoes_agentes (agente, criado_em);
-      CREATE INDEX IF NOT EXISTS idx_acoes_trace ON acoes_agentes (trace_id);
-      CREATE INDEX IF NOT EXISTS idx_acoes_ferramenta ON acoes_agentes (ferramenta, status);
-      CREATE INDEX IF NOT EXISTS idx_acoes_falhas ON acoes_agentes (status) WHERE status != 'sucesso';
-    `);
-    try {
-      this.db.exec("ALTER TABLE execucoes ADD COLUMN erro TEXT;");
-    } catch {
-      /* coluna já existe */
-    }
-  }
-
   limpar(): void {
     this.db.exec(
-      "DELETE FROM registros; DELETE FROM journal; DELETE FROM sessoes; DELETE FROM mensagens; DELETE FROM execucoes; DELETE FROM acoes_agentes;",
+      "DELETE FROM registros; DELETE FROM journal; DELETE FROM messages; DELETE FROM spans; DELETE FROM sessions;",
     );
   }
 
@@ -230,6 +202,23 @@ export class CorpDb {
       .run(r);
   }
 
+  obterRegistro(categoria: string, id: string): LinhaRegistro | undefined {
+    return this.db
+      .prepare("SELECT * FROM registros WHERE categoria = ? AND id = ?")
+      .get(categoria, id) as LinhaRegistro | undefined;
+  }
+
+  listarRegistros(categoria?: string): LinhaRegistro[] {
+    if (categoria) {
+      return this.db
+        .prepare("SELECT * FROM registros WHERE categoria = ? ORDER BY id")
+        .all(categoria) as LinhaRegistro[];
+    }
+    return this.db
+      .prepare("SELECT * FROM registros ORDER BY categoria, id")
+      .all() as LinhaRegistro[];
+  }
+
   removerRegistro(categoria: string, id: string): void {
     this.db
       .prepare("DELETE FROM registros WHERE categoria = ? AND id = ?")
@@ -239,48 +228,83 @@ export class CorpDb {
       .run(categoria, id);
   }
 
+  excluirRegistro(categoria: string, id: string): void {
+    this.removerRegistro(categoria, id);
+  }
+
   inserirEvento(e: LinhaEvento): void {
     this.db.prepare(
       "INSERT INTO journal (registro_id, categoria, ts, por, evento, resumo) VALUES (@registro_id, @categoria, @ts, @por, @evento, @resumo)",
     ).run(e);
   }
 
+  inserirJournal(e: LinhaEvento): void {
+    this.inserirEvento(e);
+  }
+
+  listarJournal(categoria?: string, registroId?: string): LinhaEvento[] {
+    if (categoria && registroId) {
+      return this.db
+        .prepare("SELECT * FROM journal WHERE categoria = ? AND registro_id = ? ORDER BY ts ASC")
+        .all(categoria, registroId) as LinhaEvento[];
+    }
+    if (categoria) {
+      return this.db
+        .prepare("SELECT * FROM journal WHERE categoria = ? ORDER BY ts ASC")
+        .all(categoria) as LinhaEvento[];
+    }
+    return this.db.prepare("SELECT * FROM journal ORDER BY ts ASC").all() as LinhaEvento[];
+  }
+
   upsertSessao(s: LinhaSessao): void {
+    const inicioMs = parseDataParaMs(s.inicio);
+    const fimMs = s.fim ? parseDataParaMs(s.fim) : null;
+    const duracaoMs = fimMs && inicioMs ? Math.max(0, fimMs - inicioMs) : null;
+    const custoMicroUsd = Math.round(Number(s.custo_usd || 0) * 1_000_000);
+    const status = s.status || "executando";
+
     this.db
       .prepare(
-        `INSERT INTO sessoes (id, agente, modelo, inicio, fim, custo_usd, status)
-         VALUES (@id, @agente, @modelo, @inicio, @fim, @custo_usd, @status)
+        `INSERT INTO sessions (id, workspace, agente, modelo, status, inicio_ms, fim_ms, duracao_ms, custo_micro_usd)
+         VALUES (@id, @workspace, @agente, @modelo, @status, @inicio_ms, @fim_ms, @duracao_ms, @custo_micro_usd)
          ON CONFLICT (id) DO UPDATE SET
            agente = excluded.agente,
            modelo = excluded.modelo,
-           inicio = excluded.inicio,
-           fim = excluded.fim,
-           custo_usd = excluded.custo_usd,
-           status = excluded.status`,
+           status = excluded.status,
+           inicio_ms = excluded.inicio_ms,
+           fim_ms = excluded.fim_ms,
+           duracao_ms = excluded.duracao_ms,
+           custo_micro_usd = excluded.custo_micro_usd`,
       )
-      .run(s);
+      .run({
+        id: s.id,
+        workspace: this.wsId,
+        agente: s.agente || "",
+        modelo: s.modelo || "",
+        status,
+        inicio_ms: inicioMs,
+        fim_ms: fimMs,
+        duracao_ms: duracaoMs,
+        custo_micro_usd: custoMicroUsd,
+      });
   }
 
-  inserirMensagem(m: LinhaMensagem): void {
-    this.db.prepare(
-      `INSERT INTO mensagens (id, sessao_id, agente, role, conteudo, criado_em)
-       VALUES (@id, @sessao_id, @agente, @role, @conteudo, @criado_em)
-       ON CONFLICT (id) DO NOTHING`,
-    ).run(m);
+  obterSessao(id: string): LinhaSessao | undefined {
+    const r = this.db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as any;
+    if (!r) return undefined;
+    return {
+      id: r.id,
+      agente: r.agente,
+      modelo: r.modelo,
+      inicio: r.inicio_ms ? new Date(r.inicio_ms).toISOString() : "",
+      fim: r.fim_ms ? new Date(r.fim_ms).toISOString() : null,
+      custo_usd: r.custo_micro_usd ? Number((r.custo_micro_usd / 1_000_000).toFixed(6)) : 0,
+      status: r.status,
+    };
   }
 
-  mensagensDaSessao(sessaoId: string): LinhaMensagem[] {
-    return this.db
-      .prepare("SELECT * FROM mensagens WHERE sessao_id = ? ORDER BY criado_em, rowid")
-      .all(sessaoId) as LinhaMensagem[];
-  }
-
-  /** Fallback local: lista sessões gravadas no espelho SQLite (quando opencode está offline) */
   listarSessoesLocal(limite = 30): Array<{ id: string; agente: string; modelo: string; inicio: string; fim: string | null; status: string; titulo_real?: string }> {
-    const sessoes = this.db
-      .prepare(`SELECT * FROM sessoes ORDER BY inicio DESC LIMIT ?`)
-      .all(limite) as Array<{ id: string; agente: string; modelo: string; inicio: string; fim: string | null; status: string }>;
-    // Enriquecer com título real (1ª msg do usuário)
+    const sessoes = this.listarSessoes({ limite });
     const ids = sessoes.map((s) => s.id);
     if (ids.length) {
       const primeiras = this.primeirasMensagensUsuario(ids);
@@ -297,45 +321,154 @@ export class CorpDb {
   }
 
   listarSessoes(filtro?: { agentePrefixo?: string; limite?: number }): LinhaSessao[] {
-    const sql = `SELECT * FROM sessoes ${filtro?.agentePrefixo ? "WHERE agente LIKE ?" : ""}
-                 ORDER BY COALESCE(NULLIF(inicio,''), '0000') DESC ${filtro?.limite ? "LIMIT " + Math.floor(filtro.limite) : ""}`;
-    const rows = filtro?.agentePrefixo
+    const sql = `SELECT * FROM sessions ${filtro?.agentePrefixo ? "WHERE agente LIKE ?" : ""}
+                 ORDER BY inicio_ms DESC ${filtro?.limite ? "LIMIT " + Math.floor(filtro.limite) : ""}`;
+    const rows = (filtro?.agentePrefixo
       ? this.db.prepare(sql).all(filtro.agentePrefixo + "%")
-      : this.db.prepare(sql).all();
-    return rows as LinhaSessao[];
+      : this.db.prepare(sql).all()) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      agente: r.agente,
+      modelo: r.modelo,
+      inicio: r.inicio_ms ? new Date(r.inicio_ms).toISOString() : "",
+      fim: r.fim_ms ? new Date(r.fim_ms).toISOString() : null,
+      custo_usd: r.custo_micro_usd ? Number((r.custo_micro_usd / 1_000_000).toFixed(6)) : 0,
+      status: r.status,
+    }));
   }
 
-  /** Grava/atualiza uma execução no ledger unificado (início: status "executando"; fim: status final). */
-  upsertExecucao(e: LinhaExecucao): void {
+  inserirMensagem(m: LinhaMensagem): void {
+    const criadoMs = parseDataParaMs(m.criado_em);
+    const role = (["user", "assistant", "system", "tool"].includes(m.role) ? m.role : "user") as any;
+
+    // Garante sessão pai para evitar violação de FK
+    const existeSessao = this.db.prepare("SELECT 1 FROM sessions WHERE id = ?").get(m.sessao_id);
+    if (!existeSessao) {
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO sessions (id, workspace, agente, modelo, status, inicio_ms, custo_micro_usd)
+           VALUES (?, ?, ?, 'auto', 'executando', ?, 0)`,
+        )
+        .run(m.sessao_id, this.wsId, m.agente || "agente", criadoMs);
+    }
+
     this.db
       .prepare(
-        `INSERT INTO execucoes (id, agente, modelo, gatilho_tipo, gatilho_origem, status, inicio, fim, duracao_ms, custo_usd, exit_code, erro)
-         VALUES (@id, @agente, @modelo, @gatilho_tipo, @gatilho_origem, @status, @inicio, @fim, @duracao_ms, @custo_usd, @exit_code, @erro)
+        `INSERT INTO messages (id, session_id, autor, role, tipo, conteudo, mencoes_json, criado_em_ms)
+         VALUES (@id, @session_id, @autor, @role, 'conversa', @conteudo, '[]', @criado_em_ms)
+         ON CONFLICT (id) DO NOTHING`,
+      )
+      .run({
+        id: m.id,
+        session_id: m.sessao_id,
+        autor: m.agente || "anon",
+        role,
+        conteudo: m.conteudo || "",
+        criado_em_ms: criadoMs,
+      });
+  }
+
+  listarMensagens(sessaoId: string): LinhaMensagem[] {
+    const rows = this.db
+      .prepare("SELECT * FROM messages WHERE session_id = ? ORDER BY criado_em_ms ASC, rowid ASC")
+      .all(sessaoId) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      sessao_id: r.session_id,
+      agente: r.autor,
+      role: r.role,
+      conteudo: r.conteudo,
+      criado_em: r.criado_em_ms ? new Date(r.criado_em_ms).toISOString() : null,
+    }));
+  }
+
+  mensagensDaSessao(sessaoId: string): LinhaMensagem[] {
+    return this.listarMensagens(sessaoId);
+  }
+
+  upsertExecucao(e: LinhaExecucao): void {
+    const inicioMs = parseDataParaMs(e.inicio);
+    const fimMs = e.fim ? parseDataParaMs(e.fim) : null;
+    const duracaoMs =
+      typeof e.duracao_ms === "number"
+        ? e.duracao_ms
+        : fimMs && inicioMs
+          ? Math.max(0, fimMs - inicioMs)
+          : null;
+    const custoMicroUsd = Math.round(Number(e.custo_usd || 0) * 1_000_000);
+    const status = e.status || "executando";
+
+    this.db
+      .prepare(
+        `INSERT INTO sessions
+          (id, workspace, agente, modelo, gatilho_tipo, gatilho_origem, status, inicio_ms, fim_ms, duracao_ms, custo_micro_usd, exit_code, erro)
+         VALUES
+          (@id, @workspace, @agente, @modelo, @gatilho_tipo, @gatilho_origem, @status, @inicio_ms, @fim_ms, @duracao_ms, @custo_micro_usd, @exit_code, @erro)
          ON CONFLICT (id) DO UPDATE SET
            agente = excluded.agente,
            modelo = excluded.modelo,
            gatilho_tipo = excluded.gatilho_tipo,
            gatilho_origem = excluded.gatilho_origem,
            status = excluded.status,
-           fim = excluded.fim,
+           fim_ms = excluded.fim_ms,
            duracao_ms = excluded.duracao_ms,
-           custo_usd = excluded.custo_usd,
+           custo_micro_usd = excluded.custo_micro_usd,
            exit_code = excluded.exit_code,
            erro = excluded.erro`,
       )
-      .run({ ...e, erro: e.erro ?? null });
+      .run({
+        id: e.id,
+        workspace: this.wsId,
+        agente: e.agente || "",
+        modelo: e.modelo || "",
+        gatilho_tipo: e.gatilho_tipo || "manual",
+        gatilho_origem: e.gatilho_origem || "",
+        status,
+        inicio_ms: inicioMs,
+        fim_ms: fimMs,
+        duracao_ms: duracaoMs,
+        custo_micro_usd: custoMicroUsd,
+        exit_code: e.exit_code ?? null,
+        erro: e.erro ?? null,
+      });
   }
 
-  /** Atualiza apenas status e fim de uma execução existente */
+  obterExecucao(id: string): LinhaExecucao | undefined {
+    const r = this.db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as any;
+    if (!r) return undefined;
+    return {
+      id: r.id,
+      agente: r.agente,
+      modelo: r.modelo,
+      gatilho_tipo: r.gatilho_tipo || "manual",
+      gatilho_origem: r.gatilho_origem || "",
+      status: r.status,
+      inicio: r.inicio_ms ? new Date(r.inicio_ms).toISOString() : "",
+      fim: r.fim_ms ? new Date(r.fim_ms).toISOString() : null,
+      duracao_ms: r.duracao_ms,
+      custo_usd: r.custo_micro_usd ? Number((r.custo_micro_usd / 1_000_000).toFixed(6)) : 0,
+      exit_code: r.exit_code,
+      erro: r.erro,
+    };
+  }
+
   atualizarStatusExecucao(id: string, status: string, fim?: string): void {
     try {
+      const fimMs = fim ? parseDataParaMs(fim) : Date.now();
       this.db
-        .prepare(`UPDATE execucoes SET status = @status, fim = COALESCE(@fim, datetime('now')) WHERE id = @id`)
-        .run({ id, status, fim: fim ?? new Date().toISOString() });
+        .prepare(
+          `UPDATE sessions
+           SET status = @status,
+               fim_ms = @fim_ms,
+               duracao_ms = CASE WHEN inicio_ms > 0 THEN (@fim_ms - inicio_ms) ELSE duracao_ms END
+           WHERE id = @id`,
+        )
+        .run({ id, status, fim_ms: fimMs });
     } catch {}
   }
 
-  /** Consulta cross-motor do ledger: "o que rodou, por que rodou (gatilho), como terminou". */
   listarExecucoes(filtro?: FiltroExecucoes): LinhaExecucao[] {
     const condicoes: string[] = [];
     const params: Record<string, string | number> = {};
@@ -357,22 +490,42 @@ export class CorpDb {
     }
     const where = condicoes.length > 0 ? `WHERE ${condicoes.join(" AND ")}` : "";
     const limite = filtro?.limite ? Math.max(1, Math.floor(filtro.limite)) : 100;
-    return this.db
-      .prepare(`SELECT * FROM execucoes ${where} ORDER BY COALESCE(NULLIF(inicio,''), '0000') DESC LIMIT ${limite}`)
-      .all(params) as LinhaExecucao[];
+    const rows = this.db
+      .prepare(`SELECT * FROM sessions ${where} ORDER BY inicio_ms DESC LIMIT ${limite}`)
+      .all(params) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      agente: r.agente,
+      modelo: r.modelo,
+      gatilho_tipo: r.gatilho_tipo || "manual",
+      gatilho_origem: r.gatilho_origem || "",
+      status: r.status,
+      inicio: r.inicio_ms ? new Date(r.inicio_ms).toISOString() : "",
+      fim: r.fim_ms ? new Date(r.fim_ms).toISOString() : null,
+      duracao_ms: r.duracao_ms,
+      custo_usd: r.custo_micro_usd ? Number((r.custo_micro_usd / 1_000_000).toFixed(6)) : 0,
+      exit_code: r.exit_code,
+      erro: r.erro,
+    }));
   }
 
-  /** Primeira mensagem do usuário por sessão (fonte de título real na lista de conversas) */
   primeirasMensagensUsuario(ids: string[]): Array<{ sessao_id: string; conteudo: string; criado_em: string | null }> {
     if (!ids.length) return [];
     const ph = ids.map(() => "?").join(",");
-    return this.db
+    const rows = this.db
       .prepare(
-        `SELECT sessao_id, conteudo, criado_em FROM mensagens
-         WHERE role = 'user' AND sessao_id IN (${ph})
-         ORDER BY criado_em ASC, rowid ASC`,
+        `SELECT session_id, conteudo, criado_em_ms FROM messages
+         WHERE role = 'user' AND session_id IN (${ph})
+         ORDER BY criado_em_ms ASC, rowid ASC`,
       )
-      .all(...ids) as Array<{ sessao_id: string; conteudo: string; criado_em: string | null }>;
+      .all(...ids) as any[];
+
+    return rows.map((r) => ({
+      sessao_id: r.session_id,
+      conteudo: r.conteudo,
+      criado_em: r.criado_em_ms ? new Date(r.criado_em_ms).toISOString() : null,
+    }));
   }
 
   buscar(termo: string): { categoria: string; id: string; descricao: string }[] {
@@ -388,56 +541,80 @@ export class CorpDb {
       .all({ padrao }) as { categoria: string; id: string; descricao: string }[];
   }
 
-  // ─── Telemetria de Agentes ─────────────────────────────────
+  inserirAcaoAgente(acao: LinhaAcaoAgente): void {
+    this.gravarAcoesEmLote([acao]);
+  }
 
-  /** Grava ações de agente em lote (batch insert otimizado para o ring buffer). */
+  listarAcoesAgente(sessaoId: string): LinhaAcaoAgente[] {
+    return this.listarAcoesSessao(sessaoId);
+  }
+
   gravarAcoesEmLote(acoes: LinhaAcaoAgente[]): void {
     if (!acoes.length) return;
-    const stmt = this.db.prepare(
-      `INSERT OR IGNORE INTO acoes_agentes
-        (id, trace_id, span_id, parent_span_id, sessao_id, agente, modelo, workspace,
+
+    const stmtSessao = this.db.prepare(`
+      INSERT OR IGNORE INTO sessions (id, workspace, agente, modelo, status, inicio_ms, custo_micro_usd)
+      VALUES (?, ?, ?, ?, 'executando', ?, 0)
+    `);
+
+    const stmt = this.db.prepare(`
+      INSERT OR IGNORE INTO spans
+        (id, session_id, trace_id, span_id, parent_span_id, agente, modelo, workspace,
          tipo_acao, ferramenta, comando_resumo, input_json, output_json,
-         status, duracao_ms, tokens_prompt, tokens_saida, custo_usd, erro, criado_em)
-       VALUES
-        (@id, @trace_id, @span_id, @parent_span_id, @sessao_id, @agente, @modelo, @workspace,
+         status, duracao_ms, prompt_tokens, saida_tokens, custo_micro_usd, erro, criado_em_ms)
+      VALUES
+        (@id, @session_id, @trace_id, @span_id, @parent_span_id, @agente, @modelo, @workspace,
          @tipo_acao, @ferramenta, @comando_resumo, @input_json, @output_json,
-         @status, @duracao_ms, @tokens_prompt, @tokens_saida, @custo_usd, @erro, @criado_em)`,
-    );
+         @status, @duracao_ms, @prompt_tokens, @saida_tokens, @custo_micro_usd, @erro, @criado_em_ms)
+    `);
+
     const tx = this.db.transaction((rows: LinhaAcaoAgente[]) => {
       for (const r of rows) {
+        const criadoMs = parseDataParaMs(r.criado_em);
+        stmtSessao.run(r.sessao_id, this.wsId, r.agente || "agente", r.modelo || "", criadoMs);
+
         stmt.run({
-          ...r,
+          id: r.id,
+          session_id: r.sessao_id,
+          trace_id: r.trace_id,
+          span_id: r.span_id,
           parent_span_id: r.parent_span_id ?? null,
+          agente: r.agente || "",
+          modelo: r.modelo || "",
+          workspace: r.workspace || this.wsId,
+          tipo_acao: r.tipo_acao || "tool",
           ferramenta: r.ferramenta ?? null,
           comando_resumo: r.comando_resumo ?? null,
           input_json: r.input_json ?? null,
           output_json: r.output_json ?? null,
+          status: r.status || "sucesso",
           duracao_ms: r.duracao_ms ?? 0,
-          tokens_prompt: r.tokens_prompt ?? 0,
-          tokens_saida: r.tokens_saida ?? 0,
-          custo_usd: r.custo_usd ?? 0,
+          prompt_tokens: r.tokens_prompt ?? 0,
+          saida_tokens: r.tokens_saida ?? 0,
+          custo_micro_usd: Math.round(Number(r.custo_usd || 0) * 1_000_000),
           erro: r.erro ?? null,
+          criado_em_ms: criadoMs,
         });
       }
     });
+
     tx(acoes);
   }
 
-  /** Lista ações de uma sessão específica (linha do tempo cronológica). */
   listarAcoesSessao(sessaoId: string, limite = 500): LinhaAcaoAgente[] {
-    return this.db
-      .prepare(`SELECT * FROM acoes_agentes WHERE sessao_id = ? ORDER BY criado_em ASC LIMIT ?`)
-      .all(sessaoId, limite) as LinhaAcaoAgente[];
+    const rows = this.db
+      .prepare(`SELECT * FROM spans WHERE session_id = ? ORDER BY criado_em_ms ASC, rowid ASC LIMIT ?`)
+      .all(sessaoId, limite) as any[];
+    return rows.map(mapSpanRowParaLinhaAcao);
   }
 
-  /** Lista ações por trace_id (jornada completa: job → task → sessão → ações). */
   listarAcoesPorTrace(traceId: string): LinhaAcaoAgente[] {
-    return this.db
-      .prepare(`SELECT * FROM acoes_agentes WHERE trace_id = ? ORDER BY criado_em ASC`)
-      .all(traceId) as LinhaAcaoAgente[];
+    const rows = this.db
+      .prepare(`SELECT * FROM spans WHERE trace_id = ? ORDER BY criado_em_ms ASC, rowid ASC`)
+      .all(traceId) as any[];
+    return rows.map(mapSpanRowParaLinhaAcao);
   }
 
-  /** Resumo de telemetria com métricas agregadas por ferramenta/agente. */
   resumoTelemetria(filtro?: FiltroTelemetria): {
     total_acoes: number;
     total_falhas: number;
@@ -446,28 +623,28 @@ export class CorpDb {
   } {
     const condicoes: string[] = [];
     const params: Record<string, string | number> = {};
-    if (filtro?.sessao_id) { condicoes.push("sessao_id = @sessao_id"); params.sessao_id = filtro.sessao_id; }
+    if (filtro?.sessao_id) { condicoes.push("session_id = @sessao_id"); params.sessao_id = filtro.sessao_id; }
     if (filtro?.trace_id) { condicoes.push("trace_id = @trace_id"); params.trace_id = filtro.trace_id; }
     if (filtro?.agente) { condicoes.push("agente = @agente"); params.agente = filtro.agente; }
     if (filtro?.ferramenta) { condicoes.push("ferramenta = @ferramenta"); params.ferramenta = filtro.ferramenta; }
     if (filtro?.status) { condicoes.push("status = @status"); params.status = filtro.status; }
-    if (filtro?.desde) { condicoes.push("criado_em >= @desde"); params.desde = filtro.desde; }
-    if (filtro?.ate) { condicoes.push("criado_em <= @ate"); params.ate = filtro.ate; }
+    if (filtro?.desde) { condicoes.push("criado_em_ms >= @desde_ms"); params.desde_ms = parseDataParaMs(filtro.desde); }
+    if (filtro?.ate) { condicoes.push("criado_em_ms <= @ate_ms"); params.ate_ms = parseDataParaMs(filtro.ate); }
     const where = condicoes.length > 0 ? `WHERE ${condicoes.join(" AND ")}` : "";
     const whereFerr = condicoes.length > 0
       ? `WHERE ${condicoes.join(" AND ")} AND ferramenta IS NOT NULL`
       : "WHERE ferramenta IS NOT NULL";
 
     const totais = this.db.prepare(
-      `SELECT COUNT(*) AS total, SUM(CASE WHEN status != 'sucesso' THEN 1 ELSE 0 END) AS falhas FROM acoes_agentes ${where}`,
-    ).get(params) as { total: number; falhas: number };
+      `SELECT COUNT(*) AS total, SUM(CASE WHEN status != 'sucesso' THEN 1 ELSE 0 END) AS falhas FROM spans ${where}`,
+    ).get(params) as { total: number; falhas: number } | undefined;
 
     const ferramentas = this.db.prepare(
       `SELECT ferramenta, COUNT(*) AS total,
               SUM(CASE WHEN status != 'sucesso' THEN 1 ELSE 0 END) AS falhas,
               ROUND(AVG(duracao_ms), 1) AS media_ms,
-              ROUND(SUM(custo_usd), 6) AS custo_usd
-       FROM acoes_agentes ${whereFerr}
+              ROUND(SUM(custo_micro_usd) / 1000000.0, 6) AS custo_usd
+       FROM spans ${whereFerr}
        GROUP BY ferramenta ORDER BY total DESC`,
     ).all(params) as Array<{ ferramenta: string; total: number; falhas: number; media_ms: number; custo_usd: number }>;
 
@@ -475,33 +652,38 @@ export class CorpDb {
       `SELECT agente, COUNT(*) AS total,
               SUM(CASE WHEN status != 'sucesso' THEN 1 ELSE 0 END) AS falhas,
               ROUND(AVG(duracao_ms), 1) AS media_ms,
-              ROUND(SUM(custo_usd), 6) AS custo_usd
-       FROM acoes_agentes ${where}
+              ROUND(SUM(custo_micro_usd) / 1000000.0, 6) AS custo_usd
+       FROM spans ${where}
        GROUP BY agente ORDER BY total DESC`,
     ).all(params) as Array<{ agente: string; total: number; falhas: number; media_ms: number; custo_usd: number }>;
 
-    return { total_acoes: totais.total ?? 0, total_falhas: totais.falhas ?? 0, ferramentas, agentes };
+    return { total_acoes: totais?.total ?? 0, total_falhas: totais?.falhas ?? 0, ferramentas, agentes };
   }
 
-  /** Consulta flexível de ações de agentes com filtros combinados. */
   listarAcoes(filtro?: FiltroTelemetria): LinhaAcaoAgente[] {
     const condicoes: string[] = [];
     const params: Record<string, string | number> = {};
-    if (filtro?.sessao_id) { condicoes.push("sessao_id = @sessao_id"); params.sessao_id = filtro.sessao_id; }
+    if (filtro?.sessao_id) { condicoes.push("session_id = @sessao_id"); params.sessao_id = filtro.sessao_id; }
     if (filtro?.trace_id) { condicoes.push("trace_id = @trace_id"); params.trace_id = filtro.trace_id; }
     if (filtro?.agente) { condicoes.push("agente = @agente"); params.agente = filtro.agente; }
     if (filtro?.ferramenta) { condicoes.push("ferramenta = @ferramenta"); params.ferramenta = filtro.ferramenta; }
     if (filtro?.status) { condicoes.push("status = @status"); params.status = filtro.status; }
-    if (filtro?.desde) { condicoes.push("criado_em >= @desde"); params.desde = filtro.desde; }
-    if (filtro?.ate) { condicoes.push("criado_em <= @ate"); params.ate = filtro.ate; }
+    if (filtro?.desde) { condicoes.push("criado_em_ms >= @desde_ms"); params.desde_ms = parseDataParaMs(filtro.desde); }
+    if (filtro?.ate) { condicoes.push("criado_em_ms <= @ate_ms"); params.ate_ms = parseDataParaMs(filtro.ate); }
     const where = condicoes.length > 0 ? `WHERE ${condicoes.join(" AND ")}` : "";
     const limite = filtro?.limite ? Math.max(1, Math.floor(filtro.limite)) : 200;
-    return this.db
-      .prepare(`SELECT * FROM acoes_agentes ${where} ORDER BY criado_em DESC LIMIT ${limite}`)
-      .all(params) as LinhaAcaoAgente[];
+    const rows = this.db
+      .prepare(`SELECT * FROM spans ${where} ORDER BY criado_em_ms DESC LIMIT ${limite}`)
+      .all(params) as any[];
+
+    return rows.map(mapSpanRowParaLinhaAcao);
   }
 
   fechar(): void {
-    this.db.close();
+    if (!this.opencorp) {
+      try {
+        this.db.close();
+      } catch {}
+    }
   }
 }

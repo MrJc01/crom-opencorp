@@ -46,7 +46,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   modelo TEXT NOT NULL DEFAULT '',
   trigger_id TEXT REFERENCES triggers(id) ON DELETE SET NULL,
   flow_id TEXT,
-  status TEXT CHECK(status IN ('pendente', 'executando', 'concluido', 'falhou', 'cancelado')) NOT NULL DEFAULT 'pendente',
+  gatilho_tipo TEXT NOT NULL DEFAULT 'manual',
+  gatilho_origem TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pendente',
   inicio_ms INTEGER NOT NULL,
   fim_ms INTEGER,
   duracao_ms INTEGER,
@@ -57,6 +59,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions (workspace, inicio_ms DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_flow ON sessions (flow_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions (status);
+CREATE INDEX IF NOT EXISTS idx_sessions_gatilho ON sessions (gatilho_tipo, gatilho_origem);
+CREATE INDEX IF NOT EXISTS idx_sessions_agente ON sessions (agente, inicio_ms DESC);
 `;
 
 export const DDL_MESSAGES = `
@@ -79,8 +83,13 @@ CREATE TABLE IF NOT EXISTS spans (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   trace_id TEXT NOT NULL,
   span_id TEXT NOT NULL UNIQUE,
-  parent_span_id TEXT REFERENCES spans(span_id) ON DELETE SET NULL,
+  parent_span_id TEXT,
+  agente TEXT NOT NULL DEFAULT '',
+  modelo TEXT NOT NULL DEFAULT '',
+  workspace TEXT NOT NULL DEFAULT '',
+  tipo_acao TEXT NOT NULL DEFAULT 'tool',
   ferramenta TEXT,
+  comando_resumo TEXT,
   input_json TEXT,
   output_json TEXT,
   status TEXT CHECK(status IN ('sucesso', 'falhou', 'timeout', 'abortado')) NOT NULL DEFAULT 'sucesso',
@@ -88,11 +97,14 @@ CREATE TABLE IF NOT EXISTS spans (
   prompt_tokens INTEGER NOT NULL DEFAULT 0,
   saida_tokens INTEGER NOT NULL DEFAULT 0,
   custo_micro_usd INTEGER NOT NULL DEFAULT 0,
+  erro TEXT,
   criado_em_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_spans_session ON spans (session_id, criado_em_ms ASC);
 CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans (trace_id);
 CREATE INDEX IF NOT EXISTS idx_spans_parent ON spans (parent_span_id);
+CREATE INDEX IF NOT EXISTS idx_spans_ferramenta ON spans (ferramenta, status);
+CREATE INDEX IF NOT EXISTS idx_spans_agente ON spans (agente, criado_em_ms ASC);
 `;
 
 export const DDL_TASKS = `
@@ -156,6 +168,92 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_ws_recent ON notifications (workspace, lida, criado_em_ms DESC);
 `;
 
+export const DDL_REGISTROS = `
+CREATE TABLE IF NOT EXISTS registros (
+  id TEXT NOT NULL,
+  categoria TEXT NOT NULL,
+  descricao TEXT NOT NULL DEFAULT '',
+  criado_por TEXT NOT NULL DEFAULT '',
+  criado_em TEXT NOT NULL DEFAULT '',
+  atualizado_em TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '',
+  conteudo TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (categoria, id)
+);
+`;
+
+export const DDL_JOURNAL = `
+CREATE TABLE IF NOT EXISTS journal (
+  registro_id TEXT NOT NULL,
+  categoria TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  por TEXT NOT NULL,
+  evento TEXT NOT NULL,
+  resumo TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_journal_registro ON journal (categoria, registro_id);
+`;
+
+export const DDL_VIEWS_COMPATIBILIDADE = `
+CREATE VIEW IF NOT EXISTS sessoes AS
+  SELECT id, agente, modelo,
+         datetime(inicio_ms / 1000, 'unixepoch') AS inicio,
+         CASE WHEN fim_ms IS NOT NULL THEN datetime(fim_ms / 1000, 'unixepoch') ELSE NULL END AS fim,
+         ROUND(custo_micro_usd / 1000000.0, 6) AS custo_usd,
+         status
+  FROM sessions;
+
+CREATE VIEW IF NOT EXISTS execucoes AS
+  SELECT id, agente, modelo,
+         gatilho_tipo, gatilho_origem,
+         status,
+         datetime(inicio_ms / 1000, 'unixepoch') AS inicio,
+         CASE WHEN fim_ms IS NOT NULL THEN datetime(fim_ms / 1000, 'unixepoch') ELSE NULL END AS fim,
+         duracao_ms,
+         ROUND(custo_micro_usd / 1000000.0, 6) AS custo_usd,
+         exit_code,
+         erro
+  FROM sessions;
+
+CREATE VIEW IF NOT EXISTS mensagens AS
+  SELECT id, session_id AS sessao_id, autor AS agente, role, conteudo,
+         datetime(criado_em_ms / 1000, 'unixepoch') AS criado_em
+  FROM messages;
+
+CREATE VIEW IF NOT EXISTS acoes_agentes AS
+  SELECT id, trace_id, span_id, parent_span_id, session_id AS sessao_id,
+         agente, modelo, workspace,
+         tipo_acao, ferramenta, comando_resumo,
+         input_json, output_json, status, duracao_ms,
+         prompt_tokens AS tokens_prompt, saida_tokens AS tokens_saida,
+         ROUND(custo_micro_usd / 1000000.0, 6) AS custo_usd,
+         erro,
+         datetime(criado_em_ms / 1000, 'unixepoch') AS criado_em
+  FROM spans;
+
+CREATE TRIGGER IF NOT EXISTS trg_execucoes_insert INSTEAD OF INSERT ON execucoes
+BEGIN
+  INSERT OR REPLACE INTO sessions (
+    id, workspace, agente, modelo, gatilho_tipo, gatilho_origem, status,
+    inicio_ms, fim_ms, duracao_ms, custo_micro_usd, exit_code, erro
+  ) VALUES (
+    NEW.id,
+    '',
+    NEW.agente,
+    COALESCE(NEW.modelo, ''),
+    COALESCE(NEW.gatilho_tipo, 'manual'),
+    COALESCE(NEW.gatilho_origem, ''),
+    COALESCE(NEW.status, 'executando'),
+    CASE WHEN NEW.inicio IS NOT NULL AND NEW.inicio != '' THEN unixepoch(NEW.inicio) * 1000 ELSE unixepoch('now') * 1000 END,
+    CASE WHEN NEW.fim IS NOT NULL AND NEW.fim != '' THEN unixepoch(NEW.fim) * 1000 ELSE NULL END,
+    NEW.duracao_ms,
+    CAST(ROUND(COALESCE(NEW.custo_usd, 0) * 1000000) AS INTEGER),
+    NEW.exit_code,
+    NEW.erro
+  );
+END;
+`;
+
 export const SCHEMA_CONSOLIDADO_DDL = `
 ${DDL_TRIGGERS}
 ${DDL_SESSIONS}
@@ -165,6 +263,9 @@ ${DDL_TASKS}
 ${DDL_TASK_LABELS}
 ${DDL_TASK_DEPENDENCIES}
 ${DDL_NOTIFICATIONS}
+${DDL_REGISTROS}
+${DDL_JOURNAL}
+${DDL_VIEWS_COMPATIBILIDADE}
 `;
 
 /**
@@ -174,6 +275,17 @@ export function inicializarBancoConsolidado(db: Database.Database): void {
   db.pragma("foreign_keys = ON");
   db.pragma("journal_mode = WAL");
   db.pragma("busy_timeout = 5000");
+
+  // Migrações defensivas para tabelas pré-existentes
+  try { db.exec("ALTER TABLE sessions ADD COLUMN gatilho_tipo TEXT NOT NULL DEFAULT 'manual';"); } catch {}
+  try { db.exec("ALTER TABLE sessions ADD COLUMN gatilho_origem TEXT NOT NULL DEFAULT '';"); } catch {}
+  try { db.exec("ALTER TABLE spans ADD COLUMN agente TEXT NOT NULL DEFAULT '';"); } catch {}
+  try { db.exec("ALTER TABLE spans ADD COLUMN modelo TEXT NOT NULL DEFAULT '';"); } catch {}
+  try { db.exec("ALTER TABLE spans ADD COLUMN workspace TEXT NOT NULL DEFAULT '';"); } catch {}
+  try { db.exec("ALTER TABLE spans ADD COLUMN tipo_acao TEXT NOT NULL DEFAULT 'tool';"); } catch {}
+  try { db.exec("ALTER TABLE spans ADD COLUMN comando_resumo TEXT;"); } catch {}
+  try { db.exec("ALTER TABLE spans ADD COLUMN erro TEXT;"); } catch {}
+
   db.exec(SCHEMA_CONSOLIDADO_DDL);
 }
 
@@ -201,6 +313,8 @@ export interface SessionRow {
   modelo: string;
   trigger_id: string | null;
   flow_id: string | null;
+  gatilho_tipo?: string;
+  gatilho_origem?: string;
   status: StatusSession;
   inicio_ms: number;
   fim_ms: number | null;
@@ -232,7 +346,12 @@ export interface SpanRow {
   trace_id: string;
   span_id: string;
   parent_span_id: string | null;
+  agente?: string;
+  modelo?: string;
+  workspace?: string;
+  tipo_acao?: string;
   ferramenta: string | null;
+  comando_resumo?: string | null;
   input_json: string | null;
   output_json: string | null;
   status: StatusSpan;
@@ -240,6 +359,7 @@ export interface SpanRow {
   prompt_tokens: number;
   saida_tokens: number;
   custo_micro_usd: number;
+  erro?: string | null;
   criado_em_ms: number;
 }
 
