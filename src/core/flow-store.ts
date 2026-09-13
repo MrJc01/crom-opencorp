@@ -58,6 +58,9 @@ export const flowSchema = z.object({
   nos: z.array(nosFlowSchema).min(1),
   arestas: z.array(arestaFlowSchema).default([]),
   auto_agendar: z.boolean().default(false),
+  // Interruptor mestre do flow: false = sem job no scheduler + run manual bloqueado.
+  // Default true preserva todos os flows existentes (ausência = ativo).
+  ativo: z.boolean().default(true),
 });
 
 export type NoFlow = z.infer<typeof nosFlowSchema>;
@@ -118,6 +121,36 @@ function gerarId(prefixo: string): string {
   return `${prefixo}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
+/**
+ * Executa uma lista de tarefas assíncronas com concorrência máxima limitada (semáforo).
+ * Previne picos explosivos de containers e chamadas simultâneas à LLM em nós fanout/debate.
+ */
+export async function executarComConcorrencia<T, R>(
+  itens: T[],
+  limiteConcorrencia: number,
+  executor: (item: T, indice: number) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const resultados: PromiseSettledResult<R>[] = new Array(itens.length);
+  let proximoIndice = 0;
+  const limiteEfetivo = Math.max(1, Math.min(limiteConcorrencia, itens.length));
+
+  async function trabalhador(): Promise<void> {
+    while (proximoIndice < itens.length) {
+      const idx = proximoIndice++;
+      try {
+        const val = await executor(itens[idx]!, idx);
+        resultados[idx] = { status: "fulfilled", value: val };
+      } catch (err) {
+        resultados[idx] = { status: "rejected", reason: err };
+      }
+    }
+  }
+
+  const trabalhadores = Array.from({ length: limiteEfetivo }, () => trabalhador());
+  await Promise.all(trabalhadores);
+  return resultados;
+}
+
 export class FlowStore {
   private readonly homeDir: string;
   private readonly sessoes: SessaoFlow;
@@ -153,13 +186,14 @@ export class FlowStore {
       nos: [{ id: "gatilho", tipo: "manual", config: {} }],
       arestas: [],
       auto_agendar: false,
+      ativo: true,
     };
     await this.salvar(wsPath, flow);
     return flow;
   }
 
   /** POST com grafo completo (editor da web): 409 se id existe + validação semântica do grafo */
-  async salvarComId(wsPath: string, bruto: { id: string; nome: string; nos: Flow["nos"]; arestas: Flow["arestas"]; auto_agendar?: boolean }): Promise<Flow> {
+  async salvarComId(wsPath: string, bruto: { id: string; nome: string; nos: Flow["nos"]; arestas: Flow["arestas"]; auto_agendar?: boolean; ativo?: boolean }): Promise<Flow> {
     const id = validarIdFlow(bruto.id);
     if (existsSync(this.caminho(wsPath, id))) {
       throw new FlowError(`flow "${id}" já existe (${this.caminho(wsPath, id)})`);
@@ -173,6 +207,7 @@ export class FlowStore {
       nos: bruto.nos,
       arestas: bruto.arestas,
       auto_agendar: bruto.auto_agendar ?? false,
+      ativo: bruto.ativo ?? true,
     };
     await this.salvar(wsPath, flow);
     return flow;
@@ -186,6 +221,7 @@ export class FlowStore {
     gatilhos: Array<{ tipo: string; detalhe?: string }>;
     temLoop: boolean;
     auto_agendar: boolean;
+    ativo: boolean;
   }[]> {
     try {
       await sincronizarJobsParaFluxos(this.homeDir);
@@ -202,6 +238,7 @@ export class FlowStore {
       gatilhos: Array<{ tipo: string; detalhe?: string }>;
       temLoop: boolean;
       auto_agendar: boolean;
+      ativo: boolean;
     }[] = [];
     for (const f of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
       try {
@@ -221,6 +258,7 @@ export class FlowStore {
           gatilhos,
           temLoop,
           auto_agendar: flow.auto_agendar ?? false,
+          ativo: flow.ativo ?? true,
         });
       } catch {
         continue;
@@ -751,6 +789,9 @@ export class FlowStore {
     opts: { entrada?: string; model?: string; execId?: string; retomar?: boolean; gatilho?: { tipo: string; origem: string } } = {},
   ): Promise<{ execId: string; status: "concluido" | "falhou" | "cancelado"; nos: NoExecInfo[]; contextoFinal: string }> {
     const flow = await this.obter(wsPath, flowId);
+    if (flow.ativo === false && !opts.retomar) {
+      throw new FlowError(`flow "${flowId}" está desativado — ative o flow para executar`);
+    }
     await this.registros.garantirCategorias(wsPath);
     const retomando = opts.retomar && opts.execId
       ? await this.estadoParaRetomar(wsPath, flowId, opts.execId)
@@ -1174,6 +1215,7 @@ export class FlowStore {
                 fork_de: duplicarDe,
                 session_from_ancestral: duplicarDe,
                 workspaceDir: wsPath,
+                timeoutMs: (no.config as any)?.timeout_ms ?? 600_000,
                 referencias: [execId],
                 tipo: "flow-no",
                 tags: [`flow:${flowId}`, `no:${no.id}`],
@@ -1187,6 +1229,7 @@ export class FlowStore {
               ...(sessionId ? { session: sessionId } : {}),
               ...(continuadaDe ? { continuada_de: continuadaDe, session_from_ancestral: continuadaDe } : {}),
               workspaceDir: wsPath,
+              timeoutMs: (no.config as any)?.timeout_ms ?? 600_000,
               referencias: [execId],
               tipo: "flow-no",
               tags: [`flow:${flowId}`, `no:${no.id}`],
@@ -1252,6 +1295,7 @@ export class FlowStore {
               ordem,
               model: opts.model,
               workspaceDir: wsPath,
+              timeoutMs: (no.config as any)?.timeout_ms ?? 600_000,
               referencias: [execId],
               tipo: "flow-no",
               tags: [`flow:${flowId}`, `no:${no.id}`],
@@ -1270,12 +1314,18 @@ export class FlowStore {
             throw new FlowError(`nó "${no.id}" (${no.tipo}) falhou: ${msg(erro)}`);
           };
           if (no.tipo === "fanout") {
-            const config = no.config as { paralelos: Array<{ agente: string; ordem: string }>; sintese?: { agente: string; ordem: string } };
+            const config = no.config as {
+              paralelos: Array<{ agente: string; ordem: string }>;
+              sintese?: { agente: string; ordem: string };
+              concorrencia_maxima?: number;
+            };
             try {
-              const rodados = await Promise.allSettled(
-                config.paralelos.map((p, i) =>
+              const maxConc = Math.max(1, config.concorrencia_maxima ?? 2);
+              const rodados = await executarComConcorrencia(
+                config.paralelos,
+                maxConc,
+                (p, i) =>
                   rodarPasso(p.agente, interpolarPasso(p.ordem, { entrada: contexto, anterior: contexto }), `/p${i + 1}`).then((s) => `### ${p.agente}\n${s}`),
-                ),
               );
               const falhas = rodados.filter((r) => r.status === "rejected");
               if (falhas.length) throw (falhas[0] as PromiseRejectedResult).reason;
@@ -1326,13 +1376,22 @@ export class FlowStore {
             }
           } else {
             // debate
-            const config = no.config as { proponentes: Array<{ agente: string; ordem: string }>; moderador: { agente: string; ordem?: string } };
+            const config = no.config as {
+              proponentes: Array<{ agente: string; ordem: string }>;
+              moderador: { agente: string; ordem?: string };
+              concorrencia_maxima?: number;
+            };
             try {
-              const propostas = await Promise.all(
-                config.proponentes.map((p, i) =>
+              const maxConc = Math.max(1, config.concorrencia_maxima ?? 2);
+              const rodados = await executarComConcorrencia(
+                config.proponentes,
+                maxConc,
+                (p, i) =>
                   rodarPasso(p.agente, interpolarPasso(p.ordem, { entrada: contexto, anterior: contexto }), `/prop${i + 1}`).then((s) => `### proposta ${p.agente}\n${s}`),
-                ),
               );
+              const falhas = rodados.filter((r) => r.status === "rejected");
+              if (falhas.length) throw (falhas[0] as PromiseRejectedResult).reason;
+              const propostas = rodados.map((r) => (r as PromiseFulfilledResult<string>).value);
               const propostasTexto = propostas.join("\n\n");
               // F9-T02: moderador.ordem (quando presente) substitui o prompt fixo,
               // com {{entrada}} = contexto de entrada e {{anterior}} = saída completa
@@ -1468,6 +1527,7 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
               ordem,
               model: opts.model,
               workspaceDir: wsPath,
+              timeoutMs: 180_000,
               referencias: [execId],
               tipo: "flow-decisao",
               tags: [`flow:${flowId}`, `no:${no.id}`, "decisao"],

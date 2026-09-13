@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { freemem } from "node:os";
 import { execa } from "execa";
+import { tokenBucketGlobal } from "./engines/token-bucket-limiter.js";
 import type { Agente } from "../schemas/agent.js";
 import { AgentStore } from "./agent-store.js";
 import { SessionError } from "./errors.js";
@@ -22,6 +24,7 @@ import { envOpencodeIsolado } from "./opencode-server.js";
 import { SettingsStore } from "./settings-store.js";
 import { engineRegistry } from "./engines/index.js";
 import { CapabilitiesPara } from "./engines/capabilities.js";
+import { EngineAccountStore } from "./engines/engine-account-store.js";
 
 export type StatusExecucao = "executando" | "concluido" | "falhou" | "cancelado" | "hitl_pendente";
 
@@ -1031,6 +1034,15 @@ export class SessionManager {
         const driverAgente = (ag.frontmatter as { execution_driver?: string } | undefined)?.execution_driver;
         modoDriver = escolher(driverAgente, driverWorkspace, driverGlobal);
 
+        // Se limites não foram explicitados no workspace, injeta salvaguardas padrão de cgroup v2
+        if (!limites && (modoDriver === "sandbox" || modoDriver === "container")) {
+          limites = {
+            ramMb: 2048,
+            cpuPct: 200,
+            redeIsolada: false,
+          };
+        }
+
         const driver = await resolverDriverExecucao(modoDriver);
         const prep = await driver.preparar({
           binary: runnerBin,
@@ -1054,6 +1066,13 @@ export class SessionManager {
       } catch {
         /* fallback silencioso para execução direta */
       }
+
+      // Host Admission Control: verifica memória do host antes de spawnar novo container
+      await this.admitirExecucaoHost(id);
+
+      // Token Bucket Rate Limiter: amortecimento preventivo de rajadas por motor
+      const motorNome = (ag.frontmatter as { engine?: string } | undefined)?.engine || "opencode";
+      await tokenBucketGlobal.adquirirToken(motorNome).catch(() => {});
 
       child = execa(binEfetivo, argsEfetivos, {
         cwd: cwdEfetivo,
@@ -1091,7 +1110,7 @@ export class SessionManager {
     };
 
     let mortePorTimeout = false;
-    const tetoMs = opcoes.timeoutMs ?? 0;
+    const tetoMs = typeof opcoes.timeoutMs === "number" && opcoes.timeoutMs > 0 ? opcoes.timeoutMs : 600_000;
     const watchdog =
       tetoMs > 0 && child.pid
         ? new WatchdogRun({
@@ -1556,7 +1575,61 @@ export class SessionManager {
     if (registro.status === "hitl_pendente") return null;
     if (!PADRAO_ERRO_MODELO.test(captura)) return null;
 
+    // 1. Rotação de Contas (se a cota da conta ativa do motor esgotou)
     const falhaCreditos = PADRAO_ERRO_CREDITOS.test(captura);
+    const falhaCota =
+      falhaCreditos ||
+      /usage limit|rate limit|quota|429|resource exhausted|status_cota|Weekly usage|Monthly usage/i.test(captura);
+
+    if (falhaCota) {
+      let motorId = "";
+      const mLow = registro.modelo.trim().toLowerCase();
+      if (mLow.startsWith("opencode-go/")) motorId = "opencode-go";
+      else if (mLow.startsWith("codex/")) motorId = "codex";
+      else if (mLow.startsWith("copilot/")) motorId = "copilot";
+      else if (mLow.startsWith("claude-code/") || mLow.startsWith("claude/")) motorId = "claude-code";
+      else if (mLow.startsWith("opencode/")) motorId = "opencode";
+
+      if (motorId) {
+        try {
+          const acctStore = new EngineAccountStore({ homeDir: this.homeDir });
+          const ativa = await acctStore.obterContaAtiva(motorId);
+          if (ativa) {
+            await acctStore.atualizarLimitesConta(ativa.id, { status_cota: "esgotado" });
+          }
+
+          const proxConta = await acctStore.rotacionarProximaConta(motorId);
+          if (proxConta && proxConta.limits.status_cota !== "esgotado") {
+            await acctStore.sincronizarAuth(motorId);
+            const idRetry = gerarId("exec");
+            try {
+              await this.registros.anexarEvento(ws.path, "execucoes", registro.id, {
+                ts: new Date().toISOString(),
+                por: "opencorp",
+                evento: "rotacao_conta",
+                resumo: `cota esgotada no motor "${motorId}" — rotacionado para conta "${proxConta.nome}" → ${idRetry}`,
+              });
+            } catch {}
+
+            return this.rodar({
+              ...opcoes,
+              execId: idRetry,
+              retryDe: {
+                de_modelo: registro.modelo,
+                de_exec: registro.id,
+              },
+              gatilho: opcoes.gatilho
+                ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, `conta:${proxConta.nome}`) }
+                : undefined,
+            });
+          }
+        } catch (erroRotacao) {
+          console.warn(`[session-manager] falha ao rotacionar conta para motor "${motorId}":`, erroRotacao);
+        }
+      }
+    }
+
+    // 2. Rotação de Modelos / Fallback de Motores
     let lista = await obterListaRotacaoCompleta(this.agentes, ws.path, opcoes.agente, this.homeDir);
     const categoriaAtual = this.inferirCategoriaModelo(registro.modelo);
     if (falhaCreditos) {
@@ -1630,6 +1703,23 @@ export class SessionManager {
       .sort((a, b) => b.inicio.localeCompare(a.inicio));
   }
 
+  /**
+   * Host Admission Control: protege o host caso a RAM física disponível esteja baixa.
+   * Se freemem < 800MB, aguarda até 5s em intervalos de 500ms para permitir que outras
+   * tarefas liberem recursos antes do spawn do novo processo.
+   */
+  async admitirExecucaoHost(sessionId: string): Promise<void> {
+    const freememBytes = freemem();
+    const freememMb = Math.round(freememBytes / (1024 * 1024));
+    if (freememMb < 800) {
+      console.warn(`[session:${sessionId}] Host sob pressão de memória (${freememMb}MB livres). Aguardando alívio...`);
+      for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        if (Math.round(freemem() / (1024 * 1024)) >= 800) return;
+      }
+    }
+  }
+
   /** execução "executando" cujo processo morreu sem finalizar → marca status final (zombie) */
   async reconciliarZombie(wsPath: string, meta: MetaRegistro): Promise<void> {
     const extras = (meta.extras ?? {}) as Record<string, unknown>;
@@ -1668,9 +1758,24 @@ export class SessionManager {
     } catch {
       viva = false;
     }
-    if (viva) return;
+
     const inicio = Date.parse(meta.criado_em);
     const duracao = Number.isFinite(inicio) ? Date.now() - inicio : 0;
+    const MAX_RUN_TIME_MS = 15 * 60_000; // 15 minutos de teto para processos em hang
+
+    if (viva) {
+      if (duracao < MAX_RUN_TIME_MS) return;
+      // Processo vivo há mais de 15 minutos sem finalizar — trava/hang detectado pelo reaper
+      try {
+        process.kill(pid, "SIGTERM");
+        setTimeout(() => {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {}
+        }, 4000);
+      } catch {}
+    }
+
     const registro = await this.paraRegistro(meta);
     registro.status = "falhou";
     registro.fim = new Date().toISOString();
@@ -1683,7 +1788,9 @@ export class SessionManager {
       "falhou",
       null,
       duracao,
-      `zombie: processo (pid ${pid}) morreu sem finalizar (reaper) — reconciliado em ${registro.fim}`,
+      viva
+        ? `zombie: processo (pid ${pid}) estourou TTL de 15min sem finalizar (reaper timeout) — terminado em ${registro.fim}`
+        : `zombie: processo (pid ${pid}) morreu sem finalizar (reaper) — reconciliado em ${registro.fim}`,
       "",
       null,
     );

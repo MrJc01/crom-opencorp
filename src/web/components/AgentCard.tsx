@@ -2,7 +2,6 @@ import { type Component, createSignal, onMount, createEffect, Show, For } from "
 import { useSearchParams } from "@solidjs/router";
 import {
   Bot,
-  Lupe,
   CheckCircle,
   XCircle,
   Play,

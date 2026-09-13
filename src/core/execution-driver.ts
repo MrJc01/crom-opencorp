@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { execa } from "execa";
 
@@ -88,14 +88,37 @@ export function dirsDoBinario(binario: string): string[] {
   }
   const dirs = new Set<string>();
   for (const c of candidatos) {
+    if (!existsSync(c)) continue;
+    let atual = c;
+    dirs.add(dirname(atual));
+    for (let hop = 0; hop < 10; hop++) {
+      try {
+        const stat = lstatSync(atual);
+        if (stat.isSymbolicLink()) {
+          const alvo = readlinkSync(atual);
+          atual = resolve(dirname(atual), alvo);
+          dirs.add(dirname(atual));
+        } else {
+          break;
+        }
+      } catch {
+        break;
+      }
+    }
     try {
       const real = realpathSync(c);
       dirs.add(dirname(real));
-      if (real !== c) dirs.add(dirname(c));
-      return [...dirs];
-    } catch {
-      /* tenta o próximo candidato */
+    } catch {}
+
+    // Se o binário residir em um node_modules, garante a montagem da raiz do node_modules
+    for (const d of [...dirs]) {
+      const nmIdx = d.lastIndexOf("/node_modules");
+      if (nmIdx !== -1) {
+        dirs.add(d.slice(0, nmIdx + "/node_modules".length));
+      }
     }
+
+    if (dirs.size > 0) return [...dirs];
   }
   return [];
 }
@@ -161,14 +184,13 @@ export class SandboxDriver implements ExecutionDriver {
       bwrapArgs.unshift("--ro-bind", "/lib64", "/lib64");
     }
 
-    // Permite leitura de dependências globais ou symlinks comuns (ex: myvoice/piper, node_modules)
+    // Permite leitura de dependências globais ou symlinks comuns (ex: myvoice/piper, node_modules).
+    // Só DIRETÓRIOS: bind de arquivo dentro de /usr (já montado ro) falha com
+    // "Can't create file" — Chrome/Playwright resolve pelo cache ms-playwright.
     const caminhosLeituraOpcionais = [
       "/home/j/Documentos/GitHub/crom-worker-opencode/node_modules",
       "/home/j/.local/share/myvoice",
       "/usr/local",
-      "/usr/bin/google-chrome",
-      "/usr/bin/chromium",
-      "/usr/bin/chromium-browser",
       "/home/j/.cache/ms-playwright",
     ];
     for (const c of caminhosLeituraOpcionais) {
@@ -203,6 +225,9 @@ export class SandboxDriver implements ExecutionDriver {
 
     // /tmp gravável (opencode/node precisam de temp) + XDG isolados do opencorp
     bwrapArgs.push("--tmpfs", "/tmp");
+    if (existsSync("/dev/shm")) {
+      bwrapArgs.push("--bind", "/dev/shm", "/dev/shm");
+    }
     for (const chave of ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"] as const) {
       const v = opts.env[chave];
       if (typeof v === "string" && v.length > 0 && v.startsWith("/") && existsSync(v)) {

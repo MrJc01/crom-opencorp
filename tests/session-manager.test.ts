@@ -133,7 +133,10 @@ describe("SessionManager.rodar (execa mockado — nunca roda opencode real)", ()
       title: "título da sessão",
     });
     const [, args] = execaMock.mock.calls[0]!;
-    expect(args).toContain("opencode/hy3-free");
+    // Prefixo opencode/ força o motor opencode e é removido antes do --model.
+    expect(args[0]).toBe("run");
+    expect(args).toContain("hy3-free");
+    expect(args).not.toContain("opencode/hy3-free");
     expect(args).toContain("--session");
     expect(args[args.indexOf("--session") + 1]).toBe("sess-abc");
     expect(args).toContain("--title");

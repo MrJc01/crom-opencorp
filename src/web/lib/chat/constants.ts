@@ -8,6 +8,12 @@ export const SUGESTOES_RAPIDAS = [
 
 /** Modelos sugeridos por motor no drawer de configuração. */
 export const MODELOS_SUGERIDOS: Record<string, string[]> = {
+  codex: [
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.6-sol",
+    "gpt-6-astra",
+  ],
   antigravity: [
     "google/gemini-3.8-flash-high",
     "google/gemini-3.7-flash-high",

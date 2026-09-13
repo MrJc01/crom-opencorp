@@ -23,6 +23,8 @@ export interface Job {
   ultima_exec: string | null;
   proxima_exec: string | null;
   criado_em: string;
+  falhas_consecutivas?: number;
+  quarentena?: boolean;
 }
 
 export interface OpcoesScheduler {
@@ -46,6 +48,8 @@ interface LinhaJob {
   ultima_exec: string | null;
   proxima_exec: string | null;
   criado_em: string;
+  falhas_consecutivas?: number;
+  quarentena?: number;
 }
 
 // ── parser cron (5 campos: min hora dom mês dow; suporta * , - / ) ──
@@ -373,6 +377,13 @@ export class Scheduler {
       );
       CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs (job_id, iniciado_em);
     `);
+    // Migrações idempotentes de colunas para resiliência e auto-cura
+    try {
+      db.exec("ALTER TABLE jobs ADD COLUMN falhas_consecutivas INTEGER NOT NULL DEFAULT 0;");
+    } catch {}
+    try {
+      db.exec("ALTER TABLE jobs ADD COLUMN quarentena INTEGER NOT NULL DEFAULT 0;");
+    } catch {}
     this.db = db;
     return db;
   }
@@ -395,6 +406,8 @@ export class Scheduler {
       ultima_exec: l.ultima_exec,
       proxima_exec: l.proxima_exec,
       criado_em: l.criado_em,
+      falhas_consecutivas: l.falhas_consecutivas ?? 0,
+      quarentena: l.quarentena === 1,
     };
   }
 
@@ -576,7 +589,7 @@ export class Scheduler {
   }
 
   async retomar(id: string): Promise<Job> {
-    (await this.banco()).prepare("UPDATE jobs SET ativo = 1 WHERE id = ?").run(id);
+    (await this.banco()).prepare("UPDATE jobs SET ativo = 1, quarentena = 0, falhas_consecutivas = 0 WHERE id = ?").run(id);
     const job = await this.obter(id);
     const proxima = (await this.calcularProxima(job.agenda, this.agora(), job.workspace)).toISOString();
     (await this.banco()).prepare("UPDATE jobs SET proxima_exec = ? WHERE id = ?").run(proxima, id);
@@ -789,20 +802,44 @@ export class Scheduler {
       try {
         const resultado = await this.executarFn(job);
         await this.registrarRun(job, { resultado });
+        // Sucesso: reseta contador de falhas consecutivas
+        (await this.banco()).prepare("UPDATE jobs SET falhas_consecutivas = 0 WHERE id = ?").run(job.id);
       } catch (erro) {
         const msgErro = erro instanceof Error ? erro.message : String(erro);
         console.error(`[scheduler] falha ao executar job ${job.id} (${job.nome}): ${msgErro}`);
         await this.registrarRun(job, { erro: msgErro });
-        try {
-          const { NotificationStore } = await import("./notification-store.js");
-          const notifs = new NotificationStore();
-          await notifs.adicionar(job.workspace || process.cwd(), {
-            tipo: "erro",
-            titulo: `Falha no agendamento: ${job.nome}`,
-            corpo: `O job "${job.nome}" falhou ao executar: ${msgErro.slice(0, 240)}`,
-          });
-        } catch {
-          /* best-effort notification */
+
+        // Incrementa falhas consecutivas e avalia Circuit Breaker
+        const db = await this.banco();
+        db.prepare("UPDATE jobs SET falhas_consecutivas = falhas_consecutivas + 1 WHERE id = ?").run(job.id);
+        const jobAtual = db.prepare("SELECT falhas_consecutivas FROM jobs WHERE id = ?").get(job.id) as { falhas_consecutivas?: number } | undefined;
+        const falhas = jobAtual?.falhas_consecutivas ?? 1;
+
+        if (falhas >= 3) {
+          // Disjuntor (Circuit Breaker): entra em quarentena para interromper loop infinito de falha
+          console.warn(`[scheduler] CIRCUIT BREAKER: job ${job.id} (${job.nome}) atingiu 3 falhas consecutivas. Entrando em quarentena preventiva.`);
+          db.prepare("UPDATE jobs SET quarentena = 1, ativo = 0 WHERE id = ?").run(job.id);
+          try {
+            const { NotificationStore } = await import("./notification-store.js");
+            const notifs = new NotificationStore();
+            await notifs.adicionar(job.workspace || process.cwd(), {
+              tipo: "aviso",
+              titulo: `Circuit Breaker: Job "${job.nome}" em Quarentena`,
+              corpo: `O job falhou 3 vezes consecutivas e foi suspenso preventivamente para proteger o sistema. Último erro: ${msgErro.slice(0, 200)}`,
+            });
+          } catch {}
+        } else {
+          try {
+            const { NotificationStore } = await import("./notification-store.js");
+            const notifs = new NotificationStore();
+            await notifs.adicionar(job.workspace || process.cwd(), {
+              tipo: "erro",
+              titulo: `Falha no agendamento (${falhas}/3): ${job.nome}`,
+              corpo: `O job "${job.nome}" falhou ao executar: ${msgErro.slice(0, 240)}`,
+            });
+          } catch {
+            /* best-effort notification */
+          }
         }
       }
       executados.push(job.id);

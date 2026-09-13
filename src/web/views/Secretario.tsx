@@ -13,6 +13,19 @@ import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { useChat, MODELOS_SUGERIDOS } from "../lib/chat/store";
 
+/** Motores com driver implementado (espelho de engineRegistry) — a lista de
+ *  instalação real vem de /api/motores via chat.listaMotores(). */
+const MOTORES_IMPLEMENTADOS = [
+  { id: "opencode", nome: "OpenCode Engine", desc: "Daemon e CLI nativos do OpenCode", alias: "opencode" },
+  { id: "codex", nome: "OpenAI Codex CLI", desc: "CLI OpenAI (plano ChatGPT, custo zero)", alias: "codex" },
+  { id: "claude-code", nome: "Claude Code CLI", desc: "Motor Anthropic CLI para tarefas de código", alias: "claude" },
+  { id: "antigravity", nome: "Google Antigravity (AGY)", desc: "CLI isolada com suporte a skills e MCP", alias: "agy" },
+  { id: "copilot", nome: "GitHub Copilot CLI", desc: "Runtime autônomo com tokens PAT/OAuth", alias: "copilot" },
+  { id: "cursor", nome: "Cursor CLI", desc: "Agente de terminal do Cursor", alias: "cursor-agent" },
+  { id: "aider", nome: "Aider CLI", desc: "Pair-programming por terminal", alias: "aider" },
+  { id: "crom-agente", nome: "Crom Agente", desc: "Motor próprio Crom", alias: "crom" },
+];
+
 /** Sincroniza `?sessao=` da URL com o store (deep-link preservado). */
 function sincronizarUrlSessao(id: string | null) {
   try {
@@ -33,8 +46,9 @@ export const SecretarioView: Component = () => {
   });
 
   const abrirPainelLateral = async () => {
-    await chat.abrirPainelLateral();
+    // Abre na hora (conteúdo preenche ao chegar) — antes travava até 2 fetches sequenciais.
     setConfigLateralAberta(true);
+    await chat.abrirPainelLateral();
   };
 
   const salvarEFechar = async () => {
@@ -160,38 +174,26 @@ export const SecretarioView: Component = () => {
               </p>
             </div>
 
+            {/* Override efetivo de Config → Modelos (settings.secretary.*) */}
+            <Show when={chat.overrideAgente() || chat.overrideModelo()}>
+              <div class="p-2.5 rounded-lg bg-sky-950/30 border border-sky-800/50 text-[11px] text-sky-200 leading-relaxed">
+                Override ativo em Config → Modelos:{" "}
+                <Show when={chat.overrideAgente()}>
+                  <span class="font-mono">agente @{chat.overrideAgente()}</span>
+                </Show>
+                <Show when={chat.overrideAgente() && chat.overrideModelo()}> · </Show>
+                <Show when={chat.overrideModelo()}>
+                  <span class="font-mono">modelo {chat.overrideModelo()}</span>
+                </Show>
+                . O chat usa esses valores; "Salvar no Agente" grava motor/modelo/rotação no frontmatter do agente.
+              </div>
+            </Show>
+
             {/* Escolha do Motor de Execução */}
             <div class="space-y-2">
               <label class="font-medium text-zinc-300 block">Motor de Execução (Harness)</label>
               <div class="grid grid-cols-1 gap-2">
-                <For
-                  each={[
-                    {
-                      id: "opencode",
-                      nome: "OpenCode Engine",
-                      desc: "Daemon e CLI nativos do OpenCode",
-                      alias: "opencode",
-                    },
-                    {
-                      id: "antigravity",
-                      nome: "Google Antigravity (AGY)",
-                      desc: "CLI isolada com suporte a skills e MCP",
-                      alias: "agy",
-                    },
-                    {
-                      id: "copilot",
-                      nome: "GitHub Copilot CLI",
-                      desc: "Runtime autônomo com tokens PAT/OAuth",
-                      alias: "copilot",
-                    },
-                    {
-                      id: "claude-code",
-                      nome: "Claude Code CLI",
-                      desc: "Motor Anthropic CLI para tarefas de código",
-                      alias: "claude",
-                    },
-                  ]}
-                >
+                <For each={MOTORES_IMPLEMENTADOS}>
                   {(mot) => {
                     const ativo = () => chat.motorConfig() === mot.id;
                     const inst = () => {

@@ -105,6 +105,9 @@ export interface ChatStore {
   agenteConfig: () => string;
   motorConfig: () => string;
   rotacaoConfig: () => string;
+  // Overrides efetivos vindos de Config → Modelos (settings.secretary.*)
+  overrideAgente: () => string;
+  overrideModelo: () => string;
   setRotacaoConfig: (v: string) => void;
   testandoMotor: () => boolean;
   resultadoTeste: () => { ok: boolean; msg: string; latencyMs?: number } | null;
@@ -215,6 +218,35 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
   const [motorConfig, setMotorConfig] = createSignal<string>("opencode");
   const [modeloConfig, setModeloConfig] = createSignal<string>("");
   const [rotacaoConfig, setRotacaoConfig] = createSignal<string>("");
+  // Overrides de Config → Modelos (fonte: settings.secretary.agent / .model)
+  const [overrideAgente, setOverrideAgente] = createSignal<string>("");
+  const [overrideModelo, setOverrideModelo] = createSignal<string>("");
+  let secretarioDefaultsAplicados = false;
+
+  /** Lê settings.secretary.* (GET /settings mesclado) — fonte da aba Config → Modelos. */
+  const carregarOverridesSecretario = async () => {
+    try {
+      const entradas = await fetchApi<Array<{ chave: string; valor: any }>>("/settings").catch(() => []);
+      if (!Array.isArray(entradas)) return;
+      for (const e of entradas) {
+        if (e.chave === "secretary.agent" && typeof e.valor === "string" && e.valor.trim()) {
+          setOverrideAgente(e.valor.trim());
+        }
+        if (e.chave === "secretary.model" && typeof e.valor === "string" && e.valor.trim()) {
+          setOverrideModelo(e.valor.trim());
+        }
+      }
+    } catch {}
+  };
+
+  /** Aplica settings.secretary.agent como agente inicial do chat (uma vez — não pisa troca manual). */
+  const aplicarAgentePadraoSecretario = async () => {
+    if (secretarioDefaultsAplicados) return;
+    secretarioDefaultsAplicados = true;
+    await carregarOverridesSecretario();
+    const padrao = overrideAgente();
+    if (padrao && padrao !== agente()) setAgente(padrao);
+  };
   const [testandoMotor, setTestandoMotor] = createSignal(false);
   const [resultadoTeste, setResultadoTeste] = createSignal<{ ok: boolean; msg: string; latencyMs?: number } | null>(null);
   const [salvandoConfig, setSalvandoConfig] = createSignal(false);
@@ -232,21 +264,35 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
       }
     } catch {}
     try {
-      const mots = await fetchApi<any[]>("/engines");
-      if (Array.isArray(mots) && mots.length > 0) setListaMotores(mots);
+      // /engines não existe no backend (retorna o SPA) — fonte real: /api/motores {motores:[...]}
+      const r = await fetchApi<any>("/api/motores").catch(() => null);
+      const mots = Array.isArray(r) ? r : r?.motores;
+      if (Array.isArray(mots) && mots.length > 0) {
+        setListaMotores(
+          mots.map((m: any) => ({
+            id: String(m.id),
+            name: String(m.name || m.id),
+            installed: Boolean(m.installed),
+            version: m.version ? String(m.version) : undefined,
+          }))
+        );
+      }
     } catch {}
   };
 
   const abrirPainelLateral = async () => {
-    await carregarAgentesEMotores();
+    await Promise.all([carregarAgentesEMotores(), carregarOverridesSecretario()]);
     const agAtual = agente();
     setAgenteConfig(agAtual);
     const enc = listaAgentes().find((a) => a.id === agAtual);
     if (enc) {
       setMotorConfig(enc.harness || (enc as any).engine || "opencode");
-      setModeloConfig(enc.model || "");
+      // Frontmatter vazio + override em Config → mostra o efetivo (evita "não puxou")
+      setModeloConfig(enc.model || overrideModelo() || "");
       const rot = enc.rotation || (enc as any).model_fallback || [];
       setRotacaoConfig(Array.isArray(rot) ? rot.join("\n") : "");
+    } else if (overrideModelo()) {
+      setModeloConfig(overrideModelo());
     }
     setResultadoTeste(null);
   };
@@ -380,6 +426,7 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
 
   const carregarSessoes = async () => {
     try {
+      void aplicarAgentePadraoSecretario();
       const status = await fetchApi<{ rodando?: boolean }>("/secretario/status").catch(() => null);
       if (status && !status.rodando) {
         await fetchApi("/secretario/start", { method: "POST" }).catch(() => null);
@@ -1280,6 +1327,8 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
     agenteConfig,
     motorConfig,
     rotacaoConfig,
+    overrideAgente,
+    overrideModelo,
     setRotacaoConfig,
     testandoMotor,
     resultadoTeste,

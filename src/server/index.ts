@@ -3396,6 +3396,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
             nos?: Flow["nos"];
             arestas?: Flow["arestas"];
             auto_agendar?: boolean;
+            ativo?: boolean;
           };
           const flowId = (corpo.id ?? "").trim();
           const jaExiste = flowId ? existsSync(flows.caminho(ws.path, flowId)) : false;
@@ -3409,6 +3410,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
               nos: corpo.nos,
               arestas: corpo.arestas ?? [],
               auto_agendar: corpo.auto_agendar ?? atual.auto_agendar ?? false,
+              ativo: corpo.ativo ?? atual.ativo ?? true,
             });
             eventBus.emit("flow-salvo", { flow: flowId });
             enviar(res, 200, await flows.obter(ws.path, flowId));
@@ -3423,6 +3425,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
               nos: corpo.nos,
               arestas: corpo.arestas ?? [],
               auto_agendar: corpo.auto_agendar ?? false,
+              ativo: corpo.ativo ?? true,
             });
             enviar(res, 201, f);
             return;
@@ -3479,7 +3482,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
             return;
           }
           const atual = await flows.obter(ws.path, flowId); // 404 se não existe
-          await flows.salvar(ws.path, { ...corpo, id: flowId, nome: String(corpo.nome ?? atual.nome), auto_agendar: typeof corpo.auto_agendar === "boolean" ? corpo.auto_agendar : (atual.auto_agendar ?? false) } as Parameters<typeof flows.salvar>[1]);          eventBus.emit("flow-salvo", { flow: flowId });
+          await flows.salvar(ws.path, { ...corpo, id: flowId, nome: String(corpo.nome ?? atual.nome), auto_agendar: typeof corpo.auto_agendar === "boolean" ? corpo.auto_agendar : (atual.auto_agendar ?? false), ativo: typeof corpo.ativo === "boolean" ? corpo.ativo : (atual.ativo ?? true) } as Parameters<typeof flows.salvar>[1]);          eventBus.emit("flow-salvo", { flow: flowId });
           enviar(res, 200, await flows.obter(ws.path, flowId));
           return;
         }

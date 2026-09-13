@@ -161,6 +161,7 @@ export async function sincronizarJobsParaFluxos(homeDir: string = opencorpHome()
       id: flowId,
       nome: job.nome || flowId,
       auto_agendar: false,
+      ativo: true,
       nos: [
         {
           id: "gatilho-cron",
@@ -216,9 +217,9 @@ export async function sincronizarJobsParaFluxos(homeDir: string = opencorpHome()
 }
 
 /**
- * Fonte única (Etapa 12.2): fluxo com nó `cron` + `auto_agendar:true` ⟺ 1 job
- * `flow:<id>` (args ["flow","run","<id>"], agenda do nó cron). Flag off ou sem
- * nó cron → remove o job. Idempotente.
+ * Fonte única (Etapa 12.2): fluxo ATIVO + nó `cron` + `auto_agendar:true` ⟺ 1 job
+ * `flow:<id>` (args ["flow","run","<id>"], agenda do nó cron). Flow desativado
+ * (`ativo:false`), flag off ou sem nó cron → remove o job. Idempotente.
  */
 export async function sincronizarFluxoParaScheduler(
   wsPath: string,
@@ -230,7 +231,7 @@ export async function sincronizarFluxoParaScheduler(
   const expressaoCron = typeof expressao === "string" ? expressao.trim() : "";
   const nomeJob = `flow:${flow.id}`;
   const wsNome = basename(wsPath);
-  const deveAgendar = flow.auto_agendar === true && expressaoCron.length > 0;
+  const deveAgendar = flow.ativo !== false && flow.auto_agendar === true && expressaoCron.length > 0;
   if (deveAgendar) validarCron(expressaoCron);
 
   const db = await garantirBanco(homeDir);
@@ -308,6 +309,7 @@ export function converterJobParaFlow(job: { id: string; nome: string; args: stri
     id,
     nome: `convertido-${job.id}`,
     auto_agendar: false,
+    ativo: true,
     nos: [
       {
         id: "gatilho",

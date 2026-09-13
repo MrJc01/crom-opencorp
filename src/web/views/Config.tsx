@@ -381,6 +381,25 @@ export const ConfigView: Component = () => {
   const [consultandoConta, setConsultandoConta] = createSignal<string | null>(null);
 
   const motores = () => statusMotores()?.motores || [];
+  /** Conectado = instalado + autenticado (ou conta ativa). OpenCode sempre listado (padrão do sistema). */
+  const motorConectado = (m: any): boolean => {
+    if (!m) return false;
+    if (m.id === "opencode") return true;
+    return Boolean(m.installed && (m.authStatus?.authenticated || m.contaAtiva));
+  };
+  /** Abas: só motores conectados (+ o selecionado, para não perder o detalhe). */
+  const motoresVisiveis = () => {
+    const list = motores();
+    const con = list.filter((m: any) => motorConectado(m));
+    const sel = motorSelecionadoTab();
+    if (sel && !con.some((m: any) => m.id === sel) && list.some((m: any) => m.id === sel)) {
+      const s = list.find((m: any) => m.id === sel);
+      return [...con, s];
+    }
+    return con.length > 0 ? con : list;
+  };
+  const motoresDesconectados = () => motores().filter((m: any) => !motorConectado(m));
+  const [popupConectarAberto, setPopupConectarAberto] = createSignal(false);
   const currentMotor = () => {
     const list = motores();
     return list.find((m: any) => m.id === motorSelecionadoTab()) || list[0] || {
@@ -1315,7 +1334,21 @@ export const ConfigView: Component = () => {
 
               {/* BARRA HORIZONTAL DE ABAS DE CADA AGENTE (Clean, sem borda, minimalista) */}
               <div class="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none border-b border-zinc-800/40 -mx-3.5 px-3.5 sm:mx-0 sm:px-0">
-                <For each={statusMotores()?.motores || []}>
+                <button
+                  type="button"
+                  data-testid="conectar-motor-btn"
+                  onClick={() => setPopupConectarAberto(true)}
+                  title="Escolher qual motor conectar para adicionar à lista"
+                  class="px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer border border-dashed border-zinc-700 text-zinc-400 hover:text-zinc-100 hover:border-zinc-500"
+                >
+                  <Plus size={12} /> Conectar
+                  <Show when={motoresDesconectados().length > 0}>
+                    <span class="text-[10px] font-mono px-1 rounded bg-zinc-800 text-zinc-400">
+                      {motoresDesconectados().length}
+                    </span>
+                  </Show>
+                </button>
+                <For each={motoresVisiveis()}>
                   {(mot: any) => {
                     const isSelected = () => motorSelecionadoTab() === mot.id;
                     const isAtivo = () => Boolean(mot.ativo);
@@ -3384,6 +3417,60 @@ export const ConfigView: Component = () => {
           </div>
         </Show>
       </div>
+
+      {/* Popup: escolher qual motor conectar (só implementados; entra na lista ao autenticar/instalar) */}
+      <Show when={popupConectarAberto()}>
+        <div class="fixed inset-0 bg-black/60 z-40" onClick={() => setPopupConectarAberto(false)} />
+        <div
+          data-testid="popup-conectar-motor"
+          class="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[22rem] max-w-[90vw] max-h-[80vh] overflow-y-auto scrollbar-thin bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-4 space-y-3"
+        >
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-semibold text-zinc-100">Conectar motor</span>
+            <button
+              type="button"
+              onClick={() => setPopupConectarAberto(false)}
+              class="text-zinc-500 hover:text-zinc-200 cursor-pointer"
+              title="Fechar"
+            >
+              <X size={15} />
+            </button>
+          </div>
+          <p class="text-[11px] text-zinc-400 leading-relaxed">
+            Somente motores com driver implementado aparecem aqui. Ao autenticar/instalar, o motor entra na lista de abas.
+          </p>
+          <Show
+            when={motoresDesconectados().length > 0}
+            fallback={<p class="text-xs text-emerald-400">Todos os motores implementados já estão conectados.</p>}
+          >
+            <div class="space-y-2">
+              <For each={motoresDesconectados()}>
+                {(m: any) => (
+                  <div class="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-zinc-900/60 border border-zinc-800">
+                    <div class="min-w-0">
+                      <div class="text-xs font-medium text-zinc-200 truncate">{m.name || m.id}</div>
+                      <div class="text-[10px] font-mono text-zinc-500">
+                        {m.installed ? (m.authStatus?.authenticated ? "instalado · autenticado" : "instalado · sem auth") : "não instalado"}
+                      </div>
+                    </div>
+                    <Button
+                      size="xs"
+                      variant="secondary"
+                      onClick={() => {
+                        setPopupConectarAberto(false);
+                        setMotorSelecionadoTab(m.id);
+                        setMotorSelecionadoAuth(m);
+                      }}
+                    >
+                      <Key size={11} class="mr-1" /> Conectar
+                    </Button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
+      </Show>
 
       <EngineAuthModal
         open={Boolean(motorSelecionadoAuth())}

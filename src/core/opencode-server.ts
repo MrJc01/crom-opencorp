@@ -330,18 +330,37 @@ async function garantirAgentesSecretario(homeDir: string, modeloForcado?: string
 
   // home isolado: .md direto em <opencode-home>/.opencode/agent/ — NUNCA em $HOME/.opencode
   // (o symlink $HOME/.opencode era o vazamento para o opencode global do usuário)
+  //
+  // Padronização secretário (fonte única por camada):
+  // - cópia global (opencode-home): template + override settings.secretary.model;
+  // - cópia do workspace (.opencorp/opencode/agent/): .opencorp/agents/<id>.md do
+  //   PRÓPRIO workspace quando existir (customizações do drawer valem) + override.
+  //   Nunca mais sobrescreve o agente do workspace com o template.
   for (const agente of ["secretario", "secretario-exec"]) {
     const origem = join(templateDir, `${agente}.md`);
     if (!existsSync(origem)) {
       console.warn(`[opencode-server] template ${agente}.md não encontrado em ${origem}`);
       continue;
     }
-    const { frontmatter, corpo } = parseAgenteMd(readFileSync(origem, "utf8"));
-    const fm = modeloOverride ? { ...frontmatter, model: modeloOverride } : frontmatter;
-    writeFileSync(join(agentDir, `${fm.id ?? agente}.md`), gerarAgenteOpencode(fm, corpo.replaceAll("{{workspace}}", "opencorp")));
+    const tpl = parseAgenteMd(readFileSync(origem, "utf8"));
+    const fmGlobal = modeloOverride ? { ...tpl.frontmatter, model: modeloOverride } : tpl.frontmatter;
+    writeFileSync(join(agentDir, `${fmGlobal.id ?? agente}.md`), gerarAgenteOpencode(fmGlobal, tpl.corpo.replaceAll("{{workspace}}", "opencorp")));
     for (const ws of workspaces) {
       if (!ws.existe) continue;
-      await bridge.sincronizarAgente(ws.path, fm, corpo);
+      let fmWs = tpl.frontmatter;
+      let corpoWs = tpl.corpo;
+      try {
+        const mdWs = join(ws.path, ".opencorp", "agents", `${agente}.md`);
+        if (existsSync(mdWs)) {
+          const parsed = parseAgenteMd(readFileSync(mdWs, "utf8"));
+          fmWs = parsed.frontmatter;
+          corpoWs = parsed.corpo;
+        }
+      } catch {
+        /* workspace ilegível — cai no template */
+      }
+      const fmEfetivo = modeloOverride ? { ...fmWs, model: modeloOverride } : fmWs;
+      await bridge.sincronizarAgente(ws.path, fmEfetivo, corpoWs);
     }
     total++;
   }

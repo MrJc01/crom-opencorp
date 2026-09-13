@@ -4,6 +4,7 @@ import {
   Play,
   Power,
   Copy,
+  Cpu,
   Bot,
   Search,
   RefreshCw,
@@ -82,6 +83,18 @@ export const MODELOS_DISPONIVEIS = [
   { id: "openrouter/google/gemini-2.5-flash", label: "Google Gemini 2.5 Flash" },
   { id: "openrouter/anthropic/claude-3.5-haiku", label: "Anthropic Claude 3.5 Haiku" },
   { id: "opencode-go/glm-5.3-flash", label: "OpenCode-Go GLM 5.3 Flash" },
+];
+
+/** Motores com driver implementado (espelho de engineRegistry) — usado se /api/motores falhar. */
+export const MOTORES_FALLBACK = [
+  { id: "opencode", name: "OpenCode Runtime" },
+  { id: "codex", name: "OpenAI Codex CLI" },
+  { id: "claude-code", name: "Claude Code CLI" },
+  { id: "antigravity", name: "Google Antigravity" },
+  { id: "copilot", name: "GitHub Copilot CLI" },
+  { id: "cursor", name: "Cursor CLI" },
+  { id: "aider", name: "Aider CLI" },
+  { id: "crom-agente", name: "Crom Agente" },
 ];
 
 export const AgentesView: Component = () => {
@@ -165,9 +178,25 @@ export const AgentesView: Component = () => {
 
   const [executandoMapa, setExecutandoMapa] = createSignal<Record<string, string>>({});
 
+  // Motores implementados no backend (engineRegistry) — fonte única via /api/motores,
+  // fallback estático espelhando os drivers registrados.
+  const [motoresDisponiveis, setMotoresDisponiveis] = createSignal<Array<{ id: string; name: string }>>(MOTORES_FALLBACK);
+  const carregarMotores = async () => {
+    try {
+      const r = await fetchApi<any>("/api/motores").catch(() => null);
+      const lista = Array.isArray(r) ? r : r?.motores;
+      if (Array.isArray(lista) && lista.length > 0) {
+        setMotoresDisponiveis(lista.map((m: any) => ({ id: String(m.id), name: String(m.name || m.id) })));
+      }
+    } catch {
+      /* mantém fallback */
+    }
+  };
+
   const carregarTudo = async () => {
     try {
       setCarregando(true);
+      void carregarMotores();
       const [listaAgentes, listaTeams, modInfo, listaExecs] = await Promise.all([
         fetchApi<Agente[]>("/agents").catch(() => []),
         fetchApi<TeamSpec[]>("/teams").catch(() => []),
@@ -1192,9 +1221,9 @@ export const AgentesView: Component = () => {
                           class="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-cyan-500"
                         >
                           <option value="">(Padrão do Sistema: OpenCode)</option>
-                          <option value="opencode">OpenCode Runtime</option>
-                          <option value="claude-code">Claude Code CLI (Em breve)</option>
-                          <option value="antigravity">Google Antigravity (Em breve)</option>
+                          <For each={motoresDisponiveis()}>
+                            {(m) => <option value={m.id}>{m.name}</option>}
+                          </For>
                         </select>
                       </div>
 

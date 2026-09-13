@@ -79,6 +79,7 @@ export interface FluxoCompleto {
   nome: string;
   descricao?: string;
   auto_agendar?: boolean;
+  ativo?: boolean;
   nos: NoGrafo[];
   arestas: ArestaGrafo[];
 }
@@ -292,6 +293,27 @@ export const FluxosView: Component = () => {
     } catch (err: any) {
       setAutoAgendar((prev) => ({ ...prev, [f.id]: !valor }));
       showToast(`Erro ao alternar agendamento: ${err.message}`, "erro");
+    }
+  };
+
+  /** Interruptor mestre do flow: false remove o job do scheduler e bloqueia run manual. */
+  const alternarAtivo = async (f: any, valor: boolean) => {
+    try {
+      const completo = await fetchApi<any>(`/flows/${encodeURIComponent(f.id)}`);
+      await fetchApi(`/flows/${encodeURIComponent(f.id)}`, {
+        method: "PUT",
+        body: JSON.stringify({ ...completo, ativo: valor }),
+      });
+      showToast(
+        valor ? `Fluxo "${f.nome || f.id}" ativado` : `Fluxo "${f.nome || f.id}" desativado (job removido do scheduler)`,
+        "sucesso"
+      );
+      setFluxos((prev: any[]) => prev.map((x: any) => (x.id === f.id ? { ...x, ativo: valor } : x)));
+      const atv = fluxoAtivo();
+      if (atv && atv.id === f.id) setFluxoAtivo({ ...atv, ativo: valor });
+      if (untrack(filtroTipo) === "cron") void carregarJobsAgenda();
+    } catch (err: any) {
+      showToast(`Erro ao alternar ativo: ${err.message}`, "erro");
     }
   };
 
@@ -1417,6 +1439,27 @@ export const FluxosView: Component = () => {
                         {f.descricao || "Pipeline autônomo com nós de agentes, scripts do workspace e governança."}
                       </p>
 
+                      <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1" onClick={(e) => e.stopPropagation()}>
+                        <label class="flex items-center gap-1.5 text-[11px] text-zinc-300 cursor-pointer" title="Desativado: remove o job do scheduler e bloqueia execução manual">
+                          <input
+                            type="checkbox"
+                            data-testid={`toggle-ativo-${f.id}`}
+                            checked={f.ativo ?? true}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              void alternarAtivo(f, e.currentTarget.checked);
+                            }}
+                            class="accent-emerald-500 h-3.5 w-3.5"
+                          />
+                          Ativo
+                        </label>
+                        <Show when={(f.ativo ?? true) === false}>
+                          <span data-testid={`badge-inativo-${f.id}`} class="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-400">
+                            Desativado
+                          </span>
+                        </Show>
+                      </div>
+
                       <Show when={filtroTipo() === "cron"}>
                         <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1" onClick={(e) => e.stopPropagation()}>
                           <span data-testid={`trigger-${f.id}`} class="text-[11px] font-mono text-sky-300">
@@ -1439,7 +1482,9 @@ export const FluxosView: Component = () => {
                             type="button"
                             data-testid={`executar-agora-${f.id}`}
                             onClick={(e) => executarAgora(f, e)}
-                            class="px-2 py-0.5 rounded-lg bg-zinc-800 hover:bg-orange-600 hover:text-white text-zinc-300 text-[11px] font-medium transition-colors cursor-pointer"
+                            disabled={(f.ativo ?? true) === false}
+                            title={(f.ativo ?? true) === false ? "Fluxo desativado — ative para executar" : "Executar agora"}
+                            class="px-2 py-0.5 rounded-lg bg-zinc-800 hover:bg-orange-600 hover:text-white text-zinc-300 text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800 disabled:hover:text-zinc-300"
                           >
                             Executar agora
                           </button>
@@ -1564,6 +1609,25 @@ export const FluxosView: Component = () => {
                 <span class="sm:hidden ml-1">Node</span>
               </Button>
 
+              <label
+                class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-950 border border-zinc-800 text-[11px] text-zinc-300 cursor-pointer"
+                title="Interruptor mestre: desativado remove o job e bloqueia execução"
+              >
+                <input
+                  type="checkbox"
+                  data-testid="toggle-ativo-detalhe"
+                  checked={fluxoAtivo()?.ativo ?? true}
+                  onChange={(e) => {
+                    const f = fluxoAtivo();
+                    if (!f) return;
+                    const atualizado: FluxoCompleto = { ...f, ativo: e.currentTarget.checked };
+                    void salvarAlteracoesWorkflow(atualizado);
+                  }}
+                  class="accent-emerald-500 h-3.5 w-3.5"
+                />
+                <span class="hidden sm:inline">Ativo</span>
+                <span class="sm:hidden">Ativo</span>
+              </label>
               <label
                 class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-950 border border-zinc-800 text-[11px] text-zinc-300 cursor-pointer"
                 title="Cria job no scheduler (PUT auto_agendar)"
