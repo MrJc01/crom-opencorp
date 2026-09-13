@@ -4583,9 +4583,23 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
             return;
           }
           if (acao === "run" && req.method === "POST") {
-            const corpo = (await lerCorpo(req)) as { entrada?: string };
+            const corpo = (await lerCorpo(req)) as { entrada?: string; sessao_por_integrante?: boolean };
             const resOrq = await orquestrador.executar(ws.path, teamId, String(corpo.entrada ?? ""));
-            enviar(res, 200, resOrq);
+            const sessaoPorIntegrante = corpo.sessao_por_integrante !== false;
+            if (!sessaoPorIntegrante) {
+              enviar(res, 200, resOrq);
+              return;
+            }
+            enviar(res, 200, {
+              ...resOrq,
+              total: resOrq.passos.length,
+              resumos: resOrq.passos.map((p) => ({
+                agente: p.agente,
+                sessao: p.sessao,
+                resumo: p.resumo,
+                ok: p.ok,
+              })),
+            });
             return;
           }
         }

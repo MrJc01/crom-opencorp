@@ -143,6 +143,11 @@ export class SandboxDriver implements ExecutionDriver {
       return prep;
     }
 
+    const homeBase =
+      (typeof opts.env.OPENCORP_HOME === "string" && opts.env.OPENCORP_HOME) ||
+      process.env.HOME ||
+      "";
+
     const bwrapArgs: string[] = [
       "--ro-bind", "/usr", "/usr",
       "--ro-bind", "/lib", "/lib",
@@ -150,13 +155,29 @@ export class SandboxDriver implements ExecutionDriver {
       "--ro-bind", "/etc", "/etc",
       "--proc", "/proc",
       "--dev", "/dev",
-      "--bind", opts.workspacePath, opts.workspacePath,
-      "--chdir", opts.cwd,
       "--unshare-pid",
       "--unshare-uts",
       "--unshare-ipc",
       "--die-with-parent",
     ];
+
+    if (existsSync("/lib64")) {
+      bwrapArgs.unshift("--ro-bind", "/lib64", "/lib64");
+    }
+
+    // /tmp gravável (opencode/node precisam de temp)
+    bwrapArgs.push("--tmpfs", "/tmp");
+
+    // Monta o workspace garantindo que o ponto de montagem exista se estiver dentro de /tmp
+    if (opts.workspacePath.startsWith("/tmp/") || opts.workspacePath === "/tmp") {
+      bwrapArgs.push("--dir", opts.workspacePath);
+    }
+    bwrapArgs.push("--bind", opts.workspacePath, opts.workspacePath);
+
+    if (opts.cwd.startsWith("/tmp/") && opts.cwd !== opts.workspacePath) {
+      bwrapArgs.push("--dir", opts.cwd);
+    }
+    bwrapArgs.push("--chdir", opts.cwd);
 
     // Isolamento de rede: allowlist lógica — sem domínios liberados, bloqueia rede via --unshare-net
     const temAllowlist = (opts.limites?.dominiosPermitidos?.length ?? 0) > 0;
@@ -180,10 +201,6 @@ export class SandboxDriver implements ExecutionDriver {
       /* sem resolv.conf no host — nada a fazer */
     }
 
-    if (existsSync("/lib64")) {
-      bwrapArgs.unshift("--ro-bind", "/lib64", "/lib64");
-    }
-
     // Permite leitura de dependências globais ou symlinks comuns (ex: myvoice/piper, node_modules).
     // Só DIRETÓRIOS: bind de arquivo dentro de /usr (já montado ro) falha com
     // "Can't create file" — Chrome/Playwright resolve pelo cache ms-playwright.
@@ -192,7 +209,10 @@ export class SandboxDriver implements ExecutionDriver {
       "/home/j/.local/share/myvoice",
       "/usr/local",
       "/home/j/.cache/ms-playwright",
-    ];
+      homeBase ? resolve(homeBase, ".opencorp", "node_modules") : "",
+      homeBase ? resolve(homeBase, ".opencorp", "bin") : "",
+      homeBase ? resolve(homeBase, ".opencorp", "lib") : "",
+    ].filter(Boolean);
     for (const c of caminhosLeituraOpcionais) {
       if (existsSync(c)) {
         bwrapArgs.push("--ro-bind", c, c);
@@ -206,6 +226,15 @@ export class SandboxDriver implements ExecutionDriver {
     for (const dir of dirsDoBinario(opts.binary)) {
       bwrapArgs.push("--ro-bind", dir, dir);
     }
+    // Se o primeiro argumento for um script com caminho (ex: node script.js / codex.js)
+    if (opts.args && opts.args[0] && typeof opts.args[0] === "string") {
+      const possivelScript = opts.args[0];
+      if (possivelScript.startsWith("/") && existsSync(possivelScript)) {
+        for (const dir of dirsDoBinario(possivelScript)) {
+          bwrapArgs.push("--ro-bind", dir, dir);
+        }
+      }
+    }
 
     // Segredos globais (wp.cjs e scripts legados leem ~/.opencorp/secrets.json
     // direto do disco). Monta SOMENTE esse arquivo, read-only — sem ele,
@@ -213,18 +242,11 @@ export class SandboxDriver implements ExecutionDriver {
     // (Os agentes já recebem segredos via OPENCORP_SECRET por design; isto
     // apenas restaura o comportamento pré-sandbox.)
     {
-      const homeBase =
-        (typeof opts.env.OPENCORP_HOME === "string" && opts.env.OPENCORP_HOME) ||
-        process.env.HOME ||
-        "";
       const segredos = homeBase ? resolve(homeBase, ".opencorp", "secrets.json") : "";
       if (segredos && existsSync(segredos)) {
         bwrapArgs.push("--ro-bind", segredos, segredos);
       }
     }
-
-    // /tmp gravável (opencode/node precisam de temp) + XDG isolados do opencorp
-    bwrapArgs.push("--tmpfs", "/tmp");
     if (existsSync("/dev/shm")) {
       bwrapArgs.push("--bind", "/dev/shm", "/dev/shm");
     }

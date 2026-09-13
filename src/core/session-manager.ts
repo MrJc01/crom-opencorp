@@ -865,6 +865,8 @@ export class SessionManager {
     if (modeloEfetivo.startsWith("opencode/")) {
       harnessEscolhido = "opencode";
       modeloEfetivo = modeloEfetivo.slice("opencode/".length);
+    } else if (modeloEfetivo.startsWith("opencode-go/")) {
+      harnessEscolhido = "opencode";
     } else if (modeloEfetivo.startsWith("claude-code/")) {
       harnessEscolhido = "claude-code";
       modeloEfetivo = modeloEfetivo.slice("claude-code/".length);

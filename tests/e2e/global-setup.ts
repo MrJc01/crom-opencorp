@@ -13,6 +13,7 @@ export default async function globalSetup(): Promise<void> {
   await mkdir(join(E2E_HOME, "workspaces"), { recursive: true });
 
   const templatesAgents = join(__dirname, "..", "..", "templates", "default", ".opencorp", "agents");
+  const ytAgents = join(__dirname, "..", "..", "templates", "youtube-video-factory", ".opencorp", "agents");
 
   // Diretórios canônicos dos workspaces (raiz padrão do WorkspaceManager)
   const dotWsDir = join(E2E_HOME, ".opencorp", "workspaces");
@@ -23,6 +24,7 @@ export default async function globalSetup(): Promise<void> {
   await mkdir(join(wsDir, ".opencorp"), { recursive: true });
   await writeFile(join(wsDir, ".opencorp", "config.json"), "{}");
   await cp(templatesAgents, join(wsDir, ".opencorp", "agents"), { recursive: true }).catch(() => {});
+  await cp(ytAgents, join(wsDir, ".opencorp", "agents"), { recursive: true }).catch(() => {});
 
   // Pre-cria times e apps para que o seeder não crie arquivos untracked no Git
   const teamSpec = {
@@ -63,6 +65,7 @@ export default async function globalSetup(): Promise<void> {
   await mkdir(join(wsDir2, ".opencorp"), { recursive: true });
   await writeFile(join(wsDir2, ".opencorp", "config.json"), "{}");
   await cp(templatesAgents, join(wsDir2, ".opencorp", "agents"), { recursive: true }).catch(() => {});
+  await cp(ytAgents, join(wsDir2, ".opencorp", "agents"), { recursive: true }).catch(() => {});
 
   // Compatibilidade com testes que acessam E2E_HOME/workspaces/* diretamente
   const legacyWs1 = join(E2E_HOME, "workspaces", "e2e-corp");
