@@ -23,12 +23,12 @@ import { registrarBuiltins } from "../core/builtin-components.js";
 import { migrarTeamsParaFlows } from "../core/flow-migrate.js";
 import { sincronizarJobsParaFluxos } from "../core/scheduler-flow-bridge.js";
 import { MeetingManager, gerarIdReuniao } from "../core/meeting-manager.js";
-import { TaskStore, type Task } from "../core/task-store.js";
+import { TaskStore } from "../core/task-store.js";
 import { PromptStore } from "../core/prompt-store.js";
-import { Scheduler, parseAgendaTask } from "../core/scheduler.js";
+import { Scheduler } from "../core/scheduler.js";
 import type { Agenda } from "../core/scheduler.js";
 import { HookStore, type Hook, type AlvoHook, type PayloadHook } from "../core/hook-store.js";
-import { NotificationStore, type TipoNotificacao } from "../core/notification-store.js";
+import { NotificationStore } from "../core/notification-store.js";
 import { AppStore } from "../core/app-store.js";
 import { TeamStore } from "../core/team-store.js";
 import { OrquestradorDeTeams } from "../core/team-orchestrator.js";
@@ -36,13 +36,13 @@ import { instalarMencoes } from "../core/mention-runner.js";
 import { TaskError, SchedulerError, HookError, AppError, TeamError, MeetingError, NotificationError, AgentError, OpencorpError, RegistryError, WorkspaceError, FlowError, ComponentError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
 import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, limparPrefixoWorkspace, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc, type PassoChat } from "../core/opencode-server.js";
-import { taskCreateSchema } from "../schemas/task.js";
 import { SecretsStore, type SecretOrigem } from "../core/secrets-store.js";
 import { completarChatDirect, testarModeloDirect, listarProvedoresStatus } from "../core/llm-client.js";
 import { engineRegistry, getEngineAuthInstructions, checkEngineAuthStatus, EngineAccountStore, WebLoginOrchestrator } from "../core/engines/index.js";
 import { createRequire } from "node:module";
 import { TelemetryCollector, gerarTraceId, type TraceContext } from "../core/telemetry-collector.js";
 import { processarCors, verificarAutenticacao, extrairTokenBearer, compararTokensSeguro, type OpcoesCors } from "./middleware/index.js";
+import { handleTaskRoutes, handleNotificationRoutes } from "./routes/index.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
@@ -1422,6 +1422,25 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
       }
 
       try {
+        const routeCtx = {
+          req,
+          res,
+          url,
+          rota,
+          resolverWs,
+          lerCorpo,
+          enviar,
+          tasks,
+          scheduler,
+          registros,
+          sessoes,
+          notificacoes,
+          homeDir: opcoes.homeDir,
+        };
+
+        if (await handleTaskRoutes(routeCtx)) return;
+        if (await handleNotificationRoutes(routeCtx)) return;
+
         // ── workspaces ──────────────────────────────────────────────
         if (rota === "/workspaces" && req.method === "GET") {
           enviar(res, 200, await workspaces.listar());
@@ -4202,95 +4221,6 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           return;
         }
 
-        if (rota === "/tasks" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          enviar(res, 200, await tasks.listar(ws.path, {
-            coluna: url.searchParams.get("coluna") ?? undefined,
-            responsavel: url.searchParams.get("responsavel") ?? undefined,
-          }));
-          return;
-        }
-        if (rota === "/tasks" && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
-          const valido = taskCreateSchema.safeParse(corpo);
-          if (!valido.success) {
-            enviar(res, 422, { erro: "task inválida", detalhes: valido.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`) });
-            return;
-          }
-          const c = valido.data;
-
-          const agendaInfo = parseAgendaTask({
-            quando: typeof corpo.quando === "string" ? corpo.quando : typeof corpo.at === "string" ? corpo.at : undefined,
-            cron: typeof corpo.cron === "string" ? corpo.cron : typeof corpo.agendar === "string" ? corpo.agendar : undefined,
-            repete: typeof corpo.repete === "string" ? corpo.repete : typeof corpo.repetir === "string" ? corpo.repetir : undefined,
-            intervaloMin: typeof corpo.intervalo_min === "number" ? corpo.intervalo_min : undefined,
-          });
-
-          const labelsIniciais = [...(c.labels ?? [])];
-          if (agendaInfo) {
-            if (agendaInfo.agenda.tipo === "cron" || agendaInfo.agenda.tipo === "intervalo_min") {
-              if (!labelsIniciais.includes("recorrente")) labelsIniciais.push("recorrente");
-            } else {
-              if (!labelsIniciais.includes("agendada")) labelsIniciais.push("agendada");
-            }
-          }
-
-          const executarAgora = Boolean(corpo.executar_agora || corpo.imediato || corpo.run);
-
-          const t = await tasks.criar(ws.path, {
-            titulo: c.titulo,
-            descricao: c.descricao,
-            coluna: c.coluna || (executarAgora ? "fazendo" : undefined),
-            prioridade: c.prioridade,
-            labels: labelsIniciais.length > 0 ? labelsIniciais : undefined,
-            responsavel: c.responsavel,
-            due: c.due || (agendaInfo?.agenda.tipo === "data_unica" ? agendaInfo.agenda.valor : undefined),
-            task_pai: c.task_pai,
-            bloqueado_por: c.bloqueado_por,
-          }, "api");
-
-          let jobInfo: any = undefined;
-          if (agendaInfo) {
-            try {
-              const jobNome = `task-${t.id}`;
-              const job = await scheduler.criar({
-                nome: jobNome,
-                agenda: agendaInfo.agenda,
-                args: ["task", "run", t.id],
-                workspace: ws.id,
-              });
-              jobInfo = { id: job.id, proxima_exec: job.proxima_exec, descricao: agendaInfo.descricao };
-              await tasks.mensagem(ws.path, t.id, {
-                autor: "sistema",
-                corpo: `📅 Agendamento configurado: ${agendaInfo.descricao} (Job: ${job.id}, Próxima: ${job.proxima_exec ? job.proxima_exec.slice(0, 16).replace("T", " ") : "-"})`,
-                tipo: "sistema",
-              });
-            } catch (err) {
-              console.error("[task schedule] erro ao criar job:", err);
-            }
-          }
-
-          if (executarAgora) {
-            void (async () => {
-              try {
-                const sessoes = new SessionManager({ homeDir: opcoes.homeDir ?? opencorpHome() });
-                const agente = c.responsavel ? c.responsavel.replace(/^agente:/, "").trim() : "executor-padrao";
-                await sessoes.rodar({
-                  agente,
-                  ordem: `Você é o agente "${agente}" executando a task ${t.id} no workspace "${ws.id}".\nTítulo: ${t.titulo}\n${t.descricao ? `Descrição:\n${t.descricao}` : ""}\nExecute todas as ações necessárias para resolver esta tarefa.`,
-                  workspaceDir: ws.path,
-                  gatilho: { tipo: "manual", origem: `task:${t.id}` },
-                });
-              } catch (err) {
-                console.error("[task run imediato] falhou:", err);
-              }
-            })();
-          }
-
-          enviar(res, 201, { ...t, agendamento: jobInfo, executando_agora: executarAgora });
-          return;
-        }
         if (rota === "/schedules" && req.method === "GET") {
           const wsFiltro = url.searchParams.get("workspace");
           const jobs = await scheduler.listar();
@@ -4723,156 +4653,6 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
             });
           }
           return;
-        }
-
-        // ── notificações (Etapa 7 / P-24) ───────────────────────────
-        if (rota === "/notifications" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const apenasNaoLidas = url.searchParams.get("nao_lidas") === "1";
-          const lista = notificacoes.listar(ws.path, { apenasNaoLidas });
-          enviar(res, 200, {
-            notificacoes: lista,
-            resumo: { nao_lidas: notificacoes.naoLidas(ws.path), total: lista.length },
-          });
-          return;
-        }
-        if (rota === "/notifications" && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
-          const n = await notificacoes.adicionar(ws.path, {
-            titulo: String(corpo.titulo ?? ""),
-            corpo: String(corpo.corpo ?? ""),
-            tipo: corpo.tipo as TipoNotificacao | undefined,
-            origem: corpo.origem !== undefined ? String(corpo.origem) : "painel",
-          });
-          enviar(res, 201, n);
-          return;
-        }
-        if (rota === "/notifications/lidas" && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const marcadas = await notificacoes.marcarTodasLidas(ws.path);
-          enviar(res, 200, { ok: true, marcadas });
-          return;
-        }
-        const mNotifLida = /^\/notifications\/([^/]+)\/lida$/.exec(rota);
-        if (mNotifLida && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const n = await notificacoes.marcarLida(ws.path, decodeURIComponent(mNotifLida[1]!));
-          enviar(res, 200, n);
-          return;
-        }
-        if (rota === "/notifications" && req.method === "DELETE") {
-          const ws = await resolverWs(url);
-          await notificacoes.limpar(ws.path);
-          enviar(res, 200, { ok: true });
-          return;
-        }
-
-        if (rota === "/tasks/colunas" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          enviar(res, 200, await tasks.colunas(ws.path));
-          return;
-        }
-        const mTask = /^\/tasks\/([^/]+)(?:\/(chat|mensagens|move|execucoes))?$/.exec(rota);
-        if (mTask) {
-          const ws = await resolverWs(url);
-          const id = decodeURIComponent(mTask[1]!);
-          const subrecurso = mTask[2];
-          if (subrecurso === "chat" || subrecurso === "mensagens") {
-            if (req.method === "GET") {
-              enviar(res, 200, await tasks.chat(ws.path, id));
-              return;
-            }
-            if (req.method === "POST") {
-              const corpo = (await lerCorpo(req)) as Record<string, unknown>;
-              const m = await tasks.mensagem(ws.path, id, {
-                autor: String(corpo.autor ?? "humano"),
-                corpo: String(corpo.corpo ?? ""),
-                tipo: corpo.tipo as "comentario" | "handoff" | "sistema" | "artefato" | "decisao" | undefined,
-                refs: Array.isArray(corpo.refs) ? (corpo.refs as unknown[]).map(String) : undefined,
-              });
-              enviar(res, 201, m);
-              return;
-            }
-          } else if (subrecurso === "execucoes" && req.method === "GET") {
-            // Execuções vinculadas à task: metas de execucoes cuja ordem ou
-            // gatilho citam o id da task (vale retroativamente — sem migração).
-            const limite = Math.min(Number(url.searchParams.get("limite")) || 50, 200);
-            const metas = await registros.listar(ws.path, "execucoes").catch(() => []);
-            const candidatas = metas.filter((m) => {
-              const ex = (m.extras ?? {}) as Record<string, unknown>;
-              const ordem = typeof ex.ordem === "string" ? ex.ordem : "";
-              const gat = (ex.gatilho ?? {}) as { origem?: unknown };
-              const origem = typeof gat.origem === "string" ? gat.origem : "";
-              return (typeof ex.task_id === "string" && ex.task_id === id)
-                || ordem.includes(id)
-                || origem === id
-                || origem.startsWith(`${id}/`);
-            });
-            const execs = (await sessoes.listarExecucoes(ws.path)) as Array<{
-              id: string;
-              agente: string;
-              inicio: string;
-              status: string;
-            }>;
-            const mapa = new Map(execs.map((e) => [e.id, e]));
-            const itens = candidatas
-              .map((m) => {
-                const s = mapa.get(m.id);
-                const ex = (m.extras ?? {}) as Record<string, unknown>;
-                return {
-                  id: m.id,
-                  agente: s?.agente ?? String(m.criado_por ?? "agente"),
-                  inicio: s?.inicio ?? String(m.criado_em ?? ""),
-                  status: s?.status ?? (typeof ex.status === "string" ? ex.status : "concluido"),
-                  ordem: typeof ex.ordem === "string" ? ex.ordem.slice(0, 160) : undefined,
-                  modelo: typeof ex.modelo === "string" ? ex.modelo : undefined,
-                  duracao_ms: typeof ex.duracao_ms === "number" ? ex.duracao_ms : undefined,
-                };
-              })
-              .sort((a, b) => String(b.inicio || "").localeCompare(String(a.inicio || "")))
-              .slice(0, limite);
-            enviar(res, 200, itens);
-            return;
-          } else if (subrecurso === "move" && req.method === "POST") {
-            const corpo = (await lerCorpo(req)) as Record<string, unknown>;
-            const coluna = String(corpo.coluna ?? "fazendo");
-            const pos = typeof corpo.pos === "number" ? corpo.pos : undefined;
-            const t = await tasks.mover(ws.path, id, coluna, pos);
-            enviar(res, 200, t);
-            return;
-          } else if (req.method === "GET") {
-            const t = await tasks.obter(ws.path, id);
-            enviar(res, 200, { ...t, bloqueada: tasks.bloqueado(ws.path, t) });
-            return;
-          } else if (req.method === "PATCH") {
-            const corpo = (await lerCorpo(req)) as Record<string, unknown>;
-            let t: Task = await tasks.obter(ws.path, id);
-            if (typeof corpo.titulo === "string" || typeof corpo.descricao === "string" ||
-                typeof corpo.prioridade === "string" || corpo.due !== undefined) {
-              t = await tasks.editar(ws.path, id, {
-                titulo: typeof corpo.titulo === "string" ? corpo.titulo : undefined,
-                descricao: typeof corpo.descricao === "string" ? corpo.descricao : undefined,
-                prioridade: typeof corpo.prioridade === "string" ? corpo.prioridade : undefined,
-                due: corpo.due === null ? null : typeof corpo.due === "string" ? corpo.due : undefined,
-              });
-            }
-            if (typeof corpo.coluna === "string") {
-              t = await tasks.mover(ws.path, id, corpo.coluna, typeof corpo.pos === "number" ? corpo.pos : undefined);
-            }
-            if (typeof corpo.responsavel === "string") {
-              t = await tasks.atribuir(ws.path, id, corpo.responsavel);
-            }
-            if (Array.isArray(corpo.labels)) {
-              t = await tasks.label(ws.path, id, "add", (corpo.labels as unknown[]).map(String));
-            }
-            enviar(res, 200, t);
-            return;
-          } else if (req.method === "DELETE") {
-            await tasks.excluir(ws.path, id);
-            enviar(res, 200, { ok: true, id });
-            return;
-          }
         }
 
         // ── /secretario/status ──
