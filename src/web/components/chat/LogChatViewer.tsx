@@ -213,11 +213,16 @@ export function parseLogToMensagens(
   const parsed = parseExecutionLog(rawLog);
   const mensagens: ChatMensagem[] = [];
 
-  // 1. Mensagem do USUÁRIO = a "ordem" de execução
-  const ordemTexto = parsed.ordem
+  // Ordem exibida de forma compacta no chat — o texto integral já aparece na
+  // caixa "Ordem Original" do topo do visualizador e no Terminal Raw.
+  const ORDEM_CHAT_MAX = 600;
+  const ordemCompleta = parsed.ordem
     || (meta?.gatilho
       ? `[${meta.gatilho.tipo}] ${meta.gatilho.origem}`
       : "Execução autônoma disparada pelo cron/scheduler do workspace.");
+  const ordemTexto = ordemCompleta.length > ORDEM_CHAT_MAX
+    ? ordemCompleta.slice(0, ORDEM_CHAT_MAX).trim() + "\n\n…(ordem completa no topo do visualizador e no Terminal Raw)"
+    : ordemCompleta;
 
   mensagens.push({
     role: "user",
@@ -226,6 +231,14 @@ export function parseLogToMensagens(
   });
 
   // 2. Mensagem do ASSISTENTE — passos na ordem cronológica exata do log
+  const semEventos = parsed.eventosCronologicos.length === 0;
+  // Log com um único bloco de texto e nenhuma ação (ex.: run que falhou rápido
+  // e só registrou o prompt): exibe o texto uma única vez, sem fabricar
+  // "pensamentos" e "resposta final" duplicados.
+  const unicoTextoSemAcao = !semEventos
+    && parsed.acoes.length === 0
+    && parsed.eventosCronologicos.length === 1
+    && parsed.eventosCronologicos[0].kind === "texto";
   const passos: TurnoPasso[] = [];
   const totalEventos = parsed.eventosCronologicos.length;
 
@@ -253,11 +266,34 @@ export function parseLogToMensagens(
 
   const statusExec = meta?.status || "concluido";
 
+  if (unicoTextoSemAcao) {
+    const unico = (parsed.eventosCronologicos[0] as { kind: "texto"; conteudo: string }).conteudo;
+    mensagens.push({ role: "assistant", content: unico, concluida: statusExec !== "executando" });
+    return mensagens;
+  }
+
+  if (semEventos) {
+    mensagens.push({ role: "assistant", content: "", concluida: statusExec !== "executando" });
+    return mensagens;
+  }
+
+  // Evita triplicar a resposta final (conteúdo + passo "texto" + "pensamento"):
+  // ela é renderizada uma única vez, no passo cronológico.
+  let conteudoAssistente = parsed.respostaFinal;
+  for (let i = passos.length - 1; i >= 0; i--) {
+    const p = passos[i];
+    if (p.tipo === "texto") {
+      if (p.texto === parsed.respostaFinal) conteudoAssistente = "";
+      break;
+    }
+  }
+  const pensamentosExibidos = parsed.pensamentos.filter((t) => t !== parsed.respostaFinal);
+
   mensagens.push({
     role: "assistant",
-    content: parsed.respostaFinal,
+    content: conteudoAssistente,
     passos: passos.length > 0 ? passos : undefined,
-    pensamento: parsed.pensamentos.length > 0 ? parsed.pensamentos.join("\n\n---\n\n") : undefined,
+    pensamento: pensamentosExibidos.length > 0 ? pensamentosExibidos.join("\n\n---\n\n") : undefined,
     concluida: statusExec !== "executando",
   });
 
@@ -307,9 +343,33 @@ export const LogChatViewer: Component<LogChatViewerProps> = (props) => {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   });
 
+  // Log sem nenhum evento parseável (ex.: run arquivado sem saída): em vez de
+  // um chat vazio, mostra um estado informativo (o prompt está na caixa
+  // "Ordem Original" do modal e o bruto no Terminal Raw).
+  const semSaida = createMemo(() => parseExecutionLog(props.log).eventosCronologicos.length === 0);
+  const executando = () => props.status === "executando";
+
   // No-op para edição de prompt (logs são read-only)
   return (
     <div class="h-full w-full flex flex-col min-h-0">
+      <Show
+        when={!semSaida()}
+        fallback={
+          <div class="flex-1 flex flex-col items-center justify-center text-center p-8 text-zinc-500 select-none">
+            <div class="h-12 w-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-3">
+              {executando() ? <Clock size={22} class="text-emerald-400 animate-pulse" /> : <Bot size={22} class="text-zinc-500" />}
+            </div>
+            <h3 class="text-sm font-semibold text-zinc-300 mb-1">
+              {executando() ? "Streaming ao vivo — aguardando a primeira saída…" : "Nenhuma saída capturada para esta execução"}
+            </h3>
+            <p class="text-xs text-zinc-500 max-w-sm">
+              {executando()
+                ? "O chat preenche sozinho assim que o agente gerar o primeiro passo."
+                : "A ordem original está no topo do visualizador e o log bruto no Terminal Raw."}
+            </p>
+          </div>
+        }
+      >
       <UniversalChat
         modo="leitura"
         podeEnviarPrompt={false}
@@ -326,6 +386,7 @@ export const LogChatViewer: Component<LogChatViewerProps> = (props) => {
           aberto: false,
         }}
       />
+      </Show>
     </div>
   );
 };

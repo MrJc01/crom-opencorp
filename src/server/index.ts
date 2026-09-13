@@ -2248,6 +2248,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           const ws = await resolverWs(url);
           const agente = url.searchParams.get("agente")?.trim() || undefined;
           const tipo = url.searchParams.get("tipo")?.trim() || undefined;
+          const busca = url.searchParams.get("busca")?.trim() || undefined;
           const limite = Math.min(Number(url.searchParams.get("limite")) || 200, 500);
           const itens: Array<{ id: string; tipo: string; titulo: string; agente: string; quando: string | null; status?: string; gatilho?: { tipo: string; origem: string } }> = [];
 
@@ -2363,6 +2364,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
             for (const t of todas) {
               const resp = (t.responsavel ?? "").replace(/^agente:/, "");
               if (agente && resp !== agente) continue;
+              if (busca && !t.titulo.toLowerCase().includes(busca) && !resp.toLowerCase().includes(busca)) continue;
               itens.push({ id: t.id, tipo: "task", titulo: t.titulo, agente: resp, quando: t.criado_em || null, status: t.coluna });
             }
           }
@@ -2375,6 +2377,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
                 if (ex.tipo !== "flow") continue;
                 const flowId = typeof ex.flow === "string" ? ex.flow : String(m.criado_por || "").replace(/^flow:/, "");
                 if (agente && !(String(m.criado_por || "").includes(agente) || flowId === agente)) continue;
+                if (busca && !String(ex.nome || flowId).toLowerCase().includes(busca)) continue;
                 const nos = Array.isArray(ex.nos) ? ex.nos as Array<{ id?: string; status?: string }> : [];
                 const ok = nos.filter((n) => n.status === "ok").length;
                 const gat = (ex.gatilho ?? {}) as { tipo?: string; origem?: string };
@@ -2401,7 +2404,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
             const jobs = await scheduler.listar();
             for (const j of jobs.filter((j) => j.workspace === ws.id)) {
               if (agente) continue; // rotinas não pertencem a um agente específico
-              itens.push({ id: j.id, tipo: "rotina", titulo: j.nome, agente: "", quando: j.ultima_exec ?? j.criado_em ?? null, status: j.ativo ? "ativa" : "pausada" });
+              itens.push({ id: j.id, tipo: "rotina", titulo: j.nome, agente: "rotina", quando: j.ultima_exec ?? j.criado_em ?? null, status: j.ativo ? "ativa" : "pausada" });
             }
           }
           if (!tipo || tipo === "conversa") {
@@ -4753,7 +4756,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           enviar(res, 200, await tasks.colunas(ws.path));
           return;
         }
-        const mTask = /^\/tasks\/([^/]+)(?:\/(chat|mensagens|move))?$/.exec(rota);
+        const mTask = /^\/tasks\/([^/]+)(?:\/(chat|mensagens|move|execucoes))?$/.exec(rota);
         if (mTask) {
           const ws = await resolverWs(url);
           const id = decodeURIComponent(mTask[1]!);
@@ -4774,6 +4777,46 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
               enviar(res, 201, m);
               return;
             }
+          } else if (subrecurso === "execucoes" && req.method === "GET") {
+            // Execuções vinculadas à task: metas de execucoes cuja ordem ou
+            // gatilho citam o id da task (vale retroativamente — sem migração).
+            const limite = Math.min(Number(url.searchParams.get("limite")) || 50, 200);
+            const metas = await registros.listar(ws.path, "execucoes").catch(() => []);
+            const candidatas = metas.filter((m) => {
+              const ex = (m.extras ?? {}) as Record<string, unknown>;
+              const ordem = typeof ex.ordem === "string" ? ex.ordem : "";
+              const gat = (ex.gatilho ?? {}) as { origem?: unknown };
+              const origem = typeof gat.origem === "string" ? gat.origem : "";
+              return (typeof ex.task_id === "string" && ex.task_id === id)
+                || ordem.includes(id)
+                || origem === id
+                || origem.startsWith(`${id}/`);
+            });
+            const execs = (await sessoes.listarExecucoes(ws.path)) as Array<{
+              id: string;
+              agente: string;
+              inicio: string;
+              status: string;
+            }>;
+            const mapa = new Map(execs.map((e) => [e.id, e]));
+            const itens = candidatas
+              .map((m) => {
+                const s = mapa.get(m.id);
+                const ex = (m.extras ?? {}) as Record<string, unknown>;
+                return {
+                  id: m.id,
+                  agente: s?.agente ?? String(m.criado_por ?? "agente"),
+                  inicio: s?.inicio ?? String(m.criado_em ?? ""),
+                  status: s?.status ?? (typeof ex.status === "string" ? ex.status : "concluido"),
+                  ordem: typeof ex.ordem === "string" ? ex.ordem.slice(0, 160) : undefined,
+                  modelo: typeof ex.modelo === "string" ? ex.modelo : undefined,
+                  duracao_ms: typeof ex.duracao_ms === "number" ? ex.duracao_ms : undefined,
+                };
+              })
+              .sort((a, b) => String(b.inicio || "").localeCompare(String(a.inicio || "")))
+              .slice(0, limite);
+            enviar(res, 200, itens);
+            return;
           } else if (subrecurso === "move" && req.method === "POST") {
             const corpo = (await lerCorpo(req)) as Record<string, unknown>;
             const coluna = String(corpo.coluna ?? "fazendo");

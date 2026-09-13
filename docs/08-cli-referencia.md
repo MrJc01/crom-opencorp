@@ -50,6 +50,42 @@ opencorp agent history <id>       # últimas execuções (registries/execucoes)
 opencorp agent cost <id>          # gasto acumulado (registries/custos)
 ```
 
+## task (kanban + chat por task)
+
+```bash
+opencorp task list [--coluna <c>] [--responsavel <a>] [--json]
+opencorp task create --titulo "..." [--descricao ...] [--coluna backlog] [--prioridade baixa|media|alta] [--responsavel humano|agente:<id>] [--due AAAA-MM-DD]
+opencorp task show <id> [--json]
+opencorp task move <id> --coluna <coluna>        # coluna é FLAG obrigatória (não posicional)
+opencorp task assign <id> <responsavel>
+opencorp task label <id> [--add a,b] [--remove c]
+opencorp task chat <id> [--msg "..." --autor humano|agente:<id> --tipo comentario|handoff|sistema|artefato|decisao]
+opencorp task run <id> [--agent <id>] [--model provider/model]   # despacha o responsável agora
+opencorp task status <id> [--limite N] [--json]
+opencorp task columns
+opencorp task delete <id>
+# contrato do agente executando a task (ver mention-runner): postar resposta e concluir com
+#   opencorp task chat <id> --msg "..." --autor agente:<eu> --tipo comentario
+#   opencorp task move <id> --coluna feito
+```
+
+## schedule / scheduler (rotinas + pulso)
+
+```bash
+opencorp schedule list
+opencorp schedule create --nome <nome> (--cron "0 9 * * *" | --intervalo-min 60 | --as <ISO>) --args "agent run <ag> \"<ordem>\"" [--workspace <id>] [--graca-min 5]
+# ATENÇÃO: a ordem do agent run é POSICIONAL — não existe --ordem (jobs criados com --ordem morrem no parser sem rastro)
+opencorp schedule show <id>
+opencorp schedule pause <id> | opencorp schedule resume <id>
+opencorp schedule run-now <id>                       # dispara agora, sem esperar o horário
+opencorp schedule delete <id>
+opencorp scheduler start | opencorp scheduler stop | opencorp scheduler status
+opencorp settings set scheduler.timezone America/Bahia            # fuso global dos crons (IANA)
+opencorp settings set scheduler.timezone America/Bahia --scope workspace   # override do workspace ativo
+# API útil: GET /schedules/:id/runs (disparos do agendador), GET /tasks/:id/execucoes (execuções vinculadas)
+# IMPORTANTE: `opencorp serve` sozinho NÃO faz tick — sem `opencorp daemon start`, proxima_exec congela no passado.
+```
+
 ## session
 
 ```bash

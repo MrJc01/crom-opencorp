@@ -70,6 +70,8 @@ O spawn é **detached** (processo próprio, sobrevive ao emissor; log em `~/.ope
 | `intervalo_min` | minutos ≥ 1 | `30` |
 | `data_unica` | ISO date | roda 1× e **desativa sozinho** (sem loop eterno de skip) |
 
+**Fuso horário:** crons são interpretados no relógio de parede de `scheduler.timezone` (IANA, default `America/Sao_Paulo`), com override por workspace via `scheduler.timezone` no escopo workspace. A web exibe todos os horários nesse mesmo fuso (aba Config → Scheduler, seletor Global ⇄ Workspace).
+
 ### 3.2 Como executa (o tick)
 
 - Daemon roda `tick()` a cada 30s: varre jobs ativos com `proxima_exec <= agora`.
@@ -82,6 +84,14 @@ O spawn é **detached** (processo próprio, sobrevive ao emissor; log em `~/.ope
 ### 3.3 Vida longa
 
 `opencorp scheduler start` (daemon dedicado) + `opencorp daemon start|status|install` — serviço **systemd do usuário** (enabled + linger) que mantém scheduler + serve vivos com restart. Máquina reiniciou → rotinas voltam sozinhas.
+
+### 3.4 "Próxima exec" no passado — diagnóstico
+
+Sintoma: `proxima_exec` congelada horas atrás (a web mostra badge âmbar **"atrasada há X — daemon parado?"**). Causas, nesta ordem:
+
+1. **Só o `serve` está rodando** — `opencorp serve` atende API + web mas **não faz tick do scheduler**. Sem tick, nada avança `proxima_exec`. Correção: `opencorp daemon start` (só o pulso; sem `--com-serve` se a API já roda separada).
+2. **Daemon morto** — `opencorp daemon status`; se caído, `start` de novo (o tick reconcilia: pula com registro ou faz catch-up dentro da janela).
+3. **Fuso trocado** — se `scheduler.timezone` não é o fuso real da máquina, os horários "não batem". Confira em Config → Scheduler e o seletor Global ⇄ Workspace.
 
 ---
 

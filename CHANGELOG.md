@@ -2,6 +2,15 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## Unreleased
+
+- **Histórico web:** timeline paginada (25/pág, mais recentes primeiro) com busca textual (`?busca=` servidor + cliente), aba Rotinas, ordenação garantida no cliente e badge de faixa `A–B de Z`.
+- **Popups padrão por tipo:** execução (chat organizado sem triplicar resposta, telemetria, terminal, diff), fluxo (circuito clicável + resultado), task (instrução, comentários, execuções vinculadas), rotina (cron, como-executa, execuções, disparos do agendador) e conversa (mensagens + continuar-chat). Nomes de agentes/fluxos clicáveis nos modais.
+- **Tasks ligadas a execuções:** novo `GET /tasks/:id/execucoes` (retroativo, via ordem/gatilho); `executarTask` captura o `exec_id` e grava mensagem `sistema` (antes usava `tipo: "execucao"`, rejeitado e engolido pelo `.catch` — chat vivia vazio).
+- **Fuso horário configurável:** `scheduler.timezone` (IANA, default `America/Sao_Paulo`) global + override por workspace (aba Config ⇄ Workspace); scheduler interpreta crons no fuso (`proximoCronTz`) e a web exibe horários nele, com badge **"atrasada há X — daemon parado?"** quando `proxima_exec` passa.
+- **Padronização:** `task move` documentado com `--coluna` (flag obrigatória, não posicional); help do `schedule create` não ensina mais `--ordem` (inexistente); docs 06/08/15 + README atualizados (tasks vinculadas, timezone, diagnóstico de `proxima_exec` obsoleta, `serve` × `daemon tick`).
+- **Correções:** `searchParams.get is not a function` no filtro de limite; modal não recarregava a cada polling (aba/scroll/telemetria preservados); botão-aninhado que quebrava o render do Solid nos modais de rotina/task.
+
 ## 0.7.0 — 2026-09-01
 
 Ciclo completo do PLANO-COMPLETO (29 pedidos, docs/PLANO-COMPLETO.md) — painel web reconstruído sobre a estrutura Preline:

@@ -90,7 +90,7 @@ export function registerScheduleCommands(program: Command): void {
   schedule
     .command("create")
     .requiredOption("--nome <nome>", "nome do job")
-    .requiredOption("--args <comando>", 'comando opencorp (sem o binário), ex.: "agent run executor-padrao --ordem \'oi\'"')
+    .requiredOption("--args <comando>", 'comando opencorp (sem o binário), ex.: "agent run executor-padrao \'oi\'" (ordem é posicional — não use --ordem)')
     .option("--cron <expr>", "expressão cron de 5 campos (min hora dom mês dow)")
     .option("--intervalo-min <n>", "repete a cada N minutos", Number)
     .option("--as <data>", "data única (ISO) — executa uma vez e desativa")

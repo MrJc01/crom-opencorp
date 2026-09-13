@@ -86,6 +86,8 @@ O mesmo schema vale para `config.json` do workspace — só as chaves presentes 
 | `security.level` | `permissive` \| `standard` \| `strict` | `standard` |
 | `tests.blind` | exigir teste cego antes de marcar etapa como feita | `true` |
 | `paths.workspaces_root` | onde ficam os workspaces | `~/opencorp-corps` |
+| `scheduler.timezone` | fuso IANA dos crons e dos horários exibidos (override por workspace no escopo workspace) | `America/Sao_Paulo` |
+| `scheduler.catch_up` | executa jobs atrasados dentro da janela ao invés de pular | `false` |
 
 ## Painel de configurações web (Fase C)
 
@@ -108,7 +110,7 @@ O painel (`opencorp serve` → navegador) organiza a empresa em views, todas com
 | Automação | **Apps** | Mini-apps declarativos do workspace (`apps/<id>/index.html`) com 3 modos de visualização via IA: **Só App** (iframe full com chat oculto), **Só Chat** (conversa IA em tela cheia) e **Os Dois** (split view 50/50 lado a lado). |
 | Sistema | **Segredos** | Cofre protegido de credenciais (`/secrets`) com templates prontos (WordPress, VPS, Provedores LLM, GitHub, Mercado Pago) e isolamento por escopos Workspace × Global (Merge automático). |
 | Sistema | **Documentação**| Visualizador de documentação integrado (`/docs`) com Markdown rico, busca rápida, navegação por capítulos e diagramas Mermaid em tempo real. |
-| Dados | **Histórico** | Timeline unificada (execuções, tasks, rotinas, conversas). |
+| Dados | **Histórico** | Timeline unificada (execuções, tasks, rotinas, conversas) com paginação (25/pág), busca textual, abas por tipo e popups padrão por item: chat organizado / circuito clicável / task com execuções vinculadas / rotina com cron + disparos / conversa com continuar-chat. |
 | Sistema | **Notificações** | Feed de avisos dos agentes (tool `notificar`): não lidas em destaque, marcar como lida, **badge no navbar** atualizado via SSE. |
 | Sistema | **Config** | As mesmas chaves do `settings` CLI, editáveis por campo com **badge de origem** (global × workspace) e toggle de escopo respeitado na leitura e na escrita. |
 

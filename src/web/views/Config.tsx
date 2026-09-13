@@ -3021,6 +3021,12 @@ export const ConfigView: Component = () => {
                 tipo="number"
                 min="1"
               />
+              <SettingRow
+                chave="scheduler.timezone"
+                label="Fuso Horário dos Agendamentos (IANA)"
+                descricao="Relógio usado para interpretar crons e exibir horários. Ex.: America/Sao_Paulo, America/Bahia, UTC. Use o seletor Global ⇄ Workspace no topo para definir por workspace."
+                tipo="text"
+              />
             </div>
           </div>
         </Show>

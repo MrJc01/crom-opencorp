@@ -105,6 +105,9 @@ export const settingsSchema = z.object({
       // catch-up: executa job atrasado (ex.: máquina dormindo) dentro da janela — senão pula com registro
       catch_up: z.boolean().default(false),
       catch_up_max_min: z.number().int().min(1).default(60),
+      /** Fuso IANA para interpretar crons e exibir horários (ex.: America/Sao_Paulo).
+       *  Override por workspace: scheduler.timezone no escopo workspace. */
+      timezone: z.string().min(1).default("America/Sao_Paulo"),
     })
     .prefault({}),
 });

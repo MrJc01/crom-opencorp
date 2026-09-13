@@ -113,6 +113,9 @@ opencorp serve start --foreground --port 4100
 opencorp daemon install
 ```
 
+> [!IMPORTANT]
+> O `serve` sozinho atende API + web, mas **não executa o tick do scheduler** — sem o supervisor, as rotinas nunca disparam e a "Próxima exec" congela no passado (a web mostra badge âmbar **"atrasada há X — daemon parado?"**). Mantenha o pulso vivo com `opencorp daemon start` (só o scheduler; sem `--com-serve` se a API já roda separada).
+
 Abra no navegador: **`http://localhost:4100`** para acessar o painel de controle.
 
 ---
@@ -156,7 +159,7 @@ Abra no navegador: **`http://localhost:4100`** para acessar o painel de controle
 ---
 
 ### 7. Histórico & Rastreabilidade de Execuções
-> Inspeção transparente de cada ordem, ferramentas chamadas (bash, curl, APIs) e tempo de resposta.
+> Inspeção transparente de cada ordem, ferramentas chamadas (bash, curl, APIs) e tempo de resposta. Timeline paginada (25/pág, mais recentes primeiro) com busca textual, abas por tipo (incl. Rotinas) e popups padrão por item: chat organizado, circuito de fluxo clicável, task com execuções vinculadas, rotina com cron + disparos do agendador, conversa com continuar-chat.
 ![Histórico de Execução](docs/assets/07-historico-execucao.png)
 
 ---
@@ -246,7 +249,8 @@ O ecossistema OpenCorp adota uma arquitetura em duas camadas operacionais:
 | `opencorp task list` | `oc task list` | Lista as tarefas do Kanban com filtros opcionais | `oc task list --coluna backlog` |
 | `opencorp task create` | `oc task create` | Cria uma nova tarefa atribuível a humanos ou agentes | `opencorp task create --titulo "Configurar GA4" --prioridade alta` |
 | `opencorp task show <id>` | `oc task show <id>` | Exibe detalhes, histórico e mensagens de uma tarefa | `oc task show tsk-123` |
-| `opencorp task move <id> <coluna>` | `oc task move <id> <coluna>` | Move uma tarefa entre colunas (`backlog`, `fazendo`, `feito`) | `oc task move tsk-123 "fazendo"` |
+| `opencorp task move <id> --coluna <coluna>` | `oc task move <id> --coluna <coluna>` | Move uma tarefa entre colunas (`backlog`, `fazendo`, `feito`) — coluna é flag obrigatória | `oc task move tsk-123 --coluna "fazendo"` |
+| `opencorp task run <id>` | `oc task run <id>` | Despacha a task agora com o agente responsável | `oc task run tsk-123` |
 | `opencorp task assign <id> <agente>` | `oc task assign <id> <agente>` | Atribui a tarefa para um agente autônomo resolver | `oc task assign tsk-123 corretor-site` |
 | `opencorp task chat <id> --msg` | `oc task chat <id> --msg` | Adiciona comentário ou instrução no chat da tarefa | `oc task chat tsk-123 --msg "@corretor-site execute agora"` |
 | `opencorp task label <id> <tags>` | `oc task label <id> <tags>` | Adiciona etiquetas organizacionais na tarefa | `oc task label tsk-123 "seo,urgente"` |
@@ -262,6 +266,7 @@ O ecossistema OpenCorp adota uma arquitetura em duas camadas operacionais:
 | `opencorp schedule run-now <id>` | `oc schedule run-now <id>` | Força o disparo imediato de uma rotina agendada | `oc schedule run-now sch-pulso-24h` |
 | `opencorp schedule pause / resume` | `oc schedule pause / resume` | Pausa ou retoma um agendamento sem excluí-lo | `oc schedule pause sch-pulso-24h` |
 | `opencorp scheduler start / stop` | `oc scheduler start / stop` | Inicia ou encerra o daemon do scheduler em background | `opencorp scheduler start` |
+| `opencorp settings set scheduler.timezone <IANA>` | `oc settings set scheduler.timezone America/Bahia` | Fuso dos crons e dos horários exibidos (global; override por workspace na aba Config ⇄ Workspace) | `oc settings set scheduler.timezone UTC` |
 | `opencorp flow list` | `oc flow list` | Lista os fluxos de trabalho (workflows em grafo) do workspace | `oc flow list` |
 | `opencorp flow run <id>` | `oc flow run <id>` | Executa um fluxo completo a partir do nó gatilho | `oc flow run analise-board --entrada "Auditar"` |
 | `opencorp flow status <id>` | `oc flow status <id>` | Consulta o status de execução de nós e histórico do fluxo | `oc flow status analise-board` |

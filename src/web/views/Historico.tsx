@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, onCleanup, createEffect, For, Show } from "solid-js";
+import { type Component, createSignal, onMount, onCleanup, createEffect, untrack, For, Show } from "solid-js";
 import {
   History,
   CheckCircle2,
@@ -9,6 +9,7 @@ import {
   X,
   Terminal,
   Filter,
+  Search,
   Copy,
   Download,
   ListTodo,
@@ -33,6 +34,7 @@ import { useSearchParams, useNavigate } from "@solidjs/router";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { fetchApi, wsAtivo } from "../lib/context";
+import { carregarFuso, fmtDataHora, fmtHora, distanciaHumana, jaPassou, fuso } from "../lib/fuso";
 import { showToast } from "../ui/Toast";
 import { LogChatViewer } from "../components/chat/LogChatViewer";
 
@@ -112,6 +114,100 @@ export const HistoricoView: Component = () => {
   const [carregando, setCarregando] = createSignal(false);
   const [runSelecionado, setRunSelecionado] = createSignal<any | null>(null);
   const [logRun, setLogRun] = createSignal<string>("");
+  // Modal padrão de Task: mesma casca dos runs — instrução, comentários e
+  // execuções vinculadas (cada execução abre o chat dela no visualizador)
+  const [taskModal, setTaskModal] = createSignal<{
+    task: any | null;
+    msgs: any[];
+    execs: Array<{ id: string; agente: string; inicio: string; status: string; duracao_ms?: number }>;
+    carregando: boolean;
+  } | null>(null);
+
+  const abrirTaskPorId = async (taskId: string) => {
+    setTaskModal({ task: null, msgs: [], execs: [], carregando: true });
+    try {
+      const [task, msgs, execs] = await Promise.all([
+        fetchApi<any>(`/tasks/${encodeURIComponent(taskId)}`).catch(() => null),
+        fetchApi<any[]>(`/tasks/${encodeURIComponent(taskId)}/mensagens`).catch(() => []),
+        fetchApi<any[]>(`/tasks/${encodeURIComponent(taskId)}/execucoes`).catch(() => []),
+      ]);
+      setTaskModal({
+        task,
+        msgs: Array.isArray(msgs) ? msgs : [],
+        execs: Array.isArray(execs) ? execs : [],
+        carregando: false,
+      });
+    } catch {
+      setTaskModal({ task: null, msgs: [], execs: [], carregando: false });
+    }
+  };
+  const fecharTask = () => setTaskModal(null);
+
+  // Popup padrão de Rotina e Conversa: mesma casca dos demais — nada navega
+  // para fora (só botões explícitos como "Ver Agenda" ou "Continuar chat").
+  const [infoModal, setInfoModal] = createSignal<
+    | { kind: "rotina"; job: any | null; execs: ItemHistorico[]; runs: any[]; carregando: boolean }
+    | { kind: "conversa"; item: ItemHistorico; msgs: Array<{ role: string; content: string }>; carregando: boolean }
+    | null
+  >(null);
+  const fecharInfo = () => setInfoModal(null);
+
+  // Abre a página do dono do item: agente → catálogo, fluxo → Studio,
+  // rotina → agenda, reunião → salas. Usado pelos nomes clicáveis nos modais.
+  const abrirAgente = (agente?: string | null) => {
+    const a = (agente || "").trim().replace(/^@/, "");
+    if (!a) return;
+    if (a.startsWith("flow:")) {
+      navigate(`/fluxos?fluxo=${encodeURIComponent(a.slice("flow:".length))}`);
+    } else if (a === "rotina") {
+      navigate("/agenda");
+    } else if (a === "reuniao" || a === "mesa-reuniao") {
+      navigate("/reunioes");
+    } else {
+      navigate(`/agentes?agente=${encodeURIComponent(a)}`);
+    }
+  };
+
+  // Descreve como o job executa: agente, fluxo ou script direto (scripts não
+  // geram execução de agente — o rastro deles está nos disparos do agendador)
+  const comandoJob = (job: any): string => ((job?.args || []) as string[]).join(" ") || "—";
+  const tipoJob = (job: any): "agente" | "fluxo" | "script" => {
+    const cmd = comandoJob(job);
+    if (/(^|\s)flow(\s| run)/.test(cmd)) return "fluxo";
+    if (/(^|\s)agent(\s| run)/.test(cmd)) return "agente";
+    return "script";
+  };
+
+  const abrirRotinaPorId = async (jobId: string) => {
+    setInfoModal({ kind: "rotina", job: null, execs: [], runs: [], carregando: true });
+    try {
+      const [jobs, runs] = await Promise.all([
+        fetchApi<any[]>("/schedules").catch(() => []),
+        fetchApi<any[]>(`/schedules/${encodeURIComponent(jobId)}/runs`).catch(() => []),
+      ]);
+      const job = (jobs || []).find((j) => j.id === jobId) || null;
+      // Execuções disparadas por este job: gatilho.origem traz o nome (ex.: yt-pautador-30min)
+      const chave = job?.nome || jobId;
+      const execs = itens()
+        .filter((i) => i.gatilho?.origem === chave || i.gatilho?.origem === jobId)
+        .sort((a, b) => String(b.quando || "").localeCompare(String(a.quando || "")));
+      setInfoModal({ kind: "rotina", job, execs, runs: Array.isArray(runs) ? runs.slice(0, 10) : [], carregando: false });
+    } catch {
+      setInfoModal({ kind: "rotina", job: null, execs: [], runs: [], carregando: false });
+    }
+  };
+
+  const abrirConversaPorId = async (item: ItemHistorico) => {
+    setInfoModal({ kind: "conversa", item, msgs: [], carregando: true });
+    try {
+      const msgs = await fetchApi<Array<{ role: string; content: string }>>(
+        `/secretario/sessoes/${encodeURIComponent(item.id)}/mensagens`
+      ).catch(() => []);
+      setInfoModal({ kind: "conversa", item, msgs: Array.isArray(msgs) ? msgs : [], carregando: false });
+    } catch {
+      setInfoModal({ kind: "conversa", item, msgs: [], carregando: false });
+    }
+  };
   const [carregandoLog, setCarregandoLog] = createSignal(false);
   const [modoVisualizacao, setModoVisualizacao] = createSignal<"chat" | "terminal" | "telemetria" | "diff" | "fluxo" | "resultado">("chat");
   const [encerrando, setEncerrando] = createSignal(false);
@@ -139,24 +235,57 @@ export const HistoricoView: Component = () => {
   const [entradaFluxo, setEntradaFluxo] = createSignal<string>("");
   const [carregandoFluxo, setCarregandoFluxo] = createSignal(false);
 
+  let pollInterval: any = null;
+  // Poller do log do run aberto (restaura declaração removida no refactor:
+  // sem ela, os usos abaixo lançam ReferenceError e a lista não renderiza)
   let liveLogInterval: any = null;
-  let timerTempoReal: any = null;
 
+  const filtroLimite = () => {
+    const p = searchParams.limite as string | undefined;
+    return p ? Math.min(Number(p), 500) : 200;
+  };
   const filtroTipo = () => (searchParams.tipo as string) || "tudo";
   const filtroStatus = () => (searchParams.status as string) || "todos";
   const filtroAgente = () => (searchParams.agente as string) || "todos";
+  const filtroBusca = () => (searchParams.busca as string) || "";
+
+  // Paginação finita (lista do mais recente ao mais velho, em páginas)
+  const [pagina, setPagina] = createSignal(1);
+  const [porPagina, setPorPagina] = createSignal(25);
+  // Busca textual com debounce → reflete em ?busca= (o backend filtra tasks/fluxos;
+  // execuções são filtradas também no cliente em itensOrdenados)
+  const [termoBusca, setTermoBusca] = createSignal(filtroBusca());
+  let buscaTimer: any = null;
+  const aoDigitarBusca = (v: string) => {
+    setTermoBusca(v);
+    if (buscaTimer) clearTimeout(buscaTimer);
+    buscaTimer = setTimeout(() => {
+      setSearchParams({ busca: v.trim() ? v.trim() : undefined });
+    }, 400);
+  };
+  // Qualquer troca de filtro/abA/busca volta para a página 1 (o polling não dispara isso)
+  createEffect(() => {
+    filtroTipo();
+    filtroStatus();
+    filtroAgente();
+    filtroBusca();
+    setPagina(1);
+  });
 
   const carregarHistorico = async (silencioso = false) => {
     if (!silencioso) setCarregando(true);
     try {
       // Buscar do endpoint unificado /historico que agrupa execucoes, tasks, rotinas e conversas
-      const dados = await fetchApi<ItemHistorico[]>("/historico?limite=200");
+      const paramsBusca = new URLSearchParams({ limite: String(filtroLimite()) });
+      const termoServidor = filtroBusca().trim();
+      if (termoServidor) paramsBusca.set("busca", termoServidor);
+      const dados = await fetchApi<ItemHistorico[]>(`/historico?${paramsBusca.toString()}`);
       let listaFinal: ItemHistorico[] = [];
       if (Array.isArray(dados) && dados.length > 0) {
         listaFinal = dados;
       } else {
         // Fallback para /execucoes caso /historico retorne vazio
-        const execs = await fetchApi<any[]>("/execucoes?limite=100");
+        const execs = await fetchApi<any[]>("/execucoes?limite=" + Math.min(Number(filtroLimite()), 100));
         listaFinal = (execs || []).map((e) => ({
           ...e,
           tipo: "execucao",
@@ -179,44 +308,23 @@ export const HistoricoView: Component = () => {
         if (resTelemetria) setResumoTelemetria(resTelemetria);
       } catch {}
 
-      // Se há um run aberto na URL, atualiza seus dados reais
+      // Se há um run aberto na URL, atualiza seus dados (sem recriar o objeto
+      // quando nada mudou — recriar a cada polling causa re-render e scroll jump
+      // no modal; e nunca sobrescreve o log, que é cuidado pelo liveLogInterval)
       const runAtual = searchParams.run as string | undefined;
       if (runAtual) {
         const itemReal = listaFinal.find((x) => x.id === runAtual);
         if (itemReal) {
-          setRunSelecionado((prev: any) => (prev ? { ...prev, ...itemReal } : itemReal));
-          if (itemReal.status === "executando" && !liveLogInterval) {
-            let pollCount = 0;
-            liveLogInterval = setInterval(async () => {
-              pollCount++;
-              const atualizado = await buscarLog(runAtual);
-              setLogRun(atualizado);
-
-              if (pollCount % 2 === 0) {
-                try {
-                  const reg = await fetchApi<{ meta?: { extras?: any } }>(
-                    `/registries/execucoes/${encodeURIComponent(runAtual)}`
-                  );
-                  const st = reg?.meta?.extras?.status;
-                  if (st && st !== "executando") {
-                    setRunSelecionado((prev: any) => (prev ? { ...prev, status: st } : null));
-                    if (liveLogInterval) {
-                      clearInterval(liveLogInterval);
-                      liveLogInterval = null;
-                    }
-                  }
-                } catch {}
-              }
-            }, 2000);
-          } else if (itemReal.status !== "executando" && liveLogInterval) {
-            clearInterval(liveLogInterval);
-            liveLogInterval = null;
-          }
+          setRunSelecionado((prev: any) => {
+            if (!prev) return itemReal;
+            if (prev.status === itemReal.status) return prev;
+            return { ...prev, ...itemReal };
+          });
         }
       }
     } catch {
       try {
-        const execs = await fetchApi<any[]>("/execucoes?limite=50");
+        const execs = await fetchApi<any[]>("/execucoes?limite=" + Math.min(Number(filtroLimite()), 50));
         const mapeados: ItemHistorico[] = (execs || []).map((e) => ({
           ...e,
           tipo: "execucao",
@@ -322,7 +430,7 @@ export const HistoricoView: Component = () => {
     let r = itens().find((item) => item.id === runId);
     if (!r) {
       try {
-        const h = await fetchApi<ItemHistorico[]>("/historico?limite=100");
+        const h = await fetchApi<ItemHistorico[]>("/historico?limite=" + filtroLimite());
         if (Array.isArray(h)) {
           r = h.find((item) => item.id === runId);
         }
@@ -458,10 +566,6 @@ export const HistoricoView: Component = () => {
               const st = reg?.meta?.extras?.status;
               if (st && st !== "executando") {
                 setRunSelecionado((prev: any) => prev ? { ...prev, status: st } : null);
-                if (liveLogInterval) {
-                  clearInterval(liveLogInterval);
-                  liveLogInterval = null;
-                }
                 void carregarHistorico();
               }
             } catch {}
@@ -475,19 +579,21 @@ export const HistoricoView: Component = () => {
 
   const selecionarItem = (item: ItemHistorico) => {
     if (item.tipo === "task") {
-      navigate(`/tasks?task=${encodeURIComponent(item.id)}`);
+      // Popup padrão de task (não navega para fora): instrução, comentários e execuções
+      void abrirTaskPorId(item.id);
       return;
     }
     if (item.tipo === "conversa") {
       if (item.reuniao) {
+        // Sala de reunião é uma página própria (vários participantes ao vivo)
         navigate(`/reunioes?reuniao=${encodeURIComponent(item.reuniao)}`);
         return;
       }
-      navigate(`/secretario`);
+      void abrirConversaPorId(item);
       return;
     }
     if (item.tipo === "rotina") {
-      navigate(`/agenda`);
+      void abrirRotinaPorId(item.id);
       return;
     }
     // execucao e fluxo abrem o visualizador com ?run=
@@ -709,35 +815,44 @@ export const HistoricoView: Component = () => {
     }
   };
 
-  // Reagir a alteração em ?run=
+  // Reagir SOMENTE a alteração em ?run= — com untrack, porque abrirLogPorId lê
+  // itens() e sem isso cada polling da lista (2.5s) reabria o modal do zero:
+  // resetava a aba para "chat", zerava a telemetria e fazia o scroll pular.
   createEffect(() => {
     const runParam = searchParams.run as string | undefined;
-    if (runParam) {
-      void abrirLogPorId(runParam);
-    } else {
-      if (liveLogInterval) {
-        clearInterval(liveLogInterval);
-        liveLogInterval = null;
+    untrack(() => {
+      if (runParam) {
+        // Evita recarregar o run já aberto (clique repetido, re-render, etc.)
+        if (runSelecionado()?.id !== runParam) {
+          void abrirLogPorId(runParam);
+        }
+      } else {
+        if (liveLogInterval) {
+          clearInterval(liveLogInterval);
+          liveLogInterval = null;
+        }
+        setRunSelecionado(null);
+        setLogRun("");
       }
-      setRunSelecionado(null);
-      setLogRun("");
-    }
+    });
   });
 
-  // Reagir a troca de workspace selecionado
+  // Reagir a troca de workspace selecionado (recarrega lista + fuso do workspace)
   createEffect(() => {
     wsAtivo();
+    void carregarFuso();
     void carregarHistorico(false);
   });
 
   onMount(() => {
+    void carregarFuso();
     void carregarHistorico(false);
 
     // Polling inteligente em tempo real: 2.5s se ativo na tela, 6s se em background
     const iniciarPolling = () => {
-      if (timerTempoReal) clearInterval(timerTempoReal);
+      if (pollInterval) clearInterval(pollInterval);
       const intervaloMs = typeof document !== "undefined" && document.hidden ? 6000 : 2500;
-      timerTempoReal = setInterval(() => {
+      pollInterval = setInterval(() => {
         if (tempoRealAtivo()) {
           void carregarHistorico(true);
         }
@@ -774,15 +889,14 @@ export const HistoricoView: Component = () => {
     window.addEventListener("keydown", aoPressionarTecla);
 
     onCleanup(() => {
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", aoMudarVisibilidade);
-      }
-      if (typeof window !== "undefined") {
-        window.removeEventListener("focus", aoFocarJanela);
-        window.removeEventListener("keydown", aoPressionarTecla);
-      }
-      if (timerTempoReal) clearInterval(timerTempoReal);
-      if (liveLogInterval) clearInterval(liveLogInterval);
+if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", aoMudarVisibilidade);
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener("focus", aoFocarJanela);
+      window.removeEventListener("keydown", aoPressionarTecla);
+    }
+    if (pollInterval) clearInterval(pollInterval);
     });
   });
 
@@ -803,6 +917,37 @@ export const HistoricoView: Component = () => {
     const set = new Set<string>();
     itens().forEach((i) => i.agente && set.add(i.agente));
     return Array.from(set);
+  };
+
+  // Ordenação garantida do mais recente ao mais velho + busca textual no cliente
+  // (o backend ignora ?busca= para execuções — aqui ela vale para todos os tipos)
+  const itensOrdenados = () => {
+    const b = filtroBusca().trim().toLowerCase();
+    let lista = itensFiltrados();
+    if (b) {
+      lista = lista.filter((i) =>
+        [i.titulo, i.ordem, i.agente, i.id, i.flow]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(b)
+      );
+    }
+    return [...lista].sort((x, y) => String(y.quando || "").localeCompare(String(x.quando || "")));
+  };
+
+  const totalPaginas = () => Math.max(1, Math.ceil(itensOrdenados().length / porPagina()));
+  const paginaAtual = () => Math.min(Math.max(pagina(), 1), totalPaginas());
+  const faixaAtual = () => {
+    const total = itensOrdenados().length;
+    if (total === 0) return "0";
+    const ini = (paginaAtual() - 1) * porPagina() + 1;
+    const fim = Math.min(paginaAtual() * porPagina(), total);
+    return `${ini}–${fim}`;
+  };
+  const itensPaginados = () => {
+    const ini = (paginaAtual() - 1) * porPagina();
+    return itensOrdenados().slice(ini, ini + porPagina());
   };
 
   const badgeTipo = (tipo: string) => {
@@ -830,7 +975,7 @@ export const HistoricoView: Component = () => {
           <div class="flex items-center gap-2">
             <h1 class="text-xl font-bold text-zinc-100 tracking-tight">Histórico de Atividades</h1>
             <span class="text-[11px] font-mono px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-300">
-              {itensFiltrados().length} de {itens().length} registros
+              {faixaAtual()} de {itensOrdenados().length} registros · pág {paginaAtual()}/{totalPaginas()}
             </span>
           </div>
           <p class="text-xs text-zinc-400 mt-0.5">
@@ -864,6 +1009,14 @@ export const HistoricoView: Component = () => {
               }`}
             >
               Fluxos
+            </button>
+            <button
+              onClick={() => setSearchParams({ tipo: "rotina" })}
+              class={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                filtroTipo() === "rotina" ? "bg-zinc-800 text-zinc-100 font-semibold" : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              Rotinas
             </button>
             <button
               onClick={() => setSearchParams({ tipo: "task" })}
@@ -921,6 +1074,28 @@ export const HistoricoView: Component = () => {
                 )}
               </For>
             </select>
+          </div>
+
+          {/* Busca textual (título, agente, id, fluxo) */}
+          <div class="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-xs">
+            <Search size={12} class="text-zinc-400 flex-shrink-0" />
+            <input
+              type="text"
+              placeholder="Buscar título, agente, id…"
+              class="bg-transparent text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none w-36 sm:w-52"
+              value={termoBusca()}
+              onInput={(e) => aoDigitarBusca(e.currentTarget.value)}
+            />
+            <Show when={termoBusca()}>
+              <button
+                type="button"
+                onClick={() => aoDigitarBusca("")}
+                class="text-zinc-500 hover:text-zinc-200 cursor-pointer"
+                title="Limpar busca"
+              >
+                <X size={12} />
+              </button>
+            </Show>
           </div>
 
           {/* Badge Tempo Real */}
@@ -1037,7 +1212,7 @@ export const HistoricoView: Component = () => {
       <div class="flex-1 overflow-y-auto min-h-0 scrollbar-thin">
         <div class="space-y-2.5 pb-4">
           <For
-            each={itensFiltrados()}
+            each={itensPaginados()}
             fallback={
               <div class="py-16 text-center text-xs text-zinc-500">
                 Nenhum registro encontrado para os filtros selecionados.
@@ -1120,7 +1295,7 @@ export const HistoricoView: Component = () => {
                           <div>US$ {Number(item.custo_usd).toFixed(4)}</div>
                         ) : null}
                         <div class="text-[10px] text-zinc-500">
-                          {item.quando ? new Date(item.quando).toLocaleTimeString("pt-BR") : ""}
+                          {item.quando ? fmtHora(item.quando) : ""}
                         </div>
                       </div>
 
@@ -1211,6 +1386,440 @@ export const HistoricoView: Component = () => {
         </div>
       </div>
 
+      {/* Paginação — lista finita do mais recente ao mais velho */}
+      <div class="flex items-center justify-between gap-3 pt-1 text-xs text-zinc-400 flex-shrink-0 flex-wrap">
+        <span class="font-mono text-[11px]">
+          Mostrando {faixaAtual()} de {itensOrdenados().length} · mais recentes primeiro
+        </span>
+        <div class="flex items-center gap-2 flex-wrap">
+          <label class="text-[11px] text-zinc-500 font-mono">por pág:</label>
+          <select
+            class="bg-zinc-900 border border-zinc-800 rounded-lg px-1.5 py-1 text-xs text-zinc-300 focus:outline-none cursor-pointer"
+            value={porPagina()}
+            onChange={(e) => {
+              setPorPagina(Number(e.currentTarget.value) || 25);
+              setPagina(1);
+            }}
+          >
+            <option value="10" class="bg-zinc-900">10</option>
+            <option value="25" class="bg-zinc-900">25</option>
+            <option value="50" class="bg-zinc-900">50</option>
+            <option value="100" class="bg-zinc-900">100</option>
+          </select>
+          <button
+            type="button"
+            disabled={paginaAtual() <= 1}
+            onClick={() => setPagina(paginaAtual() - 1)}
+            class="px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 hover:text-zinc-100 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+          >
+            ‹ Anterior
+          </button>
+          <span class="font-mono text-[11px] text-zinc-400">
+            pág {paginaAtual()}/{totalPaginas()}
+          </span>
+          <button
+            type="button"
+            disabled={paginaAtual() >= totalPaginas()}
+            onClick={() => setPagina(paginaAtual() + 1)}
+            class="px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 hover:text-zinc-100 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+          >
+            Próxima ›
+          </button>
+        </div>
+      </div>
+
+      {/* Modal padrão de Task: instrução, comentários e execuções vinculadas */}
+      <Show when={taskModal()}>
+        <div class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50" onClick={(e) => { if (e.target === e.currentTarget) fecharTask(); }}>
+          <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-3xl w-full p-4 sm:p-5 space-y-4 shadow-2xl max-h-[92vh] flex flex-col">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 pb-3 flex-shrink-0">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  {badgeTipo("task")}
+                  <h2 class="text-sm font-bold text-zinc-100 truncate">
+                    {taskModal()!.task?.titulo || "Carregando tarefa…"}
+                  </h2>
+                </div>
+                <div class="text-[11px] text-zinc-400 font-mono mt-0.5">
+                  {taskModal()!.task ? (
+                    <><Show
+                      when={taskModal()!.task.responsavel}
+                      fallback={<span>sem responsável</span>}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => abrirAgente(taskModal()!.task.responsavel)}
+                        class="hover:text-emerald-300 hover:underline cursor-pointer"
+                        title={`Abrir ${taskModal()!.task.responsavel}`}
+                      >
+                        @{taskModal()!.task.responsavel}
+                      </button>
+                    </Show><span> · </span><span class="capitalize">{taskModal()!.task.coluna}</span><span> · </span><span>{taskModal()!.task.id}</span></>
+                  ) : (
+                    <span>buscando dados da tarefa…</span>
+                  )}
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <Show when={taskModal()!.task}>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      const id = taskModal()!.task.id;
+                      fecharTask();
+                      navigate(`/tasks?task=${encodeURIComponent(id)}`);
+                    }}
+                    title="Abrir no quadro de Tasks"
+                  >
+                    <ExternalLink size={13} class="mr-1" /> Quadro
+                  </Button>
+                </Show>
+                <IconButton size="xs" variant="ghost" onClick={fecharTask} title="Fechar (ESC)">
+                  <X size={16} />
+                </IconButton>
+              </div>
+            </div>
+
+            <Show when={taskModal()!.carregando}>
+              <div class="py-12 text-center text-xs text-zinc-400">
+                <RefreshCw size={18} class="animate-spin mx-auto mb-2 text-purple-400" />
+                Carregando tarefa, comentários e execuções…
+              </div>
+            </Show>
+
+            <Show when={!taskModal()!.carregando && !taskModal()!.task}>
+              <div class="py-12 text-center text-xs text-zinc-500">
+                Tarefa não encontrada neste workspace.
+              </div>
+            </Show>
+
+            <Show when={!taskModal()!.carregando && taskModal()!.task}>
+              <div class="flex-1 overflow-y-auto min-h-0 space-y-4 scrollbar-thin pr-1">
+                <Show when={taskModal()!.task.descricao}>
+                  <div class="text-xs bg-zinc-950/70 border border-zinc-800/80 rounded-lg px-2.5 py-2 text-zinc-300 leading-relaxed select-text">
+                    <span class="text-[10px] uppercase font-mono font-bold tracking-wider text-zinc-500 block mb-0.5">
+                      Instrução:
+                    </span>
+                    <span class="whitespace-pre-wrap">{taskModal()!.task.descricao}</span>
+                  </div>
+                </Show>
+
+                <div class="space-y-2">
+                  <div class="text-[11px] font-semibold text-zinc-300 flex items-center gap-1.5">
+                    <Terminal size={12} class="text-emerald-400" /> Execuções do agente nesta task
+                    <Show when={taskModal()!.execs.length > 0}>
+                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                        {taskModal()!.execs.length}
+                      </span>
+                    </Show>
+                  </div>
+                  <Show
+                    when={taskModal()!.execs.length > 0}
+                    fallback={<div class="text-[11px] text-zinc-500 py-1">Nenhuma execução vinculada — clique em Executar na página da task para gerar a primeira.</div>}
+                  >
+                    <For each={taskModal()!.execs}>
+                      {(ex) => (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            fecharTask();
+                            setSearchParams({ run: ex.id });
+                          }}
+                          class="w-full text-left p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/70 hover:border-zinc-600 cursor-pointer flex items-center justify-between gap-2 transition-colors"
+                          title={`Abrir chat da execução ${ex.id}`}
+                        >
+                          <div class="min-w-0">
+                            <div class="flex items-center gap-1.5">
+                              <span class={`h-2 w-2 rounded-full flex-shrink-0 ${ex.status === "concluido" || ex.status === "feito" ? "bg-emerald-400" : ex.status === "falhou" ? "bg-rose-400" : ex.status === "executando" ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"}`} />
+                              <span role="link" tabindex="0" onClick={(e) => { e.stopPropagation(); abrirAgente(ex.agente); }} onKeyDown={(e) => { if (e.key === "Enter") abrirAgente(ex.agente); }} class="font-mono font-semibold text-zinc-200 text-[11px] hover:text-emerald-300 hover:underline cursor-pointer" title={`Abrir ${ex.agente}`}>@{ex.agente}</span>
+                              <span class="text-[10px] text-zinc-500 font-mono truncate">{ex.id}</span>
+                            </div>
+                            <div class="text-[10px] text-zinc-500 font-mono mt-0.5">
+                              {ex.status}{ex.duracao_ms ? ` · ${(ex.duracao_ms / 1000).toFixed(1)}s` : ""}{ex.inicio ? ` · ${fmtHora(ex.inicio)}` : ""}
+                            </div>
+                          </div>
+                          <span class="text-[10px] font-mono text-zinc-500 flex-shrink-0">abrir chat →</span>
+                        </button>
+                      )}
+                    </For>
+                  </Show>
+                </div>
+
+                <div class="space-y-2">
+                  <div class="text-[11px] font-semibold text-zinc-300 flex items-center gap-1.5">
+                    <MessageSquare size={12} class="text-zinc-400" /> Comentários & Handoffs
+                  </div>
+                  <Show
+                    when={taskModal()!.msgs.length > 0}
+                    fallback={<div class="text-[11px] text-zinc-500 py-1">Nenhum comentário registrado ainda.</div>}
+                  >
+                    <For each={taskModal()!.msgs}>
+                      {(m) => (
+                        <div class="p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/70 text-xs space-y-1">
+                          <div class="flex items-center justify-between text-[10px] text-zinc-500">
+                            <span class="font-semibold text-zinc-300 font-mono">@{m.autor} · {m.tipo}</span>
+                            <span>{m.criado_em ? fmtHora(m.criado_em) : ""}</span>
+                          </div>
+                          <p class="text-zinc-300 leading-relaxed text-[11px] whitespace-pre-wrap">{m.corpo}</p>
+                        </div>
+                      )}
+                    </For>
+                  </Show>
+                </div>
+              </div>
+            </Show>
+
+            <div class="pt-2 border-t border-zinc-800/80 flex justify-end flex-shrink-0">
+              <Button size="sm" variant="secondary" onClick={fecharTask}>
+                Fechar
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      {/* Modal padrão de Rotina / Conversa: mesma casca, sem navegar para fora */}
+      <Show when={infoModal()}>
+        <div class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50" onClick={(e) => { if (e.target === e.currentTarget) fecharInfo(); }}>
+          <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-3xl w-full p-4 sm:p-5 space-y-4 shadow-2xl max-h-[92vh] flex flex-col">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 pb-3 flex-shrink-0">
+              <div class="min-w-0">
+                <Show
+                  when={infoModal()!.kind === "rotina"}
+                  fallback={
+                    <div class="flex items-center gap-2">
+                      {badgeTipo("conversa")}
+                      <h2 class="text-sm font-bold text-zinc-100 truncate">
+                        {(infoModal() as any).item?.titulo || "Conversa"}
+                      </h2>
+                    </div>
+                  }
+                >
+                  <div class="flex items-center gap-2">
+                    {badgeTipo("rotina")}
+                    <h2 class="text-sm font-bold text-zinc-100 truncate">
+                      {(infoModal() as any).job?.nome || "Carregando rotina…"}
+                    </h2>
+                  </div>
+                </Show>
+                <div class="text-[11px] text-zinc-400 font-mono mt-0.5">
+                  <Show
+                    when={infoModal()!.kind === "rotina"}
+                    fallback={<><button
+                      type="button"
+                      onClick={() => abrirAgente((infoModal() as any).item?.agente)}
+                      class="hover:text-emerald-300 hover:underline cursor-pointer"
+                      title={`Abrir ${(infoModal() as any).item?.agente}`}
+                    >
+                      @{(infoModal() as any).item?.agente}
+                    </button><span> · {(infoModal() as any).item?.id}</span></>}
+                  >
+                    <span>
+                      {(infoModal() as any).job ? (
+                        <><span>@rotina</span><span> · </span><span>{(infoModal() as any).job.ativo ? "ativa" : "pausada"}</span><span> · </span><span>{(infoModal() as any).job.id}</span></>
+                      ) : "buscando dados do agendamento…"}
+                    </span>
+                  </Show>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <Show when={infoModal()!.kind === "rotina" && (infoModal() as any).job}>
+                  <Button size="xs" variant="ghost" onClick={() => navigate("/agenda")} title="Abrir agenda 24h">
+                    <ExternalLink size={13} class="mr-1" /> Agenda
+                  </Button>
+                </Show>
+                <Show when={infoModal()!.kind === "conversa"}>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      const id = (infoModal() as any).item.id;
+                      fecharInfo();
+                      navigate(`/secretario?sessao=${encodeURIComponent(id)}`);
+                    }}
+                    title="Continuar esta conversa no Secretário"
+                  >
+                    <MessageSquare size={13} class="mr-1" /> Continuar chat →
+                  </Button>
+                </Show>
+                <IconButton size="xs" variant="ghost" onClick={fecharInfo} title="Fechar">
+                  <X size={16} />
+                </IconButton>
+              </div>
+            </div>
+
+            <Show when={(infoModal() as any).carregando}>
+              <div class="py-12 text-center text-xs text-zinc-400">
+                <RefreshCw size={18} class="animate-spin mx-auto mb-2 text-amber-400" />
+                Carregando detalhes…
+              </div>
+            </Show>
+
+            <Show when={!(infoModal() as any).carregando}>
+              <div class="flex-1 overflow-y-auto min-h-0 space-y-4 scrollbar-thin pr-1">
+                {/* ---- ROTINA ---- */}
+                <Show when={infoModal()!.kind === "rotina"}>
+                  <Show
+                    when={(infoModal() as any).job}
+                    fallback={<div class="py-8 text-center text-xs text-zinc-500">Agendamento não encontrado (pode ter sido removido).</div>}
+                  >
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                      <div class="p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800">
+                        <span class="text-[10px] uppercase font-mono font-bold text-zinc-500 block mb-0.5">Cron</span>
+                        <span class="font-mono text-zinc-200">{(infoModal() as any).job.agenda?.valor || (infoModal() as any).job.agenda?.tipo || "—"}</span>
+                      </div>
+                      <div class="p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800">
+                        <span class="text-[10px] uppercase font-mono font-bold text-zinc-500 block mb-0.5">Última exec</span>
+                        <span class="font-mono text-zinc-200">{fmtDataHora((infoModal() as any).job.ultima_exec)}</span>
+                      </div>
+                      <div class={`p-2.5 rounded-lg border ${(infoModal() as any).job.proxima_exec && jaPassou((infoModal() as any).job.proxima_exec) ? "bg-amber-950/40 border-amber-500/50" : "bg-zinc-950/60 border-zinc-800"}`}>
+                        <span class="text-[10px] uppercase font-mono font-bold text-zinc-500 block mb-0.5">
+                          Próxima exec <span class="text-zinc-600 normal-case">({fuso()})</span>
+                        </span>
+                        <span class="font-mono text-zinc-200">{fmtDataHora((infoModal() as any).job.proxima_exec)}</span>
+                        <Show when={(infoModal() as any).job.proxima_exec && jaPassou((infoModal() as any).job.proxima_exec)}>
+                          <span class="block mt-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 w-fit">
+                            atrasada {distanciaHumana((infoModal() as any).job.proxima_exec)} — daemon parado?
+                          </span>
+                        </Show>
+                      </div>
+                    </div>
+                    <div class="text-xs bg-zinc-950/60 border border-zinc-800 rounded-lg px-2.5 py-2">
+                      <span class="text-[10px] uppercase font-mono font-bold tracking-wider text-zinc-500 block mb-0.5">
+                        Como executa · {(infoModal() as any).job && tipoJob((infoModal() as any).job) === "script" ? "script direto (sem agente)" : tipoJob((infoModal() as any).job)}
+                      </span>
+                      <code class="font-mono text-[11px] text-zinc-300 break-all select-text">{(infoModal() as any).job && comandoJob((infoModal() as any).job)}</code>
+                      <Show when={(infoModal() as any).job && tipoJob((infoModal() as any).job) === "script"}>
+                        <p class="text-[11px] text-zinc-500 mt-1 font-sans">
+                          Job de script: roda o comando acima e não gera execução de agente — o rastro está nos disparos do agendador abaixo.
+                        </p>
+                      </Show>
+                    </div>
+                    <div class="space-y-2">
+                      <div class="text-[11px] font-semibold text-zinc-300 flex items-center gap-1.5">
+                        <Terminal size={12} class="text-emerald-400" /> Execuções desta rotina
+                        <Show when={(infoModal() as any).execs.length > 0}>
+                          <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                            {(infoModal() as any).execs.length}
+                          </span>
+                        </Show>
+                      </div>
+                      <Show
+                        when={(infoModal() as any).execs.length > 0}
+                        fallback={<div class="text-[11px] text-zinc-500 py-1">Nenhuma execução registrada para este agendamento ainda.</div>}
+                      >
+                        <For each={(infoModal() as any).execs}>
+                          {(ex: ItemHistorico) => (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                fecharInfo();
+                                setSearchParams({ run: ex.id });
+                              }}
+                              class="w-full text-left p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/70 hover:border-zinc-600 cursor-pointer flex items-center justify-between gap-2 transition-colors"
+                              title={`Abrir chat da execução ${ex.id}`}
+                            >
+                              <div class="min-w-0">
+                                <div class="flex items-center gap-1.5">
+                                  <span class={`h-2 w-2 rounded-full flex-shrink-0 ${ex.status === "concluido" ? "bg-emerald-400" : ex.status === "falhou" ? "bg-rose-400" : ex.status === "executando" ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"}`} />
+                                  <span role="link" tabindex="0" onClick={(e) => { e.stopPropagation(); abrirAgente(ex.agente); }} onKeyDown={(e) => { if (e.key === "Enter") abrirAgente(ex.agente); }} class="font-mono font-semibold text-zinc-200 text-[11px] hover:text-emerald-300 hover:underline cursor-pointer" title={`Abrir ${ex.agente}`}>@{ex.agente}</span>
+                                  <span class="text-[10px] text-zinc-500 font-mono truncate">{ex.id}</span>
+                                </div>
+                                <div class="text-[10px] text-zinc-500 font-mono mt-0.5">
+                                  {ex.status}{ex.duracao_ms ? ` · ${(ex.duracao_ms / 1000).toFixed(1)}s` : ""}{ex.quando ? ` · ${fmtHora(ex.quando)}` : ""}
+                                </div>
+                              </div>
+                              <span class="text-[10px] font-mono text-zinc-500 flex-shrink-0">abrir chat →</span>
+                            </button>
+                          )}
+                        </For>
+                      </Show>
+                    </div>
+                  </Show>
+                </Show>
+
+                <Show when={infoModal()!.kind === "rotina" && (infoModal() as any).job}>
+                  <div class="space-y-2">
+                    <div class="text-[11px] font-semibold text-zinc-300 flex items-center gap-1.5">
+                      <Clock size={12} class="text-amber-400" /> Disparos do agendador
+                      <Show when={(infoModal() as any).runs.length > 0}>
+                        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                          {(infoModal() as any).runs.length}
+                        </span>
+                      </Show>
+                    </div>
+                    <Show
+                      when={(infoModal() as any).runs.length > 0}
+                      fallback={<div class="text-[11px] text-zinc-500 py-1">Nenhum disparo registrado para este agendamento.</div>}
+                    >
+                      <For each={(infoModal() as any).runs.slice(0, 10)}>
+                        {(r: any) => (
+                          <div class="p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/70 text-xs flex items-center justify-between gap-2">
+                            <div class="min-w-0">
+                              <div class="font-mono text-[11px] text-zinc-200">
+                                {r.iniciado_em ? fmtDataHora(r.iniciado_em) : `#${r.id}`}
+                              </div>
+                              <Show when={r.resultado}>
+                                <div class="text-[10px] text-zinc-500 font-mono truncate">{String(r.resultado).slice(0, 120)}</div>
+                              </Show>
+                              <Show when={r.erro}>
+                                <div class="text-[10px] text-rose-300 font-mono truncate">{String(r.erro).slice(0, 160)}</div>
+                              </Show>
+                            </div>
+                            <span class={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold flex-shrink-0 ${
+                              r.pulado
+                                ? "bg-zinc-800 text-zinc-400 border border-zinc-700"
+                                : r.erro
+                                ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                                : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                            }`}>
+                              {r.pulado ? "pulado" : r.erro ? "erro" : "ok"}
+                            </span>
+                          </div>
+                        )}
+                      </For>
+                    </Show>
+                  </div>
+                </Show>
+
+                {/* ---- CONVERSA ---- */}                <Show when={infoModal()!.kind === "conversa"}>
+                  <Show
+                    when={(infoModal() as any).msgs.length > 0}
+                    fallback={<div class="py-8 text-center text-xs text-zinc-500">Nenhuma mensagem nesta conversa.</div>}
+                  >
+                    <div class="space-y-2">
+                      <For each={(infoModal() as any).msgs}>
+                        {(m: { role: string; content: string }) => (
+                          <div class={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                            <div class={`max-w-[85%] p-2.5 rounded-xl text-xs leading-relaxed whitespace-pre-wrap select-text ${
+                              m.role === "user"
+                                ? "bg-zinc-800/80 border border-zinc-700/60 text-zinc-100"
+                                : "bg-transparent border border-zinc-800 text-zinc-300"
+                            }`}>
+                              <div class={`text-[10px] font-mono mb-1 ${m.role === "user" ? "text-zinc-400" : "text-emerald-400"}`}>
+                                {m.role === "user" ? "Você" : `@${(infoModal() as any).item?.agente || "secretario"}`}
+                              </div>
+                              {m.content}
+                            </div>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </Show>
+              </div>
+            </Show>
+
+            <div class="pt-2 border-t border-zinc-800/80 flex justify-end flex-shrink-0">
+              <Button size="sm" variant="secondary" onClick={fecharInfo}>
+                Fechar
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
       {/* Modal / Visualizador de Log */}
       <Show when={runSelecionado()}>
         <div class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50" onClick={(e) => { if (e.target === e.currentTarget) fecharLog(); }}>
@@ -1225,11 +1834,25 @@ export const HistoricoView: Component = () => {
                   >
                     <GitBranch size={17} class="text-indigo-400" />
                   </Show>
-                  <h2 class="text-sm font-bold text-zinc-100 font-mono truncate">
-                    {(runSelecionado() as ItemHistorico)?.tipo === "fluxo"
-                      ? `Fluxo: ${(runSelecionado() as ItemHistorico)?.flow || runSelecionado()!.id}`
-                      : `Execução: ${runSelecionado()!.id}`}
-                  </h2>
+                  <Show
+                    when={(runSelecionado() as ItemHistorico)?.tipo === "fluxo"}
+                    fallback={
+                      <h2 class="text-sm font-bold text-zinc-100 font-mono truncate">
+                        Execução: {runSelecionado()!.id}
+                      </h2>
+                    }
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        navigate(`/fluxos?fluxo=${encodeURIComponent((runSelecionado() as ItemHistorico)?.flow || runSelecionado()!.id)}`)
+                      }
+                      class="text-sm font-bold text-zinc-100 font-mono truncate hover:text-indigo-300 hover:underline cursor-pointer text-left"
+                      title="Abrir fluxo no Studio"
+                    >
+                      Fluxo: {(runSelecionado() as ItemHistorico)?.flow || runSelecionado()!.id}
+                    </button>
+                  </Show>
                   <Show when={runSelecionado()!.status === "executando"}>
                     <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse">
                       STREAMING AO VIVO
@@ -1237,7 +1860,14 @@ export const HistoricoView: Component = () => {
                   </Show>
                 </div>
                 <div class="text-[11px] text-zinc-400 font-mono mt-0.5 flex items-center gap-2">
-                  <span>@{runSelecionado()!.agente}</span>
+                  <button
+                    type="button"
+                    onClick={() => abrirAgente(runSelecionado()!.agente)}
+                    class="hover:text-emerald-300 hover:underline cursor-pointer"
+                    title={`Abrir ${runSelecionado()!.agente}`}
+                  >
+                    @{runSelecionado()!.agente}
+                  </button>
                   <span>·</span>
                   <span
                     class={`capitalize font-semibold ${

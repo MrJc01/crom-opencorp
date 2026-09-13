@@ -95,6 +95,77 @@ export function proximoCron(expr: string, de: Date): Date {
   throw new SchedulerError(`cron "${expr}" não tem ocorrência em ~1 ano`);
 }
 
+/** Fuso padrão quando nenhum está configurado ou o configurado é inválido. */
+export const FUSO_PADRAO = "America/Sao_Paulo";
+
+/** true se o IANA timezone é aceito pelo runtime. */
+export function fusoValido(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Offset wall-clock − UTC em ms para um instante num fuso (via Intl). */
+function offsetFusoMs(tz: string, d: Date): number {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour12: false,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+  });
+  const p: Record<string, string> = {};
+  for (const x of dtf.formatToParts(d)) p[x.type] = x.value;
+  const comoUTC = Date.UTC(+p["year"]!, +p["month"]! - 1, +p["day"]!, (+p["hour"]!) % 24, +p["minute"]!, +p["second"]!);
+  return comoUTC - d.getTime();
+}
+
+/**
+ * Próxima ocorrência de um cron interpretada no relógio de parede do fuso
+ * (ex.: "0 9 * * *" com America/Sao_Paulo = 09:00 BRT, não 09:00 UTC).
+ * Caminha em passos de 1min UTC avaliando os campos no horário local do fuso;
+ * o offset é ressincronizado a cada virada de dia (transições DST intradiárias
+ * podem deslocar um disparo em até 1h nos 2 dias de transição/ano — limitação
+ * documentada, mesma classe do node-cron sem tz).
+ */
+export function proximoCronTz(expr: string, de: Date, tz: string): Date {
+  validarCron(expr);
+  if (!fusoValido(tz)) throw new SchedulerError(`fuso horário inválido: "${tz}" (use IANA, ex.: America/Sao_Paulo)`);
+  const [mm, hh, dom, mes, dow] = expr.trim().split(/\s+/).map((s, i) => {
+    const faixas: [number, number][] = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 6]];
+    return campoCron(s, faixas[i]![0], faixas[i]![1], ["minuto", "hora", "dia-do-mês", "mês", "dia-da-semana"][i]!);
+  });
+  let t = Math.ceil((de.getTime() + 1) / 60000) * 60000;
+  let off = offsetFusoMs(tz, new Date(t));
+  let ultimoDia: number | null = null;
+  for (let i = 0; i < 527040; i++) {
+    let parede = new Date(t + off);
+    const dia = parede.getUTCDate();
+    if (ultimoDia !== null && dia !== ultimoDia) {
+      off = offsetFusoMs(tz, new Date(t));
+      parede = new Date(t + off);
+    }
+    ultimoDia = parede.getUTCDate();
+    if (
+      mm(parede.getUTCMinutes()) &&
+      hh(parede.getUTCHours()) &&
+      dom(parede.getUTCDate()) &&
+      mes(parede.getUTCMonth() + 1) &&
+      dow(parede.getUTCDay())
+    ) {
+      return new Date(t);
+    }
+    t += 60000;
+  }
+  throw new SchedulerError(`cron "${expr}" não tem ocorrência em ~1 ano`);
+}
+
 function gerarId(): string {
   return `sch-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
@@ -327,8 +398,8 @@ export class Scheduler {
     };
   }
 
-  private calcularProxima(agenda: Agenda, de: Date): Date {
-    if (agenda.tipo === "cron") return proximoCron(agenda.valor, de);
+  private async calcularProxima(agenda: Agenda, de: Date, workspaceId?: string): Promise<Date> {
+    if (agenda.tipo === "cron") return proximoCronTz(agenda.valor, de, await this.fusoDoJob(workspaceId));
     if (agenda.tipo === "intervalo_min") {
       if (agenda.valor < 1) throw new SchedulerError("intervalo_min deve ser >= 1");
       return new Date(de.getTime() + agenda.valor * 60_000);
@@ -336,6 +407,33 @@ export class Scheduler {
     const data = new Date(agenda.valor);
     if (Number.isNaN(data.getTime())) throw new SchedulerError(`data_unica inválida: "${agenda.valor}"`);
     return data;
+  }
+
+  /**
+   * Fuso do job: settings.scheduler.timezone global, com override por workspace
+   * (scheduler.timezone no escopo workspace). Inválido/ausente → FUSO_PADRAO.
+   */
+  private async fusoDoJob(workspaceId?: string): Promise<string> {
+    try {
+      const store = new SettingsStore({ homeDir: this.homeDir });
+      const { settings } = await store.resolve();
+      let tz = typeof settings.scheduler.timezone === "string" && settings.scheduler.timezone
+        ? settings.scheduler.timezone
+        : FUSO_PADRAO;
+      if (workspaceId) {
+        try {
+          const { WorkspaceManager } = await import("./workspace-manager.js");
+          const wm = new WorkspaceManager({ homeDir: this.homeDir });
+          const ws = await wm.resolver(workspaceId);
+          const rw = await store.resolve({ workspaceDir: ws.path });
+          const tw = (rw.settings as unknown as { scheduler?: { timezone?: unknown } })?.scheduler?.timezone;
+          if (typeof tw === "string" && tw) tz = tw;
+        } catch { /* sem override por workspace */ }
+      }
+      return fusoValido(tz) ? tz : FUSO_PADRAO;
+    } catch {
+      return FUSO_PADRAO;
+    }
   }
 
   private validarAgenda(agenda: Agenda): void {
@@ -420,7 +518,7 @@ export class Scheduler {
       ativo: 1,
       graca_min: dados.graca_min ?? 5,
       ultima_exec: null,
-      proxima_exec: this.calcularProxima(dados.agenda, agora).toISOString(),
+      proxima_exec: (await this.calcularProxima(dados.agenda, agora, dados.workspace)).toISOString(),
       criado_em: agora.toISOString(),
     };
     (await this.banco())
@@ -470,7 +568,7 @@ export class Scheduler {
     const args = dados.args ?? atual.args;
     if (!Array.isArray(args) || args.length === 0) throw new SchedulerError("args obrigatório — comando opencorp a executar");
     this.validarArgsJob(args);
-    const proxima = this.calcularProxima(agenda, this.agora()).toISOString();
+    const proxima = (await this.calcularProxima(agenda, this.agora(), atual.workspace)).toISOString();
     (await this.banco())
       .prepare("UPDATE jobs SET nome = ?, agenda_tipo = ?, agenda_valor = ?, args = ?, graca_min = ?, proxima_exec = ? WHERE id = ?")
       .run(nome, agenda.tipo, String(agenda.valor), JSON.stringify(args), dados.graca_min ?? atual.graca_min, proxima, id);
@@ -480,7 +578,7 @@ export class Scheduler {
   async retomar(id: string): Promise<Job> {
     (await this.banco()).prepare("UPDATE jobs SET ativo = 1 WHERE id = ?").run(id);
     const job = await this.obter(id);
-    const proxima = this.calcularProxima(job.agenda, this.agora()).toISOString();
+    const proxima = (await this.calcularProxima(job.agenda, this.agora(), job.workspace)).toISOString();
     (await this.banco()).prepare("UPDATE jobs SET proxima_exec = ? WHERE id = ?").run(proxima, id);
     return this.obter(id);
   }
@@ -649,7 +747,7 @@ export class Scheduler {
           // pular com CLAIM atômico: só quem vencer o UPDATE reagenda (sem corrida entre daemons)
           // data_unica vencida desativa — evita loop eterno de skip
           const desativarSkip = job.agenda.tipo === "data_unica";
-          const proximaSkip = desativarSkip ? null : this.calcularProxima(job.agenda, agora).toISOString();
+          const proximaSkip = desativarSkip ? null : (await this.calcularProxima(job.agenda, agora, job.workspace)).toISOString();
           const claimSkip = (await this.banco())
             .prepare("UPDATE jobs SET proxima_exec = ?, ativo = ? WHERE id = ? AND proxima_exec = ?")
             .run(proximaSkip, desativarSkip ? 0 : 1, job.id, job.proxima_exec);
@@ -664,7 +762,7 @@ export class Scheduler {
       // CLAIM atômico ANTES de executar: o UPDATE casa só se proxima_exec ainda é a prevista —
       // com dois daemons, apenas um ganha o direito de executar (sem execução dupla)
       const desativar = job.agenda.tipo === "data_unica";
-      const proxima = desativar ? null : this.calcularProxima(job.agenda, agora).toISOString();
+      const proxima = desativar ? null : (await this.calcularProxima(job.agenda, agora, job.workspace)).toISOString();
       const claim = (await this.banco())
         .prepare("UPDATE jobs SET ultima_exec = ?, proxima_exec = ?, ativo = ? WHERE id = ? AND proxima_exec = ?")
         .run(agora.toISOString(), proxima, desativar ? 0 : 1, job.id, job.proxima_exec);

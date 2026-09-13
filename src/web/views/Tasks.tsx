@@ -1,5 +1,5 @@
 import { type Component, createSignal, onMount, onCleanup, createEffect, For, Show } from "solid-js";
-import { useSearchParams } from "@solidjs/router";
+import { useSearchParams, useNavigate } from "@solidjs/router";
 import {
   Plus,
   Trash2,
@@ -16,6 +16,7 @@ import {
   Filter,
   Play,
   Bot,
+  History,
   Lock,
   Unlock,
   Zap,
@@ -45,7 +46,17 @@ export interface Task {
   criado_em?: string;
 }
 
+export interface ExecucaoVinculada {
+  id: string;
+  agente: string;
+  inicio: string;
+  status: string;
+  duracao_ms?: number;
+  modelo?: string;
+}
+
 export const TasksView: Component = () => {
+  const navigate = useNavigate();
   const [tasks, setTasks] = createSignal<Task[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
   const [agentes, setAgentes] = createSignal<any[]>([]);
@@ -72,6 +83,9 @@ export const TasksView: Component = () => {
   const [novoComentario, setNovoComentario] = createSignal("");
   const [enviandoComentario, setEnviandoComentario] = createSignal(false);
   const [executandoTask, setExecutandoTask] = createSignal(false);
+  // Execuções do agente vinculadas à task (chat de cada execução no histórico)
+  const [execsTask, setExecsTask] = createSignal<ExecucaoVinculada[]>([]);
+  const [carregandoExecs, setCarregandoExecs] = createSignal(false);
 
   const carregarTasks = async () => {
     try {
@@ -92,6 +106,15 @@ export const TasksView: Component = () => {
     } catch {
       setMensagens([]);
     }
+    setCarregandoExecs(true);
+    try {
+      const execs = await fetchApi<ExecucaoVinculada[]>(`/tasks/${encodeURIComponent(task.id)}/execucoes`).catch(() => []);
+      setExecsTask(Array.isArray(execs) ? execs : []);
+    } catch {
+      setExecsTask([]);
+    } finally {
+      setCarregandoExecs(false);
+    }
   };
 
   const abrirDetalhesTask = (task: Task) => {
@@ -101,6 +124,7 @@ export const TasksView: Component = () => {
   const fecharDetalhes = () => {
     setTaskSelecionada(null);
     setMensagens([]);
+    setExecsTask([]);
     setSearchParams({ task: undefined });
   };
 
@@ -119,6 +143,7 @@ export const TasksView: Component = () => {
     } else {
       setTaskSelecionada(null);
       setMensagens([]);
+      setExecsTask([]);
     }
   });
 
@@ -241,10 +266,11 @@ export const TasksView: Component = () => {
         ordem = `${ordem}\n\n[Instrução do Operador]:\n${instrucaoExtra.trim()}`;
       }
 
-      await fetchApi(`/agents/${encodeURIComponent(agenteId)}/run`, {
+      const disp = await fetchApi<{ exec_id?: string }>(`/agents/${encodeURIComponent(agenteId)}/run`, {
         method: "POST",
         body: JSON.stringify({ ordem }),
       });
+      const execId = disp?.exec_id;
 
       // Se estiver no backlog ou bloqueado, move automaticamente para fazendo
       if (task.coluna === "backlog" || task.coluna === "bloqueado") {
@@ -258,22 +284,26 @@ export const TasksView: Component = () => {
         }
       }
 
-      // Registra mensagem no chat da task
+      // Registra mensagem no chat da task (tipo "sistema": "execucao" não existe
+      // no backend e era silenciosamente descartado — por isso o chat vivia vazio)
       await fetchApi(`/tasks/${encodeURIComponent(task.id)}/mensagens`, {
         method: "POST",
         body: JSON.stringify({
-          corpo: `[EXECUÇÃO INICIADA] Disparado agente @${agenteId} para trabalhar nesta tarefa.`,
+          corpo: `[EXECUÇÃO INICIADA] Disparado agente @${agenteId} para trabalhar nesta tarefa.${execId ? ` (exec ${execId})` : ""}`,
           autor: "sistema",
-          tipo: "execucao",
+          tipo: "sistema",
+          refs: execId ? [execId] : undefined,
         }),
       }).catch(() => {});
 
       if (taskSelecionada()?.id === task.id) {
         const msgs = await fetchApi<MensagemTask[]>(`/tasks/${encodeURIComponent(task.id)}/mensagens`).catch(() => []);
         setMensagens(msgs || []);
+        const execs = await fetchApi<ExecucaoVinculada[]>(`/tasks/${encodeURIComponent(task.id)}/execucoes`).catch(() => []);
+        setExecsTask(Array.isArray(execs) ? execs : []);
       }
 
-      showToast(`Execução da tarefa iniciada com @${agenteId}!`, "sucesso");
+      showToast(`Execução da tarefa iniciada com @${agenteId}!${execId ? ` (exec ${execId})` : ""}`, "sucesso");
     } catch (err: any) {
       showToast(`Erro ao executar tarefa: ${err.message}`, "erro");
     } finally {
@@ -653,6 +683,50 @@ export const TasksView: Component = () => {
                 <span class="capitalize font-semibold text-zinc-200">
                   {taskSelecionada()!.prioridade || "Média"}
                 </span>
+              </div>
+            </div>
+
+            {/* Execuções vinculadas — chat de cada execução do agente nesta task */}
+            <div class="space-y-2">
+              <h3 class="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+                <History size={13} class="text-zinc-400" /> Execuções vinculadas
+                <Show when={execsTask().length > 0}>
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                    {execsTask().length}
+                  </span>
+                </Show>
+              </h3>
+              <Show when={carregandoExecs()}>
+                <div class="text-[11px] text-zinc-500 py-2 text-center">Buscando execuções do agente…</div>
+              </Show>
+              <Show when={!carregandoExecs() && execsTask().length === 0}>
+                <div class="text-[11px] text-zinc-500 py-2 text-center">
+                  Nenhuma execução do agente vinculada a esta task ainda.
+                </div>
+              </Show>
+              <div class="space-y-1.5">
+                <For each={execsTask()}>
+                  {(ex) => (
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/historico?run=${encodeURIComponent(ex.id)}`)}
+                      class="w-full text-left p-2.5 rounded-lg bg-zinc-900/80 border border-zinc-800 hover:border-zinc-600 cursor-pointer flex items-center justify-between gap-2 transition-colors"
+                      title={`Abrir chat da execução ${ex.id}`}
+                    >
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-1.5">
+                          <span class={`h-2 w-2 rounded-full flex-shrink-0 ${ex.status === "concluido" || ex.status === "feito" ? "bg-emerald-400" : ex.status === "falhou" ? "bg-rose-400" : ex.status === "executando" ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"}`} />
+                          <span class="font-mono font-semibold text-zinc-200 text-[11px]">@{ex.agente}</span>
+                          <span class="text-[10px] text-zinc-500 font-mono truncate">{ex.id}</span>
+                        </div>
+                        <div class="text-[10px] text-zinc-500 font-mono mt-0.5">
+                          {ex.status}{ex.duracao_ms ? ` · ${(ex.duracao_ms / 1000).toFixed(1)}s` : ""}{ex.inicio ? ` · ${new Date(ex.inicio).toLocaleTimeString("pt-BR")}` : ""}
+                        </div>
+                      </div>
+                      <ArrowRight size={13} class="text-zinc-600 flex-shrink-0" />
+                    </button>
+                  )}
+                </For>
               </div>
             </div>
 
