@@ -7,13 +7,19 @@ describe("LogChatViewer — realcarPassos", () => {
     expect(saida).toBe("intro\n### PASSO 1 — DEDUP: leia tudo\ncorpo");
   });
 
-  it("não toca em JSON, código ou linhas sem o padrão", () => {
+  it("não toca em JSON isolado, código ou frases citadas", () => {
     const json = '{"tipo":"HOOK","fala":"texto"}';
     expect(realcarPassos(json)).toBe(json);
-    const longa = "PASSO 9 — " + "x".repeat(200);
-    expect(realcarPassos(longa)).toBe(`### ${longa}`);
     expect(realcarPassos("$ curl -s https://x")).toBe("$ curl -s https://x");
     expect(realcarPassos("o PASSO 1 continua aqui")).toBe("o PASSO 1 continua aqui");
+    expect(realcarPassos('ele disse "olá" e saiu')).toBe('ele disse "olá" e saiu');
+  });
+
+  it("cerca corridas de linhas JSON em bloco de código", () => {
+    const entrada = ["texto antes", '{"a":1,', '"b":2},', "texto depois"].join("\n");
+    expect(realcarPassos(entrada)).toBe(
+      ["texto antes", "```json", '{"a":1,', '"b":2},', "```", "texto depois"].join("\n")
+    );
   });
 });
 

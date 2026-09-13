@@ -205,10 +205,28 @@ export function parseExecutionLog(rawLog: string): LogChatParsed {
  * Só toca em linhas que são exatamente um cabeçalho (nunca em JSON/código).
  */
 export function realcarPassos(texto: string): string {
-  return texto
+  const comSecoes = texto
     .split("\n")
-    .map((l) => (/^PASSO \d+ — .+/.test(l.trim()) ? `### ${l.trim()}` : l))
-    .join("\n");
+    .map((l) => (/^PASSO \d+ — .+/.test(l.trim()) ? `### ${l.trim()}` : l));
+  // Agrupa corridas de linhas JSON (schema, cenas) em blocos de código —
+  // corridas de 2+ linhas; linhas isoladas e curl/comandos passam intactos.
+  const saida: string[] = [];
+  let bloco: string[] = [];
+  const ehJson = (l: string): boolean => /^[{}\[\]"]/.test(l.trim());
+  const descarrega = (): void => {
+    if (bloco.length >= 2) saida.push("```json", ...bloco, "```");
+    else saida.push(...bloco);
+    bloco = [];
+  };
+  for (const l of comSecoes) {
+    if (ehJson(l)) bloco.push(l);
+    else {
+      descarrega();
+      saida.push(l);
+    }
+  }
+  descarrega();
+  return saida.join("\n");
 }
 
 export function parseLogToMensagens(
