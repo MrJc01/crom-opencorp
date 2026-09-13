@@ -37,6 +37,7 @@ import { fetchApi, wsAtivo } from "../lib/context";
 import { carregarFuso, fmtDataHora, fmtHora, distanciaHumana, jaPassou, fuso } from "../lib/fuso";
 import { showToast } from "../ui/Toast";
 import { LogChatViewer } from "../components/chat/LogChatViewer";
+import { FlowChart } from "../components/chat/FlowChart";
 
 export interface FilhaHistorico {
   id: string;
@@ -72,6 +73,7 @@ export interface ItemHistorico {
 export interface NoFluxoInfo {
   id: string;
   tipo: string;
+  agente?: string | null;
   status: "ok" | "falhou" | "nao-executado" | "executando";
   exec_id: string | null;
 }
@@ -231,6 +233,23 @@ export const HistoricoView: Component = () => {
 
   // Estados de Fluxo (timeline por nó)
   const [nosFluxo, setNosFluxo] = createSignal<NoFluxoInfo[]>([]);
+  // Definição do fluxo aberto (arestas + agente por nó) — alimenta o fluxograma
+  const [defFluxo, setDefFluxo] = createSignal<{
+    id: string;
+    nos: Array<{ id: string; tipo: string; config?: { agente?: string } }>;
+    arestas: Array<{ de: string; para: string; rotulo?: string }>;
+  } | null>(null);
+
+  /** Cruza nós da execução com a definição: preenche o agente de cada nó. */
+  const enriquecerNos = (lista: NoFluxoInfo[]): NoFluxoInfo[] => {
+    const def = defFluxo();
+    if (!def) return lista;
+    const porId = new Map(def.nos.map((n) => [n.id, n]));
+    return lista.map((n) => {
+      const agente = porId.get(n.id)?.config?.agente;
+      return typeof agente === "string" && agente && !n.agente ? { ...n, agente } : n;
+    });
+  };
   const [contextoFinalFluxo, setContextoFinalFluxo] = createSignal<string>("");
   const [entradaFluxo, setEntradaFluxo] = createSignal<string>("");
   const [carregandoFluxo, setCarregandoFluxo] = createSignal(false);
@@ -386,13 +405,27 @@ export const HistoricoView: Component = () => {
       return;
     }
     if (!silencioso) setCarregandoFluxo(true);
+    // Definição do fluxo (arestas + agente por nó) — busca uma vez por flowId
+    if (defFluxo()?.id !== flowId) {
+      setDefFluxo(null);
+      try {
+        const def = await fetchApi<{
+          id: string;
+          nos?: Array<{ id: string; tipo: string; config?: { agente?: string } }>;
+          arestas?: Array<{ de: string; para: string; rotulo?: string }>;
+        }>(`/flows/${encodeURIComponent(flowId)}`);
+        if (def && Array.isArray(def.nos)) {
+          setDefFluxo({ id: def.id || flowId, nos: def.nos, arestas: Array.isArray(def.arestas) ? def.arestas : [] });
+        }
+      } catch {}
+    }
     try {
       const execs = await fetchApi<Array<{ execId: string; status: string; nos: NoFluxoInfo[]; contextoFinal: string; entrada?: string }>>(
         `/flows/${encodeURIComponent(flowId)}/execucoes`
       );
       const atual = (execs || []).find((e) => e.execId === runId) || (execs || [])[0];
       if (atual) {
-        setNosFluxo(atual.nos || []);
+        setNosFluxo(enriquecerNos(atual.nos || []));
         if (atual.contextoFinal) {
           setContextoFinalFluxo(atual.contextoFinal);
           if (logRun() === LOG_VAZIO || !logRun().trim()) setLogRun(atual.contextoFinal);
@@ -410,7 +443,7 @@ export const HistoricoView: Component = () => {
           `/registries/execucoes/${encodeURIComponent(runId)}`
         );
         const ex = reg?.meta?.extras || {};
-        if (Array.isArray(ex.nos) && (ex.nos as unknown[]).length > nosFluxo().length) setNosFluxo(ex.nos);
+        if (Array.isArray(ex.nos) && (ex.nos as unknown[]).length > nosFluxo().length) setNosFluxo(enriquecerNos(ex.nos));
         if (typeof ex.contexto_final === "string" && ex.contexto_final.trim() && !contextoFinalFluxo().trim()) {
           setContextoFinalFluxo(ex.contexto_final);
           if (logRun() === LOG_VAZIO) setLogRun(ex.contexto_final);
@@ -491,6 +524,7 @@ export const HistoricoView: Component = () => {
     // Reseta antes de buscar (evita vazar log/contexto do run anterior)
     setLogRun("Carregando log da execução...");
     setNosFluxo([]);
+    setDefFluxo(null);
     setContextoFinalFluxo((r as ItemHistorico).contexto_final || "");
     setEntradaFluxo((r as ItemHistorico).entrada || "");
 
@@ -619,6 +653,7 @@ export const HistoricoView: Component = () => {
     setAcoesRun([]);
     setAcaoAbertaId(null);
     setNosFluxo([]);
+    setDefFluxo(null);
     setContextoFinalFluxo("");
     setEntradaFluxo("");
     setCarregandoFluxo(false);
@@ -2100,51 +2135,14 @@ if (typeof document !== "undefined") {
                     </div>
                   </Show>
                   <Show when={!carregandoFluxo() && nosFluxo().length > 0}>
-                    <div class="space-y-2">
-                      <For each={nosFluxo()}>
-                        {(no, idx) => (
-                          <div class={`rounded-xl border text-xs p-3 flex items-center justify-between gap-3 ${
-                            no.status === "ok"
-                              ? "bg-zinc-900/60 border-zinc-800/80"
-                              : no.status === "falhou"
-                              ? "bg-rose-950/20 border-rose-900/50"
-                              : no.status === "executando"
-                              ? "bg-indigo-950/30 border-indigo-800/60"
-                              : "bg-zinc-950/60 border-zinc-800/60"
-                          }`}>
-                            <div class="flex items-center gap-2.5 min-w-0">
-                              <span class="text-zinc-500 font-mono text-[10px] w-6">#{String(idx() + 1).padStart(2, "0")}</span>
-                              {no.status === "ok" ? <CheckCircle2 size={14} class="text-emerald-400 flex-shrink-0" />
-                                : no.status === "falhou" ? <XCircle size={14} class="text-rose-400 flex-shrink-0" />
-                                : no.status === "executando" ? <RefreshCw size={14} class="text-indigo-400 animate-spin flex-shrink-0" />
-                                : <Clock size={14} class="text-zinc-500 flex-shrink-0" />}
-                              <div class="min-w-0">
-                                <div class="font-mono font-semibold text-zinc-200 truncate">{no.id}</div>
-                                <div class="text-[10px] text-zinc-500 font-mono">{no.tipo}{no.exec_id ? ` · ${no.exec_id}` : ""}</div>
-                              </div>
-                            </div>
-                            <div class="flex items-center gap-2 flex-shrink-0">
-                              <span class={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold ${
-                                no.status === "ok" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                                : no.status === "falhou" ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
-                                : no.status === "executando" ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 animate-pulse"
-                                : "bg-zinc-800 text-zinc-400 border border-zinc-700"
-                              }`}>{no.status === "ok" ? "ok" : no.status === "falhou" ? "falhou" : no.status === "executando" ? "executando" : "não executado"}</span>
-                              <Show when={no.exec_id}>
-                                <button
-                                  type="button"
-                                  onClick={() => setSearchParams({ run: no.exec_id })}
-                                  class="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono text-[10px] hover:bg-zinc-700 cursor-pointer"
-                                  title={`Abrir execução ${no.exec_id} no histórico`}
-                                >
-                                  ver exec →
-                                </button>
-                              </Show>
-                            </div>
-                          </div>
-                        )}
-                      </For>
+                    <div class="text-[11px] text-zinc-500 font-mono px-1">
+                      Clique num nó com execução para abrir o chat do agente naquele passo.
                     </div>
+                    <FlowChart
+                      nos={nosFluxo()}
+                      arestas={(defFluxo()?.arestas || []).map((a) => ({ de: a.de, para: a.para, rotulo: a.rotulo }))}
+                      onAbrirExec={(execId) => setSearchParams({ run: execId })}
+                    />
                   </Show>
                   <Show when={!carregandoFluxo() && contextoFinalFluxo()}>
                     <div class="bg-zinc-950/70 border border-zinc-800 rounded-xl p-3 text-xs">
