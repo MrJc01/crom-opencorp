@@ -208,6 +208,45 @@ describe("Rotas Modulares de Flows e Sessões (Micro-Passo 11)", () => {
       expect(flow.nos?.length).toBe(1);
     });
 
+    it("PUT /flows/:id aceita atualização parcial sem campo nos preservando os nós existentes", async () => {
+      const res = await fetchApi("/flows/meu-fluxo-1", {
+        method: "PUT",
+        body: JSON.stringify({
+          id: "meu-fluxo-1",
+          ativo: false,
+          auto_agendar: true,
+        }),
+      });
+      expect(res.status).toBe(200);
+      const flow = res.json as { id: string; ativo: boolean; auto_agendar: boolean; nos?: Array<{ id: string }> };
+      expect(flow.ativo).toBe(false);
+      expect(flow.auto_agendar).toBe(true);
+      expect(flow.nos?.length).toBe(1);
+    });
+
+    it("PUT /flows/:id tolera nos/arestas como número (resumo da lista) sem disparar 'expected array, received number'", async () => {
+      const res = await fetchApi("/flows/meu-fluxo-1", {
+        method: "PUT",
+        body: JSON.stringify({
+          id: "meu-fluxo-1",
+          nos: 1, // formato resumo enviado por engano pela lista
+          arestas: 0,
+          ativo: true,
+        }),
+      });
+      expect(res.status).toBe(200);
+      const flow = res.json as { id: string; ativo: boolean; nos?: Array<{ id: string }> };
+      expect(flow.ativo).toBe(true);
+      expect(Array.isArray(flow.nos)).toBe(true);
+      expect(flow.nos?.length).toBe(1);
+    });
+
+    it("GET /flows/:id/runs retorna 200 com a lista de execuções", async () => {
+      const res = await fetchApi("/flows/meu-fluxo-1/runs");
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.json)).toBe(true);
+    });
+
     it("GET /flows/:id/export exporta o fluxo em formato JSON", async () => {
       const res = await fetchApi("/flows/meu-fluxo-1/export");
       expect(res.status).toBe(200);

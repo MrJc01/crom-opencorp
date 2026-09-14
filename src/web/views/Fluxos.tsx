@@ -167,14 +167,18 @@ export const FluxosView: Component = () => {
   // ─────────────────────────────────────────────────────────────
   // OPERAÇÕES DO WORKFLOW & GRAFO
   // ─────────────────────────────────────────────────────────────
-  const salvarAlteracoesWorkflow = async (novoFluxo: FluxoCompleto) => {
+  const salvarAlteracoesWorkflow = async (novoFluxo: any) => {
     try {
+      const payload = { ...novoFluxo };
+      if (typeof payload.nos === "number" || !Array.isArray(payload.nos)) delete payload.nos;
+      if (typeof payload.arestas === "number" || !Array.isArray(payload.arestas)) delete payload.arestas;
+
       const res = await fetchApi<FluxoCompleto>(`/flows/${encodeURIComponent(novoFluxo.id)}`, {
         method: "PUT",
-        body: JSON.stringify(novoFluxo),
+        body: JSON.stringify(payload),
       });
       setFluxoAtivo(res);
-      setFluxos((prev) => prev.map((f) => (f.id === res.id ? res : f)));
+      setFluxos((prev) => prev.map((f) => (f.id === res.id ? { ...f, ...res } : f)));
       showToast("Alterações salvas!", "sucesso");
     } catch (err: any) {
       showToast(`Erro ao salvar: ${err.message}`, "erro");

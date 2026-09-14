@@ -316,7 +316,10 @@ export const WorkflowList: Component<WorkflowListProps> = (props) => {
                         data-testid={`toggle-ativo-${f.id}`}
                         checked={f.ativo ?? true}
                         onChange={(e) => {
-                          void props.onSalvarAlteracoes({ ...f, ativo: e.currentTarget.checked });
+                          const p = { ...f, ativo: e.currentTarget.checked };
+                          if (typeof p.nos === "number") delete p.nos;
+                          if (typeof p.arestas === "number") delete p.arestas;
+                          void props.onSalvarAlteracoes(p);
                         }}
                         class="accent-emerald-500 h-3.5 w-3.5"
                       />
@@ -329,7 +332,10 @@ export const WorkflowList: Component<WorkflowListProps> = (props) => {
                         data-testid={`toggle-auto-${f.id}`}
                         checked={f.auto_agendar ?? false}
                         onChange={(e) => {
-                          void props.onSalvarAlteracoes({ ...f, auto_agendar: e.currentTarget.checked });
+                          const p = { ...f, auto_agendar: e.currentTarget.checked };
+                          if (typeof p.nos === "number") delete p.nos;
+                          if (typeof p.arestas === "number") delete p.arestas;
+                          void props.onSalvarAlteracoes(p);
                         }}
                         class="accent-orange-500 h-3.5 w-3.5"
                       />

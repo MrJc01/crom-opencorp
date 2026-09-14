@@ -79,4 +79,49 @@ test.describe("Web Fluxos: lista, canvas, NDV e execução", () => {
     await page.getByRole("button", { name: "Iniciar Execução" }).click();
     await page.waitForURL("**/historico?run=*", { timeout: 20000 });
   });
+
+  test("toggles de Ativo e Auto-agendar na lista atualizam sem erro 'nos: expected array'", async ({ page }) => {
+    const fid = `flow-toggle-${Date.now().toString(36)}`;
+    await api(page).post("/flows", {
+      headers: HDR,
+      data: {
+        id: fid,
+        nome: "Flow Toggle Test",
+        nos: [{ id: "inicio", tipo: "manual", config: {} }],
+        arestas: [],
+        ativo: true,
+        auto_agendar: false,
+      },
+    });
+
+    await page.reload();
+    await esperarElementoTexto(page, "Fluxos");
+
+    const watcher = new ConsoleWatcher(page);
+    watcher.start();
+
+    // Filtra pelo fluxo criado
+    await page.locator('input[placeholder="Pesquisar fluxos..."]').fill(fid);
+    await expect(page.getByText("Flow Toggle Test").first()).toBeVisible({ timeout: 10000 });
+
+    // Clica no toggle Auto-agendar (que envia PUT /flows/:id com os dados do card)
+    const toggleAuto = page.locator(`[data-testid="toggle-auto-${fid}"]`);
+    await expect(toggleAuto).toBeVisible({ timeout: 5000 });
+    await toggleAuto.click();
+
+    // Clica no toggle Ativo
+    const toggleAtivo = page.locator(`[data-testid="toggle-ativo-${fid}"]`);
+    await expect(toggleAtivo).toBeVisible({ timeout: 5000 });
+    await toggleAtivo.click();
+
+    // Aguarda processamento
+    await page.waitForTimeout(500);
+
+    // Valida que nenhum toast de erro apareceu
+    await expect(page.getByText(/campo "nos": Invalid input/i)).toHaveCount(0);
+    await expect(page.getByText(/Sem conexão com o servidor/i)).toHaveCount(0);
+
+    watcher.stop();
+    expect(watcher.limpos()).toEqual([]);
+  });
 });

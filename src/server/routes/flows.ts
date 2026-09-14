@@ -144,9 +144,14 @@ export async function handleFlowRoutes(ctx: RouteContext): Promise<boolean> {
       return true;
     }
     const atual = await flows.obter(ws.path, flowId);
+    const nos = Array.isArray(corpo.nos) ? corpo.nos : atual.nos;
+    const arestas = Array.isArray(corpo.arestas) ? corpo.arestas : atual.arestas;
     await flows.salvar(ws.path, {
+      ...atual,
       ...corpo,
       id: flowId,
+      nos,
+      arestas,
       nome: String(corpo.nome ?? atual.nome),
       auto_agendar: typeof corpo.auto_agendar === "boolean" ? corpo.auto_agendar : (atual.auto_agendar ?? false),
       ativo: typeof corpo.ativo === "boolean" ? corpo.ativo : (atual.ativo ?? true),
@@ -183,8 +188,8 @@ export async function handleFlowRoutes(ctx: RouteContext): Promise<boolean> {
     return true;
   }
 
-  // ── GET /flows/:id/execucoes ou /historico ─────────────────────
-  const mFlowExecucoes = /^\/flows\/([^/]+)\/(?:execucoes|historico)$/.exec(rota);
+  // ── GET /flows/:id/execucoes ou /historico ou /runs ────────────
+  const mFlowExecucoes = /^\/flows\/([^/]+)\/(?:execucoes|historico|runs)$/.exec(rota);
   if (mFlowExecucoes && req.method === "GET") {
     const ws = await resolverWs(url);
     const flowId = decodeURIComponent(mFlowExecucoes[1]!);

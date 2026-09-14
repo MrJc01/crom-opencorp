@@ -93,7 +93,9 @@ export async function fetchApi<T = unknown>(path: string, opts: RequestInit = {}
     const signal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
     res = await fetch(url, { ...opts, headers: headers(), ...(signal ? { signal } : {}) });
   } catch (err: any) {
-    showToast("Sem conexão com o servidor", "erro");
+    if (err?.name !== "AbortError") {
+      showToast("Sem conexão com o servidor", "erro");
+    }
     throw err;
   }
 
