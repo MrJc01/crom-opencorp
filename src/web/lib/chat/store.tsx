@@ -13,9 +13,14 @@ import type { Anexo } from "../../components/chat/PromptInput";
 import type { SessaoResumo } from "../../components/chat/HistoricoModal";
 import { showToast } from "../../ui/Toast";
 import { fetchApi, wsAtivo, headers } from "../context";
-import { SUGESTOES_RAPIDAS, MODELOS_SUGERIDOS } from "./constants";
+import {
+  SUGESTOES_RAPIDAS,
+  MODELOS_SUGERIDOS,
+  MODELOS_PRESETS_POPULARES,
+  inferirHarness,
+} from "./constants";
 
-export { SUGESTOES_RAPIDAS, MODELOS_SUGERIDOS };
+export { SUGESTOES_RAPIDAS, MODELOS_SUGERIDOS, MODELOS_PRESETS_POPULARES, inferirHarness };
 
 function reconciliarMensagens(antigas: ChatMensagem[], novas: ChatMensagem[]): ChatMensagem[] {
   if (!antigas || antigas.length === 0) return novas;
@@ -105,7 +110,10 @@ export interface ChatStore {
   // Drawer de configuração (motor/modelo/rotação)
   agenteConfig: () => string;
   motorConfig: () => string;
+  motorInferido: () => string;
   rotacaoConfig: () => string;
+  modeloAtivoChat: () => string;
+  setModeloAtivoChat: (v: string) => void;
   // Overrides efetivos vindos de Config → Modelos (settings.secretary.*)
   overrideAgente: () => string;
   overrideModelo: () => string;
@@ -219,6 +227,9 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
   const [motorConfig, setMotorConfig] = createSignal<string>("opencode");
   const [modeloConfig, setModeloConfig] = createSignal<string>("");
   const [rotacaoConfig, setRotacaoConfig] = createSignal<string>("");
+  const [modeloAtivoChat, setModeloAtivoChat] = createSignal<string>("");
+  const [rotacaoAtivaChat, setRotacaoAtivaChat] = createSignal<string[]>([]);
+  const motorInferido = () => inferirHarness(modeloConfig());
   const [emNovaConversa, setEmNovaConversa] = createSignal<boolean>(false);
   // Overrides de Config → Modelos (fonte: settings.secretary.agent / .model)
   const [overrideAgente, setOverrideAgente] = createSignal<string>("");
@@ -283,31 +294,65 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
   };
 
   const abrirPainelLateral = async () => {
+    const wsModPromise = fetchApi<any>(`/settings/modelos?workspace=${encodeURIComponent(wsAtivo())}`).catch(() => null);
     await Promise.all([carregarAgentesEMotores(), carregarOverridesSecretario()]);
+    const wsMod = await wsModPromise;
+
     const agAtual = agente();
     setAgenteConfig(agAtual);
     const enc = listaAgentes().find((a) => a.id === agAtual);
-    if (enc) {
-      setMotorConfig(enc.harness || (enc as any).engine || "opencode");
-      // Frontmatter vazio + override em Config → mostra o efetivo (evita "não puxou")
-      setModeloConfig(enc.model || overrideModelo() || "");
-      const rot = enc.rotation || (enc as any).model_fallback || [];
-      setRotacaoConfig(Array.isArray(rot) ? rot.join("\n") : "");
-    } else if (overrideModelo()) {
-      setModeloConfig(overrideModelo());
+
+    const modeloPadraoWs = wsMod?.default_model || "openrouter/google/gemini-2.5-flash";
+    const rotacaoWs: string[] = Array.isArray(wsMod?.rotation) && wsMod.rotation.length > 0
+      ? wsMod.rotation
+      : [
+          modeloPadraoWs,
+          "opencode/nemotron-3-ultra-free",
+          "openrouter/liquid/lfm-2.5-2.6b:free",
+          "openrouter/openrouter/free",
+        ];
+
+    const modeloBase = enc?.model || modeloAtivoChat() || overrideModelo() || modeloPadraoWs;
+    setModeloConfig(modeloBase);
+    setMotorConfig(inferirHarness(modeloBase));
+
+    const rotAgente = enc?.rotation || (enc as any)?.model_fallback;
+    if (Array.isArray(rotAgente) && rotAgente.length > 0) {
+      setRotacaoConfig(rotAgente.join("\n"));
+    } else if (rotacaoAtivaChat().length > 0) {
+      setRotacaoConfig(rotacaoAtivaChat().join("\n"));
+    } else {
+      setRotacaoConfig(rotacaoWs.join("\n"));
     }
     setResultadoTeste(null);
   };
 
-  const aoMudarAgenteConfig = (agId: string) => {
+  const aoMudarAgenteConfig = async (agId: string) => {
     setAgenteConfig(agId);
     setResultadoTeste(null);
+    const wsMod = await fetchApi<any>(`/settings/modelos?workspace=${encodeURIComponent(wsAtivo())}`).catch(() => null);
+    const modeloPadraoWs = wsMod?.default_model || "openrouter/google/gemini-2.5-flash";
+    const rotacaoWs: string[] = Array.isArray(wsMod?.rotation) && wsMod.rotation.length > 0
+      ? wsMod.rotation
+      : [
+          modeloPadraoWs,
+          "opencode/nemotron-3-ultra-free",
+          "openrouter/liquid/lfm-2.5-2.6b:free",
+          "openrouter/openrouter/free",
+        ];
+
     const enc = listaAgentes().find((a) => a.id === agId);
     if (enc) {
-      setMotorConfig(enc.harness || (enc as any).engine || "opencode");
-      setModeloConfig(enc.model || "");
-      const rot = enc.rotation || (enc as any).model_fallback || [];
-      setRotacaoConfig(Array.isArray(rot) ? rot.join("\n") : "");
+      const mod = enc.model || (agId.includes("secretario") ? overrideModelo() || modeloPadraoWs : modeloPadraoWs);
+      setModeloConfig(mod);
+      setMotorConfig(inferirHarness(mod));
+
+      const rot = enc.rotation || (enc as any)?.model_fallback;
+      if (Array.isArray(rot) && rot.length > 0) {
+        setRotacaoConfig(rot.join("\n"));
+      } else {
+        setRotacaoConfig(rotacaoWs.join("\n"));
+      }
     }
   };
 
@@ -326,7 +371,10 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
     const t0 = Date.now();
     try {
       const agId = agenteConfig();
-      const motId = motorConfig();
+      const mod = modeloConfig().trim();
+      const motId = inferirHarness(mod);
+      setMotorConfig(motId);
+
       if (agId === "secretario-exec" || agId === "secretario") {
         const [motorRes, statusRes] = await Promise.all([
           fetchApi<any>(`/api/motores/${encodeURIComponent(motId)}/test`, { method: "POST" }).catch(() => null),
@@ -351,7 +399,7 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
           body: JSON.stringify({
             ordem: "ping de verificação de motor",
             engine: motId,
-            model: modeloConfig().trim() || undefined,
+            model: mod || undefined,
           }),
         });
         const t = Date.now() - t0;
@@ -377,22 +425,69 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
     setSalvandoConfig(true);
     try {
       const rot = rotacaoConfig()
-        .split("\n")
+        .split(/[\n,]/)
         .map((s) => s.trim())
         .filter(Boolean);
+      const mod = modeloConfig().trim();
+      const agId = agenteConfig();
+      const harness = inferirHarness(mod);
 
-      await fetchApi(`/agents/${encodeURIComponent(agenteConfig())}?workspace=${encodeURIComponent(wsAtivo())}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          harness: motorConfig(),
-          model: modeloConfig().trim() || undefined,
-          rotation: rot,
-        }),
-      });
+      // 1. Aplica imediatamente à sessão ativa do chat em memória
+      setAgente(agId);
+      if (mod) {
+        setModeloAtivoChat(mod);
+        setModeloConfig(mod);
+      }
+      if (rot.length > 0) setRotacaoAtivaChat(rot);
 
-      setAgente(agenteConfig());
-      await carregarAgentesEMotores();
-      showToast(`Agente @${agenteConfig()} atualizado com motor ${motorConfig()}!`, "sucesso");
+      // 2. Persiste em paralelo no backend
+      const promessas: Promise<any>[] = [];
+
+      // Persiste rotação e modelo padrão no workspace (.opencorp/config.json)
+      promessas.push(
+        fetchApi(`/settings/modelos?workspace=${encodeURIComponent(wsAtivo())}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            default_model: mod || undefined,
+            rotation: rot,
+          }),
+        }).catch((err) => {
+          console.warn("[chat/store] Aviso ao salvar modelos no workspace:", err);
+        })
+      );
+
+      if (agId === "secretario-exec" || agId === "secretario") {
+        if (mod) {
+          setOverrideModelo(mod);
+          promessas.push(
+            fetchApi("/settings", {
+              method: "PUT",
+              body: JSON.stringify({
+                chave: "secretary.model",
+                valor: mod,
+                scope: "workspace",
+              }),
+            }).catch(() => null)
+          );
+        }
+      } else {
+        promessas.push(
+          fetchApi(`/agents/${encodeURIComponent(agId)}?workspace=${encodeURIComponent(wsAtivo())}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              harness,
+              model: mod || undefined,
+              rotation: rot,
+            }),
+          }).catch((err) => {
+            console.warn("[chat/store] Aviso ao atualizar frontmatter do agente:", err);
+          })
+        );
+      }
+
+      await Promise.all(promessas);
+      void carregarAgentesEMotores().catch(() => null);
+      showToast(`Configurações salvas no agente @${agId} e no workspace!`, "sucesso");
     } catch (e: any) {
       showToast(`Erro ao salvar: ${e?.message || e}`, "erro");
       throw e;
@@ -402,8 +497,20 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
   };
 
   const aplicarAgenteAoChat = () => {
-    setAgente(agenteConfig());
-    showToast(`Secretário direcionado para @${agenteConfig()}`, "info");
+    const agId = agenteConfig();
+    const mod = modeloConfig().trim();
+    const rot = rotacaoConfig()
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    setAgente(agId);
+    if (mod) {
+      setModeloAtivoChat(mod);
+      setModeloConfig(mod);
+    }
+    if (rot.length > 0) setRotacaoAtivaChat(rot);
+    showToast(`Modelo e rotação aplicados ao chat!`, "sucesso");
   };
 
   // Textareas por superfície (editar/focar sempre na instância certa)
@@ -935,6 +1042,13 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
         agente: agente(),
         imagens: imgs,
       };
+      if (modeloAtivoChat()) {
+        corpoEnvio.modelo = modeloAtivoChat();
+        corpoEnvio.model = modeloAtivoChat();
+      }
+      if (rotacaoAtivaChat().length > 0) {
+        corpoEnvio.rotation = rotacaoAtivaChat();
+      }
       if (sid) corpoEnvio.sessao_id = sid;
       // Pequeno contexto de localização: de que página veio a ordem (fora de /secretario)
       try {
@@ -1356,7 +1470,10 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
     carregarAgentesEMotores,
     agenteConfig,
     motorConfig,
+    motorInferido,
     rotacaoConfig,
+    modeloAtivoChat,
+    setModeloAtivoChat,
     overrideAgente,
     overrideModelo,
     setRotacaoConfig,

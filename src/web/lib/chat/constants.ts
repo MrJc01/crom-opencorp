@@ -39,3 +39,29 @@ export const MODELOS_SUGERIDOS: Record<string, string[]> = {
   cursor: ["cursor-fast", "cursor-small"],
   "crom-agente": ["crom-default"],
 };
+
+/** Presets modernos de modelos no formato unificado provedor/modelo. */
+export const MODELOS_PRESETS_POPULARES: string[] = [
+  "openrouter/google/gemini-2.5-flash",
+  "opencode/nemotron-3-ultra-free",
+  "openrouter/liquid/lfm-2.5-2.6b:free",
+  "openrouter/openrouter/free",
+  "openrouter/anthropic/claude-3.7-sonnet",
+  "openrouter/openai/gpt-4o-mini",
+];
+
+/**
+ * Infere o motor de execução (harness) a partir do prefixo do identificador do modelo.
+ * No formato unificado provedor/modelo, a maioria dos modelos roda nativamente via OpenCode.
+ */
+export function inferirHarness(modelo: string): string {
+  const m = (modelo || "").trim().toLowerCase();
+  if (m.startsWith("claude-code/") || m.startsWith("anthropic/")) return "claude-code";
+  if (m.startsWith("codex/") || m.startsWith("openai/")) return "codex";
+  if (m.startsWith("antigravity/") || m.startsWith("agy/")) return "antigravity";
+  if (m.startsWith("copilot/")) return "copilot";
+  if (m.startsWith("cursor/")) return "cursor";
+  if (m.startsWith("aider/")) return "aider";
+  if (m.startsWith("crom/")) return "crom-agente";
+  return "opencode";
+}

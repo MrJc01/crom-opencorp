@@ -6,25 +6,14 @@ import {
   Check,
   Play,
   RefreshCw,
+  Sparkles,
+  Info,
 } from "lucide-solid";
 import { UniversalChat } from "../components/chat/UniversalChat";
 import { HistoricoModal } from "../components/chat/HistoricoModal";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
-import { useChat, MODELOS_SUGERIDOS } from "../lib/chat/store";
-
-/** Motores com driver implementado (espelho de engineRegistry) — a lista de
- *  instalação real vem de /api/motores via chat.listaMotores(). */
-const MOTORES_IMPLEMENTADOS = [
-  { id: "opencode", nome: "OpenCode Engine", desc: "Daemon e CLI nativos do OpenCode", alias: "opencode" },
-  { id: "codex", nome: "OpenAI Codex CLI", desc: "CLI OpenAI (plano ChatGPT, custo zero)", alias: "codex" },
-  { id: "claude-code", nome: "Claude Code CLI", desc: "Motor Anthropic CLI para tarefas de código", alias: "claude" },
-  { id: "antigravity", nome: "Google Antigravity (AGY)", desc: "CLI isolada com suporte a skills e MCP", alias: "agy" },
-  { id: "copilot", nome: "GitHub Copilot CLI", desc: "Runtime autônomo com tokens PAT/OAuth", alias: "copilot" },
-  { id: "cursor", nome: "Cursor CLI", desc: "Agente de terminal do Cursor", alias: "cursor-agent" },
-  { id: "aider", nome: "Aider CLI", desc: "Pair-programming por terminal", alias: "aider" },
-  { id: "crom-agente", nome: "Crom Agente", desc: "Motor próprio Crom", alias: "crom" },
-];
+import { useChat, MODELOS_PRESETS_POPULARES } from "../lib/chat/store";
 
 /** Sincroniza `?sessao=` da URL com o store (deep-link preservado). */
 function sincronizarUrlSessao(id: string | null) {
@@ -52,9 +41,9 @@ export const SecretarioView: Component = () => {
   };
 
   const salvarEFechar = async () => {
+    setConfigLateralAberta(false);
     try {
       await chat.salvarConfigLateral();
-      setConfigLateralAberta(false);
     } catch {
       // erro já exibido via toast no store
     }
@@ -77,7 +66,7 @@ export const SecretarioView: Component = () => {
         agente={{
           id: chat.agente(),
           nome: chat.agente(),
-          modelo: chat.modeloConfig() || "opencode-go/glm-5.3-flash",
+          modelo: chat.modeloAtivoChat() || chat.modeloConfig() || "openrouter/google/gemini-2.5-flash",
           status: chat.carregando() ? "executando" : undefined,
         }}
         decorridoFmt={chat.decorridoFmt()}
@@ -133,7 +122,7 @@ export const SecretarioView: Component = () => {
         />
         <aside
           data-testid="drawer-lateral-config"
-          class="fixed inset-y-0 right-0 w-80 sm:w-96 bg-zinc-950/95 border-l border-zinc-800/80 shadow-2xl z-50 flex flex-col backdrop-blur-md animate-in slide-in-from-right duration-200"
+          class="fixed inset-y-0 right-0 w-84 sm:w-105 bg-zinc-950/95 border-l border-zinc-800/80 shadow-2xl z-50 flex flex-col backdrop-blur-md animate-in slide-in-from-right duration-200"
         >
           {/* Header do Drawer */}
           <div class="h-12 px-4 border-b border-zinc-800/80 flex items-center justify-between bg-zinc-900/40 select-none">
@@ -159,7 +148,7 @@ export const SecretarioView: Component = () => {
               <select
                 class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500/80 cursor-pointer"
                 value={chat.agenteConfig()}
-                onChange={(e) => chat.aoMudarAgenteConfig(e.currentTarget.value)}
+                onChange={(e) => void chat.aoMudarAgenteConfig(e.currentTarget.value)}
               >
                 <For each={chat.listaAgentes()}>
                   {(ag) => (
@@ -185,56 +174,21 @@ export const SecretarioView: Component = () => {
                 <Show when={chat.overrideModelo()}>
                   <span class="font-mono">modelo {chat.overrideModelo()}</span>
                 </Show>
-                . O chat usa esses valores; "Salvar no Agente" grava motor/modelo/rotação no frontmatter do agente.
+                . O chat usa esses valores em tempo de execução.
               </div>
             </Show>
 
-            {/* Escolha do Motor de Execução */}
-            <div class="space-y-2">
-              <label class="font-medium text-zinc-300 block">Motor de Execução (Harness)</label>
-              <div class="grid grid-cols-1 gap-2">
-                <For each={MOTORES_IMPLEMENTADOS}>
-                  {(mot) => {
-                    const ativo = () => chat.motorConfig() === mot.id;
-                    const inst = () => {
-                      const enc = chat.listaMotores().find((m) => m.id === mot.id);
-                      return enc ? enc.installed : true;
-                    };
-                    return (
-                      <button
-                        type="button"
-                        onClick={() => chat.aoMudarMotorConfig(mot.id)}
-                        class={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start justify-between ${
-                          ativo()
-                            ? "bg-emerald-950/30 border-emerald-500/80 text-emerald-200 shadow-sm"
-                            : "bg-zinc-900/60 border-zinc-800/80 hover:bg-zinc-850 hover:border-zinc-700 text-zinc-300"
-                        }`}
-                      >
-                        <div class="space-y-0.5">
-                          <div class="flex items-center gap-1.5 font-medium">
-                            <span>{mot.nome}</span>
-                            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400">
-                              {mot.alias}
-                            </span>
-                          </div>
-                          <div class="text-[11px] text-zinc-400 leading-tight">{mot.desc}</div>
-                        </div>
-                        <div class="flex items-center gap-1">
-                          <span
-                            class={`h-2 w-2 rounded-full ${
-                              inst() ? "bg-emerald-400" : "bg-zinc-600"
-                            }`}
-                            title={inst() ? "Motor instalado" : "Não detectado"}
-                          />
-                          <Show when={ativo()}>
-                            <Check size={14} class="text-emerald-400 ml-1" />
-                          </Show>
-                        </div>
-                      </button>
-                    );
-                  }}
-                </For>
+            {/* Motor de Execução (Harness) - Inferido automaticamente pelo formato unificado */}
+            <div class="p-2.5 rounded-lg bg-zinc-900/60 border border-zinc-800/80 flex items-center justify-between">
+              <div class="space-y-0.5">
+                <span class="font-medium text-zinc-300 block">Motor de Execução (Harness)</span>
+                <p class="text-[11px] text-zinc-500">
+                  Inferido pelo identificador <span class="font-mono text-zinc-400">provedor/modelo</span>
+                </p>
               </div>
+              <span class="text-xs font-mono px-2 py-0.5 rounded bg-zinc-800 text-emerald-400 border border-zinc-700/60 font-semibold">
+                {chat.motorInferido()}
+              </span>
             </div>
 
             {/* Modelo Principal */}
@@ -243,42 +197,65 @@ export const SecretarioView: Component = () => {
               <input
                 type="text"
                 class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500/80"
-                placeholder="ex.: google/gemini-3.8-flash-high ou gpt-4o"
+                placeholder="ex.: openrouter/google/gemini-2.5-flash ou opencode/nemotron-3-ultra-free"
                 value={chat.modeloConfig()}
                 onInput={(e) => chat.setModeloConfig(e.currentTarget.value)}
               />
 
-              {/* Sugestões Rápidas de Modelos */}
-              <div class="flex flex-wrap gap-1 pt-1">
-                <For each={MODELOS_SUGERIDOS[chat.motorConfig()] || []}>
-                  {(mod) => (
-                    <button
-                      type="button"
-                      onClick={() => chat.setModeloConfig(mod)}
-                      class="px-2 py-0.5 rounded-full bg-zinc-800/80 hover:bg-zinc-700 text-[10px] font-mono text-zinc-300 border border-zinc-700/60 cursor-pointer transition-colors"
-                    >
-                      {mod.split("/").pop()}
-                    </button>
-                  )}
-                </For>
+              {/* Sugestões Rápidas de Modelos Populares */}
+              <div class="space-y-1 pt-1">
+                <span class="text-[11px] text-zinc-400 flex items-center gap-1">
+                  <Sparkles size={11} class="text-amber-400" /> Presets rápidos (clique para selecionar):
+                </span>
+                <div class="flex flex-wrap gap-1">
+                  <For each={MODELOS_PRESETS_POPULARES}>
+                    {(mod) => {
+                      const selecionado = () => chat.modeloConfig() === mod;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => chat.setModeloConfig(mod)}
+                          class={`px-2 py-0.5 rounded-full text-[10px] font-mono border transition-colors cursor-pointer ${
+                            selecionado()
+                              ? "bg-emerald-950/50 text-emerald-300 border-emerald-500/70 font-semibold"
+                              : "bg-zinc-850/80 hover:bg-zinc-750 text-zinc-300 border-zinc-700/60"
+                          }`}
+                        >
+                          {mod.split("/").slice(-1)[0]}
+                        </button>
+                      );
+                    }}
+                  </For>
+                </div>
               </div>
             </div>
 
             {/* Rotação e Fallback de Modelos */}
             <div class="space-y-1.5">
               <label class="font-medium text-zinc-300 block">
-                Rotação / Fallback de Modelos
+                Lista de Rotação / Fallback
               </label>
               <textarea
-                rows={3}
-                class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500/80 scrollbar-thin resize-none"
-                placeholder="1 modelo por linha para rotação de fallback"
+                rows={4}
+                class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500/80 scrollbar-thin resize-none leading-relaxed"
+                placeholder={"openrouter/google/gemini-2.5-flash\nopencode/nemotron-3-ultra-free\nopenrouter/openrouter/free"}
                 value={chat.rotacaoConfig()}
                 onInput={(e) => chat.setRotacaoConfig(e.currentTarget.value)}
               />
-              <p class="text-[11px] text-zinc-500">
-                Modelos acionados automaticamente caso o principal atinja limites de quota ou erro.
-              </p>
+
+              {/* Dica discreta de sintaxe */}
+              <div class="p-2.5 rounded-lg bg-zinc-900/40 border border-zinc-800/80 space-y-1">
+                <div class="flex items-center gap-1 text-zinc-300 font-medium">
+                  <Info size={12} class="text-emerald-400" />
+                  <span>Sintaxe Unificada & Rotação:</span>
+                </div>
+                <p class="text-[11px] text-zinc-400 leading-snug">
+                  Informe 1 modelo por linha (ou separados por vírgula) na ordem de prioridade. Em caso de esgotamento de cota ou erro, o motor rotaciona automaticamente.
+                </p>
+                <p class="text-[10px] text-zinc-500 font-mono">
+                  Ex.: <span class="text-emerald-400/90">openrouter/google/gemini-2.5-flash</span>, <span class="text-emerald-400/90">opencode/nemotron-3-ultra-free</span>
+                </p>
+              </div>
             </div>
 
             {/* Área de Teste de Conexão */}
@@ -342,7 +319,7 @@ export const SecretarioView: Component = () => {
                   chat.aplicarAgenteAoChat();
                   setConfigLateralAberta(false);
                 }}
-                title="Apenas direciona o chat atual para este agente"
+                title="Apenas direciona o chat atual para este modelo e rotação em memória"
               >
                 Aplicar ao Chat
               </Button>
@@ -351,11 +328,12 @@ export const SecretarioView: Component = () => {
                 variant="primary"
                 onClick={() => void salvarEFechar()}
                 disabled={chat.salvandoConfig()}
+                title="Grava o modelo e a lista de rotação permanentemente no agente e workspace"
               >
                 <Show when={chat.salvandoConfig()} fallback={<Check size={13} class="mr-1" />}>
                   <RefreshCw size={13} class="mr-1 animate-spin" />
                 </Show>
-                {chat.salvandoConfig() ? "Salvando..." : "Salvar no Agente"}
+                {chat.salvandoConfig() ? "Salvando..." : "Salvar no Agente / Config"}
               </Button>
             </div>
           </div>
