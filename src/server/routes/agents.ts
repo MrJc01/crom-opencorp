@@ -331,6 +331,7 @@ export async function handleAgentRoutes(ctx: RouteContext): Promise<boolean> {
         harness_fallback: Array.isArray(corpo.harness_fallback) ? (corpo.harness_fallback as unknown[]).map(String).filter(Boolean) : undefined,
         rotation: Array.isArray(corpo.rotation) ? (corpo.rotation as unknown[]).map(String).filter(Boolean) : undefined,
         model_fallback: Array.isArray(corpo.model_fallback) ? (corpo.model_fallback as unknown[]).map(String).filter(Boolean) : undefined,
+        workspace_rotation_fallback: typeof corpo.workspace_rotation_fallback === "boolean" ? corpo.workspace_rotation_fallback : (typeof (corpo as any).rotacao_global === "boolean" ? (corpo as any).rotacao_global : undefined),
       });
       eventBus.emit("agente.editado", { agente: id });
       enviar(res, 200, salvo);

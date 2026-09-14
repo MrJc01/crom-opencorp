@@ -101,7 +101,14 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
     // GET /settings/modelos ou /modelos
     if ((rota === "/settings/modelos" || rota === "/modelos") && req.method === "GET") {
       const ws = await resolverWs(url);
-      const s = await settings.resolve({ workspaceDir: ws.path });
+      const wsConfigPath = join(ws.path, ".opencorp", "config.json");
+      let wsConfig: any = {};
+      if (existsSync(wsConfigPath)) {
+        try {
+          wsConfig = JSON.parse(readFileSync(wsConfigPath, "utf8"));
+        } catch {}
+      }
+
       const policyFile = join(ws.path, ".opencorp", "security_policy.json");
       let secPolicy: any = {};
       if (existsSync(policyFile)) {
@@ -109,13 +116,25 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
           secPolicy = JSON.parse(readFileSync(policyFile, "utf8"));
         } catch {}
       }
+
+      const defaultModel =
+        wsConfig.modelos?.padrao ||
+        wsConfig.default_model ||
+        "openrouter/google/gemini-2.5-flash";
+
+      const rotation =
+        Array.isArray(wsConfig.modelos?.rotacao) && wsConfig.modelos.rotacao.length > 0
+          ? wsConfig.modelos.rotacao
+          : [
+              defaultModel,
+              "opencode/nemotron-3-ultra-free",
+              "openrouter/liquid/lfm-2.5-2.6b:free",
+              "openrouter/openrouter/free",
+            ];
+
       enviar(res, 200, {
-        default_model: s.settings.default_model || "openrouter/nvidia/nemotron-3.5-lightning:free",
-        rotation: s.settings.tests?.rotation || [
-          "openrouter/nvidia/nemotron-3.5-lightning:free",
-          "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-          "openrouter/minimax/minimax-m3:free",
-        ],
+        default_model: defaultModel,
+        rotation,
         global_full_access: secPolicy.global_full_access === true || secPolicy.level === "permissive",
       });
       return true;
@@ -128,22 +147,58 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
         default_model?: string;
         rotation?: string[];
         global_full_access?: boolean;
+        escopo?: string;
       };
-      if (corpo.default_model && corpo.default_model.trim()) {
-        await settings.set("default_model", corpo.default_model.trim(), { scope: "global" });
-      }
-      if (Array.isArray(corpo.rotation)) {
-        const limpa = corpo.rotation.map((s) => String(s).trim()).filter(Boolean);
+
+      const escopoGlobal = url.searchParams.get("escopo") === "global" || corpo.escopo === "global";
+      const defaultModelLimpo = corpo.default_model?.trim();
+      const rotacaoLimpa = Array.isArray(corpo.rotation)
+        ? corpo.rotation.map((s) => String(s).trim()).filter(Boolean)
+        : undefined;
+
+      if (escopoGlobal) {
+        // Escopo global: grava em ~/.opencorp/settings.json
+        if (defaultModelLimpo) {
+          await settings.set("default_model", defaultModelLimpo, { scope: "global" });
+        }
         const sPath = join(home, ".opencorp", "settings.json");
         try {
           let cur: any = {};
           if (existsSync(sPath)) cur = JSON.parse(readFileSync(sPath, "utf8"));
-          cur.tests = cur.tests || {};
-          cur.tests.rotation = limpa;
-          if (corpo.default_model) cur.default_model = corpo.default_model.trim();
+          cur.modelos = cur.modelos || {};
+          if (defaultModelLimpo) {
+            cur.default_model = defaultModelLimpo;
+            cur.modelos.padrao = defaultModelLimpo;
+          }
+          if (rotacaoLimpa) {
+            cur.tests = cur.tests || {};
+            cur.tests.rotation = rotacaoLimpa;
+            cur.modelos.rotacao = rotacaoLimpa;
+          }
           await writeFileAtomic(sPath, `${JSON.stringify(cur, null, 2)}\n`);
         } catch {}
+      } else {
+        // Escopo Workspace Soberano: grava em .opencorp/config.json do workspace ativo
+        const wsOcDir = join(ws.path, ".opencorp");
+        await mkdirRecursive(wsOcDir);
+        const wsConfigPath = join(wsOcDir, "config.json");
+        let wsConfig: any = {};
+        if (existsSync(wsConfigPath)) {
+          try {
+            wsConfig = JSON.parse(readFileSync(wsConfigPath, "utf8"));
+          } catch {}
+        }
+        wsConfig.modelos = wsConfig.modelos || {};
+        if (defaultModelLimpo) {
+          wsConfig.default_model = defaultModelLimpo;
+          wsConfig.modelos.padrao = defaultModelLimpo;
+        }
+        if (rotacaoLimpa) {
+          wsConfig.modelos.rotacao = rotacaoLimpa;
+        }
+        await writeFileAtomic(wsConfigPath, `${JSON.stringify(wsConfig, null, 2)}\n`);
       }
+
       if (corpo.global_full_access !== undefined) {
         const policyDir = join(ws.path, ".opencorp");
         await mkdirRecursive(policyDir);
@@ -163,6 +218,7 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
       enviar(res, 200, { ok: true });
       return true;
     }
+
 
     // GET /settings/security ou /settings/seguranca
     if ((rota === "/settings/security" || rota === "/settings/seguranca") && req.method === "GET") {

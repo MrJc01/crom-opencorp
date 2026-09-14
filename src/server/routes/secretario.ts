@@ -23,6 +23,7 @@ import { EngineAccountStore } from "../../core/engines/index.js";
 import { TelemetryCollector, gerarTraceId, type TraceContext } from "../../core/telemetry-collector.js";
 import { WorkspaceError } from "../../core/errors.js";
 import type { OpcoesRun } from "../../core/session-manager.js";
+import { resolverCadeiaModelosAgente } from "../../core/model-resolver.js";
 import type { RouteContext } from "./types.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -205,7 +206,7 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
     }
   }
 
-  // ── Resolução de Modelos e Motores de IA ──
+  // ── Resolução de Modelos e Motores de IA (Unificada via model-resolver) ──
   async function resolverModelos(opts: {
     modeloRequisicao?: string;
     agenteId?: string;
@@ -213,54 +214,31 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
   }): Promise<{ modelos: string[]; motorPadrao: string }> {
     const { modeloRequisicao, agenteId, wsPath } = opts;
 
-    let modeloAgente: string | undefined;
+    let ag: any = undefined;
     if (agenteId && agentes && wsPath) {
       try {
-        const ag = await agentes.carregar(wsPath, agenteId);
-        modeloAgente = (ag as any)?.model || (ag as any)?.modelo;
-      } catch { }
+        ag = await agentes.carregar(wsPath, agenteId);
+      } catch {}
     }
 
-    const cfgResolvido = settings
-      ? await settings.resolve(wsPath ? { workspaceDir: wsPath } : undefined).catch(() => null)
-      : null;
-
-    const st = cfgResolvido?.settings as any;
-    const motorPadrao = st?.runner || "opencode";
-
-    const modelosRotacao = [
-      ...(Array.isArray(st?.modelos?.rotacao) ? st.modelos.rotacao : []),
-      ...(Array.isArray(st?.tests?.rotation) ? st.tests.rotation : []),
-    ].filter((m): m is string => typeof m === "string" && m.trim().length > 0);
-
-    const contingencia = [
-      "opencode-go/glm-5.3-flash",
-      "opencode/nemotron-3-ultra-free",
-      "google/gemini-2.5-flash",
-      "google/gemini-3.5-flash-lite",
-      "openrouter/qwen/qwen3-coder-flash",
-      "openrouter/minimax/minimax-m3",
-    ];
-
-    // Prioridade estrita:
-    // 1. Modelo solicitado explicitamente (corpo.modelo / corpo.model)
-    // 2. Modelo do Secretário (settings.secretary?.model) ou modelo do agente
-    // 3. Modelo padrão do workspace (settings.default_model ou settings.modelos?.padrao)
-    // 4. Lista de rotação real configurada (settings.modelos?.rotacao ou settings.tests?.rotation)
-    // 5. Fallback final caso o array esteja vazio: modelos de contingência do sistema
-    const listaBruta = [
-      modeloRequisicao,
-      st?.secretary?.model,
-      modeloAgente,
-      st?.default_model,
-      st?.modelos?.padrao,
-      ...modelosRotacao,
-      ...(modelosRotacao.length === 0 ? contingencia : []),
-      contingencia[0],
-    ].filter(Boolean) as string[];
-
-    const modelos = [...new Set(listaBruta.map((m) => String(m).trim()))];
-    return { modelos, motorPadrao };
+    try {
+      const { cadeia } = resolverCadeiaModelosAgente({
+        agente: ag?.frontmatter || ag,
+        wsPath: wsPath || "",
+        modeloSolicitado: modeloRequisicao,
+      });
+      return { modelos: cadeia, motorPadrao: "opencode" };
+    } catch {
+      return {
+        modelos: [
+          modeloRequisicao || "openrouter/google/gemini-2.5-flash",
+          "opencode/nemotron-3-ultra-free",
+          "openrouter/liquid/lfm-2.5-2.6b:free",
+          "openrouter/openrouter/free",
+        ],
+        motorPadrao: "opencode",
+      };
+    }
   }
 
   // ── Resolver Menções ──

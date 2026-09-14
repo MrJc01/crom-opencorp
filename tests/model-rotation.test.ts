@@ -116,6 +116,7 @@ describe("E2E — Integração de Rotação com Configurações de Modelos (tab=
         ],
       },
     };
+    writeFileSync(join(wsPath, ".opencorp", "settings.json"), JSON.stringify(settingsJson, null, 2), "utf8");
     writeFileSync(join(tempHome, ".opencorp", "settings.json"), JSON.stringify(settingsJson, null, 2), "utf8");
 
     const sessoes = new SessionManager({ homeDir: tempHome });
@@ -143,6 +144,7 @@ describe("E2E — Integração de Rotação com Configurações de Modelos (tab=
         ],
       },
     };
+    writeFileSync(join(wsPath, ".opencorp", "settings.json"), JSON.stringify(settingsJson, null, 2), "utf8");
     writeFileSync(join(tempHome, ".opencorp", "settings.json"), JSON.stringify(settingsJson, null, 2), "utf8");
 
     const sessoes = new SessionManager({ homeDir: tempHome });
@@ -169,6 +171,7 @@ describe("E2E — Integração de Rotação com Configurações de Modelos (tab=
         ],
       },
     };
+    writeFileSync(join(wsPath, ".opencorp", "settings.json"), JSON.stringify(settingsJson, null, 2), "utf8");
     writeFileSync(join(tempHome, ".opencorp", "settings.json"), JSON.stringify(settingsJson, null, 2), "utf8");
 
     const sessoes = new SessionManager({ homeDir: tempHome });

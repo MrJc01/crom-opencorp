@@ -28,6 +28,10 @@ export const agentSchema = z.object({
   rotation: z.array(z.string()).optional(),
   /** Alias para rotation */
   model_fallback: z.array(z.string()).optional(),
+  /** Se true, se todos os modelos do agente falharem, recorre à rotação do workspace */
+  workspace_rotation_fallback: z.boolean().default(true).optional(),
+  /** Alias para workspace_rotation_fallback */
+  rotacao_global: z.boolean().optional(),
   /** Skills declaradas para o agente (nomes kebab-case instalados em .opencorp/skills/) */
   skills: z
     .array(

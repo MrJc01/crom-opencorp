@@ -51,6 +51,7 @@ export interface Agente {
   harness_fallback?: string[];
   rotation?: string[];
   model_fallback?: string[];
+  workspace_rotation_fallback?: boolean;
   skills?: string[];
 }
 
@@ -124,6 +125,7 @@ export const AgentesView: Component = () => {
   const [formAgenteModelCustom, setFormAgenteModelCustom] = createSignal("");
   const [formAgenteHarness, setFormAgenteHarness] = createSignal("");
   const [formAgenteRotation, setFormAgenteRotation] = createSignal("");
+  const [formAgenteWorkspaceRotationFallback, setFormAgenteWorkspaceRotationFallback] = createSignal(true);
   const [formAgentePerm, setFormAgentePerm] = createSignal<"level-1" | "level-2" | "level-3">("level-2");
   const [formAgentePrompt, setFormAgentePrompt] = createSignal("");
   const [formAgenteAtivo, setFormAgenteAtivo] = createSignal(true);
@@ -297,6 +299,7 @@ export const AgentesView: Component = () => {
       setFormAgenteHarness(completo.harness || "");
       const rot = completo.rotation || completo.model_fallback || [];
       setFormAgenteRotation(Array.isArray(rot) ? rot.join("\n") : "");
+      setFormAgenteWorkspaceRotationFallback(completo.workspace_rotation_fallback !== false);
       setFormAgenteSkills(Array.isArray(completo.skills) ? [...completo.skills] : []);
       void carregarSkillsDisponiveis();
     } catch (err: any) {
@@ -329,6 +332,7 @@ export const AgentesView: Component = () => {
           corpo_prompt: formAgentePrompt(),
           harness: formAgenteHarness().trim() || undefined,
           rotation: rotLista.length > 0 ? rotLista : undefined,
+          workspace_rotation_fallback: formAgenteWorkspaceRotationFallback(),
           skills: formAgenteSkills(),
         }),
       });
@@ -1084,9 +1088,18 @@ export const AgentesView: Component = () => {
 
                     <Show when={agenteInspecionado()!.rotation && agenteInspecionado()!.rotation!.length > 0}>
                       <div class="bg-zinc-950 p-3 rounded-xl border border-zinc-800 space-y-1">
-                        <span class="text-zinc-500 block text-[10px] uppercase font-bold">
-                          Rotação & Fallback Customizado deste Agente:
-                        </span>
+                        <div class="flex items-center justify-between">
+                          <span class="text-zinc-500 block text-[10px] uppercase font-bold">
+                            Rotação & Fallback Customizado deste Agente:
+                          </span>
+                          <span class={`text-[9px] px-1.5 py-0.5 rounded border font-mono ${
+                            agenteInspecionado()!.workspace_rotation_fallback !== false
+                              ? "bg-purple-950/40 border-purple-800/40 text-purple-300"
+                              : "bg-zinc-900 border-zinc-700 text-zinc-400"
+                          }`}>
+                            {agenteInspecionado()!.workspace_rotation_fallback !== false ? "+ Rotação Global Ativa" : "Apenas Modelos Locais"}
+                          </span>
+                        </div>
                         <div class="flex flex-wrap gap-1.5 pt-0.5">
                           <For each={agenteInspecionado()!.rotation!}>
                             {(rotMod) => (
@@ -1238,6 +1251,26 @@ export const AgentesView: Component = () => {
                           onInput={(e) => setFormAgenteRotation(e.currentTarget.value)}
                           class="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-[11px] font-mono text-zinc-200 focus:outline-none focus:border-purple-500 leading-tight scrollbar-thin"
                         />
+                      </div>
+
+                      <div class="flex items-center justify-between pt-2 border-t border-zinc-800/60">
+                        <div class="space-y-0.5">
+                          <span class="text-[11px] font-medium text-zinc-300">Habilitar Rotação Global do Workspace</span>
+                          <p class="text-[10px] text-zinc-500">Se os modelos do agente falharem, recorre à rotação configurada no workspace</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFormAgenteWorkspaceRotationFallback(!formAgenteWorkspaceRotationFallback())}
+                          class={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
+                            formAgenteWorkspaceRotationFallback() ? "bg-purple-600" : "bg-zinc-700"
+                          }`}
+                        >
+                          <span
+                            class={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                              formAgenteWorkspaceRotationFallback() ? "translate-x-4" : "translate-x-1"
+                            }`}
+                          />
+                        </button>
                       </div>
                     </div>
                   </div>

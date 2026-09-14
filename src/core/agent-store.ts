@@ -28,6 +28,7 @@ export interface AgenteResumo {
   engine?: string;
   harness_fallback?: string[];
   rotation?: string[];
+  workspace_rotation_fallback?: boolean;
 }
 
 export interface EventoAgente {
@@ -59,6 +60,7 @@ export function serializarFrontmatter(ag: Agente): string {
   if (ag.harness_fallback && ag.harness_fallback.length > 0) saida += linhaFrontmatter("harness_fallback", listaInline(ag.harness_fallback));
   if (ag.rotation && ag.rotation.length > 0) saida += linhaFrontmatter("rotation", listaInline(ag.rotation));
   if (ag.model_fallback && ag.model_fallback.length > 0) saida += linhaFrontmatter("model_fallback", listaInline(ag.model_fallback));
+  if (ag.workspace_rotation_fallback !== undefined) saida += linhaFrontmatter("workspace_rotation_fallback", String(ag.workspace_rotation_fallback));
   if (ag.skills && ag.skills.length > 0) saida += linhaFrontmatter("skills", listaInline(ag.skills));
   if (ag.inherits) saida += linhaFrontmatter("inherits", ag.inherits);
   if ((ag as { execution_driver?: string }).execution_driver) saida += linhaFrontmatter("execution_driver", String((ag as { execution_driver?: string }).execution_driver));
@@ -245,6 +247,7 @@ export class AgentStore {
       rotation?: string[];
       model_fallback?: string[];
       skills?: string[];
+      workspace_rotation_fallback?: boolean;
     },
   ): Promise<Agente> {
     const carregado = await this.carregar(wsPath, id);
@@ -260,6 +263,7 @@ export class AgentStore {
       rotation: mudancas.rotation !== undefined ? mudancas.rotation : carregado.frontmatter.rotation,
       model_fallback: mudancas.model_fallback !== undefined ? mudancas.model_fallback : carregado.frontmatter.model_fallback,
       skills: mudancas.skills !== undefined ? mudancas.skills : carregado.frontmatter.skills,
+      workspace_rotation_fallback: mudancas.workspace_rotation_fallback !== undefined ? mudancas.workspace_rotation_fallback : carregado.frontmatter.workspace_rotation_fallback,
       budget: {
         ...carregado.frontmatter.budget,
         daily_usd: mudancas.budget_daily_usd ?? carregado.frontmatter.budget.daily_usd,
@@ -382,5 +386,6 @@ function resumo(ag: Agente): AgenteResumo {
     engine: (ag as any).engine || ag.harness,
     harness_fallback: ag.harness_fallback || (ag as any).engine_fallback,
     rotation: ag.rotation || ag.model_fallback,
+    workspace_rotation_fallback: ag.workspace_rotation_fallback ?? (ag as any).rotacao_global ?? true,
   };
 }

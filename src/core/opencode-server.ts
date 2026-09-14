@@ -1,5 +1,5 @@
 import { spawn, type SpawnOptions } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { opencorpHome } from "../utils/paths.js";
@@ -113,11 +113,15 @@ function copiarAuthSeNovo(homeDir: string, dataHome: string): void {
   const destino = join(dataHome, "opencode", "auth.json");
   if (!existsSync(origem)) return;
   try {
-    const novo = !existsSync(destino) || statSync(origem).mtimeMs > statSync(destino).mtimeMs;
-    if (novo) {
-      mkdirSync(dirname(destino), { recursive: true });
-      copyFileSync(origem, destino);
-    }
+    const ler = (p: string): Record<string, EntradaAuth> => {
+      try {
+        const parsed = JSON.parse(readFileSync(p, "utf8")) as Record<string, EntradaAuth>;
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch { return {}; }
+    };
+    const mesclado = { ...ler(destino), ...ler(origem) };
+    mkdirSync(dirname(destino), { recursive: true });
+    writeFileSync(destino, `${JSON.stringify(mesclado, null, 2)}\n`);
   } catch { /* best effort — opencode lida com auth ausente */ }
 }
 
@@ -134,8 +138,8 @@ export function authOverridesPathWorkspace(homeDir: string, wsId: string): strin
 }
 
 /** Prepara o auth.json do workspace: merge global ⊕ overrides do workspace
- *  (workspace vence por provedor; global é o fallback). Fonte SEMPRE é o
- *  opencorp — nunca o auth do opencode pessoal do dono. */
+ *  (workspace vence por provedor; global é o fallback). Fonte inclui chaves
+ *  do opencode do sistema e do opencorp. */
 export function prepararAuthWorkspace(homeDir: string, wsId: string): string {
   const dir = join(dirDadosWorkspace(homeDir, wsId), "opencode");
   mkdirSync(dir, { recursive: true });
@@ -147,7 +151,8 @@ export function prepararAuthWorkspace(homeDir: string, wsId: string): string {
       return parsed && typeof parsed === "object" ? parsed : {};
     } catch { return {}; }
   };
-  const mesclado = { ...ler(authOpencodePath(homeDir)), ...ler(overridesPath) };
+  const sistemaAuthPath = join(homeDir, ".local", "share", "opencode", "auth.json");
+  const mesclado = { ...ler(sistemaAuthPath), ...ler(authOpencodePath(homeDir)), ...ler(overridesPath) };
   writeFileSync(authPath, `${JSON.stringify(mesclado, null, 2)}\n`);
   return authPath;
 }

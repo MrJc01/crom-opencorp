@@ -323,6 +323,9 @@ export class WorkspaceManager {
       // workspace ainda não tiver prompts (não sobrescreve template/pacote).
       await new PromptStore({ homeDir: this.homeDir }).semear(destino);
 
+      // Regra de Ouro 1: Sementeira de modelos, execution_driver e provedores a partir do global
+      await this.semearConfiguracoesGlobais(destino);
+
       // Se houver tarefas_iniciais.json no destino, popula automaticamente no tasks.db
       const tarefasJsonPath = join(destino, "tarefas_iniciais.json");
       if (existsSync(tarefasJsonPath)) {
@@ -538,5 +541,73 @@ export class WorkspaceManager {
     });
     return { path, removidoPasta, eraAtivo };
   }
+
+  /**
+   * Sementeia configurações iniciais do workspace a partir do global (~/.opencorp/settings.json).
+   * Regra de Ouro 1: O global atua ÚNICA E EXCLUSIVAMENTE como semente na criação do workspace.
+   */
+  async semearConfiguracoesGlobais(destino: string): Promise<void> {
+    const configPath = join(destino, ".opencorp", "config.json");
+    let configWorkspace: Record<string, any> = {};
+    if (existsSync(configPath)) {
+      try {
+        configWorkspace = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, any>;
+      } catch {
+        configWorkspace = {};
+      }
+    }
+
+    let globalSettings: Record<string, any> = {};
+    const globalSettingsPath = join(this.homeDir, ".opencorp", "settings.json");
+    if (existsSync(globalSettingsPath)) {
+      try {
+        globalSettings = JSON.parse(readFileSync(globalSettingsPath, "utf8")) as Record<string, any>;
+      } catch {}
+    }
+
+    let alterado = false;
+
+    // Sementeira de modelos: { padrao, rotacao }
+    if (!configWorkspace.modelos) {
+      const padrao =
+        globalSettings.modelos?.padrao ||
+        globalSettings.default_model ||
+        "openrouter/google/gemini-2.5-flash";
+      const rotacao =
+        Array.isArray(globalSettings.modelos?.rotacao) && globalSettings.modelos.rotacao.length > 0
+          ? globalSettings.modelos.rotacao
+          : Array.isArray(globalSettings.tests?.rotation) && globalSettings.tests.rotation.length > 0
+            ? globalSettings.tests.rotation
+            : [
+                padrao,
+                "opencode/nemotron-3-ultra-free",
+                "openrouter/liquid/lfm-2.5-2.6b:free",
+                "openrouter/openrouter/free",
+              ];
+      configWorkspace.modelos = { padrao, rotacao };
+      alterado = true;
+    }
+
+    // Sementeira de execution_driver
+    if (!configWorkspace.execution_driver) {
+      configWorkspace.execution_driver = globalSettings.execution_driver || "sandbox";
+      alterado = true;
+    }
+
+    // Sementeira de provedores
+    if (!configWorkspace.provedores && globalSettings.provedores) {
+      configWorkspace.provedores = globalSettings.provedores;
+      alterado = true;
+    }
+
+    if (alterado) {
+      const ocDir = join(destino, ".opencorp");
+      if (!existsSync(ocDir)) {
+        mkdirSync(ocDir, { recursive: true });
+      }
+      await writeFileAtomic(configPath, `${JSON.stringify(configWorkspace, null, 2)}\n`);
+    }
+  }
 }
+
 

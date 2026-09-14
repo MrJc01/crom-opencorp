@@ -25,6 +25,13 @@ import { SettingsStore } from "./settings-store.js";
 import { engineRegistry } from "./engines/index.js";
 import { CapabilitiesPara } from "./engines/capabilities.js";
 import { EngineAccountStore } from "./engines/engine-account-store.js";
+import {
+  resolverCadeiaModelosAgente,
+  proximoModeloDaCadeia,
+  ehModeloGratuito,
+} from "./model-resolver.js";
+
+export { ehModeloGratuito };
 
 export type StatusExecucao = "executando" | "concluido" | "falhou" | "cancelado" | "hitl_pendente";
 
@@ -179,25 +186,14 @@ export const PADRAO_ERRO_MODELO =
 export const PADRAO_ERRO_CREDITOS =
   /requires more credits|can only afford|insufficient balance|payment_required|402|credit balance|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits/i;
 
-export function ehModeloGratuito(modelo: string): boolean {
-  const m = modelo.trim().toLowerCase();
-  if (m.endsWith(":free")) return true;
-  if (m.startsWith("opencode-go/")) return true;
-  if (m.startsWith("codex/")) return true; // custo zero — plano básico já pago
-  if (m.startsWith("antigravity/")) return true;
-  if (m.startsWith("claude-code/")) return true;
-  if (m.includes("free")) return true;
-  return false;
-}
-
 export const MODELOS_ROTACAO_PADRAO = [
-  "opencode-go/glm-5.3-flash",
-  "openrouter/meta-llama/llama-3.3-70b-instruct",
-  "opencode/nemotron-3.5-lightning-free",
+  "openrouter/openrouter/free",
   "opencode/nemotron-3-ultra-free",
-  "opencode-go/minimax-m3",
-  "opencode-go/deepseek-v4-flash",
+  "openrouter/liquid/lfm-2.5-2.6b:free",
   "openrouter/google/gemini-2.5-flash",
+  "openrouter/qwen/qwen3-coder-flash",
+  "openrouter/minimax/minimax-m3",
+  "opencode-go/glm-5.3-flash",
 ];
 
 const TETO_RUN_PADRAO_MIN = 20;
@@ -225,57 +221,52 @@ export async function tetoRunPadraoMs(homeDir?: string): Promise<number | undefi
 }
 
 export function proximoModeloRotacao(lista: string[], modeloFalho: string): string | null {
-  const limpa = lista.map((m) => m.trim()).filter((m) => m.length > 0);
-  if (limpa.length === 0) return null;
-  const idx = limpa.indexOf(modeloFalho);
-  if (idx === -1) return limpa[0] !== modeloFalho ? limpa[0]! : null;
-  const proximo = limpa[(idx + 1) % limpa.length]!;
-  return proximo !== modeloFalho ? proximo : null;
+  return proximoModeloDaCadeia({ cadeia: lista, modeloAtual: modeloFalho });
 }
 
 export async function obterListaRotacaoCompleta(
   agenteStore?: AgentStore,
   wsPath?: string,
   agenteId?: string,
-  homeDir?: string,
+  _homeDir?: string,
 ): Promise<string[]> {
-  const lista: string[] = [];
+  let ag: any = undefined;
   if (agenteStore && wsPath && agenteId) {
     try {
-      const ag = await agenteStore.carregar(wsPath, agenteId);
-      const rot = ag.frontmatter.rotation || ag.frontmatter.model_fallback;
-      if (Array.isArray(rot)) {
-        for (const m of rot) {
-          const s = String(m).trim();
-          if (s && !lista.includes(s)) lista.push(s);
-        }
-      }
+      ag = await agenteStore.carregar(wsPath, agenteId);
     } catch {}
   }
-  let globalLista = MODELOS_ROTACAO_PADRAO;
-  try {
-    const r = await new SettingsStore({ homeDir, cwd: wsPath ?? homeDir }).resolve();
-    const configurada = [...r.origens.entries()].some(
-      ([chave, origem]) => chave.startsWith("tests.rotation") && origem !== "default",
-    );
-    if (configurada && r.settings.tests.rotation.length > 0) {
-      globalLista = [...r.settings.tests.rotation];
-    }
-    const defOrigem = r.origens.get("default_model");
-    if (defOrigem && defOrigem !== "default" && r.settings.default_model && typeof r.settings.default_model === "string") {
-      const def = r.settings.default_model.trim();
-      if (def && !globalLista.includes(def)) {
-        globalLista.push(def);
-      }
-    }
-  } catch {}
 
-  for (const m of globalLista) {
-    const s = String(m).trim();
-    if (s && !lista.includes(s)) lista.push(s);
+  try {
+    const res = resolverCadeiaModelosAgente({
+      agente: ag?.frontmatter,
+      wsPath: wsPath || "",
+    });
+    if (res.herdarWorkspace && res.camada2Workspace.length === 0) {
+      return [...new Set([...res.cadeia, ...MODELOS_ROTACAO_PADRAO])];
+    }
+    return res.cadeia;
+  } catch {
+    return MODELOS_ROTACAO_PADRAO;
   }
-  return lista;
 }
+
+/**
+ * Lê defensivamente as últimas 30 linhas do log interno do OpenCode
+ * para extrair erros reais ocultados por UnknownError ou ref (ex: err_8ddb12a9).
+ */
+export function lerUltimasLinhasLogOpencode(homeDir: string, wsId: string): string {
+  try {
+    const logPath = join(homeDir, ".opencorp", "opencode-data", "workspaces", wsId, "opencode", "log", "opencode.log");
+    if (!existsSync(logPath)) return "";
+    const content = readFileSync(logPath, "utf8");
+    const lines = content.trim().split("\n");
+    return lines.slice(-30).join("\n");
+  } catch {
+    return "";
+  }
+}
+
 
 export const MODELOS_ROTACAO_POR_HARNESS: Record<string, string[]> = {
   antigravity: [
@@ -393,6 +384,7 @@ function sufixarRetry(origem: string, modelo: string): string {
 
 export interface OpcoesWatchdogRun {
   tetoMs: number;
+  inatividadeMs?: number;
   pid?: number | null;
   intervaloMs?: number;
   gracaKillMs?: number;
@@ -400,31 +392,43 @@ export interface OpcoesWatchdogRun {
   dormir?: (ms: number) => Promise<void>;
   obterStatus?: () => Promise<string | undefined>;
   matar?: (sinal: "SIGTERM" | "SIGKILL") => void;
-  aoEstourar?: (decorridoMs: number) => void | Promise<void>;
+  aoEstourar?: (decorridoMs: number, motivo?: string) => void | Promise<void>;
 }
 
 export class WatchdogRun {
   private readonly opcoes: OpcoesWatchdogRun;
   private readonly intervalo: number;
   private inicioEfetivo: number;
+  private ultimoChunkAt: number;
   private pausaDesde: number | null = null;
   private timer: NodeJS.Timeout | null = null;
   private disparou = false;
   private morteEmAndamento: Promise<void> | null = null;
+  private motivoEstouro = "";
 
   constructor(opcoes: OpcoesWatchdogRun) {
     this.opcoes = opcoes;
-    this.intervalo = Math.max(1, opcoes.intervaloMs ?? 30_000);
+    this.intervalo = Math.max(1, opcoes.intervaloMs ?? 5_000);
     this.inicioEfetivo = opcoes.agora ? opcoes.agora() : Date.now();
+    this.ultimoChunkAt = this.inicioEfetivo;
   }
 
   get estourou(): boolean {
     return this.disparou;
   }
 
+  get motivo(): string {
+    return this.motivoEstouro;
+  }
+
   /** Promise da sequência SIGTERM→espera→SIGKILL→aoEstourar (null se ainda não disparou). */
   get quandoMorto(): Promise<void> | null {
     return this.morteEmAndamento;
+  }
+
+  registrarAtividade(): void {
+    const agoraMs = this.opcoes.agora ? this.opcoes.agora() : Date.now();
+    this.ultimoChunkAt = agoraMs;
   }
 
   iniciar(): void {
@@ -442,7 +446,7 @@ export class WatchdogRun {
     }
   }
 
-  /** Um passo de verificação; @returns true se o teto estourou e a sequência de kill foi acionada. */
+  /** Um passo de verificação; @returns true se o teto ou inatividade estourou e a sequência de kill foi acionada. */
   async verificar(): Promise<boolean> {
     if (this.disparou) return false;
     const agoraMs = this.opcoes.agora ? this.opcoes.agora() : Date.now();
@@ -457,22 +461,41 @@ export class WatchdogRun {
       return false;
     }
     if (this.pausaDesde !== null) {
-      this.inicioEfetivo += agoraMs - this.pausaDesde;
+      const delta = agoraMs - this.pausaDesde;
+      this.inicioEfetivo += delta;
+      this.ultimoChunkAt += delta;
       this.pausaDesde = null;
     }
     if (status !== undefined && status !== "executando") {
       this.parar();
       return false;
     }
-    if (this.opcoes.tetoMs <= 0 || agoraMs - this.inicioEfetivo < this.opcoes.tetoMs) return false;
-    this.disparou = true;
-    this.parar();
-    this.morteEmAndamento = this.executarMorte(agoraMs - this.inicioEfetivo);
-    await this.morteEmAndamento;
-    return true;
+
+    // 1. Checagem de inatividade (nenhuma resposta por inatividadeMs, padrão 60s)
+    const inatividadeMs = typeof this.opcoes.inatividadeMs === "number" ? this.opcoes.inatividadeMs : 60_000;
+    if (inatividadeMs > 0 && agoraMs - this.ultimoChunkAt >= inatividadeMs) {
+      this.disparou = true;
+      this.motivoEstouro = `inatividade: nenhuma resposta do modelo por ${Math.round(inatividadeMs / 1000)}s (modelo travado)`;
+      this.parar();
+      this.morteEmAndamento = this.executarMorte(agoraMs - this.inicioEfetivo, this.motivoEstouro);
+      await this.morteEmAndamento;
+      return true;
+    }
+
+    // 2. Checagem de teto total de tempo
+    if (this.opcoes.tetoMs > 0 && agoraMs - this.inicioEfetivo >= this.opcoes.tetoMs) {
+      this.disparou = true;
+      this.motivoEstouro = `timeout total de ${Math.round(this.opcoes.tetoMs / 1000)}s excedido`;
+      this.parar();
+      this.morteEmAndamento = this.executarMorte(agoraMs - this.inicioEfetivo, this.motivoEstouro);
+      await this.morteEmAndamento;
+      return true;
+    }
+
+    return false;
   }
 
-  private async executarMorte(decorridoMs: number): Promise<void> {
+  private async executarMorte(decorridoMs: number, motivo?: string): Promise<void> {
     const matar =
       this.opcoes.matar ??
       ((sinal: "SIGTERM" | "SIGKILL") => {
@@ -489,7 +512,7 @@ export class WatchdogRun {
     const dormir = this.opcoes.dormir ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     if (graca > 0) await dormir(graca);
     matar("SIGKILL");
-    await this.opcoes.aoEstourar?.(decorridoMs);
+    await this.opcoes.aoEstourar?.(decorridoMs, motivo ?? this.motivoEstouro);
   }
 }
 
@@ -636,10 +659,15 @@ export class SessionManager {
     let modelo = opcoes.model ?? ag.frontmatter.model;
     if (!modelo || modelo.trim() === "" || modelo === "padrao" || modelo === "default" || modelo === "sistema") {
       try {
-        const s = await new SettingsStore({ homeDir: this.homeDir, cwd: ws.path }).resolve();
-        modelo = s.settings.default_model || "openrouter/nvidia/nemotron-3.5-lightning:free";
-      } catch {
-        modelo = "openrouter/nvidia/nemotron-3.5-lightning:free";
+        const res = resolverCadeiaModelosAgente({
+          agente: ag.frontmatter,
+          wsPath: ws.path,
+          wsId: ws.id,
+          modeloSolicitado: opcoes.model,
+        });
+        modelo = res.modeloPrimario;
+      } catch (err: any) {
+        throw new SessionError(err?.message || `Não foi possível resolver modelo para o agente "${ag.frontmatter.id}" no workspace "${ws.id}".`);
       }
     }
 
@@ -864,7 +892,6 @@ export class SessionManager {
 
     if (modeloEfetivo.startsWith("opencode/")) {
       harnessEscolhido = "opencode";
-      modeloEfetivo = modeloEfetivo.slice("opencode/".length);
     } else if (modeloEfetivo.startsWith("opencode-go/")) {
       harnessEscolhido = "opencode";
     } else if (modeloEfetivo.startsWith("claude-code/")) {
@@ -1101,9 +1128,11 @@ export class SessionManager {
       `# sessão ${id}\n# agente: ${registro.agente} · modelo: ${modelo} · workspace: ${ws.id}\n# ordem: ${ordem}\n\n`,
     );
     const captura: string[] = [];
+    let watchdog: WatchdogRun | null = null;
     const teeing = async (stream: AsyncIterable<unknown> | null | undefined) => {
       if (!stream) return;
       for await (const chunk of stream) {
+        watchdog?.registrarAtividade();
         const texto = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
         captura.push(texto);
         logStream.write(texto);
@@ -1112,13 +1141,19 @@ export class SessionManager {
     };
 
     let mortePorTimeout = false;
+    let motivoTimeout = "";
     const tetoMs = typeof opcoes.timeoutMs === "number" && opcoes.timeoutMs > 0 ? opcoes.timeoutMs : 600_000;
-    const watchdog =
-      tetoMs > 0 && child.pid
+    const inatividadeMs = typeof (opcoes as any).inatividadeMs === "number"
+      ? (opcoes as any).inatividadeMs
+      : Number(process.env.OPENCORP_INATIVIDADE_TIMEOUT_MS || 60_000);
+
+    watchdog =
+      (tetoMs > 0 || inatividadeMs > 0) && child.pid
         ? new WatchdogRun({
             tetoMs,
+            inatividadeMs,
             pid: child.pid,
-            ...(opcoes.watchdogIntervalMs ? { intervaloMs: opcoes.watchdogIntervalMs } : {}),
+            intervaloMs: opcoes.watchdogIntervalMs ?? 5_000,
             ...(opcoes.watchdogGracaMs !== undefined ? { gracaKillMs: opcoes.watchdogGracaMs } : {}),
             obterStatus: async () => {
               try {
@@ -1128,9 +1163,10 @@ export class SessionManager {
                 return undefined;
               }
             },
-            aoEstourar: async (decorrido) => {
+            aoEstourar: async (decorrido, motivo) => {
               mortePorTimeout = true;
-              const mensagem = `timeout de ${Math.round(tetoMs / 1000)}s excedido — opencode morto (modelo travado?)`;
+              motivoTimeout = motivo ?? `timeout de ${Math.round(tetoMs / 1000)}s excedido`;
+              const mensagem = `${motivoTimeout} — opencode encerrado (acionando rotação de modelo)`;
               registro.status = "falhou";
               (registro as any).erro = mensagem;
               registro.exit_code = null;
@@ -1145,7 +1181,8 @@ export class SessionManager {
     const resolverAposTimeout = async (): Promise<ResultadoRun> => {
       const morte = watchdog?.quandoMorto;
       if (morte) await morte;
-      const retry = await this.tentarRetry(ws, opcoes, registro, captura.join(""));
+      const textoFinal = captura.join("") + (motivoTimeout ? `\n[watchdog: ${motivoTimeout}]` : "");
+      const retry = await this.tentarRetry(ws, opcoes, registro, textoFinal);
       if (retry) return retry;
       return { ...registro, captura: captura.join(""), custo_usd: null };
     };
@@ -1551,21 +1588,7 @@ export class SessionManager {
    * 2. Se os modelos do motor se esgotaram ou o motor falhou (crash, processo abortado, erro do binário),
    *    rotaciona para o próximo motor da cadeia de harness (agente ou padrão do sistema).
    */
-  private inferirCategoriaModelo(modelo: string): "codex" | "opencode" | "openrouter" | "bare" {
-    const m = modelo.trim().toLowerCase();
-    if (m.startsWith("codex/")) return "codex";
-    if (m.startsWith("opencode/")) return "opencode";
-    if (m.startsWith("openrouter/")) return "openrouter";
-    return "bare";
-  }
 
-  private listaPorCategoria(lista: string[], categoria: "codex" | "opencode" | "openrouter" | "bare"): string[] {
-    if (categoria === "bare") return lista;
-    return lista.filter((m) => {
-      const c = this.inferirCategoriaModelo(m);
-      return c === categoria;
-    });
-  }
 
   private async tentarRetry(
     ws: { path: string; id: string },
@@ -1573,15 +1596,31 @@ export class SessionManager {
     registro: RegistroExecucao,
     captura: string,
   ): Promise<ResultadoRun | null> {
-    if (opcoes.retryDe) return null;
+    const tentativas = (opcoes.retryDe?.tentativas ?? 0) + 1;
+    const modelosJaTentados = [...new Set([...(opcoes.retryDe?.modelosTentados ?? []), registro.modelo])];
+    if (tentativas > 6) return null;
     if (registro.status === "hitl_pendente") return null;
-    if (!PADRAO_ERRO_MODELO.test(captura)) return null;
 
-    // 1. Rotação de Contas (se a cota da conta ativa do motor esgotou)
-    const falhaCreditos = PADRAO_ERRO_CREDITOS.test(captura);
+    // Captura profunda defensiva no log do opencode caso o binário tenha ocultado o erro em UnknownError/ref
+    let logOpencode = "";
+    if (registro.exit_code !== 0 || /UnknownError|err_[a-z0-9]+/i.test(captura)) {
+      logOpencode = lerUltimasLinhasLogOpencode(this.homeDir, ws.id);
+    }
+    const textoAnaliseErros = `${captura}\n${logOpencode}`;
+
+    const falhaTimeout =
+      /timeout|inatividade|travado|opencode encerrado|opencode morto|nenhuma resposta do modelo/i.test(textoAnaliseErros) ||
+      (registro as any).erro?.includes?.("timeout") ||
+      (registro as any).erro?.includes?.("inatividade");
+
+    const falhaModelo = PADRAO_ERRO_MODELO.test(textoAnaliseErros) || falhaTimeout;
+    if (!falhaModelo && registro.exit_code === 0) return null;
+
+    // 1. Rotação de Contas (Camada 3: cota da conta ativa do motor esgotou)
+    const falhaCreditos = PADRAO_ERRO_CREDITOS.test(textoAnaliseErros);
     const falhaCota =
       falhaCreditos ||
-      /usage limit|rate limit|quota|429|resource exhausted|status_cota|Weekly usage|Monthly usage/i.test(captura);
+      /usage limit|rate limit|quota|429|resource exhausted|status_cota|Weekly usage|Monthly usage|Monthly usage limit|Weekly usage limit/i.test(textoAnaliseErros);
 
     if (falhaCota) {
       let motorId = "";
@@ -1591,6 +1630,7 @@ export class SessionManager {
       else if (mLow.startsWith("copilot/")) motorId = "copilot";
       else if (mLow.startsWith("claude-code/") || mLow.startsWith("claude/")) motorId = "claude-code";
       else if (mLow.startsWith("opencode/")) motorId = "opencode";
+      else if (mLow.startsWith("openrouter/")) motorId = "opencode";
 
       if (motorId) {
         try {
@@ -1619,6 +1659,8 @@ export class SessionManager {
               retryDe: {
                 de_modelo: registro.modelo,
                 de_exec: registro.id,
+                tentativas,
+                modelosTentados: modelosJaTentados,
               },
               gatilho: opcoes.gatilho
                 ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, `conta:${proxConta.nome}`) }
@@ -1632,14 +1674,16 @@ export class SessionManager {
     }
 
     // 2. Rotação de Modelos / Fallback de Motores
-    let lista = await obterListaRotacaoCompleta(this.agentes, ws.path, opcoes.agente, this.homeDir);
-    const categoriaAtual = this.inferirCategoriaModelo(registro.modelo);
-    if (falhaCreditos) {
-      lista = this.listaPorCategoria(lista, categoriaAtual);
-      lista = lista.filter((m) => ehModeloGratuito(m));
+    const proximoModelo = await this.proximoModeloDaRotacao(
+      registro.modelo,
+      ws.path,
+      opcoes.agente,
+      modelosJaTentados,
+      falhaCreditos,
+    );
+    if (!proximoModelo || proximoModelo === registro.modelo || modelosJaTentados.includes(proximoModelo)) {
+      return null;
     }
-    const proximoModelo = proximoModeloRotacao(lista, registro.modelo);
-    if (!proximoModelo || proximoModelo === registro.modelo) return null;
 
     const idRetry = gerarId("exec");
     try {
@@ -1647,7 +1691,7 @@ export class SessionManager {
         ts: new Date().toISOString(),
         por: "opencorp",
         evento: "retry_modelo",
-        resumo: `falha de modelo/API (${registro.modelo}) — 1 retry com ${proximoModelo}${falhaCreditos ? " (filtrando apenas gratuitos)" : ""} → ${idRetry}`,
+        resumo: `falha de modelo/API (${registro.modelo}) — tentativa ${tentativas} rotacionando para ${proximoModelo}${falhaCreditos ? " (filtrando apenas gratuitos)" : ""} → ${idRetry}`,
       });
     } catch {
       /* journal best-effort */
@@ -1660,6 +1704,8 @@ export class SessionManager {
       retryDe: {
         de_modelo: registro.modelo,
         de_exec: registro.id,
+        tentativas,
+        modelosTentados: [...modelosJaTentados, proximoModelo],
       },
       gatilho: opcoes.gatilho
         ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, proximoModelo) }
@@ -1680,14 +1726,31 @@ export class SessionManager {
     modelosJaTentados: string[] = [],
     apenasGratuitos: boolean = false,
   ): Promise<string | null> {
-    const lista = await obterListaRotacaoCompleta(this.agentes, wsPath, agenteId, this.homeDir);
-    const tentados = new Set([...modelosJaTentados, modeloFalho]);
-    const naoTentados = lista.filter((m) => !tentados.has(m));
-    if (apenasGratuitos) {
-      const gratuitos = naoTentados.filter((m) => ehModeloGratuito(m));
-      if (gratuitos.length > 0) return gratuitos[0]!;
+    if (!wsPath) return null;
+    let ag: any = undefined;
+    if (this.agentes && agenteId) {
+      try {
+        ag = await this.agentes.carregar(wsPath, agenteId);
+      } catch {}
     }
-    return naoTentados[0] ?? null;
+
+    try {
+      const { cadeia } = resolverCadeiaModelosAgente({
+        agente: ag?.frontmatter,
+        wsPath,
+        modeloSolicitado: undefined,
+      });
+
+      return proximoModeloDaCadeia({
+        cadeia,
+        modeloAtual: modeloFalho,
+        modelosJaTentados,
+        apenasGratuitos,
+      });
+    } catch (err) {
+      console.warn("[session-manager] aviso na resolução de modelos:", err);
+      return null;
+    }
   }
 
   async listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<ResumoExecucao[]> {
