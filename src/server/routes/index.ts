@@ -8,5 +8,5 @@ export * from "./sessions.js";
 export * from "./agents.js";
 export * from "./scheduler.js";
 export * from "./config.js";
-
-
+export * from "./docs.js";
+export * from "./secretario.js";

@@ -19,6 +19,9 @@ import type { SecretsStore } from "../../core/secrets-store.js";
 import type { AppStore } from "../../core/app-store.js";
 import type { EngineAccountStore } from "../../core/engines/index.js";
 
+import type { PromptStore } from "../../core/prompt-store.js";
+import type { ApprovalsStore } from "../../core/approvals-store.js";
+
 export interface WebhookLimiterLike {
   check: (ip: string) => { ok: boolean; retryAfter?: number };
 }
@@ -49,6 +52,10 @@ export interface RouteContext {
   secretsStore?: SecretsStore;
   apps?: AppStore;
   engineAccounts?: EngineAccountStore;
+  prompts?: PromptStore;
+  approvals?: ApprovalsStore;
+  docsRoot?: string;
+  resolverCaminhoWorkspace?: (wsPath: string, pathParam: string) => Promise<string>;
   homeDir?: string;
   webhookLimiter?: WebhookLimiterLike;
   portaOpencodeOuErro?: (autoIniciar?: boolean) => Promise<number>;
@@ -56,6 +63,7 @@ export interface RouteContext {
   gerarIdExec?: () => string;
   serverPort?: number;
 }
+
 
 
 
