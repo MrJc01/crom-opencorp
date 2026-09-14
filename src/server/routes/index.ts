@@ -7,4 +7,6 @@ export * from "./flows.js";
 export * from "./sessions.js";
 export * from "./agents.js";
 export * from "./scheduler.js";
+export * from "./config.js";
+
 

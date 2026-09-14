@@ -15,6 +15,9 @@ import type { OpencodeServerManager } from "../../core/opencode-server.js";
 import type { HookStore } from "../../core/hook-store.js";
 import type { SettingsStore } from "../../core/settings-store.js";
 import type { SkillStore } from "../../core/skill-store.js";
+import type { SecretsStore } from "../../core/secrets-store.js";
+import type { AppStore } from "../../core/app-store.js";
+import type { EngineAccountStore } from "../../core/engines/index.js";
 
 export interface WebhookLimiterLike {
   check: (ip: string) => { ok: boolean; retryAfter?: number };
@@ -43,6 +46,9 @@ export interface RouteContext {
   hooks?: HookStore;
   settings?: SettingsStore;
   skillStore?: SkillStore;
+  secretsStore?: SecretsStore;
+  apps?: AppStore;
+  engineAccounts?: EngineAccountStore;
   homeDir?: string;
   webhookLimiter?: WebhookLimiterLike;
   portaOpencodeOuErro?: (autoIniciar?: boolean) => Promise<number>;
@@ -50,5 +56,6 @@ export interface RouteContext {
   gerarIdExec?: () => string;
   serverPort?: number;
 }
+
 
 
