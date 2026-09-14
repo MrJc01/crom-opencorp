@@ -79,35 +79,52 @@ export function registerMeetingCommand(program: Command): void {
       }),
     );
 
+  const querJson = (opts: { json?: boolean }, cmd?: any): boolean =>
+    Boolean(opts?.json ?? cmd?.optsWithGlobals?.()?.json ?? cmd?.parent?.opts()?.json);
+
+  const executarListarReunioes = async (opts: { json?: boolean; workspace?: string }, cmd?: any) => {
+    const ws = await manager.resolver(wsDe(program, opts));
+    const salas = await new MeetingManager().listar(ws.path);
+    if (querJson(opts, cmd)) {
+      console.log(JSON.stringify(salas, null, 2));
+      return;
+    }
+    if (salas.length === 0) {
+      console.log('nenhuma reunião — abra uma com: opencorp meeting start "<pauta>"');
+      return;
+    }
+    const formatarData = (iso: string): string => iso.slice(0, 16).replace("T", " ");
+    console.log("id                                   status              turnos  abertura            pauta");
+    for (const s of salas) {
+      console.log(
+        `${s.id}  ${s.status.padEnd(19)} ${`${s.turno}/${s.max_turnos}`.padEnd(7)} ${formatarData(s.criado_em).padEnd(19)} ${s.pauta.slice(0, 60)}`,
+      );
+    }
+  };
+
+  meeting
+    .option("--json", "saída em JSON")
+    .action((opts: { json?: boolean; workspace?: string }, cmd: any) => comErros(() => executarListarReunioes(opts, cmd)));
+
   meeting
     .command("list")
     .description("lista as reuniões do workspace ativo")
-    .action((opts: { workspace?: string }) =>
-      comErros(async () => {
-        const ws = await manager.resolver(wsDe(program, opts));
-        const salas = await new MeetingManager().listar(ws.path);
-        if (salas.length === 0) {
-          console.log('nenhuma reunião — abra uma com: opencorp meeting start "<pauta>"');
-          return;
-        }
-        const formatarData = (iso: string): string => iso.slice(0, 16).replace("T", " ");
-        console.log("id                                   status              turnos  abertura            pauta");
-        for (const s of salas) {
-          console.log(
-            `${s.id}  ${s.status.padEnd(19)} ${`${s.turno}/${s.max_turnos}`.padEnd(7)} ${formatarData(s.criado_em).padEnd(19)} ${s.pauta.slice(0, 60)}`,
-          );
-        }
-      }),
-    );
+    .option("--json", "saída em JSON")
+    .action((opts: { json?: boolean; workspace?: string }, cmd: any) => comErros(() => executarListarReunioes(opts, cmd)));
 
   meeting
     .command("show")
     .argument("<id>", "id da reunião (reuniao-...)")
+    .option("--json", "saída em JSON")
     .description("mostra meta e transcrição completa da reunião")
-    .action((id: string, opts: { workspace?: string }) =>
+    .action((id: string, opts: { json?: boolean; workspace?: string }, cmd: any) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(program, opts));
         const { sala, transcript } = await new MeetingManager().mostrar(ws.path, id);
+        if (querJson(opts, cmd)) {
+          console.log(JSON.stringify({ ...sala, transcript }, null, 2));
+          return;
+        }
         console.log(`id:            ${sala.id}`);
         console.log(`pauta:         ${sala.pauta}`);
         console.log(`participantes: ${sala.participantes.join(", ")}`);

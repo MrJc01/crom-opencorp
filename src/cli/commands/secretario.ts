@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { SessionManager } from "../../core/session-manager.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { cliFetch, obterConfiguracaoServidor } from "../client.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -31,7 +32,7 @@ async function chamarApiSecretario(
   body?: unknown,
 ): Promise<{ ok: boolean; data: any }> {
   try {
-    const res = await fetch(`http://127.0.0.1:4100${endpoint}`, {
+    const res = await cliFetch(endpoint, {
       method,
       headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
@@ -88,7 +89,8 @@ export function registerSecretarioCommand(program: Command): void {
             console.log(`PID:         ${res.data.pid ?? "-"}`);
             console.log(`Iniciado em: ${res.data.iniciado_em ?? "-"}`);
           } else {
-            console.log("Secretário não está respondendo na API HTTP (127.0.0.1:4100/secretario/status).");
+            const cfg = obterConfiguracaoServidor();
+            console.log(`Secretário não está respondendo na API HTTP (${cfg.urlBase}/secretario/status).`);
             console.log("Dica: inicie com 'opencorp serve' ou execute diretamente.");
           }
           return;

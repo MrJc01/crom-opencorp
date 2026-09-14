@@ -8,6 +8,7 @@ import { Scheduler } from "../../core/scheduler.js";
 import { converterJobParaFlow } from "../../core/scheduler-flow-bridge.js";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
 import { parseGatilho } from "../../schemas/gatilho.js";
+import { obterConfiguracaoServidor } from "../client.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -42,6 +43,30 @@ function wsDe(opts: { workspace?: string }): string | undefined {
       "grafo declarativo executável — tipos de nó v1: manual (gatilho único), agente (config {agente, ordem} — ordem usa {{entrada}} para receber o contexto), saida (config {registro: \"categoria/id\"}) e condicao (config {chave, entao, senao} — rota para o nó entao quando o contexto contém a chave, senão para senao; arestas saindo de condicao são ilustrativas). v1: fluxo linear a partir do gatilho, ramificação só via condicao",
     );
 
+  const querJson = (opts: { json?: boolean }, cmd?: any): boolean =>
+    Boolean(opts?.json ?? cmd?.optsWithGlobals?.()?.json ?? cmd?.parent?.opts()?.json);
+
+  const executarListarFlows = async (opts: { json?: boolean; workspace?: string }, cmd?: any) => {
+    const ws = await manager.resolver(wsDe(opts));
+    const lista = await store.listar(ws.path);
+    if (querJson(opts, cmd)) {
+      console.log(JSON.stringify(lista, null, 2));
+      return;
+    }
+    if (lista.length === 0) {
+      console.log('nenhum flow — crie com: opencorp flow create <id> --nome "..."');
+      return;
+    }
+    console.log("id                    nome                                 nós  arestas");
+    for (const f of lista) {
+      console.log(`${f.id.padEnd(22)}${f.nome.padEnd(37)}${String(f.nos).padEnd(5)}${f.arestas}`);
+    }
+  };
+
+  flow
+    .option("--json", "saída em JSON")
+    .action((opts: { json?: boolean; workspace?: string }, cmd: any) => comErros(() => executarListarFlows(opts, cmd)));
+
   flow
     .command("create")
     .argument("<id>", "id do flow (kebab-case)")
@@ -59,29 +84,22 @@ function wsDe(opts: { workspace?: string }): string | undefined {
   flow
     .command("list")
     .description("lista os flows do workspace")
-    .action((opts: { workspace?: string }) =>
-      comErros(async () => {
-        const ws = await manager.resolver(wsDe(opts));
-        const lista = await store.listar(ws.path);
-        if (lista.length === 0) {
-          console.log('nenhum flow — crie com: opencorp flow create <id> --nome "..."');
-          return;
-        }
-        console.log("id                    nome                                 nós  arestas");
-        for (const f of lista) {
-          console.log(`${f.id.padEnd(22)}${f.nome.padEnd(37)}${String(f.nos).padEnd(5)}${f.arestas}`);
-        }
-      }),
-    );
+    .option("--json", "saída em JSON")
+    .action((opts: { json?: boolean; workspace?: string }, cmd: any) => comErros(() => executarListarFlows(opts, cmd)));
 
   flow
     .command("show")
     .argument("<id>", "id do flow")
+    .option("--json", "saída em JSON")
     .description("mostra nós e arestas do flow")
-    .action((id: string, opts: { workspace?: string }) =>
+    .action((id: string, opts: { json?: boolean; workspace?: string }, cmd: any) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(opts));
         const f = await store.obter(ws.path, id);
+        if (querJson(opts, cmd)) {
+          console.log(JSON.stringify(f, null, 2));
+          return;
+        }
         console.log(`id:     ${f.id}`);
         console.log(`nome:   ${f.nome}`);
         console.log("nós:");
@@ -298,10 +316,16 @@ function wsDe(opts: { workspace?: string }): string | undefined {
   flow
     .command("webhooks")
     .description("lista todos os nós webhook registrados nos flows, com URLs de trigger")
-    .action((opts: { workspace?: string }) =>
+    .option("--json", "saída em JSON")
+    .action((opts: { json?: boolean; workspace?: string }) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(opts));
-        const webhooks = await store.listarWebhooks(ws.path, "http://localhost:3578");
+        const cfg = obterConfiguracaoServidor();
+        const webhooks = await store.listarWebhooks(ws.path, cfg.urlBase);
+        if (opts.json) {
+          console.log(JSON.stringify(webhooks, null, 2));
+          return;
+        }
         if (webhooks.length === 0) {
           console.log("Nenhum webhook encontrado nos flows.");
           return;

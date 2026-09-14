@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
 import { RegistryStore } from "../../core/registry-store.js";
 import { opencorpHome } from "../../utils/paths.js";
+import { cliFetch } from "../client.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -85,7 +86,7 @@ export function registerSaudeCommand(program: Command): void {
         // 3. Serve (API)
         let serveVivo = false;
         try {
-          const res = await fetch("http://127.0.0.1:4100/health", { signal: AbortSignal.timeout(1000) });
+          const res = await cliFetch("/health", { signal: AbortSignal.timeout(1000) });
           serveVivo = res.ok;
         } catch {}
 

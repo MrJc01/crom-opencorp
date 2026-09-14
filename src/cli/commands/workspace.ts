@@ -34,6 +34,33 @@ export function registerWorkspaceCommands(program: Command): void {
 
   const grupo = program.command("workspace").description("workspaces (corps) isolados");
 
+  const querJson = (opts: { json?: boolean }, cmd?: any): boolean =>
+    Boolean(opts?.json ?? cmd?.optsWithGlobals?.()?.json ?? cmd?.parent?.opts()?.json);
+
+  const executarListarWorkspaces = async (opts: { json?: boolean }, cmd?: any) => {
+    const lista = await manager.listar();
+    if (querJson(opts, cmd)) {
+      console.log(JSON.stringify(lista, null, 2));
+      return;
+    }
+    if (lista.length === 0) {
+      console.log("nenhum workspace — crie com: opencorp workspace create <id>");
+      return;
+    }
+    const largura = Math.max(...lista.map((w) => w.id.length), 2);
+    console.log(`id${" ".repeat(largura - 2)}  ativo  estado   criado_em`);
+    for (const w of lista) {
+      const estado = w.existe ? "ok" : "ausente";
+      console.log(
+        `${w.id}${" ".repeat(largura - w.id.length)}  ${w.ativo ? "●" : " "}      ${estado.padEnd(7)} ${w.criado_em.slice(0, 10)}`,
+      );
+    }
+  };
+
+  grupo
+    .option("--json", "saída em JSON")
+    .action((opts: { json?: boolean }, cmd: any) => comErros(() => executarListarWorkspaces(opts, cmd)));
+
   grupo
     .command("create")
     .argument("<id>", "id do workspace (kebab-case)")
@@ -54,31 +81,21 @@ export function registerWorkspaceCommands(program: Command): void {
   grupo
     .command("list")
     .description("lista os workspaces conhecidos (● = ativo)")
-    .action(() =>
-      comErros(async () => {
-        const lista = await manager.listar();
-        if (lista.length === 0) {
-          console.log("nenhum workspace — crie com: opencorp workspace create <id>");
-          return;
-        }
-        const largura = Math.max(...lista.map((w) => w.id.length), 2);
-        console.log(`id${" ".repeat(largura - 2)}  ativo  estado   criado_em`);
-        for (const w of lista) {
-          const estado = w.existe ? "ok" : "ausente";
-          console.log(
-            `${w.id}${" ".repeat(largura - w.id.length)}  ${w.ativo ? "●" : " "}      ${estado.padEnd(7)} ${w.criado_em.slice(0, 10)}`,
-          );
-        }
-      }),
-    );
+    .option("--json", "saída em JSON")
+    .action((opts: { json?: boolean }, cmd: any) => comErros(() => executarListarWorkspaces(opts, cmd)));
 
   grupo
     .command("show")
     .argument("[id]", "id do workspace (padrão: ativo)")
+    .option("--json", "saída em JSON")
     .description("mostra config resumida, agentes e orçamento")
-    .action((id: string | undefined) =>
+    .action((id: string | undefined, opts: { json?: boolean }, cmd: any) =>
       comErros(async () => {
         const d = await manager.detalhar(id);
+        if (querJson(opts, cmd)) {
+          console.log(JSON.stringify(d, null, 2));
+          return;
+        }
         console.log(`id:         ${d.id}`);
         console.log(`caminho:    ${d.path}`);
         console.log(`criado_em:  ${d.criado_em}`);
