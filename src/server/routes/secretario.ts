@@ -1073,14 +1073,20 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
             const mensagemStreamComWs = `${wsPrefixoStream}${mensagem}`;
 
             const msgsPreExistentes = (await listarMensagens()) ?? [];
-            const assistentesPre = msgsPreExistentes.filter((m) => m.info?.role === "assistant");
-            const hasExistingContinuation = msgsPreExistentes.some((m) => {
+            const idsMensagensAntesTentativa = new Set(msgsPreExistentes.map((m) => m.info?.id).filter(Boolean));
+
+            const inicioTurnoIdx = baselineId ? msgsPreExistentes.findIndex((m) => m.info?.id === baselineId) : -1;
+            const msgsDesteTurno = inicioTurnoIdx >= 0 ? msgsPreExistentes.slice(inicioTurnoIdx + 1) : msgsPreExistentes;
+            const assistentesDesteTurno = msgsDesteTurno.filter((m) => m.info?.role === "assistant");
+            const temTextoPrevioSubstancial = assistentesDesteTurno.some((a) => (textoDe(a) || "").trim().length > 20);
+
+            const hasExistingContinuation = msgsDesteTurno.some((m) => {
               if (m.info?.role !== "user") return false;
               const textPart = m.parts?.find((p) => p.type === "text");
               const content = textPart?.text ?? "";
               return typeof content === "string" && content.startsWith("Continue a execução");
             });
-            const textoParaEnvio = assistentesPre.length > 0 && tentativasTotais > 0 && !hasExistingContinuation
+            const textoParaEnvio = temTextoPrevioSubstancial && tentativasTotais > 0 && !hasExistingContinuation
               ? "Continue a execução anterior exatamente de onde parou. Conclua todas as análises e ações pendentes até finalizar a demanda por completo."
               : mensagemStreamComWs;
 
@@ -1159,6 +1165,7 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
                     tipo: "fallback_modelo",
                     modelo: proximo,
                     aviso: `⚠️ O modelo ${modeloAtual} falhou (${postErro}). Alternando automaticamente para ${proximo}...`,
+                    erro: true,
                   });
                   tentouFallback = true;
                   if ((modeloIdx + 1) % modelosFallback.length === 0) {
@@ -1180,7 +1187,11 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
                 const novasMsgs = inicioIdx >= 0 ? msgs.slice(inicioIdx + 1) : msgs;
                 const assistentesNovas = novasMsgs.filter((m) => m.info?.role === "assistant");
 
-                const msgComErro = assistentesNovas.find((m) => Boolean((m.info as any)?.error));
+                const msgComErro = assistentesNovas.find((m) => {
+                  if (!Boolean((m.info as any)?.error)) return false;
+                  if (m.info?.id && idsMensagensAntesTentativa.has(m.info.id)) return false;
+                  return true;
+                });
                 if (msgComErro && !postErro) {
                   const errObj = (msgComErro.info as any).error;
                   const desc = errObj?.data?.message || errObj?.message || errObj?.name || "erro na chamada de API do modelo";

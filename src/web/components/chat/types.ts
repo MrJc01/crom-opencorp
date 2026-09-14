@@ -73,6 +73,16 @@ export interface ChatMensagem {
   };
   gitStatus?: GitStatusPayload;
   gitDiff?: GitDiffPayload;
+  modelo?: string;
+  rotacoes?: NotificacaoRotacao[];
+}
+
+export interface NotificacaoRotacao {
+  tipo?: string;
+  modelo?: string;
+  aviso: string;
+  erro?: boolean;
+  timestamp?: number;
 }
 
 export interface PaginacaoMensagens {

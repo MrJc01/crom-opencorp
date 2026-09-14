@@ -717,6 +717,16 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
             : Boolean(m.info?.time?.completed || expirou || temErro || !isSessaoBusy);
           const textoFinal = content || (expirou ? "(geração anterior interrompida ou expirada)" : (temErro && !content ? `⚠️ **Erro na resposta**: ${erroDesc}` : ""));
 
+          const modNome = (m.info as any)?.providerID && (m.info as any)?.modelID
+            ? `${(m.info as any).providerID}/${(m.info as any).modelID}`
+            : ((m.info as any)?.modelID || (m.info as any)?.model || "");
+          const erroItemRotacao = temErro ? {
+            tipo: "erro",
+            modelo: modNome || undefined,
+            aviso: `⚠️ O modelo ${modNome || "utilizado"} falhou: ${erroDesc}`,
+            erro: true,
+          } : null;
+
           const ult = mensagens[mensagens.length - 1];
           if (ult && ult.role === "assistant") {
             if (passos.length > 0) {
@@ -730,6 +740,14 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
             }
             if (tools.length > 0) {
               ult.acoes = [...(ult.acoes ?? []), ...tools];
+            }
+            if (erroItemRotacao) {
+              const rot = (ult as any).rotacoes ?? [];
+              rot.push(erroItemRotacao);
+              (ult as any).rotacoes = rot;
+            }
+            if (modNome) {
+              (ult as any).modelo = modNome;
             }
             const passoComPergunta = passos.find((p) => (p as any).perguntas || p.pergunta);
             if (passoComPergunta) {
@@ -754,6 +772,8 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
                 pergunta: passoComPergunta?.pergunta,
                 opcoes: passoComPergunta?.opcoes,
                 perguntas: (passoComPergunta as any)?.perguntas,
+                modelo: modNome || undefined,
+                rotacoes: erroItemRotacao ? [erroItemRotacao] : undefined,
               } as any);
             }
           }

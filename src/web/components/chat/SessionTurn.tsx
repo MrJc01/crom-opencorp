@@ -623,6 +623,75 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
         </pre>
       </Show>
 
+      {/* Notificações de Rotação de Modelos / Fallback e Erros */}
+      <Show when={m().rotacoes && m().rotacoes!.length > 0}>
+        <Show
+          when={m().rotacoes!.length > 1}
+          fallback={
+            /* Exibição Direta (1 ocorrência) */
+            <div
+              class={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs font-mono border my-1.5 ${
+                m().rotacoes![0]?.erro
+                  ? "bg-amber-950/40 border-amber-800/60 text-amber-200"
+                  : "bg-blue-950/30 border-blue-800/50 text-blue-200"
+              }`}
+            >
+              <span class="shrink-0 mt-0.5">{m().rotacoes![0]?.erro ? "⚠️" : "⚡"}</span>
+              <span class="flex-1 leading-relaxed break-words">{m().rotacoes![0]?.aviso}</span>
+              <Show when={m().rotacoes![0]?.modelo}>
+                <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-zinc-900/80 border border-zinc-700/80 text-zinc-300">
+                  {m().rotacoes![0]?.modelo}
+                </span>
+              </Show>
+            </div>
+          }
+        >
+          {/* Exibição em Collapse (mais de 1 ocorrência) */}
+          <details
+            class="my-2 rounded-lg border border-amber-800/50 bg-amber-950/20 text-xs overflow-hidden group select-text"
+            open={m().concluida === false}
+          >
+            <summary class="flex items-center justify-between px-3 py-2 cursor-pointer select-none bg-amber-950/40 hover:bg-amber-950/60 transition-colors text-amber-300 font-medium font-mono">
+              <div class="flex items-center gap-2">
+                <span>🔄</span>
+                <span>Rotação de Modelos ({m().rotacoes!.length} eventos)</span>
+                <Show when={m().rotacoes![m().rotacoes!.length - 1]?.modelo}>
+                  <span class="px-1.5 py-0.5 rounded bg-zinc-900/90 border border-zinc-700 text-[10px] text-zinc-300">
+                    ativo: {m().rotacoes![m().rotacoes!.length - 1]?.modelo}
+                  </span>
+                </Show>
+              </div>
+              <span class="text-[10px] text-zinc-400 group-open:rotate-180 transition-transform duration-200">
+                ▼
+              </span>
+            </summary>
+            <div class="p-2 space-y-1.5 border-t border-amber-800/40 bg-black/40 font-mono text-[11px]">
+              <For each={m().rotacoes}>
+                {(rot, rIdx) => (
+                  <div
+                    class={`flex items-start gap-2 p-1.5 rounded ${
+                      rot.erro
+                        ? "bg-rose-950/30 text-rose-200 border border-rose-900/40"
+                        : "bg-zinc-900/60 text-zinc-300 border border-zinc-800/60"
+                    }`}
+                  >
+                    <span class="shrink-0 mt-0.5">{rot.erro ? "⚠️" : "⚡"}</span>
+                    <div class="flex-1 leading-relaxed break-words">
+                      <span>{rot.aviso}</span>
+                    </div>
+                    <Show when={rot.modelo}>
+                      <span class="shrink-0 text-[10px] px-1 py-0.2 rounded bg-zinc-800 text-zinc-400">
+                        #{rIdx() + 1}
+                      </span>
+                    </Show>
+                  </div>
+                )}
+              </For>
+            </div>
+          </details>
+        </Show>
+      </Show>
+
       {/* Indicador de Raciocínio ao Vivo quando ainda não há passos prontos */}
       <Show
         when={

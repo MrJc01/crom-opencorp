@@ -1029,12 +1029,21 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
 
               if (evtType === "status" || evtType === "fallback_modelo") {
                 if (payload.aviso) {
-                  const passos = [...(assistente.passos || [])];
-                  passos.push({
-                    tipo: "texto",
-                    texto: `\n> [Aviso] *${payload.aviso}*\n\n`,
-                  });
-                  assistente.passos = passos;
+                  const rotacoes = [...(assistente.rotacoes || [])];
+                  const jaExiste = rotacoes.some((r) => r.aviso === payload.aviso);
+                  if (!jaExiste) {
+                    rotacoes.push({
+                      tipo: evtType,
+                      modelo: payload.modelo,
+                      aviso: payload.aviso,
+                      erro: Boolean(payload.erro || payload.aviso.includes("falhou") || payload.aviso.includes("⚠️") || payload.aviso.includes("erro")),
+                      timestamp: Date.now(),
+                    });
+                    assistente.rotacoes = rotacoes;
+                  }
+                }
+                if (payload.modelo) {
+                  assistente.modelo = payload.modelo;
                 }
               } else if (evtType === "passos" && Array.isArray(payload.passos)) {
                 assistente.passos = payload.passos;
@@ -1108,6 +1117,9 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
                 assistente.hitl = payload.hitl || payload;
               } else if (evtType === "fim") {
                 assistente.concluida = true;
+                if (payload.modelo) {
+                  assistente.modelo = payload.modelo;
+                }
                 if (payload.resposta && !assistente.content) {
                   assistente.content = payload.resposta;
                 }
@@ -1120,7 +1132,17 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
               } else if (evtType === "erro") {
                 assistente.concluida = true;
                 const msgErro = payload.erro || payload.mensagem || "Erro desconhecido";
-                showToast(`Erro no Secretário: ${msgErro}`, "erro");
+                const rotacoes = [...(assistente.rotacoes || [])];
+                const jaExiste = rotacoes.some((r) => r.aviso?.includes(msgErro));
+                if (!jaExiste) {
+                  rotacoes.push({
+                    tipo: "erro",
+                    aviso: `⚠️ Erro: ${msgErro}`,
+                    erro: true,
+                    timestamp: Date.now(),
+                  });
+                  assistente.rotacoes = rotacoes;
+                }
                 assistente.content = assistente.content
                   ? `${assistente.content}\n\n> **Erro no Secretário**: ${msgErro}`
                   : `> **Erro no Secretário**: ${msgErro}`;
