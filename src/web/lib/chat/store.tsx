@@ -127,6 +127,8 @@ export interface ChatStore {
   testarMotorConexao: () => Promise<void>;
   salvarConfigLateral: () => Promise<void>;
   aplicarAgenteAoChat: () => void;
+  // Sincronização periódica / heartbeat de sessão
+  sincronizarSessaoAtiva: (opts?: { silencioso?: boolean; forcar?: boolean }) => Promise<boolean>;
   // Alertas
   alertaFalhas: () => string | null;
   dispensarAlertaFalhas: () => void;
@@ -741,6 +743,90 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
       setTotalMensagensServidor(0);
       setTemMaisMensagensAnteriores(false);
       setCarregando(false);
+    }
+  };
+
+  let syncEmAndamento = false;
+  let ultimoHashSincronizado = "";
+
+  /**
+   * Sincroniza periodicamente a sessão aberta com o servidor.
+   * Se o servidor tiver novas mensagens ou mudanças de status (ex.: resposta concluída em background,
+   * tool calls adicionadas, ou stream que terminou sem evento SSE), atualiza o estado local sem
+   * necessitar de reload da página.
+   */
+  const sincronizarSessaoAtiva = async (opts?: { silencioso?: boolean; forcar?: boolean }): Promise<boolean> => {
+    const sid = sessaoAtivaId();
+    if (!sid || (streamingAtivo() && !opts?.forcar) || syncEmAndamento) {
+      return false;
+    }
+    syncEmAndamento = true;
+    try {
+      const respPag = await fetchApi<any>(`/secretario/sessoes/${encodeURIComponent(sid)}/mensagens?turnos=2`).catch(() => null);
+      if (!respPag) return false;
+
+      let lista: ChatMensagem[] = [];
+      let paginacao: PaginacaoMensagens | null = null;
+
+      if (respPag && typeof respPag === "object" && "mensagens" in respPag) {
+        lista = Array.isArray(respPag.mensagens) ? respPag.mensagens : [];
+        paginacao = respPag.paginacao || null;
+      } else if (Array.isArray(respPag)) {
+        lista = respPag;
+      }
+
+      if (lista.length === 0) return false;
+
+      const ult = lista[lista.length - 1];
+      const hashAtual = `${lista.length}:${ult?.role}:${ult?.content?.length || 0}:${ult?.pensamento?.length || 0}:${ult?.acoes?.length || 0}:${ult?.concluida}`;
+
+      const msgsLocais = mensagens();
+      const ultLocal = msgsLocais[msgsLocais.length - 1];
+      const hashLocal = `${msgsLocais.length}:${ultLocal?.role}:${ultLocal?.content?.length || 0}:${ultLocal?.pensamento?.length || 0}:${ultLocal?.acoes?.length || 0}:${ultLocal?.concluida}`;
+
+      const mudou = hashAtual !== hashLocal || hashAtual !== ultimoHashSincronizado || opts?.forcar;
+
+      if (mudou) {
+        ultimoHashSincronizado = hashAtual;
+
+        // Se o usuário já rolou e carregou mensagens anteriores, mesclamos apenas o final
+        if (msgsLocais.length > lista.length && temMaisMensagensAnteriores()) {
+          const offset = msgsLocais.length - lista.length;
+          const anteriores = msgsLocais.slice(0, offset);
+          setMensagens([...anteriores, ...reconciliarMensagens(msgsLocais.slice(offset), lista)]);
+        } else {
+          setMensagens((prev) => reconciliarMensagens(prev, lista));
+        }
+
+        if (paginacao) {
+          setTotalMensagensServidor(paginacao.total_mensagens);
+          setTemMaisMensagensAnteriores(paginacao.tem_mais);
+        }
+
+        // Se no servidor a mensagem do assistente já concluiu e o chat ainda estava com loading, desativa
+        if (ult?.role === "assistant" && ult?.concluida === true) {
+          if (carregando()) {
+            setCarregando(false);
+          }
+          if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+          }
+        }
+
+        // Se no servidor a mensagem está em execução e o frontend não estava com streaming ou monitoramento ativo
+        if (ult?.role === "assistant" && ult?.concluida === false && !streamingAtivo() && !monitorTimeout) {
+          setCarregando(true);
+          retomarMonitoramento(sid);
+        }
+
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      syncEmAndamento = false;
     }
   };
 
@@ -1486,6 +1572,7 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
     testarMotorConexao,
     salvarConfigLateral,
     aplicarAgenteAoChat,
+    sincronizarSessaoAtiva,
     alertaFalhas,
     dispensarAlertaFalhas: () => setAlertaFalhas(null),
     aprovarHitl,
