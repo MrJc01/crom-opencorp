@@ -943,11 +943,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             <button
               type="button"
               onClick={() => fileInputRef.click()}
-              class="h-7 w-7 shrink-0 rounded-lg bg-zinc-800/90 hover:bg-zinc-750 text-zinc-400 hover:text-zinc-200 flex items-center justify-center transition-colors cursor-pointer border border-zinc-700/50"
+              class="h-8 w-8 shrink-0 rounded-lg bg-zinc-800/90 hover:bg-zinc-750 text-zinc-300 hover:text-zinc-100 flex items-center justify-center transition-colors cursor-pointer border border-zinc-700/60"
               title="Anexar arquivo ou imagem"
               aria-label="Anexar arquivo ou imagem"
             >
-              <Plus size={14} />
+              <Plus size={16} strokeWidth={2} />
             </button>
 
             {/* Dropdown Compacto de Modelo (OpenCode Style) */}
@@ -955,16 +955,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               <button
                 type="button"
                 onClick={() => setModelDropdownOpen(!modelDropdownOpen())}
-                class="h-7 px-2 sm:px-2.5 rounded-lg bg-zinc-800/90 hover:bg-zinc-750 text-zinc-300 flex items-center gap-1 sm:gap-1.5 transition-colors cursor-pointer border border-zinc-700/60 font-mono text-[10px] sm:text-[11px]"
+                class="h-8 px-2.5 rounded-lg bg-zinc-800/90 hover:bg-zinc-750 text-zinc-300 flex items-center gap-1.5 transition-colors cursor-pointer border border-zinc-700/60 font-mono text-xs"
                 title="Alterar modelo ativo"
               >
-                <Cpu size={12} class="text-emerald-400 shrink-0" />
-                <span class="truncate max-w-[80px] sm:max-w-[130px]">
+                <Cpu size={14} class="text-emerald-400 shrink-0" />
+                <span class="truncate max-w-[90px] sm:max-w-[140px]">
                   {(props.modeloAtivo || "gemini-2.5-flash").split("/").slice(-1)[0]}
                 </span>
                 <ChevronDown
-                  size={10}
-                  class={`text-zinc-500 ml-0.5 shrink-0 transition-transform ${
+                  size={11}
+                  class={`text-zinc-400 ml-0.5 shrink-0 transition-transform ${
                     modelDropdownOpen() ? "rotate-180" : ""
                   }`}
                 />
@@ -1013,7 +1013,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
             {/* Seletor de Agente Compacto */}
             <select
-              class="h-7 bg-zinc-800/90 border border-zinc-700/60 rounded-lg px-2 text-[11px] font-mono text-zinc-300 focus:outline-none cursor-pointer hover:bg-zinc-750 transition-colors max-w-[130px] sm:max-w-[160px] truncate shrink-0"
+              class="h-8 bg-zinc-800/90 border border-zinc-700/60 rounded-lg px-2 text-xs font-mono text-zinc-300 focus:outline-none cursor-pointer hover:bg-zinc-750 transition-colors max-w-[130px] sm:max-w-[160px] truncate shrink-0"
               value={props.agenteSelecionado || "secretario-exec"}
               onChange={(e) => props.onMudarAgente?.(e.currentTarget.value)}
               title="Destinatário da ordem"
@@ -1037,7 +1037,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             </select>
 
             {/* Pílulas Rápidas Clicáveis para [/] [@] [!] */}
-            <div class="hidden md:flex items-center gap-1 font-mono text-[10px] shrink-0">
+            <div class="hidden md:flex items-center gap-1 font-mono text-xs shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -1047,7 +1047,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   setIndiceAtivo(0);
                   textareaRef?.focus();
                 }}
-                class="px-1.5 py-0.5 rounded bg-zinc-800/80 hover:bg-purple-950/40 hover:text-purple-300 text-zinc-400 border border-zinc-700/60 cursor-pointer transition-colors"
+                class="h-6 px-2 rounded-md bg-zinc-800/80 hover:bg-purple-950/40 hover:text-purple-300 text-zinc-400 border border-zinc-700/60 cursor-pointer transition-colors font-semibold"
                 title="Inserir comando /"
               >
                 /
@@ -1061,7 +1061,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   setIndiceAtivo(0);
                   textareaRef?.focus();
                 }}
-                class="px-1.5 py-0.5 rounded bg-zinc-800/80 hover:bg-emerald-950/40 hover:text-emerald-300 text-zinc-400 border border-zinc-700/60 cursor-pointer transition-colors"
+                class="h-6 px-2 rounded-md bg-zinc-800/80 hover:bg-emerald-950/40 hover:text-emerald-300 text-zinc-400 border border-zinc-700/60 cursor-pointer transition-colors font-semibold"
                 title="Inserir menção @"
               >
                 @
@@ -1075,7 +1075,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   setIndiceAtivo(0);
                   textareaRef?.focus();
                 }}
-                class="px-1.5 py-0.5 rounded bg-zinc-800/80 hover:bg-amber-950/40 hover:text-amber-300 text-zinc-400 border border-zinc-700/60 cursor-pointer transition-colors"
+                class="h-6 px-2 rounded-md bg-zinc-800/80 hover:bg-amber-950/40 hover:text-amber-300 text-zinc-400 border border-zinc-700/60 cursor-pointer transition-colors font-semibold"
                 title="Inserir terminal !"
               >
                 !
@@ -1089,11 +1089,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               <button
                 type="button"
                 onClick={props.onParar}
-                class="flex items-center justify-center h-7 w-7 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-bold transition-all active:scale-95 shadow-md cursor-pointer animate-pulse"
+                class="flex items-center justify-center h-8 w-8 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-bold transition-all active:scale-95 shadow-md cursor-pointer animate-pulse"
                 title="Interromper geração atual"
                 aria-label="Interromper geração atual"
               >
-                <Square size={12} fill="currentColor" />
+                <Square size={13} fill="currentColor" />
               </button>
             </Show>
 
@@ -1105,11 +1105,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 id={`${prefixoBotoes()}btn-enfileirar`}
                 data-testid={`${prefixoBotoes()}btn-enfileirar`}
                 onClick={dispararEnvio}
-                class="flex items-center gap-1.5 px-3 h-7 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-all active:scale-95 shadow-md cursor-pointer text-xs"
+                class="flex items-center gap-1.5 px-3 h-8 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-all active:scale-95 shadow-md cursor-pointer text-xs"
                 title="Adicionar prompt à fila de espera (Enter)"
                 aria-label="Adicionar à fila de espera"
               >
-                <Clock size={12} />
+                <Clock size={13} />
                 <span>+ Fila</span>
               </button>
             </Show>
@@ -1120,7 +1120,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 data-testid={`${prefixoBotoes()}btn-enviar`}
                 onClick={dispararEnvio}
                 disabled={!valorTexto().trim() && listaAnexos().length === 0}
-                class={`flex items-center justify-center h-7 w-7 rounded-full transition-all cursor-pointer ${
+                class={`flex items-center justify-center h-8 w-8 rounded-full transition-all cursor-pointer ${
                   valorTexto().trim() || listaAnexos().length > 0
                     ? "bg-emerald-500 text-zinc-950 hover:bg-emerald-400 active:scale-95 shadow-md shadow-emerald-500/20"
                     : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
@@ -1128,7 +1128,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 title="Enviar mensagem (Enter)"
                 aria-label="Enviar mensagem"
               >
-                <ArrowUp size={14} stroke-width={2.5} />
+                <ArrowUp size={16} strokeWidth={2.5} />
               </button>
             </Show>
           </div>
