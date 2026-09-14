@@ -65,6 +65,7 @@ export interface ChatStore {
   // Sessões
   sessoes: () => SessaoResumo[];
   sessaoAtivaId: () => string | null;
+  emNovaConversa: () => boolean;
   selecionarSessao: (id: string) => Promise<void>;
   novaConversa: () => void;
   excluirSessao: (id: string) => Promise<void>;
@@ -218,6 +219,7 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
   const [motorConfig, setMotorConfig] = createSignal<string>("opencode");
   const [modeloConfig, setModeloConfig] = createSignal<string>("");
   const [rotacaoConfig, setRotacaoConfig] = createSignal<string>("");
+  const [emNovaConversa, setEmNovaConversa] = createSignal<boolean>(false);
   // Overrides de Config → Modelos (fonte: settings.secretary.agent / .model)
   const [overrideAgente, setOverrideAgente] = createSignal<string>("");
   const [overrideModelo, setOverrideModelo] = createSignal<string>("");
@@ -442,12 +444,15 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
         status: s.status,
       }));
       setSessoes(lista);
+      if (emNovaConversa()) {
+        return;
+      }
       const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
       const urlSessaoId = params?.get("sessao");
       const ativa = urlSessaoId || sessaoAtivaId();
       if (ativa && lista.some((s) => s.id === ativa)) {
         void selecionarSessao(ativa);
-      } else if (lista.length > 0 && !sessaoAtivaId()) {
+      } else if (lista.length > 0 && !sessaoAtivaId() && !urlSessaoId) {
         void selecionarSessao(lista[0].id);
       }
     } catch (err) {
@@ -569,6 +574,7 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
   };
 
   const selecionarSessao = async (id: string) => {
+    setEmNovaConversa(false);
     pararMonitoramento();
     if (abortController) {
       abortController.abort();
@@ -681,6 +687,7 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
   };
 
   const novaConversa = () => {
+    setEmNovaConversa(true);
     pararMonitoramento();
     if (abortController) {
       abortController.abort();
@@ -1011,6 +1018,7 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
             const evtType = currentEvent || payload.tipo || "";
 
             if (evtType === "inicio" && payload.sessao_id) {
+              setEmNovaConversa(false);
               setSessaoAtivaId(payload.sessao_id);
               try { syncChannel?.postMessage({ tipo: "mensagem_enviada", sessao_id: payload.sessao_id }); } catch {}
             }
@@ -1312,6 +1320,7 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
   const store: ChatStore = {
     sessoes,
     sessaoAtivaId,
+    emNovaConversa,
     selecionarSessao,
     novaConversa,
     excluirSessao,

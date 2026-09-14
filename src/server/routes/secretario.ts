@@ -681,7 +681,6 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
       });
 
       const modeloInicial = modelosFallbackConv[0]!;
-      const { providerID: pIdIni, modelID: mIdIni } = parsearModelo(modeloInicial);
 
       let sessaoExiste = false;
       if (sessaoId) {
@@ -700,7 +699,6 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
           body: JSON.stringify({
             title: mensagem.slice(0, 60),
             agent: agenteResolvido,
-            model: { providerID: pIdIni, modelID: mIdIni },
           }),
           signal: AbortSignal.timeout(10000),
         });
@@ -710,6 +708,9 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
         }
         const sessionData = (await createRes.json()) as { id: string };
         sessaoId = sessionData.id;
+        if (modeloInicial) {
+          await trocarModeloEngine(baseUrl, sessaoId, modeloInicial);
+        }
       } else if (modeloSolicitado) {
         await trocarModeloEngine(baseUrl, sessaoId, modeloSolicitado);
       }
@@ -957,7 +958,6 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
           });
 
           const modeloInicial = modelosFallback[0]!;
-          const { providerID: pIdIni, modelID: mIdIni } = parsearModelo(modeloInicial);
 
           let sessaoExiste = false;
           if (sessaoId) {
@@ -976,7 +976,6 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
               body: JSON.stringify({
                 title: mensagem.slice(0, 60),
                 agent: agente,
-                model: { providerID: pIdIni, modelID: mIdIni },
               }),
               signal: AbortSignal.timeout(10000),
             });
@@ -987,6 +986,9 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
             }
             const sessionData = (await createRes.json()) as { id: string };
             sessaoId = sessionData.id;
+            if (modeloInicial) {
+              await trocarModeloEngine(baseUrl, sessaoId, modeloInicial);
+            }
           } else if (modeloSolicitado) {
             await trocarModeloEngine(baseUrl, sessaoId, modeloSolicitado);
           }
