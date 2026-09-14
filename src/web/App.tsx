@@ -1,4 +1,4 @@
-import { type Component, onMount, onCleanup, createEffect, Show } from "solid-js";
+import { type Component, onMount, onCleanup, createEffect, Show, lazy, Suspense } from "solid-js";
 import { Router, Route, useLocation, useNavigate, Navigate } from "@solidjs/router";
 import { Bot } from "lucide-solid";
 import { Sidebar } from "./components/Sidebar";
@@ -6,26 +6,35 @@ import { Topbar } from "./components/Topbar";
 import { GlobalTitlebar } from "./components/GlobalTitlebar";
 import { LoginModal } from "./components/LoginModal";
 import { ToastContainer } from "./ui/Toast";
-import SecretarioDock from "./components/SecretarioDock";
 import { ChatStoreProvider } from "./lib/chat/store";
 import { carregarWorkspaces, conectarSSE, wsAtivo, autenticado, sidebarMobileAberta, dockSecretarioAberto, setDockSecretarioAberto } from "./lib/context";
 
-// Views
-import { SecretarioView } from "./views/Secretario";
-import { HomeView } from "./views/Home";
-import { TasksView } from "./views/Tasks";
-import { AgentesView } from "./views/Agentes";
-import { AtivosView } from "./views/Ativos";
-import { AgentCard } from "./components/AgentCard";
-import { WorkspaceView } from "./views/Workspace";
-import { ReunioesView } from "./views/Reunioes";
-import { FluxosView } from "./views/Fluxos";
-import { AppsView } from "./views/Apps";
-import { SecretsView } from "./views/Secrets";
-import { HistoricoView } from "./views/Historico";
-import { NotificacoesView } from "./views/Notificacoes";
-import { ConfigView } from "./views/Config";
-import { DocsView } from "./views/Docs";
+// Views e componentes pesados carregados sob demanda via code-splitting
+const HomeView = lazy(() => import("./views/Home").then((m) => ({ default: m.HomeView })));
+const SecretarioView = lazy(() => import("./views/Secretario").then((m) => ({ default: m.SecretarioView })));
+const TasksView = lazy(() => import("./views/Tasks").then((m) => ({ default: m.TasksView })));
+const AgentesView = lazy(() => import("./views/Agentes").then((m) => ({ default: m.AgentesView })));
+const AtivosView = lazy(() => import("./views/Ativos").then((m) => ({ default: m.AtivosView })));
+const AgentCard = lazy(() => import("./components/AgentCard").then((m) => ({ default: m.AgentCard })));
+const WorkspaceView = lazy(() => import("./views/Workspace").then((m) => ({ default: m.WorkspaceView })));
+const ReunioesView = lazy(() => import("./views/Reunioes").then((m) => ({ default: m.ReunioesView })));
+const FluxosView = lazy(() => import("./views/Fluxos").then((m) => ({ default: m.FluxosView })));
+const AppsView = lazy(() => import("./views/Apps").then((m) => ({ default: m.AppsView })));
+const SecretsView = lazy(() => import("./views/Secrets").then((m) => ({ default: m.SecretsView })));
+const HistoricoView = lazy(() => import("./views/Historico").then((m) => ({ default: m.HistoricoView })));
+const NotificacoesView = lazy(() => import("./views/Notificacoes").then((m) => ({ default: m.NotificacoesView })));
+const ConfigView = lazy(() => import("./views/Config").then((m) => ({ default: m.ConfigView })));
+const DocsView = lazy(() => import("./views/Docs").then((m) => ({ default: m.DocsView })));
+const SecretarioDock = lazy(() => import("./components/SecretarioDock"));
+
+const ViewLoader: Component = () => (
+  <div class="flex h-full w-full min-h-[50vh] items-center justify-center">
+    <div class="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-2.5 text-xs text-zinc-400 backdrop-blur-sm shadow-sm animate-pulse">
+      <div class="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+      <span>Carregando módulo...</span>
+    </div>
+  </div>
+);
 
 export const AppLayout: Component<{ children?: any }> = (props) => {
   const location = useLocation();
@@ -92,10 +101,14 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
         </Show>
         <div class="flex flex-1 min-h-0 overflow-hidden">
           <main class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative bg-zinc-950">
-            {props.children}
+            <Suspense fallback={<ViewLoader />}>
+              {props.children}
+            </Suspense>
           </main>
           <Show when={dockSecretarioAberto() && location.pathname !== "/secretario"}>
-            <SecretarioDock />
+            <Suspense fallback={null}>
+              <SecretarioDock />
+            </Suspense>
           </Show>
         </div>
       </div>
