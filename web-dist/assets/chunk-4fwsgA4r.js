@@ -1,0 +1,1 @@
+import{e as a,A as c,C as o}from"./app.js";var r=[["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}],["path",{d:"M12 6v6l4 2",key:"mmk7yg"}]],l=e=>a(o,c(e,{iconNode:r,name:"clock"})),t=l;export{t as c};
