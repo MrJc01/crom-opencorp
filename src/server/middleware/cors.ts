@@ -15,19 +15,37 @@ export interface OpcoesCors {
 }
 
 const ORIGENS_PADRAO_LOOPBACK = [
-  /^http:\/\/localhost(:\d+)?$/,
-  /^https:\/\/localhost(:\d+)?$/,
-  /^http:\/\/127\.0\.0\.1(:\d+)?$/,
-  /^https:\/\/127\.0\.0\.1(:\d+)?$/,
+  /^https?:\/\/localhost(:\d+)?$/,
+  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+  /^https?:\/\/0\.0\.0\.0(:\d+)?$/,
+  /^https?:\/\/\[::1\](:\d+)?$/,
+  /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/,
+  /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/,
+  /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?$/,
+  /^https?:\/\/[a-zA-Z0-9_.-]+\.local(:\d+)?$/,
 ];
 
 /**
- * Determina se uma origem é confiável (loopback ou explicitamente na lista de permissão).
+ * Determina se uma origem é confiável (same-origin, loopback ou explicitamente na lista de permissão).
  */
-export function ehOrigemPermitida(origem?: string | null, origensPermitidas: string[] = []): boolean {
+export function ehOrigemPermitida(
+  origem?: string | null,
+  origensPermitidas: string[] = [],
+  req?: IncomingMessage | null,
+): boolean {
   if (!origem) return true; // Requisições sem Origin (same-origin, curl, CLI, etc.) são permitidas
 
-  // Verifica origens loopback padrão
+  // Same-Origin: se a origem corresponder ao Host da própria requisição
+  if (req?.headers?.host) {
+    try {
+      const urlOrigem = new URL(origem);
+      if (urlOrigem.host === req.headers.host) {
+        return true;
+      }
+    } catch {}
+  }
+
+  // Verifica origens loopback padrão e redes locais
   for (const padrao of ORIGENS_PADRAO_LOOPBACK) {
     if (padrao.test(origem)) return true;
   }
@@ -48,7 +66,7 @@ export function obterHeadersCors(
   opcoes?: OpcoesCors,
 ): Record<string, string> {
   const origemReq = req?.headers?.origin;
-  const permitida = ehOrigemPermitida(origemReq, opcoes?.origensPermitidas);
+  const permitida = ehOrigemPermitida(origemReq, opcoes?.origensPermitidas, req);
 
   const headers: Record<string, string> = {
     "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
@@ -77,7 +95,7 @@ export function processarCors(
   opcoes?: OpcoesCors,
 ): boolean {
   const origemReq = req.headers.origin;
-  const permitida = ehOrigemPermitida(origemReq, opcoes?.origensPermitidas);
+  const permitida = ehOrigemPermitida(origemReq, opcoes?.origensPermitidas, req);
   const metodo = (req.method ?? "GET").toUpperCase();
 
   // Aplica headers CORS preventivamente na resposta

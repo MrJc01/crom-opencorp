@@ -37,9 +37,8 @@ export const SettingRow: Component<SettingRowProps> = (props) => {
   const [modificado, setModificado] = createSignal(false);
 
   createEffect(() => {
-    if (!modificado()) {
-      setVal(valorAtual());
-    }
+    setVal(valorAtual());
+    setModificado(false);
   });
 
   const origem = () => item()?.origem || "default";
@@ -125,10 +124,14 @@ export const SettingRow: Component<SettingRowProps> = (props) => {
                 setVal(e.currentTarget.value);
                 setModificado(true);
               }}
+              onChange={(e) => {
+                setVal(e.currentTarget.value);
+                setModificado(true);
+              }}
               class="w-24 bg-zinc-900/80 border border-zinc-800 rounded-md px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-600 text-right"
             />
             <Show when={modificado()}>
-              <Button size="xs" variant="secondary" onClick={handleSalvar} loading={props.salvando?.() ?? false}>
+              <Button size="xs" variant="secondary" onClick={handleSalvar} loading={props.salvando?.() ?? false} title="Salvar">
                 <Check size={11} />
               </Button>
             </Show>

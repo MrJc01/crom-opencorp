@@ -240,7 +240,7 @@ export const TabSecrets: Component<TabSecretsProps> = (props) => {
 
           <input
             type="password"
-            placeholder="Cole a chave de API aqui..."
+            placeholder="sk-or-v1-..."
             value={novaChaveValor()}
             onInput={(e) => setNovaChaveValor(e.currentTarget.value)}
             class="bg-zinc-900/80 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-600 sm:col-span-2"

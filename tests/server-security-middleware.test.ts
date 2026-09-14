@@ -117,6 +117,21 @@ describe("Middlewares de Segurança da API (MICRO-PASSO 8)", () => {
       expect(ehOrigemPermitida(undefined)).toBe(true);
     });
 
+    it("permite 0.0.0.0, IPv6 loopback e faixas de rede local privada", () => {
+      expect(ehOrigemPermitida("http://0.0.0.0:4100")).toBe(true);
+      expect(ehOrigemPermitida("http://[::1]:4100")).toBe(true);
+      expect(ehOrigemPermitida("http://192.168.1.100:4100")).toBe(true);
+      expect(ehOrigemPermitida("http://10.0.0.5:8080")).toBe(true);
+      expect(ehOrigemPermitida("http://172.16.0.1:3000")).toBe(true);
+      expect(ehOrigemPermitida("http://meu-servidor.local:4100")).toBe(true);
+    });
+
+    it("permite requisição same-origin baseada no header Host da requisição", () => {
+      const req = { headers: { host: "app.empresa.intranet:4100" } } as IncomingMessage;
+      expect(ehOrigemPermitida("http://app.empresa.intranet:4100", [], req)).toBe(true);
+      expect(ehOrigemPermitida("http://outro-host.com:4100", [], req)).toBe(false);
+    });
+
     it("rejeita origens externas desconhecidas por padrão", () => {
       expect(ehOrigemPermitida("https://attacker.evil.com")).toBe(false);
       expect(ehOrigemPermitida("http://malicious-site.org")).toBe(false);
