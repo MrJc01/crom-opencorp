@@ -12,6 +12,9 @@ import type { FlowStore } from "../../core/flow-store.js";
 import type { AgentStore } from "../../core/agent-store.js";
 import type { TeamStore } from "../../core/team-store.js";
 import type { OpencodeServerManager } from "../../core/opencode-server.js";
+import type { HookStore } from "../../core/hook-store.js";
+import type { SettingsStore } from "../../core/settings-store.js";
+import type { SkillStore } from "../../core/skill-store.js";
 
 export interface WebhookLimiterLike {
   check: (ip: string) => { ok: boolean; retryAfter?: number };
@@ -37,6 +40,9 @@ export interface RouteContext {
   teams?: TeamStore;
   templates?: TemplateStore;
   opencodeServer?: OpencodeServerManager;
+  hooks?: HookStore;
+  settings?: SettingsStore;
+  skillStore?: SkillStore;
   homeDir?: string;
   webhookLimiter?: WebhookLimiterLike;
   portaOpencodeOuErro?: (autoIniciar?: boolean) => Promise<number>;
@@ -44,4 +50,5 @@ export interface RouteContext {
   gerarIdExec?: () => string;
   serverPort?: number;
 }
+
 

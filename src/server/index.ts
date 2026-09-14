@@ -24,7 +24,6 @@ import { MeetingManager } from "../core/meeting-manager.js";
 import { TaskStore } from "../core/task-store.js";
 import { PromptStore } from "../core/prompt-store.js";
 import { Scheduler } from "../core/scheduler.js";
-import type { Agenda } from "../core/scheduler.js";
 import { HookStore, type Hook, type AlvoHook, type PayloadHook } from "../core/hook-store.js";
 import { NotificationStore } from "../core/notification-store.js";
 import { AppStore } from "../core/app-store.js";
@@ -47,6 +46,9 @@ import {
   handleWorkspaceRoutes,
   handleFlowRoutes,
   handleSessionRoutes,
+  handleAgentRoutes,
+  handleSchedulerRoutes,
+  COMANDOS_AGENDA,
 } from "./routes/index.js";
 
 const require = createRequire(import.meta.url);
@@ -63,18 +65,6 @@ interface DefinicaoRota {
   publico?: boolean;
 }
 
-/** Whitelist de comandos que uma rotina (schedule) pode executar — job inválido
- *  é barrado na criação/edição, não descoberto em produção (PLANO-WEB-CRUD B1). */
-const COMANDOS_AGENDA = new Set([
-  "agent", "task", "flow", "team", "meeting", "schedule", "workspace", "doctor", "settings",
-  "budget", "approvals", "template", "hook", "tool", "monitor", "app", "registry", "subcorp",
-  "supervisor", "scheduler", "serve", "web", "test",
-]);
-
-/** Normaliza args de rotina: array → strings; string → split por espaços. */
-function normalizarArgsAgenda(args: unknown): string[] {
-  return Array.isArray(args) ? (args as unknown[]).map(String) : String(args ?? "").split(/\s+/).filter(Boolean);
-}
 
 // ── F3-T01: gramática de menções (@) — mesma regex no cliente (PromptInput) e no
 // servidor (verdade autoritativa). Formas canônicas:
@@ -158,14 +148,6 @@ function liberarStreamSecretario(sessaoId: string, res: { destroyed: boolean; wr
   }
 }
 
-/** Monta a Agenda a partir de agenda_tipo/agenda_valor do corpo HTTP. */
-function parseAgendaCorpo(corpo: Record<string, unknown>): Agenda {
-  return corpo.agenda_tipo === "cron"
-    ? { tipo: "cron", valor: String(corpo.agenda_valor ?? "") }
-    : corpo.agenda_tipo === "data_unica"
-      ? { tipo: "data_unica", valor: String(corpo.agenda_valor ?? "") }
-      : { tipo: "intervalo_min", valor: Number(corpo.agenda_valor ?? 0) };
-}
 
 const ROUTES: DefinicaoRota[] = [
   { method: "GET", path: "/health", descricao: "Verifica saúde do servidor e versão", publico: true },
@@ -675,7 +657,7 @@ function statusHttpDe(erro: unknown): number {
   if (code === 5) return 409;
   if (erro instanceof TaskError) return (erro as TaskError).status ?? 400;
   if (erro instanceof TeamError) return (erro as TeamError).status ?? 400;
-  if (erro instanceof SchedulerError) return 400;
+  if (erro instanceof SchedulerError) return ((erro as unknown as { status?: number }).status ?? 400);
   if (erro instanceof HookError) return ((erro as unknown as { status?: number }).status ?? 400);
   if (erro instanceof NotificationError) return ((erro as unknown as { status?: number }).status ?? 400);
   if (erro instanceof AppError) return ((erro as unknown as { status?: number }).status ?? 404);
@@ -788,51 +770,6 @@ export function iniciarPollExecucoes(
       }
     })();
   }, intervaloMs);
-}
-
-/** Onde um agente é citado: specs de teams (.opencorp/teams/*.json), grafos de flows
- *  (.opencorp/flows/*.json, nós agente/decisao) e tasks abertas (responsavel=agente:id).
- *  Usado pela guarda de exclusão (PUT DELETE /agents/:id → 409). */
-async function citacoesAgente(
-  wsPath: string,
-  idAgente: string,
-  listarTasks: (p: string) => Promise<Array<{ responsavel?: string; coluna: string; id: string; titulo: string }>>,
-): Promise<string[]> {
-  const citacoes: string[] = [];
-  const { readdirSync, readFileSync, existsSync } = await import("node:fs");
-  const { join } = await import("node:path");
-
-  const varreDirJson = (dir: string, rotulo: string, contemAgente: (obj: Record<string, unknown>, id: string) => boolean): void => {
-    if (!existsSync(dir)) return;
-    for (const f of readdirSync(dir).filter((x) => x.endsWith(".json"))) {
-      try {
-        const obj = JSON.parse(readFileSync(join(dir, f), "utf8")) as Record<string, unknown>;
-        if (contemAgente(obj, String(obj.id ?? f.replace(/\.json$/, "")))) citacoes.push(`${rotulo} ${obj.id ?? f.replace(/\.json$/, "")}`);
-      } catch {
-        /* arquivo ilegível não bloqueia exclusão */
-      }
-    }
-  };
-
-  /** Teams/flows: confere o JSON inteiro — pega nós agente E os nós da fusão
-   *  (fanout.paralelos/sintese, review.executor/revisor, debate.proponentes/moderador),
-   *  que todos usam a forma { "agente": "<id>" } (achado da auditoria #2). */
-  const jsonCita = (obj: Record<string, unknown>): boolean =>
-    JSON.stringify(obj).includes(`"agente":"${idAgente}"`) || JSON.stringify(obj).includes(`"agente": "${idAgente}"`);
-
-  varreDirJson(join(wsPath, ".opencorp", "teams"), "team", (obj) => jsonCita(obj));
-  varreDirJson(join(wsPath, ".opencorp", "flows"), "flow", (obj) => jsonCita(obj));
-
-  try {
-    const abertas = await listarTasks(wsPath);
-    for (const t of abertas) {
-      if (t.responsavel === `agente:${idAgente}` && t.coluna !== "feito") citacoes.push(`task ${t.id} (${t.titulo})`);
-    }
-  } catch {
-    /* board indisponível não bloqueia */
-  }
-
-  return citacoes;
 }
 
 /** Rate limiter in-memory por IP para endpoints webhook (Fase 4 - Item 14) */
@@ -1210,85 +1147,6 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
     };
   }
 
-  async function gerarPromptComIA(
-    homeDir: string,
-    descricao: string,
-    modeloPreferido?: string,
-    modelosFallback: string[] = [],
-  ): Promise<{ prompt: string; modelo: string }> {
-    const modelosCandidatos = [
-      modeloPreferido,
-      ...modelosFallback,
-      "openrouter/google/gemini-3.8-flash",
-      "openrouter/nvidia/nemotron-3.5-lightning:free",
-      "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-      "openrouter/minimax/minimax-m3:free",
-    ].filter(Boolean) as string[];
-
-    for (const mod of modelosCandidatos) {
-      try {
-        const resp = await completarChatDirect({
-          model: mod,
-          messages: [
-            {
-              role: "system",
-              content:
-                "Você é um arquiteto especialista em Agentes Autônomos de Inteligência Artificial. " +
-                "Crie um System Prompt em formato Markdown profissional, detalhado, rico e em português para o agente solicitado. " +
-                "Estruture o prompt com as seções: # [Nome do Agente], ## Papel & Missão Principal, ## Diretrizes & Regras de Ação, ## Formato de Resposta & Comunicação, ## Restrições & Segurança. " +
-                "IMPORTANTE: Não inclua processos de pensamento (thinking). Comece a resposta imediatamente com '# System Prompt:'. Retorne apenas o markdown do prompt, sem blocos de código envolvendo tudo.",
-            },
-            {
-              role: "user",
-              content: `Gere o System Prompt completo para este agente: ${descricao}`,
-            },
-          ],
-          homeDir,
-          maxTokens: 1200,
-          temperature: 0.7,
-        });
-
-        let content = resp.content;
-        if (typeof content === "string" && content.trim().length > 50) {
-          if (content.includes("# ")) {
-            content = content.slice(content.indexOf("# "));
-          }
-          content = content.replace(/^```markdown\s*/i, "").replace(/\s*```$/, "").trim();
-          return { prompt: content, modelo: resp.model };
-        }
-      } catch {}
-    }
-
-    // Fallback estruturado caso a API externa não responda
-    const promptFallback = [
-      `# System Prompt: ${descricao.split("\n")[0]?.slice(0, 60) || "Agente Especialista"}`,
-      "",
-      "## Papel & Missão Principal",
-      `Você é um agente autônomo especialista encarregado da seguinte missão: ${descricao}`,
-      "Sua função é atuar com excelência, pensamento crítico e foco em entregar resultados concretos de alto valor para o workspace.",
-      "",
-      "## Diretrizes & Regras de Ação",
-      "1. Analise o contexto completo antes de iniciar qualquer execução.",
-      "2. Execute tarefas de forma precisa, modular e documentada.",
-      "3. Siga boas práticas de engenharia de software e padrões corporativos.",
-      "4. Priorize decisões estratégicas que otimizem tempo e recursos.",
-      "5. Valide seus passos antes de concluir para garantir precisão máxima.",
-      "",
-      "## Formato de Resposta & Comunicação",
-      "- Seja direto, profissional e objetivo.",
-      "- Utilize Markdown para estruturar tópicos, passos e relatórios.",
-      "- Apresente dados em tabelas ou listas quando facilitar a compreensão.",
-      "- Justifique decisões técnicas com clareza.",
-      "",
-      "## Restrições & Segurança",
-      "- Não execute comandos destrutivos sem verificação de impacto.",
-      "- Respeite os limites operacionais e políticas de segurança do workspace.",
-      "- Em caso de ambiguidade crítica, documente as premissas adotadas.",
-    ].join("\n");
-
-    return { prompt: promptFallback, modelo: modeloPreferido || "fallback-local" };
-  }
-
   async function resolverWs(url: URL): Promise<{ id: string; path: string }> {
     const id = url.searchParams.get("workspace") ?? opcoes.workspace ?? undefined;
     return workspaces.resolver(id) as unknown as { id: string; path: string };
@@ -1508,6 +1366,8 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           gerarIdExec,
           serverPort,
           homeDir: opcoes.homeDir,
+          hooks,
+          settings,
         };
 
         if (await handleWorkspaceRoutes(routeCtx)) return;
@@ -1516,6 +1376,8 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
         if (await handleMeetingRoutes(routeCtx)) return;
         if (await handleFlowRoutes(routeCtx)) return;
         if (await handleSessionRoutes(routeCtx)) return;
+        if (await handleAgentRoutes(routeCtx)) return;
+        if (await handleSchedulerRoutes(routeCtx)) return;
 
         if (rota === "/templates" && req.method === "GET") {
           enviar(res, 200, await templates.listar());
@@ -1762,176 +1624,6 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           const wsGit = new WorkspaceGit();
           const resultado = await wsGit.removerWorktree(ws.path, caminho);
           enviar(res, resultado.sucesso ? 200 : 400, { ok: resultado.sucesso, ...resultado });
-          return;
-        }
-
-        // ── agentes ─────────────────────────────────────────────────
-        if (rota === "/agents" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          enviar(res, 200, await agentes.listar(ws.path));
-          return;
-        }
-        if (rota === "/agents" && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as {
-            id?: string;
-            from?: string;
-            model?: string;
-            role?: string;
-            corpo_prompt?: string;
-            permissions?: string;
-            ativo?: boolean;
-          };
-          const criado = await agentes.criar(ws.path, corpo.id ?? "", { de: corpo.from, model: corpo.model });
-          // Se vieram campos extras (role, corpo_prompt, permissions), aplica via editar()
-          const temExtras = corpo.role || corpo.corpo_prompt || corpo.permissions || corpo.ativo !== undefined;
-          if (temExtras) {
-            const editado = await agentes.editar(ws.path, criado.frontmatter.id, {
-              role: corpo.role,
-              model: corpo.model,
-              permissions: corpo.permissions as "level-1" | "level-2" | "level-3" | undefined,
-              corpo: corpo.corpo_prompt,
-              ativo: corpo.ativo,
-            });
-            enviar(res, 201, { id: editado.id, modelo: editado.model, role: editado.role });
-          } else {
-            enviar(res, 201, { id: criado.frontmatter.id, modelo: criado.frontmatter.model });
-          }
-          return;
-        }
-        if (rota === "/agents/gerar-prompt" && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as { descricao?: string; modelo?: string };
-          const descricao = String(corpo.descricao ?? "").trim();
-          if (!descricao) {
-            enviar(res, 400, { erro: "campo 'descricao' é obrigatório para gerar o prompt" });
-            return;
-          }
-
-          const s = await settings.resolve({ workspaceDir: ws.path });
-          const modeloPref = corpo.modelo?.trim() || s.settings.default_model;
-          const fallbackList = s.settings.tests?.rotation || [];
-          const home = opcoes.homeDir ?? opencorpHome();
-
-          const resultado = await gerarPromptComIA(home, descricao, modeloPref, fallbackList);
-          enviar(res, 200, resultado);
-          return;
-        }
-
-        if (rota === "/agents/aplicar-modelo-global" && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as { model?: string };
-          const s = await settings.resolve({ workspaceDir: ws.path });
-          const modeloAlvo = corpo.model?.trim() || s.settings.default_model || "openrouter/nvidia/nemotron-3.5-lightning:free";
-          const lista = await agentes.listar(ws.path);
-          let alterados = 0;
-          for (const ag of lista) {
-            try {
-              await agentes.editar(ws.path, ag.id, { model: modeloAlvo });
-              alterados++;
-            } catch {}
-          }
-          eventBus.emit("agentes.atualizados", { total: alterados, modelo: modeloAlvo });
-          enviar(res, 200, { ok: true, alterados, modelo: modeloAlvo });
-          return;
-        }
-
-        if (rota === "/agents/semear-catalogo" && req.method === "POST") {
-          // Etapa 5 — copia os agentes do catálogo que ainda não existem (idempotente)
-          const ws = await resolverWs(url);
-          const resultado = await agentes.semearCatalogo(ws.path);
-          enviar(res, 200, resultado);
-          return;
-        }
-        const mAgente = /^\/agents\/([^/]+)$/.exec(rota);
-        if (mAgente && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const carregado = await agentes.carregar(ws.path, decodeURIComponent(mAgente[1]!));
-          enviar(res, 200, { ...carregado.frontmatter, corpo_prompt: carregado.corpo });
-          return;
-        }
-        if (mAgente && req.method === "PUT") {
-          // edição do frontmatter (PLANO-WEB-CRUD C2) — zod + bridge no AgentStore.editar
-          const ws = await resolverWs(url);
-          const id = decodeURIComponent(mAgente[1]!);
-          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
-          if (corpo.ativo !== undefined && typeof corpo.ativo !== "boolean") {
-            enviar(res, 422, { erro: "campo 'ativo' deve ser boolean (true/false)" });
-            return;
-          }
-          // agentes de sistema: o Secretário inteiro depende deles — desativação é bloqueada
-          if (corpo.ativo === false && (id === "secretario" || id === "secretario-exec")) {
-            enviar(res, 422, { erro: "secretário e secretário-exec são agentes de sistema e não podem ser desativados" });
-            return;
-          }
-          const salvo = await agentes.editar(ws.path, id, {
-            role: corpo.role !== undefined ? String(corpo.role) : undefined,
-            model: corpo.model !== undefined ? String(corpo.model) : undefined,
-            permissions: corpo.permissions !== undefined ? (String(corpo.permissions) as "level-1" | "level-2" | "level-3") : undefined,
-            tools: Array.isArray(corpo.tools) ? (corpo.tools as unknown[]).map(String).filter(Boolean) : undefined,
-            budget_daily_usd: typeof corpo.budget_daily_usd === "number" ? corpo.budget_daily_usd : undefined,
-            budget_max_turns: typeof corpo.budget_max_turns === "number" ? corpo.budget_max_turns : undefined,
-            ativo: corpo.ativo as boolean | undefined,
-            corpo: typeof corpo.corpo_prompt === "string" ? corpo.corpo_prompt : (typeof corpo.corpo === "string" ? corpo.corpo : undefined),
-            harness: typeof corpo.harness === "string" ? corpo.harness.trim() : (typeof (corpo as any).engine === "string" ? (corpo as any).engine.trim() : undefined),
-            harness_fallback: Array.isArray(corpo.harness_fallback) ? (corpo.harness_fallback as unknown[]).map(String).filter(Boolean) : undefined,
-            rotation: Array.isArray(corpo.rotation) ? (corpo.rotation as unknown[]).map(String).filter(Boolean) : undefined,
-            model_fallback: Array.isArray(corpo.model_fallback) ? (corpo.model_fallback as unknown[]).map(String).filter(Boolean) : undefined,
-          });
-          eventBus.emit("agente.editado", { agente: id });
-          enviar(res, 200, salvo);
-          return;
-        }
-        if (mAgente && req.method === "DELETE") {
-          // guarda: agente citado em teams/flows/task responsável → 409 (PLANO-WEB-CRUD C3, decisão do dono: bloquear)
-          const ws = await resolverWs(url);
-          const id = decodeURIComponent(mAgente[1]!);
-          const citacoes = await citacoesAgente(ws.path, id, (p) => tasks.listar(p));
-          try {
-            for (const h of hooks.listar(ws.path)) {
-              const alvo = h.alvo as { tipo?: string; agente?: string };
-              if (alvo?.tipo === "agent_run" && alvo.agente === id) citacoes.push(`hook ${h.id}`);
-            }
-          } catch {
-            /* hooks indisponíveis não bloqueiam */
-          }
-          if (citacoes.length) {
-            enviar(res, 409, {
-              erro: `agente "${id}" está em uso e não pode ser excluído — remova-o primeiro de: ${citacoes.slice(0, 8).join(", ")}${citacoes.length > 8 ? ` (+${citacoes.length - 8})` : ""}`,
-              citacoes,
-            });
-            return;
-          }
-          await agentes.excluir(ws.path, id);
-          eventBus.emit("agente.excluido", { agente: id });
-          enviar(res, 200, { ok: true, id });
-          return;
-        }
-        const mAgenteRun = /^\/agents\/([^/]+)\/run$/.exec(rota);
-        if (mAgenteRun && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const idRun = decodeURIComponent(mAgenteRun[1]!);
-          const corpo = (await lerCorpo(req)) as { ordem?: string; model?: string; engine?: string; harness?: string };
-          // Etapa 5 — guard antes do 202: agente desativado não entra em execução
-          const alvo = await agentes.carregar(ws.path, idRun);
-          if (alvo.frontmatter.ativo === false) {
-            enviar(res, 409, { erro: `agente '${idRun}' está desativado — ative no painel de agentes` });
-            return;
-          }
-          const execId = gerarIdExec();
-          const opcoes: OpcoesRun = {
-            agente: idRun,
-            ordem: corpo.ordem ?? "",
-            model: corpo.model,
-            engine: corpo.engine || corpo.harness,
-            harness: corpo.harness || corpo.engine,
-            workspaceDir: ws.path,
-            workspaceId: ws.id,
-            execId,
-            gatilho: { tipo: "manual", origem: `api:${ws.id}` },
-          };
-          void sessoes.rodar(opcoes).catch(() => undefined);
-          enviar(res, 202, { exec_id: execId, status: "iniciado" });
           return;
         }
 
@@ -2991,25 +2683,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           return;
         }
 
-        // ── tools (só LISTA a spec — executar fica no CLI/MCP) ─────
-        if (rota === "/tools" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const dir = join(ws.path, ".opencorp", "tools");
-          const itens: Array<{ id: string; spec?: unknown; erro?: string }> = [];
-          if (existsSync(dir)) {
-            const arquivos = (await readdir(dir)).filter((f) => f.endsWith(".json")).sort();
-            for (const f of arquivos) {
-              const id = f.replace(/\.json$/, "");
-              try {
-                itens.push({ id, spec: JSON.parse(readFileSync(join(dir, f), "utf8")) });
-              } catch (erro) {
-                itens.push({ id, erro: `JSON inválido: ${erro instanceof Error ? erro.message : String(erro)}` });
-              }
-            }
-          }
-          enviar(res, 200, itens);
-          return;
-        }
+
 
 
 
@@ -3447,106 +3121,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           return;
         }
 
-        if (rota === "/schedules" && req.method === "GET") {
-          const wsFiltro = url.searchParams.get("workspace");
-          const jobs = await scheduler.listar();
-          // ?all=1 (ou sem workspace) = escopo "todas as empresas"
-          enviar(res, 200, !wsFiltro || url.searchParams.has("all") ? jobs : jobs.filter((j) => j.workspace === wsFiltro));
-          return;
-        }
-        if (rota === "/schedules" && req.method === "POST") {
-          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
-          const argsJob = normalizarArgsAgenda(corpo.args);
-          // whitelist de comandos reais — job inválido é barrado na criação, não descoberto em produção
-          if (argsJob.length === 0 || !COMANDOS_AGENDA.has(argsJob[0]!)) {
-            enviar(res, 422, { erro: `args[0] inválido: "${String(argsJob[0] ?? "")}" não é um comando opencorp` });
-            return;
-          }
-          const agenda: Agenda = parseAgendaCorpo(corpo);
-          const j = await scheduler.criar({
-            nome: String(corpo.nome ?? ""),
-            agenda,
-            args: argsJob,
-            workspace: corpo.workspace !== undefined ? String(corpo.workspace) : (await resolverWs(url)).id,
-            graca_min: typeof corpo.graca_min === "number" ? corpo.graca_min : undefined,
-          });
-          enviar(res, 201, j);
-          return;
-        }
-        const mSchedRun = /^\/schedules\/([^/]+)\/run$/.exec(rota);
-        if (mSchedRun && req.method === "POST") {
-          const id = decodeURIComponent(mSchedRun[1]!);
-          const { resultado } = await scheduler.runNow(id);
-          enviar(res, 200, { ok: true, resultado });
-          return;
-        }
-        const mSchedRuns = /^\/schedules\/([^/]+)\/runs$/.exec(rota);
-        if (mSchedRuns && req.method === "GET") {
-          const id = decodeURIComponent(mSchedRuns[1]!);
-          const limite = Math.min(Number(url.searchParams.get("limite")) || 20, 100);
-          enviar(res, 200, await scheduler.listarRuns(id, limite));
-          return;
-        }
-        const mSched = /^\/schedules\/([^/]+)$/.exec(rota);
-        if (mSched) {
-          const id = decodeURIComponent(mSched[1]!);
-          if (req.method === "GET") {
-            enviar(res, 200, await scheduler.obter(id));
-            return;
-          }
-          if (req.method === "PATCH") {
-            const corpo = (await lerCorpo(req)) as Record<string, unknown>;
-            if (corpo.ativo === false) {
-              enviar(res, 200, await scheduler.pausar(id));
-            } else if (corpo.ativo === true) {
-              enviar(res, 200, await scheduler.retomar(id));
-            } else if (corpo.agenda_tipo !== undefined || corpo.agenda_valor !== undefined) {
-              // edição de agenda exige o PAR (tipo, valor) — evita converter cron em intervalo sem querer (auditoria #4);
-              // nome/args/graca_min podem vir no mesmo PATCH
-              if (corpo.agenda_tipo === undefined || corpo.agenda_valor === undefined) {
-                enviar(res, 422, { erro: "informe agenda_tipo E agenda_valor juntos para editar a agenda" });
-                return;
-              }
-              const argsJob = corpo.args !== undefined ? normalizarArgsAgenda(corpo.args) : undefined;
-              if (argsJob && (argsJob.length === 0 || !COMANDOS_AGENDA.has(argsJob[0]!))) {
-                enviar(res, 422, { erro: `args[0] inválido: "${String(argsJob[0] ?? "")}" não é um comando opencorp` });
-                return;
-              }
-              enviar(res, 200, await scheduler.atualizar(id, {
-                nome: corpo.nome !== undefined ? String(corpo.nome) : undefined,
-                agenda: parseAgendaCorpo(corpo),
-                args: argsJob,
-                graca_min: typeof corpo.graca_min === "number" ? corpo.graca_min : undefined,
-              }));
-            } else if (corpo.nome !== undefined || corpo.args !== undefined || corpo.graca_min !== undefined) {
-              // edição plena (PLANO-WEB-CRUD B1) — mesma whitelist da criação
-              const argsJob = corpo.args !== undefined ? normalizarArgsAgenda(corpo.args) : undefined;
-              if (argsJob && (argsJob.length === 0 || !COMANDOS_AGENDA.has(argsJob[0]!))) {
-                enviar(res, 422, { erro: `args[0] inválido: "${String(argsJob[0] ?? "")}" não é um comando opencorp` });
-                return;
-              }
-              enviar(res, 200, await scheduler.atualizar(id, {
-                nome: corpo.nome !== undefined ? String(corpo.nome) : undefined,
-                agenda: parseAgendaCorpo(corpo),
-                args: argsJob,
-                graca_min: typeof corpo.graca_min === "number" ? corpo.graca_min : undefined,
-              }));
-            } else {
-              enviar(res, 400, { erro: "corpo vazio — use {ativo}, {nome}, {agenda_tipo/agenda_valor}, {args} ou {graca_min}" });
-            }
-            return;
-          }
-          if (req.method === "DELETE") {
-            await scheduler.excluir(id);
-            enviar(res, 200, { ok: true, id });
-            return;
-          }
-          if (req.method === "POST") {
-            const { resultado } = await scheduler.runNow(id);
-            enviar(res, 200, { ok: true, resultado });
-            return;
-          }
-        }
+
 
         if ((rota === "/apps" || rota === "/api/apps") && req.method === "GET") {
           const ws = await resolverWs(url);
