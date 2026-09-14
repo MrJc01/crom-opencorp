@@ -11,15 +11,14 @@ import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
 import { AgentStore } from "../core/agent-store.js";
 import { TemplateStore } from "../core/template-store.js";
-import { SessionManager, PADRAO_ERRO_MODELO, PADRAO_ERRO_CREDITOS, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
+import { SessionManager, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
 import { RegistryStore, type MetaRegistro } from "../core/registry-store.js";
 import { BudgetManager } from "../core/budget-manager.js";
 import { ApprovalsStore } from "../core/approvals-store.js";
 import { SettingsError, SettingsStore } from "../core/settings-store.js";
-import { FlowStore, type Flow, type SessaoFlow } from "../core/flow-store.js";
+import { FlowStore, type SessaoFlow } from "../core/flow-store.js";
 import { ComponentStore } from "../core/component-store.js";
 import { registrarBuiltins } from "../core/builtin-components.js";
-import { migrarTeamsParaFlows } from "../core/flow-migrate.js";
 import { sincronizarJobsParaFluxos } from "../core/scheduler-flow-bridge.js";
 import { MeetingManager } from "../core/meeting-manager.js";
 import { TaskStore } from "../core/task-store.js";
@@ -34,14 +33,21 @@ import { OrquestradorDeTeams } from "../core/team-orchestrator.js";
 import { instalarMencoes } from "../core/mention-runner.js";
 import { TaskError, SchedulerError, HookError, AppError, TeamError, NotificationError, AgentError, OpencorpError, RegistryError, WorkspaceError, FlowError, ComponentError } from "../core/errors.js";
 import { eventBus, type EventoBus } from "../core/event-bus.js";
-import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, limparPrefixoWorkspace, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc, type ParteOc, type PassoChat } from "../core/opencode-server.js";
+import { OpencodeServerManager, SecretarioError, extrairAcoesMensagens, extrairPassosMensagens, limparPrefixoWorkspace, dirOpencodeHome, dirOpencodeData, authOpencodePath, authOverridesPathWorkspace, mascararChave, fundirAuth, PROVEEDOR_RE, type EntradaAuth, type MensagemOc } from "../core/opencode-server.js";
 import { SecretsStore, type SecretOrigem } from "../core/secrets-store.js";
 import { completarChatDirect, testarModeloDirect, listarProvedoresStatus } from "../core/llm-client.js";
 import { engineRegistry, getEngineAuthInstructions, checkEngineAuthStatus, EngineAccountStore, WebLoginOrchestrator } from "../core/engines/index.js";
 import { createRequire } from "node:module";
 import { TelemetryCollector, gerarTraceId, type TraceContext } from "../core/telemetry-collector.js";
 import { processarCors, verificarAutenticacao, extrairTokenBearer, compararTokensSeguro, type OpcoesCors } from "./middleware/index.js";
-import { handleTaskRoutes, handleNotificationRoutes, handleMeetingRoutes, handleWorkspaceRoutes } from "./routes/index.js";
+import {
+  handleTaskRoutes,
+  handleNotificationRoutes,
+  handleMeetingRoutes,
+  handleWorkspaceRoutes,
+  handleFlowRoutes,
+  handleSessionRoutes,
+} from "./routes/index.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
@@ -1421,6 +1427,61 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
       }
 
       try {
+        // Helper: obtém porta do opencode server ou lança 409 se não iniciado (auto-iniciar opcional)
+        async function portaOpencodeOuErro(autoIniciar = false): Promise<number> {
+          let status = await opencodeServer.status();
+          if (autoIniciar && (!status.rodando || !status.porta)) {
+            try {
+              const res = await opencodeServer.iniciar();
+              if (res.porta) return res.porta;
+              status = await opencodeServer.status();
+            } catch (err) {
+              console.error("[secretario] falha ao auto-iniciar opencode server:", err);
+            }
+          }
+          if (!status.rodando || !status.porta) {
+            throw new SecretarioError("secretário não iniciado — POST /secretario/start", { status: 409 });
+          }
+          return status.porta;
+        }
+
+        // Helper: espelha TODAS as mensagens de uma sessão no corp.db
+        async function sincronizarSessaoNoCorp(porta: number, sessaoId: string): Promise<void> {
+          try {
+            const res = await fetch(`http://127.0.0.1:${porta}/session/${sessaoId}/message`, { signal: AbortSignal.timeout(5000) });
+            if (!res.ok) return;
+            const msgs = (await res.json()) as Array<{
+              info?: { id?: string; role?: string; agent?: string; time?: { created?: number; completed?: number } };
+              parts?: Array<{ type: string; text?: string }>;
+            }>;
+            if (!Array.isArray(msgs) || msgs.length === 0) return;
+            const ws = await resolverWs(new URL(req.url ?? "/", "http://local"));
+            const db = registros.corpDb(ws.path);
+            const agente = msgs.find((m) => m.info?.agent)?.info?.agent ?? "secretario";
+            const iso = (ms?: number): string | undefined => (ms ? new Date(ms).toISOString() : undefined);
+            const primeira = iso(msgs[0]?.info?.time?.created);
+            const ultima = [...msgs].reverse().find((m) => m.info?.time?.completed)?.info?.time?.completed;
+            db.upsertSessao({
+              id: sessaoId, agente, modelo: "",
+              inicio: primeira ?? new Date().toISOString(),
+              fim: iso(ultima) ?? new Date().toISOString(),
+              custo_usd: null, status: "concluida",
+            });
+            for (const m of msgs) {
+              const role = m.info?.role;
+              const id = m.info?.id;
+              if (!id || (role !== "user" && role !== "assistant")) continue;
+              const texto = (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim();
+              if (!texto) continue;
+              db.inserirMensagem({ id, sessao_id: sessaoId, agente, role, conteudo: texto, criado_em: iso(m.info?.time?.created) ?? null });
+            }
+          } catch {
+            /* espelho é best-effort */
+          }
+        }
+
+        const serverPort = server.address() && typeof server.address() === "object" ? (server.address() as any).port : undefined;
+
         const routeCtx = {
           req,
           res,
@@ -1437,6 +1498,15 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           meetings,
           workspaces,
           templates,
+          flows,
+          agentes,
+          teams,
+          opencodeServer,
+          webhookLimiter,
+          portaOpencodeOuErro,
+          sincronizarSessaoNoCorp,
+          gerarIdExec,
+          serverPort,
           homeDir: opcoes.homeDir,
         };
 
@@ -1444,6 +1514,8 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
         if (await handleTaskRoutes(routeCtx)) return;
         if (await handleNotificationRoutes(routeCtx)) return;
         if (await handleMeetingRoutes(routeCtx)) return;
+        if (await handleFlowRoutes(routeCtx)) return;
+        if (await handleSessionRoutes(routeCtx)) return;
 
         if (rota === "/templates" && req.method === "GET") {
           enviar(res, 200, await templates.listar());
@@ -1863,332 +1935,6 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           return;
         }
 
-        // ── sessões ─────────────────────────────────────────────────
-        if (rota === "/sessions" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const agente = url.searchParams.get("agent") ?? undefined;
-          enviar(res, 200, await sessoes.listarExecucoes(ws.path, agente ? { agente } : undefined));
-          return;
-        }
-        const mSessaoLog = /^\/sessions\/([^/]+)\/log$/.exec(rota);
-        if (mSessaoLog && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const id = decodeURIComponent(mSessaoLog[1]!);
-          try {
-            enviar(res, 200, { id, log: await sessoes.logDe(ws.path, id) });
-            return;
-          } catch {
-            const todosWs = await workspaces.listar();
-            for (const outro of todosWs) {
-              if (outro.path === ws.path) continue;
-              try {
-                const log = await sessoes.logDe(outro.path, id);
-                enviar(res, 200, { id, log });
-                return;
-              } catch {}
-            }
-            // Fallback: verificar se o conteúdo/log foi salvo no registro de execuções
-            try {
-              const reg = await registros.obter(ws.path, "execucoes", id);
-              if (reg.conteudo && reg.conteudo.trim()) {
-                enviar(res, 200, { id, log: reg.conteudo });
-                return;
-              }
-            } catch {}
-            for (const outro of todosWs) {
-              try {
-                const reg = await registros.obter(outro.path, "execucoes", id);
-                if (reg.conteudo && reg.conteudo.trim()) {
-                  enviar(res, 200, { id, log: reg.conteudo });
-                  return;
-                }
-              } catch {}
-            }
-            enviar(res, 200, { id, log: "(Nenhuma saída de log capturada para esta execução)" });
-            return;
-          }
-        }
-        const mExecCancelar = /^\/(?:execucoes|sessions)\/([^/]+)\/(?:cancelar|cancel|abort)$/.exec(rota);
-        if (mExecCancelar && (req.method === "POST" || req.method === "DELETE")) {
-          const ws = await resolverWs(url);
-          const id = decodeURIComponent(mExecCancelar[1]!);
-          let cancelado = false;
-          let wsAlvo = ws.path;
-
-          if (id.startsWith("ses_")) {
-            try {
-              const porta = await portaOpencodeOuErro();
-              await fetch(`http://127.0.0.1:${porta}/session/${encodeURIComponent(id)}/abort`, { method: "POST" });
-              cancelado = true;
-            } catch {}
-          } else {
-            try {
-              cancelado = (await sessoes.cancelar?.(ws.path, id)) ?? false;
-            } catch {}
-
-            // Se não encontrou ou falhou no workspace atual, busca em todos os outros workspaces
-            const todosWs = await workspaces.listar();
-            for (const outro of todosWs) {
-              try {
-                const meta = await registros.lerMeta(outro.path, "execucoes", id);
-                if (meta) {
-                  wsAlvo = outro.path;
-                  if (!cancelado) {
-                    cancelado = (await sessoes.cancelar?.(outro.path, id)) ?? false;
-                  }
-                  break;
-                }
-              } catch {}
-            }
-          }
-
-          // Garantir atualização no meta.json da execução para não ficar preso em "executando"
-          const atualizarMetaExec = async (caminhoWs: string) => {
-            try {
-              const meta = await registros.lerMeta(caminhoWs, "execucoes", id);
-              const extras = (meta.extras ?? {}) as Record<string, unknown>;
-              const inicio = Date.parse(meta.criado_em);
-              const fim = new Date().toISOString();
-              const duracao = Number.isFinite(inicio) ? Date.now() - inicio : 0;
-              meta.extras = {
-                ...extras,
-                status: "cancelado",
-                fim,
-                duracao_ms: (extras.duracao_ms as number | null) ?? duracao,
-                pid: null,
-              };
-              await registros.salvarMeta(caminhoWs, "execucoes", id, meta);
-              return true;
-            } catch {
-              return false;
-            }
-          };
-
-          await atualizarMetaExec(wsAlvo);
-          if (wsAlvo !== ws.path) {
-            await atualizarMetaExec(ws.path);
-          }
-
-          try {
-            registros.corpDb(wsAlvo).atualizarStatusExecucao(id, "cancelado");
-          } catch {}
-          if (wsAlvo !== ws.path) {
-            try {
-              registros.corpDb(ws.path).atualizarStatusExecucao(id, "cancelado");
-            } catch {}
-          }
-
-          eventBus.emit("execucao.cancelada", { id });
-          enviar(res, 200, { ok: true, id, status: "cancelado", cancelado: true, mensagem: "Execução encerrada com sucesso." });
-          return;
-        }
-
-        // ── /execucoes/:id/retry — reenvia (clona) uma execução com os mesmos parâmetros originais ──
-        const mExecRetry = /^\/(?:execucoes|sessions)\/([^/]+)\/retry$/.exec(rota);
-        if (mExecRetry && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const idOriginal = decodeURIComponent(mExecRetry[1]!);
-          let meta: MetaRegistro | null = null;
-          let wsEfetivo = ws;
-
-          try {
-            meta = await registros.lerMeta(ws.path, "execucoes", idOriginal);
-          } catch {
-            // Se não encontrou no workspace atual, busca em todos os workspaces conhecidos
-            const todosWs = await workspaces.listar();
-            for (const outro of todosWs) {
-              if (outro.path === ws.path) continue;
-              try {
-                meta = await registros.lerMeta(outro.path, "execucoes", idOriginal);
-                wsEfetivo = { id: outro.id, path: outro.path };
-                break;
-              } catch {}
-            }
-          }
-
-          if (!meta) {
-            enviar(res, 404, { erro: `Execução "${idOriginal}" não encontrada` });
-            return;
-          }
-
-          const extras = (meta.extras ?? {}) as Record<string, unknown>;
-          const agenteOriginal = meta.criado_por || String(extras.agente ?? "executor-padrao");
-          const ordemOriginal = String(extras.ordem || meta.descricao?.replace(/^Ordem:\s*/i, "") || "");
-          let modeloParaExecutar = extras.modelo ? String(extras.modelo) : undefined;
-          if (modeloParaExecutar === "-") modeloParaExecutar = undefined;
-
-          // Se a execução original falhou, rotaciona automaticamente para o próximo modelo se houve erro de modelo/tokens
-          if (modeloParaExecutar && sessoes.proximoModeloDaRotacao) {
-            let logOriginal = "";
-            try {
-              logOriginal = await sessoes.logDe(wsEfetivo.path, idOriginal);
-            } catch {}
-            const erroOriginal = String(extras.erro ?? "");
-            const erroCreditos = PADRAO_ERRO_CREDITOS.test(erroOriginal) || PADRAO_ERRO_CREDITOS.test(logOriginal);
-            if (PADRAO_ERRO_MODELO.test(erroOriginal) || PADRAO_ERRO_MODELO.test(logOriginal) || extras.status === "falhou") {
-              const prox = await sessoes.proximoModeloDaRotacao(
-                modeloParaExecutar,
-                wsEfetivo.path,
-                agenteOriginal,
-                [modeloParaExecutar],
-                erroCreditos,
-              );
-              if (prox && prox !== modeloParaExecutar) {
-                modeloParaExecutar = prox;
-              }
-            }
-          }
-
-          // Verificar se o agente ainda existe e está ativo no workspace da execução
-          try {
-            const alvo = await agentes.carregar(wsEfetivo.path, agenteOriginal);
-            if (alvo.frontmatter.ativo === false) {
-              enviar(res, 409, { erro: `Agente '${agenteOriginal}' está desativado — ative no painel de agentes` });
-              return;
-            }
-          } catch {
-            // agente pode ter sido removido — prossegue mesmo assim
-          }
-
-          const novoExecId = gerarIdExec();
-          const opcoesRun: OpcoesRun = {
-            agente: agenteOriginal,
-            ordem: ordemOriginal,
-            model: modeloParaExecutar,
-            workspaceDir: wsEfetivo.path,
-            workspaceId: wsEfetivo.id,
-            execId: novoExecId,
-            gatilho: { tipo: "manual", origem: `retry:${idOriginal}` },
-            retryDe: {
-              de_modelo: String(extras.modelo || modeloParaExecutar || ""),
-              de_exec: idOriginal,
-            },
-          };
-          void sessoes.rodar(opcoesRun).catch(() => undefined);
-          enviar(res, 202, {
-            ok: true,
-            exec_id: novoExecId,
-            exec_id_original: idOriginal,
-            agente: agenteOriginal,
-            modelo: modeloParaExecutar,
-            ordem: ordemOriginal.slice(0, 200),
-            status: "iniciado",
-            mensagem: `Execução reenviada como ${novoExecId} (clone de ${idOriginal}${modeloParaExecutar ? ` com modelo ${modeloParaExecutar}` : ""})`,
-          });
-          return;
-        }
-
-        // ── /execucoes/:id/diff — retorna o diff e arquivos alterados pela execução ──
-        const mExecDiff = /^\/(?:execucoes|sessions)\/([^/]+)\/diff$/.exec(rota);
-        if (mExecDiff && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const idExec = decodeURIComponent(mExecDiff[1]!);
-          let wsEfetivo = ws;
-
-          try {
-            await registros.lerMeta(ws.path, "execucoes", idExec);
-          } catch {
-            const todosWs = await workspaces.listar();
-            for (const outro of todosWs) {
-              if (outro.path === ws.path) continue;
-              try {
-                await registros.lerMeta(outro.path, "execucoes", idExec);
-                wsEfetivo = { id: outro.id, path: outro.path };
-                break;
-              } catch {}
-            }
-          }
-
-          const { WorkspaceGit } = await import("../core/workspace-git.js");
-          const wsGit = new WorkspaceGit();
-          if (!wsGit.temGit(wsEfetivo.path)) {
-            enviar(res, 200, { ok: true, temGit: false, diff: "", arquivos: [] });
-            return;
-          }
-
-          try {
-            const { execa } = await import("execa");
-            // 1. Tenta achar o commit que contém [idExec] na mensagem
-            const logRes = await execa(
-              "git",
-              ["log", `--grep=[${idExec}]`, "-n", "1", "--format=%H"],
-              { cwd: wsEfetivo.path, reject: false }
-            );
-
-            const commitHash = logRes.stdout.trim();
-
-            if (commitHash) {
-              const diffCommit = await wsGit.obterDiff(wsEfetivo.path, commitHash);
-              const numstat = await execa(
-                "git",
-                ["show", "--numstat", "--format=", commitHash],
-                { cwd: wsEfetivo.path, reject: false }
-              );
-              const arquivos = numstat.stdout
-                .split("\n")
-                .filter(Boolean)
-                .map((linha) => {
-                  const partes = linha.split("\t");
-                  return { caminho: partes[2], adicionadas: partes[0], removidas: partes[1] };
-                });
-              enviar(res, 200, {
-                ok: true,
-                temGit: true,
-                diff: diffCommit,
-                arquivos,
-                commitHash,
-              });
-              return;
-            }
-
-            // 2. Se não achou commit específico, tenta pela tag checkpoint pre-execId
-            const tagRes = await execa(
-              "git",
-              ["tag", "-l", `checkpoint/pre-${idExec}`],
-              { cwd: wsEfetivo.path, reject: false }
-            );
-            if (tagRes.stdout.trim()) {
-              const diffCp = await execa(
-                "git",
-                ["diff", `checkpoint/pre-${idExec}..HEAD`],
-                { cwd: wsEfetivo.path, reject: false }
-              );
-              const numstatCp = await execa(
-                "git",
-                ["diff", "--numstat", `checkpoint/pre-${idExec}..HEAD`],
-                { cwd: wsEfetivo.path, reject: false }
-              );
-              const arquivos = numstatCp.stdout
-                .split("\n")
-                .filter(Boolean)
-                .map((linha) => {
-                  const partes = linha.split("\t");
-                  return { caminho: partes[2], adicionadas: partes[0], removidas: partes[1] };
-                });
-              enviar(res, 200, {
-                ok: true,
-                temGit: true,
-                diff: diffCp.stdout || "",
-                arquivos,
-                checkpoint: `checkpoint/pre-${idExec}`,
-              });
-              return;
-            }
-
-            // 3. Nenhuma alteração registrada
-            enviar(res, 200, {
-              ok: true,
-              temGit: true,
-              diff: "",
-              arquivos: [],
-              mensagem: "Nenhum commit ou alteração registrada para esta execução",
-            });
-          } catch (e: any) {
-            enviar(res, 500, { erro: `Falha ao obter diff da execução: ${e.message || String(e)}` });
-          }
-          return;
-        }
-
         // ── /historico — fonte única p/ a view Histórico (filtro por agente server-side) ──
         if (rota === "/historico" && req.method === "GET") {
           const ws = await resolverWs(url);
@@ -2446,72 +2192,8 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           return;
         }
 
-        // ── /execucoes — ledger unificado (PLANO-UNIFICACAO): toda ativação de agente, de qualquer
-        // motor, com gatilho (cron/mencao/dependencia/padrao/turno/evento/manual) — a leitura cross-motor ──
-        if (rota === "/execucoes" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const filtro = {
-            agente: url.searchParams.get("agente")?.trim() || undefined,
-            gatilho_tipo: url.searchParams.get("gatilho")?.trim() || undefined,
-            gatilho_origem: url.searchParams.get("origem")?.trim() || undefined,
-            status: url.searchParams.get("status")?.trim() || undefined,
-            limite: Math.min(Number(url.searchParams.get("limite")) || 100, 500),
-          };
-          enviar(res, 200, registros.corpDb(ws.path).listarExecucoes(filtro));
-          return;
-        }
 
-        // ── /telemetria/resumo — agregação de métricas de telemetria de agentes ──
-        if (rota === "/telemetria/resumo" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const filtro = {
-            sessao_id: url.searchParams.get("sessao_id")?.trim() || undefined,
-            trace_id: url.searchParams.get("trace_id")?.trim() || undefined,
-            agente: url.searchParams.get("agente")?.trim() || undefined,
-            ferramenta: url.searchParams.get("ferramenta")?.trim() || undefined,
-            status: url.searchParams.get("status")?.trim() || undefined,
-            desde: url.searchParams.get("desde")?.trim() || undefined,
-            ate: url.searchParams.get("ate")?.trim() || undefined,
-          };
-          enviar(res, 200, registros.corpDb(ws.path).resumoTelemetria(filtro));
-          return;
-        }
 
-        // ── /telemetria/trace/:trace_id — timeline completa de um trace ──
-        const mTrace = /^\/telemetria\/trace\/([^/]+)$/.exec(rota);
-        if (mTrace && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const traceId = decodeURIComponent(mTrace[1]!);
-          enviar(res, 200, registros.corpDb(ws.path).listarAcoesPorTrace(traceId));
-          return;
-        }
-
-        // ── /acoes — listagem flexível de ações granulares de agentes ──
-        if (rota === "/acoes" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const filtro = {
-            sessao_id: url.searchParams.get("sessao_id")?.trim() || undefined,
-            trace_id: url.searchParams.get("trace_id")?.trim() || undefined,
-            agente: url.searchParams.get("agente")?.trim() || undefined,
-            ferramenta: url.searchParams.get("ferramenta")?.trim() || undefined,
-            status: url.searchParams.get("status")?.trim() || undefined,
-            desde: url.searchParams.get("desde")?.trim() || undefined,
-            ate: url.searchParams.get("ate")?.trim() || undefined,
-            limite: Math.min(Number(url.searchParams.get("limite")) || 200, 1000),
-          };
-          enviar(res, 200, registros.corpDb(ws.path).listarAcoes(filtro));
-          return;
-        }
-
-        // ── /acoes/:sessao_id — ações detalhadas de uma sessão específica ──
-        const mAcoesSessao = /^\/acoes\/([^/]+)$/.exec(rota);
-        if (mAcoesSessao && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const sessaoId = decodeURIComponent(mAcoesSessao[1]!);
-          const limite = Math.min(Number(url.searchParams.get("limite")) || 500, 1000);
-          enviar(res, 200, registros.corpDb(ws.path).listarAcoesSessao(sessaoId, limite));
-          return;
-        }
 
         // ── registros ───────────────────────────────────────────────
         const mReg = /^\/registries\/([^/]+)(?:\/([^/]+))?$/.exec(rota);
@@ -3329,238 +3011,7 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           return;
         }
 
-        // ── flows ───────────────────────────────────────────────────
-        if (rota === "/flows" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          enviar(res, 200, await flows.listar(ws.path));
-          return;
-        }
-        if (rota === "/flows" && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as {
-            id?: string; nome?: string;
-            nos?: Flow["nos"];
-            arestas?: Flow["arestas"];
-            auto_agendar?: boolean;
-            ativo?: boolean;
-          };
-          const flowId = (corpo.id ?? "").trim();
-          const jaExiste = flowId ? existsSync(flows.caminho(ws.path, flowId)) : false;
 
-          // se o flow já existe no workspace e recebeu grafo completo, atualiza de forma idempotente (upsert)
-          if (jaExiste && Array.isArray(corpo.nos)) {
-            const atual = await flows.obter(ws.path, flowId);
-            await flows.salvar(ws.path, {
-              id: flowId,
-              nome: corpo.nome ?? atual.nome,
-              nos: corpo.nos,
-              arestas: corpo.arestas ?? [],
-              auto_agendar: corpo.auto_agendar ?? atual.auto_agendar ?? false,
-              ativo: corpo.ativo ?? atual.ativo ?? true,
-            });
-            eventBus.emit("flow-salvo", { flow: flowId });
-            enviar(res, 200, await flows.obter(ws.path, flowId));
-            return;
-          }
-
-          // com grafo no corpo (editor da web), valida e salva inteiro — senão cria só o gatilho
-          if (Array.isArray(corpo.nos) && corpo.nos.length > 0) {
-            const f = await flows.salvarComId(ws.path, {
-              id: flowId,
-              nome: corpo.nome ?? flowId,
-              nos: corpo.nos,
-              arestas: corpo.arestas ?? [],
-              auto_agendar: corpo.auto_agendar ?? false,
-              ativo: corpo.ativo ?? true,
-            });
-            enviar(res, 201, f);
-            return;
-          }
-          const f = await flows.criar(ws.path, flowId, corpo.nome ?? flowId);
-          if (corpo.auto_agendar === true) {
-            await flows.salvar(ws.path, { ...f, auto_agendar: true });
-            enviar(res, 201, await flows.obter(ws.path, flowId));
-            return;
-          }
-          enviar(res, 201, f);
-          return;
-        }
-        if (rota === "/flows/import" && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
-          const payloadFlow =
-            corpo && typeof corpo === "object" && "flow" in corpo
-              ? corpo.flow
-              : corpo && typeof corpo === "object" && "nos" in corpo
-              ? corpo
-              : corpo?.dados ?? corpo;
-
-          const sobrescrever = Boolean(corpo?.sobrescrever ?? corpo?.force);
-          const novoId = corpo?.novoId ?? corpo?.id;
-
-          const importado = await flows.importar(ws.path, payloadFlow, {
-            sobrescrever,
-            novoId: typeof novoId === "string" && novoId.trim().length > 0 ? novoId.trim() : undefined,
-          });
-          eventBus.emit("flow-salvo", { flow: importado.id });
-          enviar(res, 201, { ok: true, flow: importado });
-          return;
-        }
-        if (rota === "/flows/migrate-teams" && req.method === "POST") {
-          // fusão team×fluxo (PLANO-WEB-CRUD F3): converte teams legados em flows
-          const ws = await resolverWs(url);
-          enviar(res, 200, await migrarTeamsParaFlows(ws.path, teams, flows));
-          return;
-        }
-        const mFlow = /^\/flows\/([^/]+)$/.exec(rota);
-        if (mFlow && req.method === "GET") {
-          const ws = await resolverWs(url);
-          enviar(res, 200, await flows.obter(ws.path, decodeURIComponent(mFlow[1]!)));
-          return;
-        }
-        if (mFlow && req.method === "PUT") {
-          // salva o grafo completo (PLANO-WEB-CRUD B2) — zod + semântica no FlowStore.salvar
-          const ws = await resolverWs(url);
-          const flowId = decodeURIComponent(mFlow[1]!);
-          const corpo = (await lerCorpo(req)) as Record<string, unknown>;
-          if (corpo.id && corpo.id !== flowId) {
-            enviar(res, 422, { erro: `id do corpo ("${String(corpo.id)}") não bate com a rota ("${flowId}")` });
-            return;
-          }
-          const atual = await flows.obter(ws.path, flowId); // 404 se não existe
-          await flows.salvar(ws.path, { ...corpo, id: flowId, nome: String(corpo.nome ?? atual.nome), auto_agendar: typeof corpo.auto_agendar === "boolean" ? corpo.auto_agendar : (atual.auto_agendar ?? false), ativo: typeof corpo.ativo === "boolean" ? corpo.ativo : (atual.ativo ?? true) } as Parameters<typeof flows.salvar>[1]);          eventBus.emit("flow-salvo", { flow: flowId });
-          enviar(res, 200, await flows.obter(ws.path, flowId));
-          return;
-        }
-        if (mFlow && req.method === "DELETE") {
-          const ws = await resolverWs(url);
-          const flowId = decodeURIComponent(mFlow[1]!);
-          await flows.deletar(ws.path, flowId);
-          eventBus.emit("flow-excluido", { flow: flowId });
-          enviar(res, 200, { ok: true, id: flowId });
-          return;
-        }
-        const mFlowExport = /^\/flows\/([^/]+)\/export$/.exec(rota);
-        if (mFlowExport && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const flowId = decodeURIComponent(mFlowExport[1]!);
-          const exportData = await flows.exportar(ws.path, flowId);
-          if (url.searchParams.get("download") === "1") {
-            res.writeHead(200, {
-              "content-type": "application/json; charset=utf-8",
-              "content-disposition": `attachment; filename="flow-${flowId}.json"`,
-            });
-            res.end(JSON.stringify(exportData, null, 2));
-            return;
-          }
-          enviar(res, 200, exportData);
-          return;
-        }
-        const mFlowExecucoes = /^\/flows\/([^/]+)\/execucoes$/.exec(rota);
-        if (mFlowExecucoes && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const flowId = decodeURIComponent(mFlowExecucoes[1]!);
-          enviar(res, 200, await flows.listarExecucoes(ws.path, flowId));
-          return;
-        }
-        const mFlowStatus = /^\/flows\/([^/]+)\/status$/.exec(rota);
-        if (mFlowStatus && req.method === "GET") {
-          const ws = await resolverWs(url);
-          enviar(res, 200, await flows.ultimaExecucao(ws.path, decodeURIComponent(mFlowStatus[1]!)));
-          return;
-        }
-        const mFlowRun = /^\/flows\/([^/]+)\/run$/.exec(rota);
-        if (mFlowRun && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as { entrada?: string; model?: string; gatilho?: string };
-          const flowId = decodeURIComponent(mFlowRun[1]!);
-          const execId = `exec-${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
-          let gatilho: { tipo: string; origem: string } | undefined;
-          if (typeof corpo.gatilho === "string" && corpo.gatilho.includes(":")) {
-            const [tipo, ...resto] = corpo.gatilho.split(":");
-            if (tipo && resto.length) gatilho = { tipo, origem: resto.join(":") };
-          }
-          void flows.executar(ws.path, flowId, { entrada: corpo.entrada, model: corpo.model, execId, gatilho: gatilho as any }).catch(() => undefined);
-          enviar(res, 202, { status: "iniciado", flow: flowId, exec_id: execId });
-          return;
-        }
-        const mFlowWebhook = /^\/flows\/([^/]+)\/webhook$/.exec(rota);
-        if (mFlowWebhook && req.method === "POST") {
-          const ip = req.socket.remoteAddress || "127.0.0.1";
-          const rateCheck = webhookLimiter.check(ip);
-          if (!rateCheck.ok) {
-            res.setHeader("Retry-After", String(rateCheck.retryAfter));
-            enviar(res, 429, {
-              erro: "Too Many Requests — limite de 30 req/min atingido para webhooks",
-              retry_after: rateCheck.retryAfter,
-            });
-            return;
-          }
-          const ws = await resolverWs(url);
-          const rawCorpo = await lerCorpo(req);
-          const flowId = decodeURIComponent(mFlowWebhook[1]!);
-          const entradaStr = typeof rawCorpo === "string" ? rawCorpo : JSON.stringify(rawCorpo ?? {});
-          const execId = `exec-${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
-          void flows.executar(ws.path, flowId, { entrada: entradaStr, execId, gatilho: { tipo: "webhook", origem: flowId } as any }).catch((err) => {
-            console.error(`[flows] erro ao executar webhook do flow ${flowId}:`, err);
-          });
-          enviar(res, 202, { ok: true, status: "iniciado", flow: flowId, gatilho: "webhook", exec_id: execId });
-          return;
-        }
-        const mFlowResume = /^\/flows\/([^/]+)\/resume$/.exec(rota);
-        if (mFlowResume && req.method === "POST") {
-          const ws = await resolverWs(url);
-          const corpo = (await lerCorpo(req)) as { exec_id?: string; model?: string };
-          if (!corpo.exec_id) {
-            enviar(res, 422, { erro: "corpo obrigatório: { exec_id } — id da execução falha a retomar" });
-            return;
-          }
-          const flowId = decodeURIComponent(mFlowResume[1]!);
-          // Valida elegibilidade ANTES do 202 (antes: qualquer id recebia
-          // "retomando" e o erro era engolido pelo .catch silencioso).
-          try {
-            const meta = await registros.lerMeta(ws.path, "execucoes", corpo.exec_id);
-            const ex = (meta.extras ?? {}) as Record<string, unknown>;
-            if (ex.tipo !== "flow" || ex.flow !== flowId) {
-              enviar(res, 422, { erro: `execução "${corpo.exec_id}" não pertence ao flow "${flowId}"` });
-              return;
-            }
-            if (ex.status !== "falhou") {
-              enviar(res, 422, { erro: `execução "${corpo.exec_id}" está "${String(ex.status ?? "?")}" — só falhas podem ser retomadas` });
-              return;
-            }
-            const nos = (ex.nos ?? []) as Array<{ status?: string }>;
-            if (!nos.some((n) => n.status !== "ok")) {
-              enviar(res, 422, { erro: `execução "${corpo.exec_id}" não tem nós pendentes para retomar` });
-              return;
-            }
-          } catch (erro) {
-            const msg = erro instanceof Error ? erro.message : String(erro);
-            if (!msg.startsWith("execução")) {
-              enviar(res, 404, { erro: `execução "${corpo.exec_id}" não encontrada` });
-              return;
-            }
-            enviar(res, 422, { erro: msg });
-            return;
-          }
-          void flows
-            .executar(ws.path, flowId, { model: corpo.model, execId: corpo.exec_id, retomar: true })
-            .catch((err) => {
-              console.error(`[flows] erro ao retomar ${flowId}/${corpo.exec_id}:`, err);
-            });
-          enviar(res, 202, { status: "retomando", flow: flowId, exec_id: corpo.exec_id });
-          return;
-        }
-
-        // ── webhooks registry ──────────────────────────────────────
-        if (rota === "/webhooks" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const porta = server.address() && typeof server.address() === "object" ? (server.address() as any).port : "";
-          const baseUrl = porta ? `http://localhost:${porta}` : "";
-          const webhooks = await flows.listarWebhooks(ws.path, baseUrl);
-          enviar(res, 200, webhooks);
-          return;
-        }
 
         // ── components (marketplace) ───────────────────────────────
         if (rota === "/components" && req.method === "GET") {
@@ -3665,15 +3116,8 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           enviar(res, 200, { total: eventos.length, limite, offset, eventos: paginado });
           return;
         }
-        if (rota === "/audit/flows" && req.method === "GET") {
-          const ws = await resolverWs(url);
-          const limite = Math.min(Math.max(parseInt(String(url.searchParams.get("limite") ?? "50"), 10) || 50, 1), 200);
-          let eventos = await registros.lerJournal(ws.path, "logs", "audit-log");
-          eventos = eventos.filter((e) => Boolean((e as Record<string, unknown>).flow_id) || String(e.por ?? "").startsWith("flow:") || String(e.evento ?? "").startsWith("flow_"));
-          eventos.reverse();
-          enviar(res, 200, { total: eventos.length, limite, eventos: eventos.slice(0, limite) });
-          return;
-        }
+
+
 
         // ── GET /files — lista diretório ou lê arquivo do workspace
         if (rota === "/files" && req.method === "GET") {
@@ -4465,59 +3909,6 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           return;
         }
 
-        // Helper: obtém porta do opencode server ou lança 409 se não iniciado (auto-iniciar opcional)
-        async function portaOpencodeOuErro(autoIniciar = false): Promise<number> {
-          let status = await opencodeServer.status();
-          if (autoIniciar && (!status.rodando || !status.porta)) {
-            try {
-              const res = await opencodeServer.iniciar();
-              if (res.porta) return res.porta;
-              status = await opencodeServer.status();
-            } catch (err) {
-              console.error("[secretario] falha ao auto-iniciar opencode server:", err);
-            }
-          }
-          if (!status.rodando || !status.porta) {
-            throw new SecretarioError("secretário não iniciado — POST /secretario/start", { status: 409 });
-          }
-          return status.porta;
-        }
-
-        // Helper: espelha TODAS as mensagens de uma sessão no corp.db (ids reais do opencode —
-        // idempotente; garante espelho completo independente de quem/cliente iniciou a conversa)
-        async function sincronizarSessaoNoCorp(porta: number, sessaoId: string): Promise<void> {
-          try {
-            const res = await fetch(`http://127.0.0.1:${porta}/session/${sessaoId}/message`, { signal: AbortSignal.timeout(5000) });
-            if (!res.ok) return;
-            const msgs = (await res.json()) as Array<{
-              info?: { id?: string; role?: string; agent?: string; time?: { created?: number; completed?: number } };
-              parts?: Array<{ type: string; text?: string }>;
-            }>;
-            if (!Array.isArray(msgs) || msgs.length === 0) return;
-            const ws = await resolverWs(new URL(req.url ?? "/", "http://local"));
-            const db = registros.corpDb(ws.path);
-            const agente = msgs.find((m) => m.info?.agent)?.info?.agent ?? "secretario";
-            const iso = (ms?: number): string | undefined => (ms ? new Date(ms).toISOString() : undefined);
-            const primeira = iso(msgs[0]?.info?.time?.created);
-            const ultima = [...msgs].reverse().find((m) => m.info?.time?.completed)?.info?.time?.completed;
-            db.upsertSessao({
-              id: sessaoId, agente, modelo: "",
-              inicio: primeira ?? new Date().toISOString(),
-              fim: iso(ultima) ?? new Date().toISOString(),
-              custo_usd: null, status: "concluida",
-            });
-            for (const m of msgs) {
-              const role = m.info?.role;
-              const id = m.info?.id;
-              if (!id || (role !== "user" && role !== "assistant")) continue;
-              const texto = (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim();
-              if (!texto) continue;
-              db.inserirMensagem({ id, sessao_id: sessaoId, agente, role, conteudo: texto, criado_em: iso(m.info?.time?.created) ?? null });
-            }
-          } catch {
-            /* espelho é best-effort — nunca afeta o chat */
-          }
-        }
 
         // Helper: troca o modelo da sessão no opencode serve em tempo real (hot-swap para fallback)
         async function trocarModeloOpencode(baseUrl: string, sessaoId: string, modeloCompleto: string): Promise<boolean> {
@@ -4545,485 +3936,8 @@ Comandos \`/\` não reconhecidos não são enviados ao modelo — são respondid
           }
         }
 
-        // ── /secretario/sessoes (proxy GET /session) ──
-        if (rota === "/secretario/sessoes" && req.method === "GET") {
-          try {
-            const porta = await portaOpencodeOuErro(true);
-            const opencodeUrl = `http://127.0.0.1:${porta}/session`;
-            const [resOpencode, resStatus] = await Promise.all([
-              fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) }),
-              fetch(`http://127.0.0.1:${porta}/session/status`, { signal: AbortSignal.timeout(3000) }).catch(() => null),
-            ]);
-            if (!resOpencode.ok) {
-              enviar(res, 502, { erro: `opencode respondeu ${resOpencode.status}` });
-              return;
-            }
-            const data = await resOpencode.json();
-            let statusMap: Record<string, { type?: string }> = {};
-            if (resStatus && resStatus.ok) {
-              try { statusMap = (await resStatus.json()) as Record<string, { type?: string }>; } catch {}
-            }
-            // enriquece com títulos REAIS (1ª msg do usuário) e status de execução ao vivo
-            try {
-              const itens = (data as Array<Record<string, unknown>>) ?? [];
-              for (const s of itens) {
-                const sid = String(s.id ?? "");
-                const isBusy = statusMap[sid]?.type === "busy";
-                s.executando = isBusy;
-                s.status = isBusy ? "executando" : "idle";
-              }
-              const ids = itens.map((s) => String(s.id ?? "")).filter(Boolean);
-              if (ids.length) {
-                // espelho vive no corp.db do workspace — tenta o ativo; sem ativo, usa o 1º existente
-                let ws: { id: string; path: string };
-                try {
-                  ws = await resolverWs(url);
-                } catch {
-                  const todos = await workspaces.listar();
-                  const primeiro = todos.find((w) => w.existe);
-                  if (!primeiro) throw new Error("nenhum workspace para enriquecer");
-                  ws = { id: primeiro.id, path: primeiro.path };
-                }
-                const db = registros.corpDb(ws.path);
-                const primeiras = db.primeirasMensagensUsuario(ids);
-                const primeiraPorSessao = new Map<string, string>();
-                for (const p of primeiras) {
-                  if (!primeiraPorSessao.has(p.sessao_id)) primeiraPorSessao.set(p.sessao_id, p.conteudo);
-                }
-                for (const s of itens) {
-                  const id = String(s.id ?? "");
-                  const tituloAtual = String(s.title ?? "").trim();
-                  const real = primeiraPorSessao.get(id);
-                  if (real) {
-                    (s as Record<string, unknown>).titulo_real = real.length > 70 ? real.slice(0, 69) + "…" : real;
-                    (s as Record<string, unknown>).sem_conteudo = false;
-                  } else if (!tituloAtual || tituloAtual.startsWith("New session")) {
-                    (s as Record<string, unknown>).sem_conteudo = true;
-                  }
-                }
-              }
-            } catch (erro) {
-              console.error("[enriquecimento] falhou:", erro instanceof Error ? erro.message : erro);
-            }
-            // espelho completo: sincroniza as 5 sessões mais recentes em background
-            try {
-              const lista = (data as Array<{ id?: string; updated?: number; time?: { updated?: number } }>) ?? [];
-              const recentes = [...lista]
-                .sort((a, b) => (b.updated ?? b.time?.updated ?? 0) - (a.updated ?? a.time?.updated ?? 0))
-                .slice(0, 5)
-                .map((s) => s.id)
-                .filter((id): id is string => !!id);
-              for (const id of recentes) void sincronizarSessaoNoCorp(porta, id);
-            } catch {
-              /* espelho best-effort */
-            }
-            enviar(res, 200, data);
-          } catch (erro) {
-            // Fallback: retornar sessões do espelho SQLite local quando opencode está offline
-            try {
-              let ws: { id: string; path: string };
-              try {
-                ws = await resolverWs(url);
-              } catch {
-                const todos = await workspaces.listar();
-                const primeiro = todos.find((w) => w.existe);
-                if (!primeiro) throw new Error("nenhum workspace");
-                ws = { id: primeiro.id, path: primeiro.path };
-              }
-              const db = registros.corpDb(ws.path);
-              const sessoesLocais = db.listarSessoesLocal(30);
-              const resultado = sessoesLocais.map((s) => ({
-                id: s.id,
-                agent: s.agente,
-                model: s.modelo,
-                title: s.titulo_real || `Conversa ${s.id.slice(0, 8)}`,
-                titulo_real: s.titulo_real,
-                updated: s.inicio ? new Date(s.inicio).getTime() : Date.now(),
-                time: { updated: s.inicio ? new Date(s.inicio).getTime() : Date.now() },
-                status: s.status || "idle",
-                executando: false,
-                sem_conteudo: !s.titulo_real,
-                _fallback: true,
-              }));
-              console.warn(`[secretario/sessoes] opencode offline, retornando ${resultado.length} sessões do espelho local`);
-              enviar(res, 200, resultado);
-            } catch (fallbackErro) {
-              // Se até o fallback falhar, retorna array vazio para não travar o frontend
-              console.error("[secretario/sessoes] fallback também falhou:", fallbackErro instanceof Error ? fallbackErro.message : fallbackErro);
-              enviar(res, 200, []);
-            }
-          }
-          return;
-        }
 
-        // ── /secretario/sessoes/:id/mensagens (GET /session/:id/message → [{role,content}]) ──
-        const mMensagens = /^\/secretario\/sessoes\/([^/]+)\/mensagens$/.exec(rota);
-        if (mMensagens && req.method === "GET") {
-          try {
-            const porta = await portaOpencodeOuErro();
-            const sessionId = decodeURIComponent(mMensagens[1]!);
-            // opencode ≥1.18: mensagens em GET /session/:id/message ([{info:{role,time},parts}])
-            const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}/message`;
-            const [resOpencode, resStatus] = await Promise.all([
-              fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) }),
-              fetch(`http://127.0.0.1:${porta}/session/status`, { signal: AbortSignal.timeout(3000) }).catch(() => null),
-            ]);
-            if (!resOpencode.ok) {
-              enviar(res, resOpencode.status === 404 ? 404 : 502, { erro: resOpencode.status === 404 ? "sessão não encontrada" : `opencode respondeu ${resOpencode.status}` });
-              return;
-            }
-            let isSessaoBusy = false;
-            let sessaoRetryInfo: { message?: string; action?: { message?: string; link?: string } } | null = null;
-            if (resStatus && resStatus.ok) {
-              try {
-                const statusMap = (await resStatus.json()) as Record<string, { type?: string; message?: string; action?: { message?: string; link?: string } }>;
-                isSessaoBusy = statusMap[sessionId]?.type === "busy";
-                if (statusMap[sessionId]?.type === "retry") {
-                  sessaoRetryInfo = statusMap[sessionId] ?? null;
-                }
-              } catch {}
-            }
-            const rawMsgs = ((await resOpencode.json()) as MensagemOc[]) ?? [];
-            const mensagens: Array<{
-              id?: string;
-              indice_global?: number;
-              role: string;
-              content: string;
-              passos?: PassoChat[];
-              pensamento?: string;
-              criado_em?: string;
-              concluida: boolean;
-              acoes?: Array<{ ferramenta?: string; resumo?: string; sucesso?: boolean }>;
-              imagens?: string[];
-              pergunta?: string;
-              opcoes?: string[];
-            }> = [];
 
-            for (const m of rawMsgs) {
-              const role = m.info?.role;
-              if (role === "user") {
-                const parts = m.parts ?? [];
-                const rawContent = parts.filter((p: ParteOc) => p.type === "text").map((p: ParteOc) => p.text ?? "").join("\n").trim();
-                const content = limparPrefixoWorkspace(rawContent);
-                const imagens = parts.filter((p: any) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p: any) => p.url);
-                mensagens.push({
-                  id: m.info?.id,
-                  role: "user",
-                  content,
-                  criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
-                  concluida: true,
-                  imagens: imagens.length > 0 ? imagens : undefined,
-                });
-              } else if (role === "assistant") {
-                const passos = extrairPassosMensagens([m]);
-                const tools = passos.filter((p) => p.tipo === "acao").map((p) => ({
-                  ferramenta: p.ferramenta,
-                  resumo: p.resumo,
-                  sucesso: p.sucesso !== false,
-                }));
-                const pensamentosPassos = passos.filter((p) => p.tipo === "pensamento").map((p) => p.texto ?? "").filter(Boolean);
-                const pensamento = pensamentosPassos.join("\n\n---\n\n");
-                const textosPassos = passos.filter((p) => p.tipo === "texto").map((p) => p.texto ?? "").filter(Boolean);
-                const content = textosPassos.join("\n\n");
-
-                const agora = Date.now();
-                const criadoEmMs = m.info?.time?.created ?? 0;
-                // Não expira se a sessão estiver ativamente executando (busy) no daemon
-                const expirou = !isSessaoBusy && !m.info?.time?.completed && criadoEmMs > 0 && agora - criadoEmMs > 600_000;
-                const temErro = Boolean((m.info as any)?.error);
-                const erroDesc = temErro ? (((m.info as any)?.error as any)?.data?.message || ((m.info as any)?.error as any)?.message || ((m.info as any)?.error as any)?.name || "interrompido") : "";
-                // Só consideramos incompleta se a sessão ESTIVER ativamente busy no daemon E finish for "tool-calls"
-                const isCompleted = isSessaoBusy
-                  ? Boolean(m.info?.time?.completed && (m.info as any)?.finish !== "tool-calls")
-                  : Boolean(m.info?.time?.completed || expirou || temErro || !isSessaoBusy);
-                const textoFinal = content || (expirou ? "(geração anterior interrompida ou expirada)" : (temErro && !content ? `⚠️ **Erro na resposta**: ${erroDesc}` : ""));
-
-                // Se a mensagem anterior já é do assistente (mesmo turno com múltiplos passos), consolida nela
-                const ult = mensagens[mensagens.length - 1];
-                if (ult && ult.role === "assistant") {
-                  if (passos.length > 0) {
-                    ult.passos = [...(ult.passos ?? []), ...passos];
-                  }
-                  if (pensamento) {
-                    ult.pensamento = ult.pensamento ? `${ult.pensamento}\n\n---\n\n${pensamento}` : pensamento;
-                  }
-                  if (textoFinal) {
-                    ult.content = ult.content ? `${ult.content}\n\n${textoFinal}` : textoFinal;
-                  }
-                  if (tools.length > 0) {
-                    ult.acoes = [...(ult.acoes ?? []), ...tools];
-                  }
-                  const passoComPergunta = passos.find((p) => (p as any).perguntas || p.pergunta);
-                  if (passoComPergunta) {
-                    if ((passoComPergunta as any).perguntas) (ult as any).perguntas = (passoComPergunta as any).perguntas;
-                    if (passoComPergunta.pergunta) ult.pergunta = passoComPergunta.pergunta;
-                    if (passoComPergunta.opcoes) ult.opcoes = passoComPergunta.opcoes;
-                  }
-                  // O status concluida reflete o último passo processado no turno
-                  ult.concluida = isCompleted;
-                } else {
-                  const temAlgo = Boolean(textoFinal || passos.length > 0 || pensamento || tools.length > 0 || temErro);
-                  if (temAlgo || !isCompleted) {
-                    const passoComPergunta = passos.find((p) => (p as any).perguntas || p.pergunta);
-                    mensagens.push({
-                      id: m.info?.id,
-                      role: "assistant",
-                      content: textoFinal,
-                      passos: passos.length > 0 ? passos : undefined,
-                      pensamento: pensamento || undefined,
-                      criado_em: m.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined,
-                      concluida: isCompleted,
-                      acoes: tools.length > 0 ? tools : undefined,
-                      pergunta: passoComPergunta?.pergunta,
-                      opcoes: passoComPergunta?.opcoes,
-                      perguntas: (passoComPergunta as any)?.perguntas,
-                    } as any);
-                  }
-                }
-              }
-            }
-
-            // Se o opencode estiver em estado retry (ex: limite de cota mensal atingido), expõe aviso claro
-            if (sessaoRetryInfo) {
-              const msgRetry = sessaoRetryInfo.message || sessaoRetryInfo.action?.message || "Limite de cota ou taxa do provedor atingido.";
-              const linkAviso = sessaoRetryInfo.action?.link ? ` [Acessar painel do provedor](${sessaoRetryInfo.action.link})` : "";
-              const avisoFormatado = `⚠️ **Limite de Cota no Provedor**: ${msgRetry}${linkAviso}`;
-
-              const ultMsg = mensagens[mensagens.length - 1];
-              if (!ultMsg || ultMsg.role === "user") {
-                mensagens.push({
-                  role: "assistant",
-                  content: avisoFormatado,
-                  concluida: true,
-                  criado_em: new Date().toISOString(),
-                });
-              } else if (ultMsg.role === "assistant" && !ultMsg.content) {
-                ultMsg.content = avisoFormatado;
-                ultMsg.concluida = true;
-              }
-            }
-
-            // Se a sessão estiver ocupada (busy) no opencode daemon, a última mensagem do assistente ainda está em curso;
-            // Caso a sessão NÃO esteja ocupada no daemon, ela já encerrou (concluida = true).
-            if (mensagens.length > 0 && mensagens[mensagens.length - 1].role === "assistant") {
-              mensagens[mensagens.length - 1].concluida = isSessaoBusy ? false : true;
-            }
-
-            // Filtra mensagens fantasmas do assistente que ficaram 100% vazias
-            const mensagensValidas = mensagens.filter((msg, idx) => {
-              if (msg.role === "assistant") {
-                const temTxt = Boolean(msg.content && msg.content.trim().length > 0);
-                const temAcoes = Boolean(msg.acoes && msg.acoes.length > 0);
-                const temPensamento = Boolean(msg.pensamento && msg.pensamento.trim().length > 0);
-                const temPassos = Boolean(msg.passos && msg.passos.length > 0);
-                if (!msg.concluida && idx === mensagens.length - 1) return true;
-                return temTxt || temAcoes || temPensamento || temPassos;
-              }
-              return true;
-            });
-
-            const mensagensComIndice = mensagensValidas.map((msg, i) => ({
-              ...msg,
-              indice_global: i,
-            }));
-
-            const turnosParam = url.searchParams.get("turnos");
-            const antesDoIndiceParam = url.searchParams.get("antes_do_indice");
-
-            if (turnosParam) {
-              const qtdTurnos = Math.max(1, parseInt(turnosParam, 10) || 2);
-              const antesDoIndice = antesDoIndiceParam !== null ? parseInt(antesDoIndiceParam, 10) : null;
-
-              const turnos: Array<{ inicio: number; fim: number }> = [];
-              let inicioAtual = 0;
-              for (let i = 0; i < mensagensComIndice.length; i++) {
-                if (mensagensComIndice[i].role === "user" && i > 0 && i > inicioAtual) {
-                  turnos.push({ inicio: inicioAtual, fim: i });
-                  inicioAtual = i;
-                }
-              }
-              if (mensagensComIndice.length > 0) {
-                turnos.push({ inicio: inicioAtual, fim: mensagensComIndice.length });
-              }
-
-              const turnosCandidatos = antesDoIndice !== null
-                ? turnos.filter((t) => t.fim <= antesDoIndice)
-                : turnos;
-
-              if (turnosCandidatos.length === 0) {
-                enviar(res, 200, {
-                  mensagens: [],
-                  paginacao: {
-                    total_mensagens: mensagensComIndice.length,
-                    total_turnos: turnos.length,
-                    primeiro_indice: 0,
-                    ultimo_indice: 0,
-                    tem_mais: false,
-                  },
-                });
-                return;
-              }
-
-              const turnosSelecionados = turnosCandidatos.slice(-qtdTurnos);
-              const idxInicio = turnosSelecionados[0].inicio;
-              const idxFim = turnosSelecionados[turnosSelecionados.length - 1].fim;
-              const fatia = mensagensComIndice.slice(idxInicio, idxFim);
-              const temMais = idxInicio > 0;
-
-              enviar(res, 200, {
-                mensagens: fatia,
-                paginacao: {
-                  total_mensagens: mensagensComIndice.length,
-                  total_turnos: turnos.length,
-                  primeiro_indice: idxInicio,
-                  ultimo_indice: idxFim,
-                  tem_mais: temMais,
-                },
-              });
-              return;
-            }
-
-            enviar(res, 200, mensagensComIndice);
-          } catch (erro) {
-            if (erro instanceof SecretarioError) {
-              enviar(res, erro.status ?? 409, { erro: erro.message });
-            } else {
-              enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
-            }
-          }
-          return;
-        }
-
-        // ── /secretario/sessoes/:id (proxy GET /session/:id) ──
-        const mSessaoDetalhe = /^\/secretario\/sessoes\/([^/]+)$/.exec(rota);
-        if (mSessaoDetalhe && req.method === "GET") {
-          try {
-            const porta = await portaOpencodeOuErro();
-            const sessionId = decodeURIComponent(mSessaoDetalhe[1]!);
-            const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}`;
-            const resOpencode = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
-            if (!resOpencode.ok) {
-              if (resOpencode.status === 404) {
-                enviar(res, 404, { erro: "sessão não encontrada" });
-              } else {
-                enviar(res, 502, { erro: `opencode respondeu ${resOpencode.status}` });
-              }
-              return;
-            }
-            const data = await resOpencode.json();
-            enviar(res, 200, data);
-          } catch (erro) {
-            if (erro instanceof SecretarioError) {
-              enviar(res, erro.status ?? 409, { erro: erro.message });
-            } else {
-              enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
-            }
-          }
-          return;
-        }
-
-        // ── POST /secretario/sessoes/:id/truncar — edita prompt (trunca histórico para reenvio)
-        const mTruncar = /^\/secretario\/sessoes\/([^/]+)\/truncar$/.exec(rota);
-        if (mTruncar && req.method === "POST") {
-          try {
-            const porta = await portaOpencodeOuErro();
-            const sessionId = decodeURIComponent(mTruncar[1]!);
-            const corpo = (await lerCorpo(req)) as { manter_ate?: unknown };
-            const manter = typeof corpo.manter_ate === "number" ? Math.floor(Number(corpo.manter_ate)) : -1;
-            if (!Number.isInteger(manter) || manter < 0) {
-              enviar(res, 400, { erro: "manter_ate deve ser número inteiro >=0" });
-              return;
-            }
-            const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}/message`;
-            const resOp = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
-            if (!resOp.ok) {
-              enviar(res, resOp.status === 404 ? 404 : 502, { erro: resOp.status === 404 ? "sessão não encontrada" : `opencode respondeu ${resOp.status}` });
-              return;
-            }
-            const raw = (await resOp.json()) as Array<{
-              info?: { id?: string; role?: string; time?: { completed?: number } };
-              parts?: Array<{ type: string; text?: string; url?: string }>;
-            }>;
-            const filtrados = (Array.isArray(raw) ? raw : [])
-              .map((m) => {
-                const pensamento = (m.parts ?? []).filter((p) => p.type === "reasoning" || p.type === "thinking").map((p) => p.text ?? "").join("\n").trim();
-                return {
-                  id: m.info?.id,
-                  role: m.info?.role ?? "",
-                  content: (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim(),
-                  pensamento: pensamento || undefined,
-                  imagens: (m.parts ?? []).filter((p) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p) => p.url as string),
-                  concluida: m.info?.role === "assistant" ? !!m.info?.time?.completed : true,
-                };
-              })
-              .filter((m) => (m.role === "user" || m.role === "assistant") && (m.content.length > 0 || (m as unknown as { pensamento?: string }).pensamento || (m.imagens && m.imagens.length > 0) || (m.role === "assistant" && m.concluida === false)));
-            if (manter > filtrados.length) {
-              enviar(res, 400, { erro: `manter_ate ${manter} fora do range (total ${filtrados.length})` });
-              return;
-            }
-            if (manter === filtrados.length) {
-              enviar(res, 200, { ok: true, removidos: 0 });
-              return;
-            }
-            const paraRemover = filtrados.slice(manter);
-            const idsParaRemover = paraRemover.map((m) => m.id).filter(Boolean) as string[];
-            if (!idsParaRemover.length) {
-              enviar(res, 200, { ok: true, removidos: 0 });
-              return;
-            }
-            const homeDir = opcoes.homeDir ?? opencorpHome();
-            const dataHome = dirOpencodeData(homeDir);
-            const dbPath = join(dataHome, "opencode", "opencode.db");
-            let removidos = 0;
-            let dbErro: Error | null = null;
-            try {
-              const mod = await import("better-sqlite3");
-              const BetterSqlite3 = (mod as unknown as { default: unknown }).default ?? mod;
-              // @ts-ignore — construtor dinâmico
-              const db: { prepare: (sql: string) => { run: (id: string) => { changes: number } }; close: () => void; transaction: (fn: (ids: string[]) => void) => (ids: string[]) => void } = new (BetterSqlite3 as unknown as new (path: string) => unknown)(dbPath) as unknown as never;
-              const delPart = db.prepare("DELETE FROM part WHERE message_id = ?");
-              const delMsg = db.prepare("DELETE FROM message WHERE id = ?");
-              const tx = db.transaction((ids: string[]) => {
-                for (const id of ids) {
-                  delPart.run(id);
-                  const inf = delMsg.run(id);
-                  if (inf.changes) removidos++;
-                }
-              });
-              tx(idsParaRemover);
-              db.close();
-            } catch (e) {
-              dbErro = e as Error;
-            }
-            // fallback para fake-opencode (memória) quando DB não tem os dados ou falhou
-            if (removidos === 0 && idsParaRemover.length > 0) {
-              try {
-                const truncRes = await fetch(`http://127.0.0.1:${porta}/session/${sessionId}/truncate`, {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({ manter_ate: manter }),
-                  signal: AbortSignal.timeout(3000),
-                });
-                if (truncRes.ok) {
-                  const j = (await truncRes.json().catch(() => ({}))) as { removidos?: number };
-                  removidos = typeof j.removidos === "number" ? j.removidos : idsParaRemover.length;
-                  dbErro = null;
-                }
-              } catch {}
-            }
-            if (dbErro && removidos === 0) {
-              enviar(res, 500, { erro: `falha ao truncar no DB: ${dbErro.message}` });
-              return;
-            }
-            void sincronizarSessaoNoCorp(porta, sessionId);
-            eventBus.emit("secretario.mensagem", { sessao_id: sessionId, fase: "truncar" });
-            enviar(res, 200, { ok: true, removidos });
-          } catch (erro) {
-            if (erro instanceof SecretarioError) enviar(res, erro.status ?? 409, { erro: erro.message });
-            else enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
-          }
-          return;
-        }
 
         // ── GET/PUT /opencode-config — config do opencode do opencorp (home isolado) ──
         // Arquivo: <opencorpHome>/.opencorp/opencode-home/opencode.json — editável pelo

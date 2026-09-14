@@ -8,6 +8,15 @@ import type { WorkspaceManager } from "../../core/workspace-manager.js";
 import type { TemplateStore } from "../../core/template-store.js";
 import type { SessaoApi } from "../index.js";
 
+import type { FlowStore } from "../../core/flow-store.js";
+import type { AgentStore } from "../../core/agent-store.js";
+import type { TeamStore } from "../../core/team-store.js";
+import type { OpencodeServerManager } from "../../core/opencode-server.js";
+
+export interface WebhookLimiterLike {
+  check: (ip: string) => { ok: boolean; retryAfter?: number };
+}
+
 export interface RouteContext {
   req: IncomingMessage;
   res: ServerResponse;
@@ -23,6 +32,16 @@ export interface RouteContext {
   notificacoes: NotificationStore;
   meetings: MeetingManager;
   workspaces: WorkspaceManager;
+  flows?: FlowStore;
+  agentes?: AgentStore;
+  teams?: TeamStore;
   templates?: TemplateStore;
+  opencodeServer?: OpencodeServerManager;
   homeDir?: string;
+  webhookLimiter?: WebhookLimiterLike;
+  portaOpencodeOuErro?: (autoIniciar?: boolean) => Promise<number>;
+  sincronizarSessaoNoCorp?: (porta: number, sessaoId: string) => Promise<void>;
+  gerarIdExec?: () => string;
+  serverPort?: number;
 }
+
