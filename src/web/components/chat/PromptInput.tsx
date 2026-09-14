@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, For, Show, createMemo, createEffect } from "solid-js";
+import { type Component, createSignal, onMount, onCleanup, For, Show, createMemo, createEffect } from "solid-js";
 import {
   ArrowUp,
   Square,
@@ -20,6 +20,9 @@ import {
   Clock,
   FolderGit2,
   GitBranch,
+  Plus,
+  ChevronDown,
+  Cpu,
 } from "lucide-solid";
 import { IconButton } from "../../ui/IconButton";
 import { showToast } from "../../ui/Toast";
@@ -57,6 +60,11 @@ export interface PromptInputProps {
   agenteSelecionado?: string;
   onMudarAgente?: (ag: any) => void;
   agentesLista?: Array<{ id: string; role?: string }>;
+  modeloAtivo?: string;
+  onMudarModelo?: (modelo: string) => void;
+  branchAtiva?: string;
+  workspaceId?: string;
+  onAbrirConfig?: () => void;
   refTextarea?: (el: HTMLTextAreaElement) => void;
   /** Id do textarea (default `chat-input`; único por superfície montada). */
   id?: string;
@@ -73,6 +81,27 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const [modoMenu, setModoMenu] = createSignal<"slash" | "at" | "bang" | null>(null);
   const [queryMenu, setQueryMenu] = createSignal("");
   const [indiceAtivo, setIndiceAtivo] = createSignal(0);
+
+  // Estado do Seletor de Modelo embutido
+  const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
+  const MODEL_OPTIONS = [
+    { id: "openrouter/google/gemini-2.5-flash", name: "gemini-2.5-flash", desc: "Google · Ultra rápido" },
+    { id: "opencode/nemotron-3-ultra-free", name: "nemotron-3-ultra-free", desc: "OpenCode · Custo zero nativo" },
+    { id: "anthropic/claude-3-7-sonnet", name: "claude-3-7-sonnet", desc: "Anthropic · Code & Architecture" },
+    { id: "deepseek/deepseek-r1", name: "deepseek-r1", desc: "DeepSeek · Raciocínio matemático" },
+    { id: "openai/gpt-4o-mini", name: "gpt-4o-mini", desc: "OpenAI · Equilibrado e rápido" },
+  ];
+
+  onMount(() => {
+    const handleClickFora = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-model-picker]")) {
+        setModelDropdownOpen(false);
+      }
+    };
+    document.addEventListener("click", handleClickFora);
+    onCleanup(() => document.removeEventListener("click", handleClickFora));
+  });
 
   // Itens dinâmicos para @ (agentes e tasks do workspace)
   const [listaTasks, setListaTasks] = createSignal<any[]>([]);
@@ -675,365 +704,450 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   };
 
   return (
-    <div class="relative flex flex-col w-full max-w-3xl mx-auto rounded-2xl bg-zinc-900 border border-zinc-800 shadow-xl p-2.5 transition-all focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700/50">
-      {/* ─────────────────────────────────────────────────────────────
-          POPOVER DE AUTOCOMPLETE FLUTUANTE (/ @ !)
-         ───────────────────────────────────────────────────────────── */}
-      <Show when={modoMenu() && itensFiltrados().length > 0}>
-        <div
-          class="absolute bottom-full mb-2 inset-x-0 rounded-2xl bg-zinc-950/95 border border-zinc-700/90 shadow-2xl backdrop-blur-xl p-2 z-50 text-xs max-h-72 overflow-y-auto scrollbar-thin animate-in fade-in slide-in-from-bottom-2 duration-100"
-          onMouseDown={(e) => e.preventDefault()}
-        >
-          {/* Cabeçalho do Popover */}
-          <div class="px-2.5 py-1 mb-1 border-b border-zinc-800/80 flex items-center justify-between text-[11px] font-mono">
-            <div class="flex items-center gap-1.5 font-bold">
-              <Show when={modoMenu() === "slash"}>
-                <span class="text-purple-400">/ Comandos Rápidos</span>
-              </Show>
-              <Show when={modoMenu() === "at"}>
-                <span class="text-emerald-400">@ Menções (Agente · Prompt · Arquivo · Task)</span>
-              </Show>
-              <Show when={modoMenu() === "bang"}>
-                <span class="text-amber-400">! Comandos de Terminal (Shell)</span>
+    <div class="w-full max-w-3xl mx-auto flex flex-col">
+      <div class="relative flex flex-col w-full rounded-2xl bg-[#14151a] border border-zinc-800/90 shadow-2xl p-2.5 transition-all focus-within:border-zinc-700/80 focus-within:ring-1 focus-within:ring-zinc-700/40">
+        {/* ─────────────────────────────────────────────────────────────
+            POPOVER DE AUTOCOMPLETE FLUTUANTE (/ @ !)
+           ───────────────────────────────────────────────────────────── */}
+        <Show when={modoMenu() && itensFiltrados().length > 0}>
+          <div
+            class="absolute bottom-full mb-2 inset-x-0 rounded-2xl bg-zinc-950/95 border border-zinc-700/90 shadow-2xl backdrop-blur-xl p-2 z-50 text-xs max-h-72 overflow-y-auto scrollbar-thin animate-in fade-in slide-in-from-bottom-2 duration-100"
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            {/* Cabeçalho do Popover */}
+            <div class="px-2.5 py-1 mb-1 border-b border-zinc-800/80 flex items-center justify-between text-[11px] font-mono">
+              <div class="flex items-center gap-1.5 font-bold">
+                <Show when={modoMenu() === "slash"}>
+                  <span class="text-purple-400">/ Comandos Rápidos</span>
+                </Show>
+                <Show when={modoMenu() === "at"}>
+                  <span class="text-emerald-400">@ Menções (Agente · Prompt · Arquivo · Task)</span>
+                </Show>
+                <Show when={modoMenu() === "bang"}>
+                  <span class="text-amber-400">! Comandos de Terminal (Shell)</span>
+                </Show>
+              </div>
+              <span class="text-zinc-500 text-[10px]">
+                ↑↓ navega · Tab/↵ escolhe · Esc fecha
+              </span>
+            </div>
+
+            {/* Lista de Sugestões */}
+            <div class="space-y-0.5">
+              <Show when={secoesAt() !== null} fallback={
+                <For each={itensFiltrados()}>
+                  {(item, idx) => {
+                    const Icone = item.icone || Sparkles;
+                    const ativo = () => indiceAtivo() === idx();
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => selecionarItem(item)}
+                        onMouseEnter={() => setIndiceAtivo(idx())}
+                        class={`w-full px-2.5 py-1.5 rounded-xl flex items-center justify-between gap-3 text-left transition-colors cursor-pointer ${
+                          ativo()
+                            ? "bg-zinc-800 text-zinc-100 shadow-xs"
+                            : "hover:bg-zinc-900/60 text-zinc-300"
+                        }`}
+                      >
+                        <div class="flex items-center gap-2.5 min-w-0">
+                          <div
+                            class={`h-6 w-6 rounded-md flex items-center justify-center flex-shrink-0 ${
+                              item.tipo === "slash"
+                                ? "bg-purple-950/60 text-purple-400 border border-purple-800/60"
+                                : item.tipo === "at"
+                                ? "bg-emerald-950/60 text-emerald-400 border border-emerald-800/60"
+                                : "bg-amber-950/60 text-amber-400 border border-amber-800/60"
+                            }`}
+                          >
+                            <Icone size={13} />
+                          </div>
+                          <div class="min-w-0">
+                            <div class="font-mono text-xs font-bold text-zinc-100 truncate">{item.titulo}</div>
+                            <div class="text-[11px] text-zinc-400 truncate leading-snug">{item.descricao}</div>
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-1.5 flex-shrink-0">
+                          <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-900 text-zinc-500 border border-zinc-800">
+                            {item.categoria}
+                          </span>
+                          <Show when={ativo()}>
+                            <CornerDownLeft size={12} class="text-zinc-400" />
+                          </Show>
+                        </div>
+                      </button>
+                    );
+                  }}
+                </For>
+              }>
+                <For each={secoesAt()!}>
+                  {(secao) => (
+                    <div>
+                      <div class="px-2.5 pt-1 pb-0.5 text-[10px] font-mono uppercase tracking-wider text-zinc-500">
+                        {secao.secao}
+                      </div>
+                      <For each={secao.itens}>
+                        {(item) => {
+                          const Icone = item.icone || Sparkles;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => selecionarItem(item)}
+                              onMouseEnter={() => {
+                                const idx = itensFiltrados().indexOf(item);
+                                if (idx >= 0) setIndiceAtivo(idx);
+                              }}
+                              class="w-full px-2.5 py-1.5 rounded-xl flex items-center justify-between gap-3 text-left transition-colors cursor-pointer hover:bg-zinc-900/60 text-zinc-300"
+                            >
+                              <div class="flex items-center gap-2.5 min-w-0">
+                                <div class="h-6 w-6 rounded-md flex items-center justify-center flex-shrink-0 bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
+                                  <Icone size={13} />
+                                </div>
+                                <div class="min-w-0">
+                                  <div class="font-mono text-xs font-bold text-zinc-100 truncate">{item.titulo}</div>
+                                  <div class="text-[11px] text-zinc-400 truncate leading-snug">{item.descricao}</div>
+                                </div>
+                              </div>
+                              <div class="flex items-center gap-1.5 flex-shrink-0">
+                                <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-900 text-zinc-500 border border-zinc-800">
+                                  {item.categoria}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        }}
+                      </For>
+                    </div>
+                  )}
+                </For>
               </Show>
             </div>
-            <span class="text-zinc-500 text-[10px]">
-              ↑↓ navega · Tab/↵ escolhe · Esc fecha
-            </span>
           </div>
+        </Show>
 
-          {/* Lista de Sugestões */}
-          <div class="space-y-0.5">
-            <Show when={secoesAt() !== null} fallback={
-              <For each={itensFiltrados()}>
-                {(item, idx) => {
-                  const Icone = item.icone || Sparkles;
-                  const ativo = () => indiceAtivo() === idx();
-                  return (
+        {/* Anexos Ativos */}
+        <Show when={listaAnexos().length > 0}>
+          <div class="flex flex-wrap gap-2 px-1 pb-2 border-b border-zinc-800/80 mb-2">
+            <For each={listaAnexos()}>
+              {(anexo, idx) => (
+                <div class="relative group flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700 text-xs text-zinc-200">
+                  <Show when={anexo.mime.startsWith("image/")} fallback={<Paperclip size={12} class="text-zinc-400" />}>
+                    <img src={anexo.url} alt={anexo.nome} class="h-6 w-6 rounded object-cover" />
+                  </Show>
+                  <span class="max-w-[120px] truncate text-[11px] font-medium">{anexo.nome}</span>
+                  <button
+                    onClick={() => props.onRemoverAnexo?.(idx())}
+                    class="text-zinc-400 hover:text-rose-400 p-0.5 rounded transition-colors cursor-pointer"
+                    title="Remover anexo"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
+
+        {/* F3-T01: pill de destinatário (@agente) + chips de contexto (@arquivo/@task) */}
+        <Show when={agenteMencio() !== null || chipsContexto().length > 0}>
+          <div class="flex flex-wrap gap-2 px-1 pb-2 border-b border-zinc-800/80 mb-2">
+            <Show when={agenteMencio() !== null}>
+              <div
+                data-testid="mention-agente-pill"
+                class="flex items-center gap-1.5 px-2 py-1 bg-emerald-950/50 rounded-md border border-emerald-800/60 text-xs text-emerald-200"
+              >
+                <AtSign size={12} class="text-emerald-400" />
+                <span class="text-[11px] font-medium">para @{agenteMencio()}</span>
+                <button
+                  onClick={() => setAgenteMencio(null)}
+                  class="text-emerald-300 hover:text-rose-400 p-0.5 rounded transition-colors cursor-pointer"
+                  title="Remover destinatário"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </Show>
+            <For each={chipsContexto()}>
+              {(chip) => (
+                <div
+                  data-testid={`mention-chip-${chip.tipo}`}
+                  class="flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700 text-xs text-zinc-200"
+                >
+                  <FileText size={12} class="text-zinc-400" />
+                  <span class="max-w-[180px] truncate text-[11px] font-medium">{chip.label}</span>
+                  <button
+                    onClick={() => removerMençãoDoTexto(chip.label)}
+                    class="text-zinc-400 hover:text-rose-400 p-0.5 rounded transition-colors cursor-pointer"
+                    title="Remover contexto"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
+
+        {/* Input de Texto */}
+        <textarea
+          id={props.id || "chat-input"}
+          data-testid={props.id || "chat-input"}
+          ref={(el) => {
+            textareaRef = el;
+            props.refTextarea?.(el);
+          }}
+          rows={1}
+          prop:value={valorTexto()}
+          value={valorTexto()}
+          onFocusIn={() => {
+            setEmFoco(true);
+            autoResize();
+          }}
+          onFocusOut={() => {
+            setEmFoco(false);
+            autoResize();
+          }}
+          onInput={(e) => {
+            const val = e.currentTarget.value;
+            setEmFoco(true);
+            props.onInput?.(val);
+            verificarGatilhos(val);
+            autoResize();
+          }}
+          onKeyDown={handleKeyDown}
+          onPaste={(e) => {
+            handlePaste(e);
+            setTimeout(autoResize, 15);
+          }}
+          placeholder={props.placeholder || "Pergunte qualquer coisa, / para comandos, @ para contexto..."}
+          class="w-full flex-none bg-transparent text-sm text-zinc-100 placeholder-zinc-500 resize-none focus:outline-none px-2 py-1 leading-relaxed scrollbar-thin"
+          style={{
+            "min-height": `${ALTURA_MINIMA}px`,
+            "max-height": `${ALTURA_MAXIMA}px`,
+          }}
+        />
+
+        {/* Barra de Ações Inferior Embutida */}
+        <div class="flex items-center justify-between pt-2 px-1 text-xs select-none gap-2 border-t border-zinc-800/60 mt-1">
+          <div class="flex items-center gap-1.5 text-zinc-400 min-w-0 flex-1 overflow-x-auto scrollbar-none py-0.5">
+            {/* Input oculto para arquivos */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              class="hidden"
+              onChange={handleFileChange}
+            />
+
+            {/* Botão de Anexo (+) */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.click()}
+              class="h-7 w-7 shrink-0 rounded-lg bg-zinc-800/90 hover:bg-zinc-750 text-zinc-400 hover:text-zinc-200 flex items-center justify-center transition-colors cursor-pointer border border-zinc-700/50"
+              title="Anexar arquivo ou imagem"
+              aria-label="Anexar arquivo ou imagem"
+            >
+              <Plus size={14} />
+            </button>
+
+            {/* Dropdown Compacto de Modelo (OpenCode Style) */}
+            <div class="relative shrink-0" data-model-picker>
+              <button
+                type="button"
+                onClick={() => setModelDropdownOpen(!modelDropdownOpen())}
+                class="h-7 px-2 sm:px-2.5 rounded-lg bg-zinc-800/90 hover:bg-zinc-750 text-zinc-300 flex items-center gap-1 sm:gap-1.5 transition-colors cursor-pointer border border-zinc-700/60 font-mono text-[10px] sm:text-[11px]"
+                title="Alterar modelo ativo"
+              >
+                <Cpu size={12} class="text-emerald-400 shrink-0" />
+                <span class="truncate max-w-[80px] sm:max-w-[130px]">
+                  {(props.modeloAtivo || "gemini-2.5-flash").split("/").slice(-1)[0]}
+                </span>
+                <ChevronDown
+                  size={10}
+                  class={`text-zinc-500 ml-0.5 shrink-0 transition-transform ${
+                    modelDropdownOpen() ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+
+              <Show when={modelDropdownOpen()}>
+                <div class="absolute bottom-full left-0 mb-2 w-64 rounded-xl bg-zinc-900 border border-zinc-700 shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div class="px-2 py-1 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider border-b border-zinc-800/80 mb-1">
+                    Modelo Ativo
+                  </div>
+                  <For each={MODEL_OPTIONS}>
+                    {(m) => (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          props.onMudarModelo?.(m.id);
+                          setModelDropdownOpen(false);
+                        }}
+                        class={`w-full text-left px-2 py-1.5 rounded-lg text-xs flex flex-col transition-colors cursor-pointer ${
+                          props.modeloAtivo === m.id
+                            ? "bg-emerald-950/40 text-emerald-300 font-medium border border-emerald-800/40"
+                            : "hover:bg-zinc-800 text-zinc-300"
+                        }`}
+                      >
+                        <span class="font-mono font-semibold">{m.name}</span>
+                        <span class="text-[10px] text-zinc-500">{m.desc}</span>
+                      </button>
+                    )}
+                  </For>
+                  <Show when={props.onAbrirConfig}>
                     <button
                       type="button"
-                      onClick={() => selecionarItem(item)}
-                      onMouseEnter={() => setIndiceAtivo(idx())}
-                      class={`w-full px-2.5 py-1.5 rounded-xl flex items-center justify-between gap-3 text-left transition-colors cursor-pointer ${
-                        ativo()
-                          ? "bg-zinc-800 text-zinc-100 shadow-xs"
-                          : "hover:bg-zinc-900/60 text-zinc-300"
-                      }`}
-                    >
-                      <div class="flex items-center gap-2.5 min-w-0">
-                        <div
-                          class={`h-6 w-6 rounded-md flex items-center justify-center flex-shrink-0 ${
-                            item.tipo === "slash"
-                              ? "bg-purple-950/60 text-purple-400 border border-purple-800/60"
-                              : item.tipo === "at"
-                              ? "bg-emerald-950/60 text-emerald-400 border border-emerald-800/60"
-                              : "bg-amber-950/60 text-amber-400 border border-amber-800/60"
-                          }`}
-                        >
-                          <Icone size={13} />
-                        </div>
-                        <div class="min-w-0">
-                          <div class="font-mono text-xs font-bold text-zinc-100 truncate">{item.titulo}</div>
-                          <div class="text-[11px] text-zinc-400 truncate leading-snug">{item.descricao}</div>
-                        </div>
-                      </div>
-                      <div class="flex items-center gap-1.5 flex-shrink-0">
-                        <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-900 text-zinc-500 border border-zinc-800">
-                          {item.categoria}
-                        </span>
-                        <Show when={ativo()}>
-                          <CornerDownLeft size={12} class="text-zinc-400" />
-                        </Show>
-                      </div>
-                    </button>
-                  );
-                }}
-              </For>
-            }>
-              <For each={secoesAt()!}>
-                {(secao) => (
-                  <div>
-                    <div class="px-2.5 pt-1 pb-0.5 text-[10px] font-mono uppercase tracking-wider text-zinc-500">
-                      {secao.secao}
-                    </div>
-                    <For each={secao.itens}>
-                      {(item) => {
-                        const Icone = item.icone || Sparkles;
-                        return (
-                          <button
-                            type="button"
-                            onClick={() => selecionarItem(item)}
-                            onMouseEnter={() => {
-                              const idx = itensFiltrados().indexOf(item);
-                              if (idx >= 0) setIndiceAtivo(idx);
-                            }}
-                            class="w-full px-2.5 py-1.5 rounded-xl flex items-center justify-between gap-3 text-left transition-colors cursor-pointer hover:bg-zinc-900/60 text-zinc-300"
-                          >
-                            <div class="flex items-center gap-2.5 min-w-0">
-                              <div class="h-6 w-6 rounded-md flex items-center justify-center flex-shrink-0 bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
-                                <Icone size={13} />
-                              </div>
-                              <div class="min-w-0">
-                                <div class="font-mono text-xs font-bold text-zinc-100 truncate">{item.titulo}</div>
-                                <div class="text-[11px] text-zinc-400 truncate leading-snug">{item.descricao}</div>
-                              </div>
-                            </div>
-                            <div class="flex items-center gap-1.5 flex-shrink-0">
-                              <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-900 text-zinc-500 border border-zinc-800">
-                                {item.categoria}
-                              </span>
-                            </div>
-                          </button>
-                        );
+                      onClick={() => {
+                        setModelDropdownOpen(false);
+                        props.onAbrirConfig?.();
                       }}
-                    </For>
-                  </div>
+                      class="w-full mt-1 pt-1.5 border-t border-zinc-800 text-left px-2 py-1 rounded text-[11px] text-zinc-400 hover:text-zinc-100 flex items-center justify-between cursor-pointer"
+                    >
+                      <span>Gerenciar modelos & rotação</span>
+                      <span class="text-zinc-500">⚙</span>
+                    </button>
+                  </Show>
+                </div>
+              </Show>
+            </div>
+
+            {/* Seletor de Agente Compacto */}
+            <select
+              class="h-7 bg-zinc-800/90 border border-zinc-700/60 rounded-lg px-2 text-[11px] font-mono text-zinc-300 focus:outline-none cursor-pointer hover:bg-zinc-750 transition-colors max-w-[130px] sm:max-w-[160px] truncate shrink-0"
+              value={props.agenteSelecionado || "secretario-exec"}
+              onChange={(e) => props.onMudarAgente?.(e.currentTarget.value)}
+              title="Destinatário da ordem"
+            >
+              <For
+                each={
+                  props.agentesLista && props.agentesLista.length > 0
+                    ? props.agentesLista
+                    : [
+                        { id: "secretario-exec", role: "secretário-exec" },
+                        { id: "secretario", role: "secretário" },
+                      ]
+                }
+              >
+                {(ag) => (
+                  <option value={ag.id}>
+                    @{ag.id}
+                  </option>
                 )}
               </For>
+            </select>
+
+            {/* Pílulas Rápidas Clicáveis para [/] [@] [!] */}
+            <div class="hidden md:flex items-center gap-1 font-mono text-[10px] shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  props.onInput?.("/");
+                  setModoMenu("slash");
+                  setQueryMenu("");
+                  setIndiceAtivo(0);
+                  textareaRef?.focus();
+                }}
+                class="px-1.5 py-0.5 rounded bg-zinc-800/80 hover:bg-purple-950/40 hover:text-purple-300 text-zinc-400 border border-zinc-700/60 cursor-pointer transition-colors"
+                title="Inserir comando /"
+              >
+                /
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  props.onInput?.("@");
+                  setModoMenu("at");
+                  setQueryMenu("");
+                  setIndiceAtivo(0);
+                  textareaRef?.focus();
+                }}
+                class="px-1.5 py-0.5 rounded bg-zinc-800/80 hover:bg-emerald-950/40 hover:text-emerald-300 text-zinc-400 border border-zinc-700/60 cursor-pointer transition-colors"
+                title="Inserir menção @"
+              >
+                @
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  props.onInput?.("!");
+                  setModoMenu("bang");
+                  setQueryMenu("");
+                  setIndiceAtivo(0);
+                  textareaRef?.focus();
+                }}
+                class="px-1.5 py-0.5 rounded bg-zinc-800/80 hover:bg-amber-950/40 hover:text-amber-300 text-zinc-400 border border-zinc-700/60 cursor-pointer transition-colors"
+                title="Inserir terminal !"
+              >
+                !
+              </button>
+            </div>
+          </div>
+
+          {/* Botão de Envio Circular, Parar ou Enfileirar */}
+          <div class="flex items-center gap-1.5 shrink-0">
+            <Show when={props.carregando}>
+              <button
+                type="button"
+                onClick={props.onParar}
+                class="flex items-center justify-center h-7 w-7 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-bold transition-all active:scale-95 shadow-md cursor-pointer animate-pulse"
+                title="Interromper geração atual"
+                aria-label="Interromper geração atual"
+              >
+                <Square size={12} fill="currentColor" />
+              </button>
+            </Show>
+
+            <Show
+              when={props.carregando && (valorTexto().trim() || listaAnexos().length > 0)}
+            >
+              <button
+                type="button"
+                id={`${prefixoBotoes()}btn-enfileirar`}
+                data-testid={`${prefixoBotoes()}btn-enfileirar`}
+                onClick={dispararEnvio}
+                class="flex items-center gap-1.5 px-3 h-7 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-all active:scale-95 shadow-md cursor-pointer text-xs"
+                title="Adicionar prompt à fila de espera (Enter)"
+                aria-label="Adicionar à fila de espera"
+              >
+                <Clock size={12} />
+                <span>+ Fila</span>
+              </button>
+            </Show>
+
+            <Show when={!props.carregando}>
+              <button
+                id={`${prefixoBotoes()}btn-enviar`}
+                data-testid={`${prefixoBotoes()}btn-enviar`}
+                onClick={dispararEnvio}
+                disabled={!valorTexto().trim() && listaAnexos().length === 0}
+                class={`flex items-center justify-center h-7 w-7 rounded-full transition-all cursor-pointer ${
+                  valorTexto().trim() || listaAnexos().length > 0
+                    ? "bg-emerald-500 text-zinc-950 hover:bg-emerald-400 active:scale-95 shadow-md shadow-emerald-500/20"
+                    : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                }`}
+                title="Enviar mensagem (Enter)"
+                aria-label="Enviar mensagem"
+              >
+                <ArrowUp size={14} stroke-width={2.5} />
+              </button>
             </Show>
           </div>
         </div>
-      </Show>
+      </div>
 
-      {/* Visualização de Anexos Pendentes */}
-      <Show when={listaAnexos().length > 0}>
-        <div class="flex flex-wrap gap-2 px-1 pb-2 border-b border-zinc-800/80 mb-2">
-          <For each={listaAnexos()}>
-            {(anexo, idx) => (
-              <div class="relative group flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700 text-xs text-zinc-200">
-                <Show when={anexo.mime.startsWith("image/")} fallback={<Paperclip size={12} class="text-zinc-400" />}>
-                  <img src={anexo.url} alt={anexo.nome} class="h-6 w-6 rounded object-cover" />
-                </Show>
-                <span class="max-w-[120px] truncate text-[11px] font-medium">{anexo.nome}</span>
-                <button
-                  onClick={() => props.onRemoverAnexo?.(idx())}
-                  class="text-zinc-400 hover:text-rose-400 p-0.5 rounded transition-colors cursor-pointer"
-                  title="Remover anexo"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
-
-      {/* F3-T01: pill de destinatário (@agente) + chips de contexto (@arquivo/@task) */}
-      <Show when={agenteMencio() !== null || chipsContexto().length > 0}>
-        <div class="flex flex-wrap gap-2 px-1 pb-2 border-b border-zinc-800/80 mb-2">
-          <Show when={agenteMencio() !== null}>
-            <div
-              data-testid="mention-agente-pill"
-              class="flex items-center gap-1.5 px-2 py-1 bg-emerald-950/50 rounded-md border border-emerald-800/60 text-xs text-emerald-200"
-            >
-              <AtSign size={12} class="text-emerald-400" />
-              <span class="text-[11px] font-medium">para @{agenteMencio()}</span>
-              <button
-                onClick={() => setAgenteMencio(null)}
-                class="text-emerald-300 hover:text-rose-400 p-0.5 rounded transition-colors cursor-pointer"
-                title="Remover destinatário"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          </Show>
-          <For each={chipsContexto()}>
-            {(chip) => (
-              <div
-                data-testid={`mention-chip-${chip.tipo}`}
-                class="flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700 text-xs text-zinc-200"
-              >
-                <FileText size={12} class="text-zinc-400" />
-                <span class="max-w-[180px] truncate text-[11px] font-medium">{chip.label}</span>
-                <button
-                  onClick={() => removerMençãoDoTexto(chip.label)}
-                  class="text-zinc-400 hover:text-rose-400 p-0.5 rounded transition-colors cursor-pointer"
-                  title="Remover contexto"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
-
-      {/* Input de Texto */}
-      <textarea
-        id={props.id || "chat-input"}
-        data-testid={props.id || "chat-input"}
-        ref={(el) => {
-          textareaRef = el;
-          props.refTextarea?.(el);
-        }}
-        rows={1}
-        prop:value={valorTexto()}
-        value={valorTexto()}
-        onFocusIn={() => {
-          setEmFoco(true);
-          autoResize();
-        }}
-        onFocusOut={() => {
-          setEmFoco(false);
-          autoResize();
-        }}
-        onInput={(e) => {
-          const val = e.currentTarget.value;
-          setEmFoco(true);
-          props.onInput?.(val);
-          verificarGatilhos(val);
-          autoResize();
-        }}
-        onKeyDown={handleKeyDown}
-        onPaste={(e) => {
-          handlePaste(e);
-          setTimeout(autoResize, 15);
-        }}
-        placeholder={props.placeholder || "Pergunte ao Secretário Executivo… (/ comandos, @ contexto, ! terminal)"}
-        class="w-full flex-none bg-transparent text-sm text-zinc-100 placeholder-zinc-500 resize-none focus:outline-none px-2 py-1 leading-relaxed scrollbar-thin"
-        style={{
-          "min-height": `${ALTURA_MINIMA}px`,
-          "max-height": `${ALTURA_MAXIMA}px`,
-        }}
-      />
-
-      {/* Barra de Ações Inferior */}
-      <div class="flex items-center justify-between pt-2 px-1 text-xs select-none">
-        <div class="flex items-center gap-2 text-zinc-400">
-          {/* Seletor de Agente Secretário / Secretário Executivo */}
-          <select
-            class="bg-zinc-800 border border-zinc-700/80 rounded-md px-2 py-1 text-xs text-zinc-200 focus:outline-none cursor-pointer hover:bg-zinc-700/80 transition-colors max-w-[200px] truncate"
-            value={props.agenteSelecionado || "secretario-exec"}
-            onChange={(e) => props.onMudarAgente?.(e.currentTarget.value)}
-          >
-            <For
-              each={
-                props.agentesLista && props.agentesLista.length > 0
-                  ? props.agentesLista
-                  : [
-                      { id: "secretario-exec", role: "secretário-exec (ações)" },
-                      { id: "secretario", role: "secretário (consulta)" },
-                    ]
-              }
-            >
-              {(ag) => (
-                <option value={ag.id}>
-                  {ag.role ? `${ag.id} (${ag.role})` : ag.id}
-                </option>
-              )}
-            </For>
-          </select>
-
-          {/* Botão de Anexo */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            class="hidden"
-            onChange={handleFileChange}
-          />
-          <IconButton
-            size="sm"
-            variant="ghost"
-            onClick={() => fileInputRef.click()}
-            title="Anexar arquivo ou imagem"
-            aria-label="Anexar arquivo ou imagem"
-            class="text-zinc-400 hover:text-zinc-200"
-          >
-            <Paperclip size={15} />
-          </IconButton>
-
-          {/* Atalhos Rápidos Clicáveis para Acionar / @ ! */}
-          <div class="hidden sm:flex items-center gap-1 font-mono text-[10px]">
-            <button
-              type="button"
-              onClick={() => {
-                props.onInput("/");
-                setModoMenu("slash");
-                setQueryMenu("");
-                setIndiceAtivo(0);
-                textareaRef?.focus();
-              }}
-              class="px-1.5 py-0.5 rounded bg-zinc-800/80 hover:bg-zinc-750 text-purple-400 hover:text-purple-300 border border-zinc-700/60 cursor-pointer transition-colors"
-              title="Inserir comando /"
-            >
-              / comandos
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                props.onInput("@");
-                setModoMenu("at");
-                setQueryMenu("");
-                setIndiceAtivo(0);
-                textareaRef?.focus();
-              }}
-              class="px-1.5 py-0.5 rounded bg-zinc-800/80 hover:bg-zinc-750 text-emerald-400 hover:text-emerald-300 border border-zinc-700/60 cursor-pointer transition-colors"
-              title="Inserir menção @"
-            >
-              @ contexto
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                props.onInput("!");
-                setModoMenu("bang");
-                setQueryMenu("");
-                setIndiceAtivo(0);
-                textareaRef?.focus();
-              }}
-              class="px-1.5 py-0.5 rounded bg-zinc-800/80 hover:bg-zinc-750 text-amber-400 hover:text-amber-300 border border-zinc-700/60 cursor-pointer transition-colors"
-              title="Inserir terminal !"
-            >
-              ! shell
-            </button>
-          </div>
+      {/* Identificação da branch e atalhos rápidos no rodapé estilo OpenCode */}
+      <div class="flex items-center justify-between px-2 pt-1.5 text-[10px] text-zinc-500 font-mono select-none">
+        <div class="flex items-center gap-1.5 hover:text-zinc-400 transition-colors cursor-pointer truncate max-w-[240px] sm:max-w-none">
+          <FolderGit2 size={11} class="text-zinc-500 shrink-0" />
+          <span class="truncate">{props.workspaceId || "crom-worker-opencode"}</span>
+          <span class="text-zinc-600">/</span>
+          <GitBranch size={10} class="text-emerald-500/80 shrink-0" />
+          <span class="text-zinc-400 truncate">{props.branchAtiva || "feat/ecossistema"}</span>
         </div>
 
-        {/* Botão de Envio, Parar ou Enfileirar */}
-        <div class="flex items-center gap-1.5">
-          <Show when={props.carregando}>
-            <button
-              type="button"
-              onClick={props.onParar}
-              class="flex items-center justify-center h-8 w-8 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-bold transition-all active:scale-95 shadow-md cursor-pointer animate-pulse"
-              title="Interromper geração atual"
-              aria-label="Interromper geração atual"
-            >
-              <Square size={13} fill="currentColor" />
-            </button>
-          </Show>
-
-          <Show
-            when={props.carregando && (valorTexto().trim() || listaAnexos().length > 0)}
-          >
-            <button
-              type="button"
-              id={`${prefixoBotoes()}btn-enfileirar`}
-              data-testid={`${prefixoBotoes()}btn-enfileirar`}
-              onClick={dispararEnvio}
-              class="flex items-center gap-1.5 px-3 h-8 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-all active:scale-95 shadow-md cursor-pointer text-xs"
-              title="Adicionar prompt à fila de espera (Enter)"
-              aria-label="Adicionar à fila de espera"
-            >
-              <Clock size={13} />
-              <span>+ Fila</span>
-            </button>
-          </Show>
-
-          <Show when={!props.carregando}>
-            <button
-              id={`${prefixoBotoes()}btn-enviar`}
-              data-testid={`${prefixoBotoes()}btn-enviar`}
-              onClick={dispararEnvio}
-              disabled={!valorTexto().trim() && listaAnexos().length === 0}
-              class="flex items-center justify-center h-8 w-8 rounded-full bg-zinc-100 text-zinc-950 font-bold transition-all disabled:opacity-30 disabled:pointer-events-none hover:bg-white active:scale-95 shadow-md cursor-pointer"
-              title="Enviar mensagem (Enter)"
-              aria-label="Enviar mensagem"
-            >
-              <ArrowUp size={16} stroke-width={2.5} />
-            </button>
-          </Show>
+        <div class="hidden sm:flex items-center gap-3 shrink-0">
+          <span><kbd class="px-1 py-0.2 rounded bg-zinc-850 border border-zinc-700/60 text-zinc-400">Enter</kbd> enviar</span>
+          <span><kbd class="px-1 py-0.2 rounded bg-zinc-850 border border-zinc-700/60 text-zinc-400">Shift+Enter</kbd> quebra</span>
         </div>
       </div>
     </div>

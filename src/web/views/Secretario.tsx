@@ -14,6 +14,7 @@ import { HistoricoModal } from "../components/chat/HistoricoModal";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { useChat, MODELOS_PRESETS_POPULARES } from "../lib/chat/store";
+import { fetchApi, wsAtivo } from "../lib/context";
 
 /** Sincroniza `?sessao=` da URL com o store (deep-link preservado). */
 function sincronizarUrlSessao(id: string | null) {
@@ -29,6 +30,7 @@ export const SecretarioView: Component = () => {
   const chat = useChat();
   const [historicoAberto, setHistoricoAberto] = createSignal(false);
   const [configLateralAberta, setConfigLateralAberta] = createSignal(false);
+  const [branchAtiva, setBranchAtiva] = createSignal("main");
 
   createEffect(() => {
     sincronizarUrlSessao(chat.sessaoAtivaId());
@@ -36,6 +38,12 @@ export const SecretarioView: Component = () => {
 
   // Auto-sincronização periódica da sessão aberta enquanto o usuário estiver nesta tela
   onMount(() => {
+    fetchApi<{ branch?: string }>("/workspaces/git/status")
+      .then((res) => {
+        if (res?.branch) setBranchAtiva(res.branch);
+      })
+      .catch(() => {});
+
     // Verifica mudanças a cada 3.5 segundos se a aba estiver visível e não houver stream ativo
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") {
@@ -113,6 +121,15 @@ export const SecretarioView: Component = () => {
         onAdiantarFila={(id) => void chat.adiantarFila(id)}
         onAprovarHitl={(id) => void chat.aprovarHitl(id)}
         onRejeitarHitl={(id, m) => void chat.rejeitarHitl(id, m)}
+        sessoes={chat.sessoes()}
+        sessaoAtivaId={chat.sessaoAtivaId()}
+        emNovaConversa={chat.emNovaConversa()}
+        onSelecionarSessao={(id) => void chat.selecionarSessao(id)}
+        onExcluirSessao={(id) => void chat.excluirSessao(id)}
+        modeloAtivo={chat.modeloAtivoChat() || chat.modeloConfig() || "openrouter/google/gemini-2.5-flash"}
+        onMudarModelo={(m) => chat.setModeloConfig(m)}
+        workspaceId={wsAtivo() || "crom-worker-opencode"}
+        branchAtiva={branchAtiva()}
         onNovaSessao={() => { chat.novaConversa(); }}
         onAbrirHistorico={() => setHistoricoAberto(true)}
         onAbrirConfiguracoes={() => void abrirPainelLateral()}

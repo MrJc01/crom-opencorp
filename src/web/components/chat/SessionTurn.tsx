@@ -22,6 +22,8 @@ import { showToast } from "../../ui/Toast";
 import { renderMarkdown, processarDiagramasMermaid } from "../../md.js";
 import type { ChatMensagem, TurnoPasso, AcaoItem, ItemPergunta } from "./types";
 import { GitStatusCard, GitDiffViewCard } from "./GitStatusCard";
+import { OpenCodeReasoning } from "./OpenCodeReasoning";
+import { OpenCodeBasicTool } from "./OpenCodeBasicTool";
 
 export type { ChatMensagem, TurnoPasso, AcaoItem, ItemPergunta };
 
@@ -554,16 +556,29 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
     <div
       ref={turnRef}
       data-role={m().role}
-      class={`group relative flex flex-col py-3 px-4 rounded-xl transition-colors ${
+      class={`group relative flex flex-col py-2 px-3 transition-colors ${
         m().role === "user"
-          ? "oc-user bg-zinc-900/60 border border-zinc-800/80 ml-auto max-w-[85%]"
+          ? "oc-user bg-zinc-800/90 border border-zinc-700/60 rounded-2xl rounded-tr-xs ml-auto max-w-[85%] px-4 py-2.5 text-zinc-100 shadow-md"
           : "oc-assistant bg-transparent mr-auto max-w-full w-full"
       }`}
     >
+      {/* Cabeçalho do Turno do Assistente (Estilo OpenCode) */}
+      <Show when={m().role !== "user"}>
+        <div class="flex items-center gap-1.5 mb-1.5 text-xs font-medium text-emerald-400 select-none">
+          <Sparkles size={13} class="text-emerald-400 shrink-0" />
+          <span class="text-zinc-300 font-semibold font-mono text-[11px]">Secretário Executivo</span>
+          <Show when={m().modelo}>
+            <span class="text-[10px] font-mono px-1 py-0.2 rounded bg-zinc-800/80 text-zinc-400 border border-zinc-700/50">
+              {m().modelo!.split("/").slice(-1)[0]}
+            </span>
+          </Show>
+        </div>
+      </Show>
+
       {/* Cabeçalho do Turno do Usuário */}
       <Show when={m().role === "user"}>
-        <div class="flex items-center gap-1.5 mb-1.5 text-[11px] font-medium text-zinc-400 select-none">
-          <span class="font-semibold text-zinc-200">Você</span>
+        <div class="flex items-center gap-1.5 mb-1 text-[11px] font-medium text-zinc-400 select-none">
+          <span class="font-semibold text-zinc-300">Você</span>
         </div>
       </Show>
 
@@ -724,29 +739,12 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
             const itens = m().pensamento!.split("\n\n---\n\n").filter(Boolean);
             const ativo = () => isPensandoAutonomoAtivo(pIdx(), itens.length);
             return (
-              <details
-                class="mb-2 rounded-xl bg-zinc-950/70 border border-zinc-800/80 overflow-hidden text-xs"
-                open={m().concluida === false}
-              >
-                <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
-                  <span class="flex items-center gap-1.5">
-                    <Brain size={13} class={ativo() ? "text-purple-400" : "text-zinc-400"} />
-                    <span
-                      class={
-                        ativo()
-                          ? "text-purple-300 animate-pulse font-semibold"
-                          : "text-zinc-300 font-medium"
-                      }
-                    >
-                      {ativo() ? "Pensando…" : `Raciocínio (${pIdx() + 1})`}
-                    </span>
-                  </span>
-                  <span class="text-[10px] text-zinc-500 font-mono">
-                    {ativo() ? (props.decorridoFmt || "ao vivo") : "concluído"}
-                  </span>
-                </summary>
-                <PensamentoCorpo texto={pensamentoItem} />
-              </details>
+              <OpenCodeReasoning
+                titulo={ativo() ? "Pensando…" : `Raciocínio (${pIdx() + 1})`}
+                texto={pensamentoItem}
+                ativo={ativo()}
+                duracao={ativo() ? (props.decorridoFmt || "ao vivo") : "concluído"}
+              />
             );
           }}
         </For>
@@ -759,16 +757,14 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
           <>
             {/* Fallback Legado: Ações / Ferramentas em Andamento */}
             <Show when={props.mostrarAcoes !== false && m().acoes && m().acoes!.length > 0}>
-              <div class="space-y-1 mb-2">
+              <div class="space-y-0.5 mb-1.5">
                 <For each={m().acoes}>
                   {(acao) => (
-                    <div class="flex items-center gap-2 text-xs text-zinc-400 bg-zinc-900/50 px-2.5 py-1 rounded border border-zinc-800/60 font-mono">
-                      <span class={acao.sucesso === false ? "text-rose-400" : "text-emerald-400"}>
-                        {acao.sucesso === false ? "✗" : "✓"}
-                      </span>
-                      <span class="text-zinc-300 font-semibold">{acao.ferramenta || "ferramenta"}:</span>
-                      <span class="text-zinc-400 truncate">{acao.resumo || "executando..."}</span>
-                    </div>
+                    <OpenCodeBasicTool
+                      titulo={acao.ferramenta || "Shell"}
+                      comando={acao.resumo}
+                      status={acao.sucesso === false ? "erro" : "ok"}
+                    />
                   )}
                 </For>
               </div>
@@ -813,72 +809,28 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
           </>
         }
       >
-        <div class="space-y-2">
+        <div class="space-y-1">
           <For each={m().passos}>
             {(passo, idx) => (
               <>
                 {/* Passo: Pensamento Separado */}
                 <Show when={props.mostrarPensamento !== false && passo.tipo === "pensamento" && passo.texto}>
-                  <details
-                    class="rounded-xl bg-zinc-950/70 border border-zinc-800/80 overflow-hidden text-xs my-1.5"
-                    open={m().concluida === false}
-                  >
-                    <summary class="px-3 py-1.5 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between select-none bg-zinc-900/40">
-                      <span class="flex items-center gap-1.5">
-                        <Brain size={13} class={isPassoPensandoAtivo(idx()) ? "text-purple-400" : "text-zinc-400"} />
-                        <span
-                          class={
-                            isPassoPensandoAtivo(idx())
-                              ? "text-purple-300 animate-pulse font-semibold"
-                              : "text-zinc-300 font-medium"
-                          }
-                        >
-                          {isPassoPensandoAtivo(idx()) ? "Pensando…" : `Raciocínio (${idx() + 1})`}
-                        </span>
-                      </span>
-                      <span class="text-[10px] text-zinc-500 font-mono">
-                        {isPassoPensandoAtivo(idx()) ? (props.decorridoFmt || "ao vivo") : "concluído"}
-                      </span>
-                    </summary>
-                    <PensamentoCorpo texto={passo.texto} />
-                  </details>
+                  <OpenCodeReasoning
+                    titulo={isPassoPensandoAtivo(idx()) ? "Pensando…" : `Raciocínio (${idx() + 1})`}
+                    texto={passo.texto!}
+                    ativo={isPassoPensandoAtivo(idx())}
+                    duracao={isPassoPensandoAtivo(idx()) ? (props.decorridoFmt || "ao vivo") : "concluído"}
+                  />
                 </Show>
 
                 {/* Passo: Ação / Tool (Bash, Comandos, Leitura) com Saída e Status */}
                 <Show when={props.mostrarAcoes !== false && passo.tipo === "acao" && passo.ferramenta !== "unknown" && passo.ferramenta !== "invalid"}>
-                  <details
-                    class="rounded-xl bg-zinc-950/85 border border-zinc-800 text-xs font-mono text-zinc-300 my-1.5 overflow-hidden group"
-                    open={Boolean(passo.saida && (passo.sucesso === false || (passo.saida.length < 500 && !m().content)))}
-                  >
-                    <summary class="flex items-center gap-2 px-3 py-2 cursor-pointer select-none hover:bg-zinc-900/50 transition-colors">
-                      <Terminal size={13} class="text-amber-400 flex-shrink-0" />
-                      <span class="text-amber-300/90 font-bold">{passo.ferramenta}:</span>
-                      <span class="truncate flex-1 text-zinc-300">{passo.resumo || "executado"}</span>
-                      <Show
-                        when={passo.status !== "running"}
-                        fallback={
-                          <span class="text-[10px] ml-auto flex-shrink-0 font-bold px-1.5 py-0.2 rounded border bg-amber-950/60 text-amber-300 border-amber-800/60 animate-pulse flex items-center gap-1">
-                            <span class="animate-spin text-[8px]">⏳</span> em execução...
-                          </span>
-                        }
-                      >
-                        <span
-                          class={`text-[10px] ml-auto flex-shrink-0 font-bold px-1.5 py-0.2 rounded border ${
-                            passo.sucesso !== false
-                              ? "bg-emerald-950/60 text-emerald-300 border-emerald-800/60"
-                              : "bg-rose-950/60 text-rose-300 border-rose-800/60"
-                          }`}
-                        >
-                          {passo.sucesso !== false ? "✓ ok" : "✗ falhou"}
-                        </span>
-                      </Show>
-                    </summary>
-                    <Show when={passo.saida}>
-                      <div class="px-3 py-2 bg-black/60 border-t border-zinc-800/60 text-zinc-300 text-[11px] leading-relaxed max-h-56 overflow-y-auto font-mono whitespace-pre-wrap select-text scrollbar-thin">
-                        {passo.saida}
-                      </div>
-                    </Show>
-                  </details>
+                  <OpenCodeBasicTool
+                    titulo={passo.ferramenta || "Shell"}
+                    comando={passo.resumo}
+                    status={passo.status === "running" ? "rodando" : passo.sucesso !== false ? "ok" : "erro"}
+                    saida={passo.saida}
+                  />
                 </Show>
 
                 {/* Passo: Resposta de Texto com Markdown Rico */}

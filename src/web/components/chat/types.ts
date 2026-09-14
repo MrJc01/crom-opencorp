@@ -160,6 +160,17 @@ export interface UniversalChatProps {
   onRemoverFila?: (id: string) => void;
   onEditarFila?: (id: string) => void;
   onAdiantarFila?: (id: string) => void;
+
+  // Abas de Sessões do OpenCode (Tabs no Topo)
+  sessoes?: any[];
+  sessaoAtivaId?: string | null;
+  emNovaConversa?: boolean;
+  onSelecionarSessao?: (id: string) => void;
+  onExcluirSessao?: (id: string, e: MouseEvent) => void;
+  modeloAtivo?: string;
+  onMudarModelo?: (modelo: string) => void;
+  branchAtiva?: string;
+  workspaceId?: string;
 }
 
 export interface PromptFilaItem {

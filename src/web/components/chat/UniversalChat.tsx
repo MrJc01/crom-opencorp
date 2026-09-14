@@ -33,6 +33,8 @@ import { SessionTurn } from "./SessionTurn";
 import { PromptInput, type Anexo } from "./PromptInput";
 import { FollowupQueueDock } from "./FollowupQueueDock";
 import { ChatIframeEmbed } from "./ChatIframeEmbed";
+import { OpenCodeTabsHeader } from "./OpenCodeTabsHeader";
+import { OpenCodeWatermark } from "./OpenCodeWatermark";
 import { IconButton } from "../../ui/IconButton";
 import { Button } from "../../ui/Button";
 import type { UniversalChatProps } from "./types";
@@ -170,171 +172,34 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
 
   return (
     <div class="flex flex-col h-full w-full overflow-hidden bg-zinc-950 text-zinc-100 relative">
-      {/* ─── Topbar / Header do Chat (Apenas quando o chat está visível) ─── */}
+      {/* ─── Topbar com Abas de Sessões (Estilo OpenCode 1:1) ─── */}
       <Show when={modoVis() !== "app"}>
-        <div class="flex items-center justify-between px-4 py-2.5 bg-zinc-900/70 border-b border-zinc-800/80 select-none z-10 flex-shrink-0 backdrop-blur-xs">
-          <div class="flex items-center gap-3 min-w-0">
-          <div class="h-8 w-8 rounded-xl bg-gradient-to-br from-emerald-500/20 to-blue-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0 shadow-xs">
-            <Show
-              when={props.agente?.icone}
-              fallback={<Bot size={16} />}
-            >
-              {(Icone) => {
-                const Comp = Icone();
-                return <Comp size={16} />;
-              }}
-            </Show>
-          </div>
-          <div class="flex flex-col min-w-0">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="font-semibold text-sm text-zinc-100 font-mono leading-none">
-                @{agenteNome()}
-              </span>
-              <Show when={modeloNome()}>
-                <span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-800/80 text-zinc-400 border border-zinc-700/60 truncate max-w-xs">
-                  {modeloNome()}
-                </span>
-              </Show>
-              <Show when={props.agente?.status === "executando" || props.carregando}>
-                <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse flex items-center gap-1">
-                  <span class="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                  AO VIVO
-                </span>
-                <Show when={props.onParar}>
-                  <button
-                    type="button"
-                    onClick={() => props.onParar?.()}
-                    class="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30 hover:border-rose-500/60 active:scale-95 transition-all flex items-center gap-1 cursor-pointer"
-                    title="Interromper agente"
-                  >
-                    <Square size={9} fill="currentColor" />
-                    Parar
-                  </button>
-                </Show>
-              </Show>
-            </div>
-          </div>
-        </div>
-
-        {/* Alternador de Abas Mobile quando o Iframe está aberto */}
-        <Show when={iframeAberto()}>
-          <div class="flex md:hidden items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5 text-xs">
-            <button
-              type="button"
-              onClick={() => setAbaMobile("chat")}
-              class={`px-2 py-1 rounded font-medium transition-colors ${
-                abaMobile() === "chat" ? "bg-zinc-800 text-zinc-100" : "text-zinc-400"
-              }`}
-            >
-              💬 Chat
-            </button>
-            <button
-              type="button"
-              onClick={() => setAbaMobile("preview")}
-              class={`px-2 py-1 rounded font-medium transition-colors ${
-                abaMobile() === "preview" ? "bg-zinc-800 text-zinc-100" : "text-zinc-400"
-              }`}
-            >
-              🌐 Preview
-            </button>
-          </div>
-        </Show>
-
-        {/* Ações da Direita (Toggles, Sessões, Iframe) */}
-        <div class="flex items-center gap-2">
-          {/* Toggle de Pensamento */}
-          <IconButton
-            size="lg"
-            titulo={
-              mostrarPensamento()
-                ? "Ocultar Raciocínio / Pensamento"
-                : "Exibir Raciocínio / Pensamento"
+        <OpenCodeTabsHeader
+          sessoes={props.sessoes || []}
+          sessaoAtivaId={props.sessaoAtivaId ?? null}
+          emNovaConversa={props.emNovaConversa}
+          onSelecionarSessao={(id) => props.onSelecionarSessao?.(id)}
+          onNovaSessao={() => props.onNovaSessao?.()}
+          onExcluirSessao={(id, e) => props.onExcluirSessao?.(id, e)}
+          onAbrirHistorico={props.onAbrirHistorico}
+          onAbrirConfiguracoes={props.onAbrirConfiguracoes}
+          carregando={props.carregando}
+          onParar={props.onParar}
+          mostrarPensamento={mostrarPensamento()}
+          onTogglePensamento={() => setMostrarPensamento((p) => !p)}
+          mostrarAcoes={mostrarAcoes()}
+          onToggleAcoes={() => setMostrarAcoes((a) => !a)}
+          iframeHabilitado={props.iframeConfig?.habilitado}
+          iframeAberto={iframeAberto()}
+          onToggleIframe={() => {
+            if (iframeAberto()) fecharIframe();
+            else {
+              setIframeAberto(true);
+              props.iframeConfig?.onToggle?.(true);
             }
-            onClick={() => setMostrarPensamento((p) => !p)}
-            class={
-              mostrarPensamento()
-                ? "text-purple-400 bg-purple-500/10 border border-purple-500/30"
-                : "text-zinc-500 hover:text-zinc-300"
-            }
-          >
-            <Brain size={22} />
-          </IconButton>
-
-          {/* Toggle de Ações / Ferramentas */}
-          <IconButton
-            size="lg"
-            titulo={
-              mostrarAcoes()
-                ? "Ocultar Passos de Ferramentas"
-                : "Exibir Passos de Ferramentas"
-            }
-            onClick={() => setMostrarAcoes((a) => !a)}
-            class={
-              mostrarAcoes()
-                ? "text-amber-400 bg-amber-500/10 border border-amber-500/30"
-                : "text-zinc-500 hover:text-zinc-300"
-            }
-          >
-            <Terminal size={22} />
-          </IconButton>
-
-          {/* Toggle de Preview Lateral (Iframe) */}
-          <IconButton
-            size="lg"
-            titulo={iframeAberto() ? "Fechar Preview Lateral" : "Abrir Preview Lateral (Iframe)"}
-            onClick={() => {
-              if (iframeAberto()) {
-                fecharIframe();
-              } else {
-                setIframeAberto(true);
-                props.iframeConfig?.onToggle?.(true);
-              }
-            }}
-            class={
-              iframeAberto()
-                ? "text-blue-400 bg-blue-500/15 border border-blue-500/30"
-                : "text-zinc-400 hover:text-zinc-200"
-            }
-          >
-            <Globe size={22} />
-          </IconButton>
-
-          <Show when={props.onNovaSessao}>
-            <IconButton
-              data-testid="btn-nova-conversa"
-              size="lg"
-              titulo="Nova Conversa"
-              onClick={props.onNovaSessao!}
-              class="text-zinc-400 hover:text-zinc-200"
-            >
-              <Plus size={22} />
-            </IconButton>
-          </Show>
-
-          <Show when={props.onAbrirHistorico}>
-            <IconButton
-              size="lg"
-              titulo="Histórico de Sessões"
-              onClick={props.onAbrirHistorico!}
-              class="text-zinc-400 hover:text-zinc-200"
-            >
-              <History size={22} />
-            </IconButton>
-          </Show>
-
-          <Show when={props.onAbrirConfiguracoes}>
-            <IconButton
-              size="lg"
-              titulo="Configurar Agente / Motor"
-              data-testid="btn-configurar-motor"
-              onClick={props.onAbrirConfiguracoes!}
-              class="text-zinc-400 hover:text-zinc-200"
-            >
-              <Settings2 size={22} />
-            </IconButton>
-          </Show>
-        </div>
-        </div>
+          }}
+          modeloAtivo={props.modeloAtivo || modeloNome()}
+        />
       </Show>
 
       {/* ─── Corpo Principal (Chat + Iframe Split View) ──────────── */}
@@ -362,25 +227,20 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
             <Show
               when={props.mensagens.length > 0}
               fallback={
-                <div class="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-500 select-none">
-                  <div class="h-12 w-12 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-blue-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-3 shadow-inner">
-                    <Sparkles size={24} />
-                  </div>
-                  <h3 class="text-base font-semibold text-zinc-200 mb-1">
-                    {agenteNome()} pronto para atuar
-                  </h3>
-                  <p class="text-xs text-zinc-500 max-w-md mb-4">
-                    Envie ordens, peça modificações em arquivos do workspace ou visualize previews ao vivo.
-                  </p>
+                <div class="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-500 select-none my-auto">
+                  <OpenCodeWatermark
+                    label="opencode"
+                    sublabel="OpenCorp AI Studio · Secretário Executivo"
+                  />
 
                   <Show when={props.sugestoesRapidas && props.sugestoesRapidas.length > 0}>
-                    <div class="flex flex-wrap gap-2 justify-center max-w-lg">
+                    <div class="flex flex-wrap gap-2 justify-center max-w-lg mt-2">
                       <For each={props.sugestoesRapidas}>
                         {(s) => (
                           <button
                             type="button"
                             onClick={() => props.onEnviarPrompt?.(s.prompt)}
-                            class="px-3 py-1.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-300 hover:text-zinc-100 transition-colors cursor-pointer text-left"
+                            class="px-3 py-1.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-300 hover:text-zinc-100 transition-colors cursor-pointer text-left shadow-xs"
                           >
                             {s.rotulo}
                           </button>
@@ -505,12 +365,17 @@ export const UniversalChat: Component<UniversalChatProps> = (props) => {
                   onAdicionarAnexo={(a) => setLocalAnexos((prev) => [...prev, a])}
                   onRemoverAnexo={(idx) => setLocalAnexos((prev) => prev.filter((_, i) => i !== idx))}
                   placeholder={
-                    props.placeholder || `Envie uma ordem ou mensagem para @${agenteNome()}...`
+                    props.placeholder || "Pergunte qualquer coisa, / para comandos, @ para contexto..."
                   }
                   carregando={props.carregando || false}
                   onParar={props.onParar}
                   agenteSelecionado={agenteId()}
                   onMudarAgente={() => {}}
+                  modeloAtivo={props.modeloAtivo || modeloNome()}
+                  onMudarModelo={props.onMudarModelo}
+                  branchAtiva={props.branchAtiva}
+                  workspaceId={props.workspaceId}
+                  onAbrirConfig={props.onAbrirConfiguracoes}
                   onEnviar={() => {
                     const txt = props.valorPrompt !== undefined ? props.valorPrompt : localPrompt();
                     const att = localAnexos();
