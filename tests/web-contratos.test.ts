@@ -3,7 +3,7 @@
  * (rodarFlowHub, renderAgendaForm nunca expostos) e "rota fora do /doc".
  */
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -76,8 +76,11 @@ describe("Contrato — handlers inline sempre expostos", () => {
 });
 
 describe("Contrato — rotas chamadas pelo frontend existem no ROUTES (/doc)", () => {
-  const server = readFileSync(join(RAIZ, "src", "server", "index.ts"), "utf8");
-  const blocoRotas = /const ROUTES[^=]*= \[([\s\S]*?)\];/.exec(server)?.[1] ?? "";
+  const caminhoRotas = existsSync(join(RAIZ, "src", "server", "routes", "system.ts"))
+    ? join(RAIZ, "src", "server", "routes", "system.ts")
+    : join(RAIZ, "src", "server", "index.ts");
+  const server = readFileSync(caminhoRotas, "utf8");
+  const blocoRotas = /(?:const|export const) ROUTES[^=]*= \[([\s\S]*?)\];/.exec(server)?.[1] ?? "";
   const padroes: Array<{ method: string; path: string }> = [];
   for (const m of blocoRotas.matchAll(/method:\s*"(\w+)",\s*path:\s*"([^"]+)"/g)) {
     padroes.push({ method: m[1]!, path: m[2]! });

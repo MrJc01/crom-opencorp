@@ -62,6 +62,8 @@ export interface RouteContext {
   sincronizarSessaoNoCorp?: (porta: number, sessaoId: string) => Promise<void>;
   gerarIdExec?: () => string;
   serverPort?: number;
+  version?: string;
+  orquestrador?: import("../../core/team-orchestrator.js").OrquestradorDeTeams;
 }
 
 
