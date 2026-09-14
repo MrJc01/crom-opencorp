@@ -225,25 +225,38 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
       ? await settings.resolve(wsPath ? { workspaceDir: wsPath } : undefined).catch(() => null)
       : null;
 
-    const motorPadrao =
-      (cfgResolvido?.settings as any)?.runner ||
-      cfgResolvido?.settings?.secretary?.model ||
-      "opencode";
+    const st = cfgResolvido?.settings as any;
+    const motorPadrao = st?.runner || "opencode";
 
-    const listaBruta = [
-      modeloRequisicao,
-      modeloAgente,
-      cfgResolvido?.settings?.secretary?.model,
-      cfgResolvido?.settings?.default_model,
-      (cfgResolvido?.settings as any)?.modelos?.padrao,
-      ...((cfgResolvido?.settings as any)?.modelos?.rotacao || []),
-      ...(cfgResolvido?.settings?.tests?.rotation || []),
+    const modelosRotacao = [
+      ...(Array.isArray(st?.modelos?.rotacao) ? st.modelos.rotacao : []),
+      ...(Array.isArray(st?.tests?.rotation) ? st.tests.rotation : []),
+    ].filter((m): m is string => typeof m === "string" && m.trim().length > 0);
+
+    const contingencia = [
       "opencode-go/glm-5.3-flash",
       "opencode/nemotron-3-ultra-free",
-      "google/gemini-3.6-flash",
+      "google/gemini-2.5-flash",
       "google/gemini-3.5-flash-lite",
       "openrouter/qwen/qwen3-coder-flash",
       "openrouter/minimax/minimax-m3",
+    ];
+
+    // Prioridade estrita:
+    // 1. Modelo solicitado explicitamente (corpo.modelo / corpo.model)
+    // 2. Modelo do Secretário (settings.secretary?.model) ou modelo do agente
+    // 3. Modelo padrão do workspace (settings.default_model ou settings.modelos?.padrao)
+    // 4. Lista de rotação real configurada (settings.modelos?.rotacao ou settings.tests?.rotation)
+    // 5. Fallback final caso o array esteja vazio: modelos de contingência do sistema
+    const listaBruta = [
+      modeloRequisicao,
+      st?.secretary?.model,
+      modeloAgente,
+      st?.default_model,
+      st?.modelos?.padrao,
+      ...modelosRotacao,
+      ...(modelosRotacao.length === 0 ? contingencia : []),
+      contingencia[0],
     ].filter(Boolean) as string[];
 
     const modelos = [...new Set(listaBruta.map((m) => String(m).trim()))];

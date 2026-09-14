@@ -165,8 +165,19 @@ interface NoArvore {
   filhos?: NoArvore[];
 }
 
-const ARVORE_IGNORAR_DIRS = new Set(["node_modules", ".git", "dist", "web-dist", "__pycache__"]);
-const ARVORE_CAP_NOS = 3000;
+const ARVORE_IGNORAR_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".opencode",
+  "opencode",
+  "dist",
+  "web-dist",
+  "__pycache__",
+  ".cache",
+  ".pytest_cache",
+  "coverage",
+]);
+const ARVORE_CAP_NOS = 15000;
 
 async function construirArvore(raiz: string, profundidadeMax: number): Promise<{ arvore: NoArvore[]; truncado: boolean }> {
   let total = 0;
@@ -180,8 +191,9 @@ async function construirArvore(raiz: string, profundidadeMax: number): Promise<{
     let entradas: import("node:fs").Dirent[] = [];
     try {
       entradas = (await readdir(dirAbs, { withFileTypes: true })).filter((e) => {
-        if (e.name.startsWith(".")) return e.name === ".opencorp";
-        if (e.name.endsWith(".log")) return false;
+        if (ARVORE_IGNORAR_DIRS.has(e.name)) return false;
+        if (e.name.startsWith(".") && e.name !== ".opencorp" && e.name !== ".gitignore" && e.name !== ".env") return false;
+        if (e.name.endsWith(".log") || e.name.endsWith(".db-wal") || e.name.endsWith(".db-shm")) return false;
         return true;
       });
     } catch {

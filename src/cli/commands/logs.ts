@@ -59,7 +59,9 @@ export function registerLogsCommand(program: Command): void {
       });
 
       if (entradas.length === 0 && !opts.tail) {
-        console.log("nenhum evento registrado nos logs até o momento.");
+        if (!opts.json) {
+          console.log("nenhum evento registrado nos logs até o momento.");
+        }
         return;
       }
 
