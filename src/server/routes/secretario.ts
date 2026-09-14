@@ -61,7 +61,7 @@ function enfileirarStreamSecretario(
         res.writeHead(503, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" });
         res.end(JSON.stringify({ erro: "tempo de espera na fila esgotado — tente novamente" }));
       }
-    } catch {}
+    } catch { }
   }, LEASE_STREAM_MS);
   lista.push(entrada);
   filaStreamsSecretario.set(sessaoId, lista);
@@ -100,7 +100,7 @@ function textoAjudaSlash(): string {
 - \`/task list\`: quadro Kanban de tarefas
 - \`/task status <id>\`: status detalhado de uma task
 - \`/task run <id>\`: despacha a task para o agente responsável
-- \`/doctor\`: verifica integridade do OpenCode, API, daemon e portas
+- \`/doctor\`: verifica integridade do motor de IA, API, daemon e portas
 - \`/git status|diff|restore|log\`: comandos git do workspace
 - \`/help\`: esta lista
 
@@ -128,22 +128,33 @@ async function resolverCaminhoLocal(wsPath: string, pathParam: string): Promise<
   return alvo;
 }
 
-async function trocarModeloOpencode(baseUrl: string, sessaoId: string, modeloCompleto: string): Promise<boolean> {
+export function parsearModelo(modelo: string): { providerID: string; modelID: string } {
+  const m = String(modelo ?? "").trim();
+  if (!m) return { providerID: "opencode", modelID: "default" };
+  if (!m.includes("/")) {
+    return { providerID: "opencode", modelID: m };
+  }
+  const idx = m.indexOf("/");
+  return {
+    providerID: m.slice(0, idx).trim(),
+    modelID: m.slice(idx + 1).trim(),
+  };
+}
+
+async function trocarModeloEngine(baseUrl: string, sessaoId: string, modeloCompleto: string): Promise<boolean> {
   try {
-    const partes = String(modeloCompleto).trim().split("/");
-    const providerID = partes[0]!;
-    const id = partes.slice(1).join("/");
+    const { providerID, modelID } = parsearModelo(modeloCompleto);
     const [res1, res2] = await Promise.all([
       fetch(`${baseUrl}/api/session/${encodeURIComponent(sessaoId)}/model`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model: { id, providerID } }),
+        body: JSON.stringify({ model: { id: modelID, providerID } }),
         signal: AbortSignal.timeout(5000),
       }).catch(() => null),
       fetch(`${baseUrl}/session/${encodeURIComponent(sessaoId)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model: { id, providerID } }),
+        body: JSON.stringify({ model: { id: modelID, providerID } }),
         signal: AbortSignal.timeout(5000),
       }).catch(() => null),
     ]);
@@ -180,10 +191,10 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
 
   async function obterPorta(): Promise<number> {
     if (portaOpencodeOuErro) return portaOpencodeOuErro();
-    if (!opencodeServer) throw new SecretarioError("servidor opencode não configurado", { status: 500 });
+    if (!opencodeServer) throw new SecretarioError("servidor do motor de IA não configurado", { status: 500 });
     const st = await opencodeServer.status();
     if (!st.rodando || !st.porta) {
-      throw new SecretarioError("secretário não iniciado — POST /secretario/start", { status: 409 });
+      throw new SecretarioError("motor do secretário não iniciado — execute POST /secretario/start", { status: 409 });
     }
     return st.porta;
   }
@@ -192,6 +203,51 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
     if (sincronizarSessaoNoCorp) {
       await sincronizarSessaoNoCorp(porta, sessaoId);
     }
+  }
+
+  // ── Resolução de Modelos e Motores de IA ──
+  async function resolverModelos(opts: {
+    modeloRequisicao?: string;
+    agenteId?: string;
+    wsPath?: string;
+  }): Promise<{ modelos: string[]; motorPadrao: string }> {
+    const { modeloRequisicao, agenteId, wsPath } = opts;
+
+    let modeloAgente: string | undefined;
+    if (agenteId && agentes && wsPath) {
+      try {
+        const ag = await agentes.carregar(wsPath, agenteId);
+        modeloAgente = (ag as any)?.model || (ag as any)?.modelo;
+      } catch { }
+    }
+
+    const cfgResolvido = settings
+      ? await settings.resolve(wsPath ? { workspaceDir: wsPath } : undefined).catch(() => null)
+      : null;
+
+    const motorPadrao =
+      (cfgResolvido?.settings as any)?.runner ||
+      cfgResolvido?.settings?.secretary?.model ||
+      "opencode";
+
+    const listaBruta = [
+      modeloRequisicao,
+      modeloAgente,
+      cfgResolvido?.settings?.secretary?.model,
+      cfgResolvido?.settings?.default_model,
+      (cfgResolvido?.settings as any)?.modelos?.padrao,
+      ...((cfgResolvido?.settings as any)?.modelos?.rotacao || []),
+      ...(cfgResolvido?.settings?.tests?.rotation || []),
+      "opencode-go/glm-5.3-flash",
+      "opencode/nemotron-3-ultra-free",
+      "google/gemini-3.6-flash",
+      "google/gemini-3.5-flash-lite",
+      "openrouter/qwen/qwen3-coder-flash",
+      "openrouter/minimax/minimax-m3",
+    ].filter(Boolean) as string[];
+
+    const modelos = [...new Set(listaBruta.map((m) => String(m).trim()))];
+    return { modelos, motorPadrao };
   }
 
   // ── Resolver Menções ──
@@ -301,10 +357,12 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
       try {
         if (opencodeServer) {
           const st = await opencodeServer.status();
-          linhas.push(`Secretário (opencode): ${st.rodando ? "rodando" : "parado"}${st.porta ? ` (porta ${st.porta})` : ""}`);
+          const cfg = settings ? await settings.resolve({ workspaceDir: ws.path }).catch(() => null) : null;
+          const motorNome = (cfg?.settings as any)?.runner || "opencode";
+          linhas.push(`Motor do Secretário (${motorNome}): ${st.rodando ? "rodando" : "parado"}${st.porta ? ` (porta ${st.porta})` : ""}`);
         }
       } catch {
-        linhas.push("Secretário (opencode): indisponível");
+        linhas.push("Motor do Secretário: indisponível");
       }
       try {
         const pidInfo = JSON.parse(readFileSync(join(home, ".opencorp", "scheduler.pid"), "utf8")) as { pid?: number };
@@ -416,7 +474,7 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
 
   if (rota === "/secretario/start" && req.method === "POST") {
     if (!opencodeServer) {
-      enviar(res, 500, { erro: "servidor opencode não configurado" });
+      enviar(res, 500, { erro: "servidor do motor de IA não configurado" });
       return true;
     }
     try {
@@ -447,11 +505,15 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
     const ws = await resolverWs(url);
     const listaAgentes = agentes ? await agentes.listar(ws.path).catch(() => []) : [];
     const listaTasks = await tasks.listar(ws.path).catch(() => []);
+    const { modelos, motorPadrao } = await resolverModelos({ wsPath: ws.path });
     enviar(res, 200, {
       workspace: { id: ws.id, path: ws.path },
       agentes: listaAgentes.map((a) => ({ id: a.id, role: a.role, ativo: a.ativo })),
       tasks_em_andamento: listaTasks.filter((t) => t.coluna === "fazendo").length,
       total_tasks: listaTasks.length,
+      motor_ativo: motorPadrao,
+      modelo_principal: modelos[0] ?? null,
+      modelos_disponiveis: modelos,
     });
     return true;
   }
@@ -492,18 +554,31 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
   // ─────────────────────────────────────────────────────────────────────
   if ((rota === "/secretario/ordem" || rota === "/secretario/chat") && req.method === "POST") {
     const ws = await resolverWs(url);
-    const corpo = (await lerCorpo(req)) as { ordem?: string; mensagem?: string; agente?: string };
+    const corpo = (await lerCorpo(req)) as {
+      ordem?: string;
+      mensagem?: string;
+      agente?: string;
+      modelo?: string;
+      model?: string;
+      motor?: string;
+      engine?: string;
+    };
     const textoOrdem = String(corpo.ordem ?? corpo.mensagem ?? "").trim();
     if (!textoOrdem) {
       enviar(res, 400, { erro: "ordem ou mensagem obrigatória" });
       return true;
     }
     const ag = corpo.agente || "secretario-exec";
+    const modeloEspecificado = corpo.modelo || corpo.model;
+    const motorEspecificado = corpo.motor || corpo.engine;
+
     const resRun = await sessoes.rodar({
       agente: ag,
       ordem: textoOrdem,
       workspaceDir: ws.path,
       gatilho: { tipo: "manual", origem: "api:secretario" },
+      ...(modeloEspecificado ? { modelo: modeloEspecificado } : {}),
+      ...(motorEspecificado ? { motor: motorEspecificado } : {}),
     } as OpcoesRun);
     enviar(res, 200, resRun);
     return true;
@@ -518,6 +593,10 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
         mensagem?: string;
         sessao_id?: string;
         agente?: string;
+        modelo?: string;
+        model?: string;
+        motor?: string;
+        engine?: string;
         imagens?: Array<{ nome?: string; mime?: string; url?: string }>;
         contexto?: string[];
       };
@@ -581,6 +660,16 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
       let sessaoId = corpo.sessao_id;
       const baseUrl = `http://127.0.0.1:${porta}`;
 
+      const modeloSolicitado = corpo.modelo || corpo.model;
+      const { modelos: modelosFallbackConv, motorPadrao } = await resolverModelos({
+        modeloRequisicao: modeloSolicitado,
+        agenteId: agenteResolvido,
+        wsPath: ws.path,
+      });
+
+      const modeloInicial = modelosFallbackConv[0]!;
+      const { providerID: pIdIni, modelID: mIdIni } = parsearModelo(modeloInicial);
+
       let sessaoExiste = false;
       if (sessaoId) {
         try {
@@ -588,7 +677,7 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
             signal: AbortSignal.timeout(3000),
           });
           if (checkRes.ok) sessaoExiste = true;
-        } catch {}
+        } catch { }
       }
 
       if (!sessaoId || !sessaoExiste) {
@@ -598,50 +687,37 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
           body: JSON.stringify({
             title: mensagem.slice(0, 60),
             agent: agenteResolvido,
+            model: { providerID: pIdIni, modelID: mIdIni },
           }),
           signal: AbortSignal.timeout(10000),
         });
         if (!createRes.ok) {
-          enviar(res, 502, { erro: `falha ao criar sessão: ${createRes.status}` });
+          enviar(res, 502, { erro: `falha ao criar sessão no motor: ${createRes.status}` });
           return true;
         }
         const sessionData = (await createRes.json()) as { id: string };
         sessaoId = sessionData.id;
+      } else if (modeloSolicitado) {
+        await trocarModeloEngine(baseUrl, sessaoId, modeloSolicitado);
       }
 
-      const wsParaCfg = await resolverWs(url).catch(() => null);
-      const cfgResolvido = settings ? await settings.resolve(wsParaCfg ? { workspaceDir: wsParaCfg.path } : undefined).catch(() => null) : null;
-      const candidatosConv = [
-        cfgResolvido?.settings.secretary?.model,
-        cfgResolvido?.settings.default_model,
-        ...(cfgResolvido?.settings.tests?.rotation || []),
-        "google/gemini-3.6-flash",
-        "google/gemini-3.5-flash-lite",
-        "openrouter/qwen/qwen3-coder-flash",
-        "openrouter/minimax/minimax-m3",
-      ].filter(Boolean) as string[];
-      const modelosFallbackConv = [...new Set(candidatosConv)];
-
       let respostaTexto = "";
+      let modeloQueRespondeu = modeloInicial;
       const extrair = (m: { parts?: Array<{ type: string; text?: string }> }): string =>
         (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim();
 
-      const wsPrefixo = wsParaCfg
-        ? `[WORKSPACE ATIVO: "${wsParaCfg.id}" | CAMINHO: ${wsParaCfg.path}]\n(Atenção Secretário: O usuário está operando estritamente no workspace "${wsParaCfg.id}". Ao rodar comandos 'oc', use SEMPRE a flag '--workspace ${wsParaCfg.id}'. Suas análises, listagens e tarefas devem ser restritas exclusivamente a este workspace. Não consulte outros workspaces.)\n\n`
-        : "";
+      const wsPrefixo = `[WORKSPACE ATIVO: "${ws.id}" | CAMINHO: ${ws.path}]\n(Atenção Secretário: O usuário está operando estritamente no workspace "${ws.id}". Ao rodar comandos 'oc', use SEMPRE a flag '--workspace ${ws.id}'. Suas análises, listagens e tarefas devem ser restritas exclusivamente a este workspace. Não consulte outros workspaces.)\n\n`;
       const mensagemComWs = `${wsPrefixo}${mensagem}`;
 
       for (let mIdx = 0; mIdx < modelosFallbackConv.length; mIdx++) {
         const mod = modelosFallbackConv[mIdx]!;
-        const partesMod = String(mod).trim().split("/");
-        const modProvider = partesMod[0]!;
-        const modId = partesMod.slice(1).join("/");
+        const { providerID: modProvider, modelID: modId } = parsearModelo(mod);
         const modelPayload = modProvider && modId ? { providerID: modProvider, modelID: modId } : undefined;
 
         if (mIdx > 0) {
-          await fetch(`${baseUrl}/session/${sessaoId}/abort`, { method: "POST" }).catch(() => {});
+          await fetch(`${baseUrl}/session/${sessaoId}/abort`, { method: "POST" }).catch(() => { });
           await sleep(300);
-          await trocarModeloOpencode(baseUrl, sessaoId, mod);
+          await trocarModeloEngine(baseUrl, sessaoId, mod);
           await sleep(150);
         }
 
@@ -669,9 +745,12 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
             if (msgData.info?.role === "assistant") {
               respostaTexto = extrair(msgData);
             }
-            if (respostaTexto) break;
+            if (respostaTexto) {
+              modeloQueRespondeu = mod;
+              break;
+            }
           }
-        } catch {}
+        } catch { }
       }
 
       if (!respostaTexto) {
@@ -700,18 +779,24 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
       }
 
       if (!respostaTexto) {
-        enviar(res, 504, { erro: "timeout aguardando resposta do assistant (180s)", sessao_id: sessaoId });
+        enviar(res, 504, { erro: "timeout aguardando resposta do modelo assistente (60s)", sessao_id: sessaoId });
         return true;
       }
 
       void sincronizarCorp(porta, sessaoId);
-      enviar(res, 200, { sessao_id: sessaoId, resposta: respostaTexto, agente: agenteResolvido });
+      enviar(res, 200, {
+        sessao_id: sessaoId,
+        resposta: respostaTexto,
+        agente: agenteResolvido,
+        modelo: modeloQueRespondeu,
+        motor: corpo.motor || corpo.engine || motorPadrao,
+      });
       return true;
     } catch (erro) {
       if (erro instanceof SecretarioError) {
         enviar(res, erro.status ?? 409, { erro: erro.message });
       } else {
-        enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
+        enviar(res, 502, { erro: `proxy do motor falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
       }
       return true;
     }
@@ -733,6 +818,10 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
         prompt?: string;
         sessao_id?: string;
         agente?: string;
+        modelo?: string;
+        model?: string;
+        motor?: string;
+        engine?: string;
         imagens?: Array<{ nome?: string; mime?: string; url?: string }>;
         contexto?: string[];
       };
@@ -846,6 +935,17 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
           const agente = resolvido.agente ?? "secretario-exec";
           let sessaoId = corpo.sessao_id || url.searchParams.get("sessao") || undefined;
 
+          const modeloSolicitado = corpo.modelo || corpo.model;
+          const motorSolicitado = corpo.motor || corpo.engine;
+          const { modelos: modelosFallback, motorPadrao } = await resolverModelos({
+            modeloRequisicao: modeloSolicitado,
+            agenteId: agente,
+            wsPath: ws.path,
+          });
+
+          const modeloInicial = modelosFallback[0]!;
+          const { providerID: pIdIni, modelID: mIdIni } = parsearModelo(modeloInicial);
+
           let sessaoExiste = false;
           if (sessaoId) {
             try {
@@ -853,27 +953,43 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
                 signal: AbortSignal.timeout(3000),
               });
               if (checkRes.ok) sessaoExiste = true;
-            } catch {}
+            } catch { }
           }
 
           if (!sessaoId || !sessaoExiste) {
             const createRes = await fetch(`${baseUrl}/session`, {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ title: mensagem.slice(0, 60), agent: agente }),
+              body: JSON.stringify({
+                title: mensagem.slice(0, 60),
+                agent: agente,
+                model: { providerID: pIdIni, modelID: mIdIni },
+              }),
               signal: AbortSignal.timeout(10000),
             });
             if (!createRes.ok) {
-              sse("erro", { erro: `falha ao criar sessão: ${createRes.status}` });
+              sse("erro", { erro: `falha ao criar sessão no motor: ${createRes.status}` });
               res.end();
               return;
             }
             const sessionData = (await createRes.json()) as { id: string };
             sessaoId = sessionData.id;
+          } else if (modeloSolicitado) {
+            await trocarModeloEngine(baseUrl, sessaoId, modeloSolicitado);
           }
 
-          sse("inicio", { sessao_id: sessaoId, agente });
-          eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "inicio", agente });
+          sse("inicio", {
+            sessao_id: sessaoId,
+            agente,
+            modelo: modeloInicial,
+            motor: motorSolicitado || motorPadrao,
+          });
+          eventBus.emit("secretario.mensagem", {
+            sessao_id: sessaoId,
+            fase: "inicio",
+            agente,
+            modelo: modeloInicial,
+          });
 
           if (chaveStreamRegistrada && chaveStreamRegistrada !== sessaoId) {
             streamsSecretarioAtivos.delete(chaveStreamRegistrada);
@@ -905,22 +1021,6 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
           const baseAssistant = [...baseMsgs].reverse().find((m) => m.info?.role === "assistant");
           const baselineId = baseAssistant?.info?.id ?? null;
 
-          const wsParaCfgStream = await resolverWs(url).catch(() => null);
-          const cfgResolvidoStream = settings ? await settings.resolve(wsParaCfgStream ? { workspaceDir: wsParaCfgStream.path } : undefined).catch(() => null) : null;
-          const rotaModelos = [
-            cfgResolvidoStream?.settings.secretary?.model,
-            cfgResolvidoStream?.settings.default_model,
-            ...(cfgResolvidoStream?.settings.tests?.rotation || []),
-            "opencode-go/glm-5.3-flash",
-            "opencode/nemotron-3-ultra-free",
-            "opencode/nemotron-3.5-lightning-free",
-            "google/gemini-3.6-flash",
-            "google/gemini-3.5-flash-lite",
-            "openrouter/qwen/qwen3-coder-flash",
-            "openrouter/minimax/minimax-m3",
-          ].filter(Boolean) as string[];
-          const modelosFallback = rotaModelos.length > 0 ? [...new Set(rotaModelos)] : ["opencode-go/glm-5.3-flash", "opencode/nemotron-3-ultra-free"];
-
           let modeloIdx = 0;
           let tentativasTotais = 0;
           const maxTentativas = modelosFallback.length * 3;
@@ -930,12 +1030,12 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
           let enviadoPensamento = "";
           let acoesAvisadas = 0;
           let itensAssinatura = "";
+          let modeloAtivoFinal = modeloInicial;
 
           while (tentativasTotais < maxTentativas && !concluida) {
             const modeloAtual = modelosFallback[modeloIdx % modelosFallback.length]!;
-            const partesMod = String(modeloAtual).trim().split("/");
-            const modProvider = partesMod[0]!;
-            const modId = partesMod.slice(1).join("/");
+            modeloAtivoFinal = modeloAtual;
+            const { providerID: modProvider, modelID: modId } = parsearModelo(modeloAtual);
             const modelPayload = modProvider && modId ? { providerID: modProvider, modelID: modId } : undefined;
 
             if (tentativasTotais > 0) {
@@ -950,20 +1050,24 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
                 modelo: modeloAtual,
               });
 
-              await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+              await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
               await sleep(350);
-              await trocarModeloOpencode(baseUrl, sessaoId, modeloAtual);
+              await trocarModeloEngine(baseUrl, sessaoId, modeloAtual);
               await sleep(200);
             }
 
-            const wsPrefixoStream = wsParaCfgStream
-              ? `[WORKSPACE ATIVO: "${wsParaCfgStream.id}" | CAMINHO: ${wsParaCfgStream.path}]\n(Atenção Secretário: O usuário está operando estritamente no workspace "${wsParaCfgStream.id}". Ao rodar comandos 'oc', use SEMPRE a flag '--workspace ${wsParaCfgStream.id}'. Suas análises, listagens e tarefas devem ser restritas exclusivamente a este workspace. Não consulte outros workspaces.)\n\n`
-              : "";
+            const wsPrefixoStream = `[WORKSPACE ATIVO: "${ws.id}" | CAMINHO: ${ws.path}]\n(Atenção Secretário: O usuário está operando estritamente no workspace "${ws.id}". Ao rodar comandos 'oc', use SEMPRE a flag '--workspace ${ws.id}'. Suas análises, listagens e tarefas devem ser restritas exclusivamente a este workspace. Não consulte outros workspaces.)\n\n`;
             const mensagemStreamComWs = `${wsPrefixoStream}${mensagem}`;
 
             const msgsPreExistentes = (await listarMensagens()) ?? [];
             const assistentesPre = msgsPreExistentes.filter((m) => m.info?.role === "assistant");
-            const textoParaEnvio = assistentesPre.length > 0 && tentativasTotais > 0
+            const hasExistingContinuation = msgsPreExistentes.some((m) => {
+              if (m.info?.role !== "user") return false;
+              const textPart = m.parts?.find((p) => p.type === "text");
+              const content = textPart?.text ?? "";
+              return typeof content === "string" && content.startsWith("Continue a execução");
+            });
+            const textoParaEnvio = assistentesPre.length > 0 && tentativasTotais > 0 && !hasExistingContinuation
               ? "Continue a execução anterior exatamente de onde parou. Conclua todas as análises e ações pendentes até finalizar a demanda por completo."
               : mensagemStreamComWs;
 
@@ -984,15 +1088,15 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
               signal: AbortSignal.timeout(3_600_000),
             }).then(async (r) => {
               if (!r.ok) {
-                postErro = `opencode /message respondeu HTTP ${r.status}`;
+                postErro = `motor /message respondeu HTTP ${r.status}`;
               } else {
                 try {
                   postData = (await r.json()) as MensagemOc;
-                } catch {}
+                } catch { }
               }
               postConcluido = true;
             }).catch((err) => {
-              postErro = `opencode /message falhou (${err.name === "AbortError" ? "timeout" : "conexão"})`;
+              postErro = `motor /message falhou (${err.name === "AbortError" ? "timeout" : "conexão"})`;
               postConcluido = true;
             });
 
@@ -1016,11 +1120,11 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
                     const sessStatus = statusMap[sessaoId];
                     if (sessStatus?.type === "retry") {
                       const msgRetry = sessStatus.message || sessStatus.action?.message || "limite de cota atingido";
-                      postErro = `opencode status retry: ${msgRetry}`;
-                      await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+                      postErro = `motor status retry: ${msgRetry}`;
+                      await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
                     }
                   }
-                } catch {}
+                } catch { }
               }
 
               if (postErro && !concluida) {
@@ -1029,14 +1133,10 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
                     const acctStore = new EngineAccountStore({ homeDir: home });
                     const proxConta = await acctStore.rotacionarProximaConta("opencode-go");
                     if (proxConta) {
-                      sse("status", {
-                        tipo: "rotacao_conta",
-                        aviso: `🔄 Conta OpenCode-Go "${proxConta.nome}" ativada (rotação automática por limite de cota).`,
-                      });
-                      await fetch(`${baseUrl}/abort`, { method: "POST" }).catch(() => {});
+                      await fetch(`${baseUrl}/abort`, { method: "POST" }).catch(() => { });
                       await sleep(500);
                     }
-                  } catch {}
+                  } catch { }
                 }
 
                 if (tentativasTotais < maxTentativas - 1) {
@@ -1072,7 +1172,7 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
                   const errObj = (msgComErro.info as any).error;
                   const desc = errObj?.data?.message || errObj?.message || errObj?.name || "erro na chamada de API do modelo";
                   postErro = `erro no modelo: ${desc}`;
-                  await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+                  await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
                   continue;
                 }
 
@@ -1128,14 +1228,14 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
                     if (vazioDesde === null) vazioDesde = Date.now();
                     else if (Date.now() - vazioDesde > 20_000) {
                       postErro = `modelo ${modeloAtual} não gerou resposta após 20s`;
-                      await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+                      await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
                     }
                   }
                 } else {
                   if (vazioDesde === null) vazioDesde = Date.now();
                   else if (Date.now() - vazioDesde > 20_000) {
                     postErro = `modelo ${modeloAtual} não iniciou após 20s`;
-                    await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+                    await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
                   }
                 }
               }
@@ -1189,14 +1289,14 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
 
             try {
               const tc = TelemetryCollector.obter();
-              const wsStream = wsParaCfgStream ?? (await resolverWs(url).catch(() => ({ path: process.cwd() })));
+              const wsStream = ws;
               const db = registros.corpDb(wsStream.path);
               tc.conectar(db);
               const traceCtx: TraceContext = {
                 trace_id: gerarTraceId(),
                 sessao_id: sessaoId!,
                 agente,
-                modelo: modelosFallback[modeloIdx % modelosFallback.length] ?? "desconhecido",
+                modelo: modeloAtivoFinal,
                 workspace: wsStream.path,
               };
               tc.registrarPassos(traceCtx, passosFinais);
@@ -1207,8 +1307,19 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
           }
 
           const respostaFinal = enviado || (totalAcoes > 0 ? "Ação concluída." : "Processamento concluído.");
-          sse("fim", { sessao_id: sessaoId, resposta: respostaFinal, agente });
-          eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "fim", agente });
+          sse("fim", {
+            sessao_id: sessaoId,
+            resposta: respostaFinal,
+            agente,
+            modelo: modeloAtivoFinal,
+            motor: motorSolicitado || motorPadrao,
+          });
+          eventBus.emit("secretario.mensagem", {
+            sessao_id: sessaoId,
+            fase: "fim",
+            agente,
+            modelo: modeloAtivoFinal,
+          });
           liberarStreamSecretario(sessaoId, res);
           res.end();
           void sincronizarCorp(porta, sessaoId);
@@ -1219,7 +1330,7 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
             if (erro instanceof SecretarioError) {
               enviar(res, erro.status ?? 409, { erro: erro.message });
             } else {
-              enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
+              enviar(res, 502, { erro: `proxy do motor falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
             }
           } else {
             sse("erro", { erro: erro instanceof Error ? erro.message : String(erro) });
@@ -1236,7 +1347,7 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
         if (erro instanceof SecretarioError) {
           enviar(res, erro.status ?? 409, { erro: erro.message });
         } else {
-          enviar(res, 502, { erro: `proxy falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
+          enviar(res, 502, { erro: `proxy do motor falhou: ${erro instanceof Error ? erro.message : String(erro)}` });
         }
       } else {
         sse("erro", { erro: erro instanceof Error ? erro.message : String(erro) });
@@ -1256,7 +1367,7 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
       throw erro;
     });
     if (bruto === null) {
-      enviar(res, 404, { erro: "config do opencode ainda não existe (inicie o secretário)", path: configPath });
+      enviar(res, 404, { erro: "configuração do motor ainda não existe (inicie o secretário)", path: configPath });
       return true;
     }
     try {
@@ -1296,7 +1407,7 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
     try {
       await writeFileAtomic(configPath, texto, { encoding: "utf8" });
     } catch (erro) {
-      enviar(res, 500, { erro: `falha ao gravar config: ${erro instanceof Error ? erro.message : String(erro)}` });
+      enviar(res, 500, { erro: `falha ao gravar configuração: ${erro instanceof Error ? erro.message : String(erro)}` });
       return true;
     }
     enviar(res, 200, { ok: true, path: configPath });
@@ -1326,11 +1437,6 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
       }));
 
   if (rota === "/provider-keys" && req.method === "GET") {
-    const motorChaves = url.searchParams.get("motor") ?? "opencode";
-    if (motorChaves !== "opencode") {
-      enviar(res, 400, { erro: `motor desconhecido: "${motorChaves}" — hoje apenas "opencode"` });
-      return true;
-    }
     const { home: h, ws } = escopoChaves();
     const gPath = authOpencodePath(h);
     const g = lerAuth(gPath);
@@ -1348,11 +1454,6 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
   }
 
   if (rota === "/provider-keys" && req.method === "PUT") {
-    const motorChaves = url.searchParams.get("motor") ?? "opencode";
-    if (motorChaves !== "opencode") {
-      enviar(res, 400, { erro: `motor desconhecido: "${motorChaves}" — hoje apenas "opencode"` });
-      return true;
-    }
     const corpo = (await lerCorpo(req)) as { provider?: string; key?: string; escopo?: string };
     const provider = String(corpo.provider ?? "").trim();
     const key = String(corpo.key ?? "").trim();
@@ -1363,7 +1464,7 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
       return true;
     }
     if (!PROVEEDOR_RE.test(provider) || !provider) {
-      enviar(res, 400, { erro: "provider inválido — use letras/números/hífen (ex.: opencode-go, openrouter)" });
+      enviar(res, 400, { erro: "provider inválido — use letras/números/hífen (ex.: opencode-go, openrouter, anthropic, openai)" });
       return true;
     }
     if (key.length < 8) {

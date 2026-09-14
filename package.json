@@ -24,7 +24,8 @@
     "serve": "node bin/opencorp.mjs serve --host 0.0.0.0 --port 4100",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "playwright test",
-    "dev": "tsx watch src/cli/index.ts"
+    "dev": "tsx watch src/cli/index.ts",
+    "cleanup-continue": "node src/server/scripts/cleanupContinue.ts"
   },
   "dependencies": {
     "@clack/prompts": "^1.7.0",

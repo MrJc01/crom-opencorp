@@ -682,6 +682,10 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
           const parts = m.parts ?? [];
           const rawContent = parts.filter((p: ParteOc) => p.type === "text").map((p: ParteOc) => p.text ?? "").join("\n").trim();
           const content = limparPrefixoWorkspace(rawContent);
+          // Mensagens automáticas de continuação geradas por rotação/fallback interno não poluem o histórico
+          if (content.startsWith("Continue a execução anterior exatamente de onde parou")) {
+            continue;
+          }
           const imagens = parts.filter((p: any) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p: any) => p.url);
           mensagens.push({
             id: m.info?.id,

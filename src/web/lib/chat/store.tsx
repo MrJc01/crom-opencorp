@@ -1029,7 +1029,6 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
 
               if (evtType === "status" || evtType === "fallback_modelo") {
                 if (payload.aviso) {
-                  showToast(payload.aviso, "aviso");
                   const passos = [...(assistente.passos || [])];
                   passos.push({
                     tipo: "texto",
