@@ -51,13 +51,24 @@ describe("Secretário — Resiliência a Cota Excedida e Detecção de Retry Sta
     await mkdir(join(home, ".opencorp"), { recursive: true });
     await mkdir(join(home, "logs"), { recursive: true });
     await mkdir(join(home, "workspaces", "corp-quota", ".opencorp"), { recursive: true });
-    await writeFile(join(home, "workspaces", "corp-quota", ".opencorp", "config.json"), "{}");
+    await writeFile(
+      join(home, "workspaces", "corp-quota", ".opencorp", "config.json"),
+      JSON.stringify({
+        modelos: {
+          padrao: "opencode-go/glm-5.3-flash",
+          rotacao: [
+            "opencode-go/glm-5.3-flash",
+            "google/gemini-3.6-flash",
+          ],
+        },
+      }),
+    );
     await writeFile(
       join(home, ".opencorp", "workspaces.json"),
       JSON.stringify({
         version: 1,
         ativo: "corp-quota",
-        workspaces: [{ id: "corp-quota", criado_em: new Date().toISOString() }],
+        workspaces: [{ id: "corp-quota", path: join(home, "workspaces", "corp-quota"), criado_em: new Date().toISOString() }],
       }),
     );
     await writeFile(
@@ -102,6 +113,11 @@ describe("Secretário — Resiliência a Cota Excedida e Detecção de Retry Sta
       if (url.includes("/abort") && req.method === "POST") {
         res.writeHead(200, { "content-type": "application/json" });
         res.end("true");
+        return;
+      }
+      if (url.includes("/message") && req.method === "DELETE") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
         return;
       }
       if (url.includes("/message") && req.method === "POST") {

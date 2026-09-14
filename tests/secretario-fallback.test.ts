@@ -51,13 +51,24 @@ describe("Secretário — Fallback e Hot-Swap Automático de Modelo", () => {
     await mkdir(join(home, ".opencorp"), { recursive: true });
     await mkdir(join(home, "logs"), { recursive: true });
     await mkdir(join(home, "workspaces", "corp-teste", ".opencorp"), { recursive: true });
-    await writeFile(join(home, "workspaces", "corp-teste", ".opencorp", "config.json"), "{}");
+    await writeFile(
+      join(home, "workspaces", "corp-teste", ".opencorp", "config.json"),
+      JSON.stringify({
+        modelos: {
+          padrao: "openrouter/fail-first:free",
+          rotacao: [
+            "openrouter/fail-first:free",
+            "openrouter/minimax/minimax-m3:free",
+          ],
+        },
+      }),
+    );
     await writeFile(
       join(home, ".opencorp", "workspaces.json"),
       JSON.stringify({
         version: 1,
         ativo: "corp-teste",
-        workspaces: [{ id: "corp-teste", criado_em: new Date().toISOString() }],
+        workspaces: [{ id: "corp-teste", path: join(home, "workspaces", "corp-teste"), criado_em: new Date().toISOString() }],
       }),
     );
     // Configura rotação com 2 modelos no settings.json
@@ -80,9 +91,11 @@ describe("Secretário — Fallback e Hot-Swap Automático de Modelo", () => {
     // - POST /session/:id/message:
     //     se modelo for "fail-first", responde HTTP 500 / 429
     //     se modelo for "minimax-m3", responde com sucesso
+    let fakeMessages: any[] = [];
     fakeOpencode = createServer(async (req, res) => {
       const url = req.url ?? "/";
       if (url === "/session" && req.method === "POST") {
+        fakeMessages = [];
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ id: "ses-fake-fallback-1" }));
         return;
@@ -101,8 +114,24 @@ describe("Secretário — Fallback e Hot-Swap Automático de Modelo", () => {
         res.end(JSON.stringify(true));
         return;
       }
+      if (url.includes("/message") && req.method === "DELETE") {
+        const idToDelete = url.split("/").pop();
+        fakeMessages = fakeMessages.filter((m) => m.info?.id !== idToDelete);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
       if (url.includes("/message") && req.method === "POST") {
         messageAttempts++;
+        let body = "";
+        for await (const chunk of req) body += chunk;
+        const parsed = body ? JSON.parse(body) : {};
+        const userMsg = {
+          info: { id: `msg-usr-${messageAttempts}`, role: "user", time: { created: Date.now() } },
+          parts: parsed.parts || [{ type: "text", text: "" }],
+        };
+        fakeMessages.push(userMsg);
+
         const currentModel = switchedModels[switchedModels.length - 1];
         if (!currentModel || currentModel.includes("fail-first")) {
           // Primeiro modelo falha imediatamente
@@ -111,25 +140,18 @@ describe("Secretário — Fallback e Hot-Swap Automático de Modelo", () => {
           return;
         }
         // Modelo secundário responde sucesso
+        const asstMsg = {
+          info: { id: `msg-asst-${messageAttempts}`, role: "assistant", time: { completed: Date.now() } },
+          parts: [{ type: "text", text: "Resposta recuperada via fallback!" }],
+        };
+        fakeMessages.push(asstMsg);
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(
-          JSON.stringify({
-            info: { id: "msg-asst-1", role: "assistant", time: { completed: Date.now() } },
-            parts: [{ type: "text", text: "Resposta recuperada via fallback!" }],
-          }),
-        );
+        res.end(JSON.stringify(asstMsg));
         return;
       }
       if (url.includes("/message") && req.method === "GET") {
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(
-          JSON.stringify([
-            {
-              info: { id: "msg-asst-1", role: "assistant", time: { completed: Date.now() } },
-              parts: [{ type: "text", text: "Resposta recuperada via fallback!" }],
-            },
-          ]),
-        );
+        res.end(JSON.stringify(fakeMessages));
         return;
       }
       res.writeHead(404);
@@ -214,5 +236,28 @@ describe("Secretário — Fallback e Hot-Swap Automático de Modelo", () => {
     expect(text).toContain("fallback_modelo");
     expect(text).toContain("event: fim");
     expect(switchedModels).toContain("openrouter/minimax/minimax-m3:free");
+  });
+
+  it("não duplica prompt do usuário no histórico quando ocorre fallback e reenvio de modelo", async () => {
+    switchedModels = [];
+    messageAttempts = 0;
+
+    const res = await fetchApi("/secretario/conversa", {
+      method: "POST",
+      body: JSON.stringify({ mensagem: "prompt com contingencia sem duplicar" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(messageAttempts).toBeGreaterThanOrEqual(2);
+
+    const sId = (res.json as any).sessao_id;
+    const msgRes = await fetchApi(`/secretario/sessoes/${encodeURIComponent(sId)}/mensagens`);
+    expect(msgRes.status).toBe(200);
+    const msgs = (msgRes.json as any).mensagens ?? msgRes.json;
+    const userMsgs = (Array.isArray(msgs) ? msgs : []).filter((m: any) => m.role === "user");
+
+    // O prompt do usuário deve constar exatamente 1 vez, sem duplicatas
+    expect(userMsgs.length).toBe(1);
+    expect(userMsgs[0].content).toBe("prompt com contingencia sem duplicar");
   });
 });

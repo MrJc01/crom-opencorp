@@ -575,6 +575,46 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
     return true;
   }
 
+  /**
+   * Remove mensagens órfãs/sem resposta útil criadas durante uma tentativa com falha de modelo,
+   * impedindo que o prompt do usuário seja duplicado/salvo múltiplas vezes no histórico ao tentar o próximo modelo.
+   */
+  async function limparMensagensTentativaFalha(
+    baseUrlSessao: string,
+    idsAntes: Set<string | undefined>,
+    manterSeTiverTextoSubstancial: boolean = true,
+  ): Promise<void> {
+    try {
+      await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+      const getRes = await fetch(`${baseUrlSessao}/message`, { signal: AbortSignal.timeout(4000) });
+      if (!getRes.ok) return;
+      const msgs = (await getRes.json()) as MensagemOc[];
+      if (!Array.isArray(msgs)) return;
+
+      const novas = msgs.filter((m) => m.info?.id && !idsAntes.has(m.info.id));
+      if (novas.length === 0) return;
+
+      if (manterSeTiverTextoSubstancial) {
+        const assistentesNovas = novas.filter((m) => m.info?.role === "assistant");
+        const temSubstancial = assistentesNovas.some((a) => {
+          const passos = extrairPassosMensagens([a]);
+          const txt = passos.filter((p) => p.tipo === "texto").map((p) => p.texto ?? "").join("\n").trim();
+          return txt.length > 20;
+        });
+        if (temSubstancial) return;
+      }
+
+      for (const m of novas) {
+        if (m.info?.id) {
+          await fetch(`${baseUrlSessao}/message/${encodeURIComponent(m.info.id)}`, {
+            method: "DELETE",
+            signal: AbortSignal.timeout(3000),
+          }).catch(() => {});
+        }
+      }
+    } catch {}
+  }
+
   // ─────────────────────────────────────────────────────────────────────
   // 5. CONVERSA SÍNCRONA COM POLLING (/secretario/conversa)
   // ─────────────────────────────────────────────────────────────────────
@@ -713,6 +753,11 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
           await sleep(150);
         }
 
+        const msgsAntes = (await fetch(`${baseUrl}/session/${sessaoId}/message`, { signal: AbortSignal.timeout(4000) })
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => [])) as MensagemOc[];
+        const idsAntes = new Set((Array.isArray(msgsAntes) ? msgsAntes : []).map((m) => m.info?.id).filter(Boolean));
+
         try {
           const msgRes = await fetch(`${baseUrl}/session/${sessaoId}/message`, {
             method: "POST",
@@ -743,6 +788,11 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
             }
           }
         } catch { }
+
+        // Se falhou e ainda temos outro modelo de contingência na rotação, remove a tentativa incompleta para não duplicar o prompt
+        if (!respostaTexto && mIdx < modelosFallbackConv.length - 1) {
+          await limparMensagensTentativaFalha(`${baseUrl}/session/${sessaoId}`, idsAntes, false);
+        }
       }
 
       if (!respostaTexto) {
@@ -1254,6 +1304,7 @@ export async function handleSecretarioRoutes(ctx: RouteContext): Promise<boolean
             modeloIdx++;
             tentativasTotais++;
             if (tentouFallback) {
+              await limparMensagensTentativaFalha(baseUrlSessao, idsMensagensAntesTentativa, true);
               continue;
             }
           }

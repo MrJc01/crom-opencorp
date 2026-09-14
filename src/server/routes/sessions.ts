@@ -687,6 +687,29 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
             continue;
           }
           const imagens = parts.filter((p: any) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p: any) => p.url);
+
+          // Deduplicação defensiva: se o último item já for do usuário com mesmo conteúdo, descarta
+          const ult = mensagens[mensagens.length - 1];
+          if (ult && ult.role === "user" && ult.content === content) {
+            continue;
+          }
+          // Se o último for assistente vazio (sem texto, pensamento, passos ou ações)
+          // e o anterior for usuário com mesmo conteúdo, remove o assistente vazio e descarta o duplicado
+          if (
+            ult &&
+            ult.role === "assistant" &&
+            !ult.content &&
+            !ult.pensamento &&
+            (!ult.passos || ult.passos.length === 0) &&
+            (!ult.acoes || ult.acoes.length === 0)
+          ) {
+            const penult = mensagens[mensagens.length - 2];
+            if (penult && penult.role === "user" && penult.content === content) {
+              mensagens.pop();
+              continue;
+            }
+          }
+
           mensagens.push({
             id: m.info?.id,
             role: "user",
@@ -758,7 +781,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
             ult.concluida = isCompleted;
           } else {
             const temAlgo = Boolean(textoFinal || passos.length > 0 || pensamento || tools.length > 0 || temErro);
-            if (temAlgo || !isCompleted) {
+            if (temAlgo || (!isCompleted && isSessaoBusy)) {
               const passoComPergunta = passos.find((p) => (p as any).perguntas || p.pergunta);
               mensagens.push({
                 id: m.info?.id,
