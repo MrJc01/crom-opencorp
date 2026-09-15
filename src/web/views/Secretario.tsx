@@ -58,9 +58,9 @@ export const SecretarioView: Component = () => {
     });
   });
 
-  const abrirPainelLateral = async () => {
+  const abrirPainelLateral = () => {
+    void chat.abrirPainelLateral();
     setConfigLateralAberta(true);
-    await chat.abrirPainelLateral();
   };
 
   const salvarEFechar = async () => {
@@ -186,7 +186,7 @@ export const SecretarioView: Component = () => {
               >
                 <For each={chat.listaAgentes()}>
                   {(ag) => (
-                    <option value={ag.id}>
+                    <option value={ag.id} selected={ag.id === chat.agenteConfig()}>
                       {ag.id} — {ag.role || ag.id} ({ag.harness || (ag as any).engine || "opencode"})
                     </option>
                   )}

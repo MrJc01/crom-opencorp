@@ -148,6 +148,63 @@ export function useChat(): ChatStore {
 
 const CHAVE_RASCUNHO = (sid: string | null) => `oc-chat-rascunho:${sid || "nova"}`;
 
+export const AGENTES_PADRAO_SECRETARIO: AgenteOpcao[] = [
+  {
+    id: "secretario-exec",
+    role: "Secretário Executivo (Orquestrador com ferramentas)",
+    model: "opencode/nemotron-3-ultra-free",
+    harness: "opencode",
+    rotation: [
+      "opencode/nemotron-3-ultra-free",
+      "openrouter/google/gemini-2.5-flash",
+      "openrouter/liquid/lfm-2.5-2.6b:free",
+      "openrouter/openrouter/free",
+    ],
+  },
+  {
+    id: "secretario",
+    role: "Consultor Executivo e Estrategista",
+    model: "openrouter/google/gemini-2.5-flash",
+    harness: "direct_llm",
+    rotation: [
+      "openrouter/google/gemini-2.5-flash",
+      "opencode/nemotron-3-ultra-free",
+      "openrouter/liquid/lfm-2.5-2.6b:free",
+      "openrouter/openrouter/free",
+    ],
+  },
+  {
+    id: "pautador-youtube",
+    role: "Especialista em pautas, roteiros e SEO para YouTube",
+    model: "openrouter/google/gemini-2.5-flash",
+    harness: "direct_llm",
+    rotation: [
+      "openrouter/google/gemini-2.5-flash",
+      "opencode/nemotron-3-ultra-free",
+    ],
+  },
+  {
+    id: "pesquisador-fontes",
+    role: "Curador de notícias e métricas de audiência",
+    model: "openrouter/google/gemini-2.5-flash",
+    harness: "direct_llm",
+    rotation: [
+      "openrouter/google/gemini-2.5-flash",
+      "opencode/nemotron-3-ultra-free",
+    ],
+  },
+  {
+    id: "code-reviewer",
+    role: "Auditor técnico de código e boas práticas",
+    model: "anthropic/claude-3-7-sonnet",
+    harness: "opencode",
+    rotation: [
+      "anthropic/claude-3-7-sonnet",
+      "opencode/nemotron-3-ultra-free",
+    ],
+  },
+];
+
 export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) => {
   const [sessoes, setSessoes] = createSignal<SessaoResumo[]>([]);
   const sessaoInicial = () => {
@@ -221,13 +278,13 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
   const [carregandoAnteriores, setCarregandoAnteriores] = createSignal(false);
   let ultimoHash = "";
 
-  const [listaAgentes, setListaAgentes] = createSignal<AgenteOpcao[]>([
-    { id: "secretario-exec", role: "Secretário Executivo", model: "opencode-go/glm-5.3-flash", harness: "opencode" },
-  ]);
+  let cacheWsModelos: { default_model?: string; rotation?: string[] } | null = null;
+
+  const [listaAgentes, setListaAgentes] = createSignal<AgenteOpcao[]>(AGENTES_PADRAO_SECRETARIO);
   const [listaMotores, setListaMotores] = createSignal<MotorOpcao[]>([]);
   const [agenteConfig, setAgenteConfig] = createSignal<string>("secretario-exec");
   const [motorConfig, setMotorConfig] = createSignal<string>("opencode");
-  const [modeloConfig, setModeloConfig] = createSignal<string>("");
+  const [modeloConfig, setModeloConfig] = createSignal<string>("openrouter/google/gemini-2.5-flash");
   const [rotacaoConfig, setRotacaoConfig] = createSignal<string>("");
   const [modeloAtivoChat, setModeloAtivoChat] = createSignal<string>("");
   const [rotacaoAtivaChat, setRotacaoAtivaChat] = createSignal<string[]>([]);
@@ -272,41 +329,47 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
       if (Array.isArray(ags) && ags.length > 0) {
         setListaAgentes(ags);
         const enc = ags.find((a) => a.id === agente());
-        if (enc && !modeloConfig()) {
+        if (enc) {
           if (enc.model) setModeloConfig(enc.model);
           if (enc.harness || enc.engine) setMotorConfig(enc.harness || enc.engine);
         }
       }
     } catch {}
-    try {
-      // /engines não existe no backend (retorna o SPA) — fonte real: /api/motores {motores:[...]}
-      const r = await fetchApi<any>("/api/motores").catch(() => null);
-      const mots = Array.isArray(r) ? r : r?.motores;
-      if (Array.isArray(mots) && mots.length > 0) {
-        setListaMotores(
-          mots.map((m: any) => ({
-            id: String(m.id),
-            name: String(m.name || m.id),
-            installed: Boolean(m.installed),
-            version: m.version ? String(m.version) : undefined,
-          }))
-        );
-      }
-    } catch {}
+
+    // Pré-aquece cache de modelos do workspace
+    void fetchApi<any>(`/settings/modelos?workspace=${encodeURIComponent(wsAtivo())}`)
+      .then((wsMod) => {
+        if (wsMod) cacheWsModelos = wsMod;
+      })
+      .catch(() => null);
+
+    // Carrega motores em background sem travar a interface
+    void fetchApi<any>("/api/motores")
+      .then((r) => {
+        const mots = Array.isArray(r) ? r : r?.motores;
+        if (Array.isArray(mots) && mots.length > 0) {
+          setListaMotores(
+            mots.map((m: any) => ({
+              id: String(m.id),
+              name: String(m.name || m.id),
+              installed: Boolean(m.installed),
+              version: m.version ? String(m.version) : undefined,
+            }))
+          );
+        }
+      })
+      .catch(() => null);
   };
 
   const abrirPainelLateral = async () => {
-    const wsModPromise = fetchApi<any>(`/settings/modelos?workspace=${encodeURIComponent(wsAtivo())}`).catch(() => null);
-    await Promise.all([carregarAgentesEMotores(), carregarOverridesSecretario()]);
-    const wsMod = await wsModPromise;
-
-    const agAtual = agente();
+    // 1. SINCRONAMENTE: Preenche imediatamente tudo com dados locais no milissegundo zero (sem travar)
+    const agAtual = agente() || "secretario-exec";
     setAgenteConfig(agAtual);
     const enc = listaAgentes().find((a) => a.id === agAtual);
 
-    const modeloPadraoWs = wsMod?.default_model || "openrouter/google/gemini-2.5-flash";
-    const rotacaoWs: string[] = Array.isArray(wsMod?.rotation) && wsMod.rotation.length > 0
-      ? wsMod.rotation
+    const modeloPadraoWs = cacheWsModelos?.default_model || "openrouter/google/gemini-2.5-flash";
+    const rotacaoWs: string[] = Array.isArray(cacheWsModelos?.rotation) && cacheWsModelos!.rotation.length > 0
+      ? cacheWsModelos!.rotation
       : [
           modeloPadraoWs,
           "opencode/nemotron-3-ultra-free",
@@ -327,15 +390,47 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
       setRotacaoConfig(rotacaoWs.join("\n"));
     }
     setResultadoTeste(null);
+
+    // 2. EM SEGUNDO PLANO (sem bloquear a gaveta): Atualiza configurações do servidor
+    try {
+      const [ags, wsMod] = await Promise.all([
+        fetchApi<any[]>(`/agents?workspace=${encodeURIComponent(wsAtivo())}`).catch(() => null),
+        fetchApi<any>(`/settings/modelos?workspace=${encodeURIComponent(wsAtivo())}`).catch(() => null),
+        carregarOverridesSecretario().catch(() => null),
+      ]);
+
+      if (wsMod) {
+        cacheWsModelos = wsMod;
+      }
+
+      if (Array.isArray(ags) && ags.length > 0) {
+        setListaAgentes(ags);
+        const encAtualizado = ags.find((a) => a.id === agAtual);
+        if (encAtualizado) {
+          if (!modeloConfig() || modeloConfig() === modeloPadraoWs) {
+            const modServidor = encAtualizado.model || modeloAtivoChat() || overrideModelo() || wsMod?.default_model;
+            if (modServidor) {
+              setModeloConfig(modServidor);
+              setMotorConfig(inferirHarness(modServidor));
+            }
+          }
+          const rotAtualizada = encAtualizado.rotation || (encAtualizado as any)?.model_fallback;
+          if (Array.isArray(rotAtualizada) && rotAtualizada.length > 0 && !rotacaoConfig()) {
+            setRotacaoConfig(rotAtualizada.join("\n"));
+          }
+        }
+      }
+    } catch {}
   };
 
   const aoMudarAgenteConfig = async (agId: string) => {
     setAgenteConfig(agId);
     setResultadoTeste(null);
-    const wsMod = await fetchApi<any>(`/settings/modelos?workspace=${encodeURIComponent(wsAtivo())}`).catch(() => null);
-    const modeloPadraoWs = wsMod?.default_model || "openrouter/google/gemini-2.5-flash";
-    const rotacaoWs: string[] = Array.isArray(wsMod?.rotation) && wsMod.rotation.length > 0
-      ? wsMod.rotation
+
+    const enc = listaAgentes().find((a) => a.id === agId);
+    const modeloPadraoWs = cacheWsModelos?.default_model || "openrouter/google/gemini-2.5-flash";
+    const rotacaoWs: string[] = Array.isArray(cacheWsModelos?.rotation) && cacheWsModelos!.rotation.length > 0
+      ? cacheWsModelos!.rotation
       : [
           modeloPadraoWs,
           "opencode/nemotron-3-ultra-free",
@@ -343,7 +438,6 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
           "openrouter/openrouter/free",
         ];
 
-    const enc = listaAgentes().find((a) => a.id === agId);
     if (enc) {
       const mod = enc.model || (agId.includes("secretario") ? overrideModelo() || modeloPadraoWs : modeloPadraoWs);
       setModeloConfig(mod);
@@ -355,6 +449,18 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
       } else {
         setRotacaoConfig(rotacaoWs.join("\n"));
       }
+    } else {
+      setModeloConfig(modeloPadraoWs);
+      setMotorConfig(inferirHarness(modeloPadraoWs));
+      setRotacaoConfig(rotacaoWs.join("\n"));
+    }
+
+    if (!cacheWsModelos) {
+      void fetchApi<any>(`/settings/modelos?workspace=${encodeURIComponent(wsAtivo())}`)
+        .then((wsMod) => {
+          if (wsMod) cacheWsModelos = wsMod;
+        })
+        .catch(() => null);
     }
   };
 

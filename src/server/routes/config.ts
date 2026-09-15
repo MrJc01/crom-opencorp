@@ -359,7 +359,8 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
       } catch {}
     }
 
-    const rawMotores = await engineRegistry.listSummaries(home, true);
+    const checkHealth = rota.includes("/status") || url.searchParams.get("checkHealth") === "true";
+    const rawMotores = await engineRegistry.listSummaries(home, checkHealth);
     const motores = rawMotores.map((m) => {
       const authStatus = checkEngineAuthStatus(m.id, home);
       return {
@@ -385,7 +386,10 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
 
     const todasContas = await accts.listar();
     const limitesMotores = await accts.obterLimitesMotores();
-    const tokensAoVivo: Record<string, any> = await engineRegistry.fetchAllLiveTokens(home).catch(() => ({}));
+    const incluirTokens = rota.includes("/status") || url.searchParams.get("tokens") === "true" || url.searchParams.get("liveTokens") === "true";
+    const tokensAoVivo: Record<string, any> = incluirTokens
+      ? await engineRegistry.fetchAllLiveTokens(home).catch(() => ({}))
+      : {};
     const motoresComDetalhes = motores.map((m) => {
       const contasMotor = todasContas.filter((c) => c.motorId === m.id);
       const contaAtiva = contasMotor.find((c) => c.ativa) || contasMotor[0] || null;
