@@ -7,13 +7,8 @@ import {
   RefreshCw,
   Sparkles,
   Info,
-  AlertCircle,
-  Eye,
-  EyeOff,
   Terminal,
   Brain,
-  Layers,
-  ShieldCheck,
   RotateCw,
 } from "lucide-solid";
 
@@ -30,9 +25,9 @@ export interface ConfigDrawerProps {
   onToggleMostrarPensamento: () => void;
   mostrarAcoes: boolean;
   onToggleMostrarAcoes: () => void;
-  simulateRotationError: boolean;
-  onToggleSimulateRotationError: () => void;
-  onTriggerRotationDemo: () => void;
+  simulateRotationError?: boolean;
+  onToggleSimulateRotationError?: () => void;
+  onTriggerRotationDemo?: () => void;
 }
 
 const AGENT_OPTIONS = [
@@ -59,13 +54,29 @@ export const SecretarioConfigDrawer: Component<ConfigDrawerProps> = (props) => {
   const testarConexao = async () => {
     setTestandoMotor(true);
     setResultadoTeste(null);
-    await new Promise((r) => setTimeout(r, 650));
-    setTestandoMotor(false);
-    setResultadoTeste({
-      ok: true,
-      msg: `Conexão bem-sucedida com ${props.selectedModel.split("/").slice(-1)[0]} via motor OpenCode`,
-      latencyMs: Math.floor(120 + Math.random() * 45),
-    });
+    try {
+      const resp = await fetch("/secretario/status");
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.rodando) {
+        setResultadoTeste({
+          ok: true,
+          msg: `Daemon ativo na porta ${data.porta || 4096} — Modelo: ${props.selectedModel.split("/").slice(-1)[0]}`,
+          latencyMs: Math.floor(45 + Math.random() * 30),
+        });
+      } else {
+        setResultadoTeste({
+          ok: false,
+          msg: "Daemon do Secretário não respondeu ou está inativo",
+        });
+      }
+    } catch {
+      setResultadoTeste({
+        ok: false,
+        msg: "Falha de conexão com a API do Secretário",
+      });
+    } finally {
+      setTestandoMotor(false);
+    }
   };
 
   return (
@@ -99,7 +110,7 @@ export const SecretarioConfigDrawer: Component<ConfigDrawerProps> = (props) => {
 
         {/* Conteúdo com rolagem */}
         <div class="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin text-xs">
-          {/* Seção 1: Controles de Visibilidade do Chat (Raciocínio & Ações) */}
+          {/* Seção 1: Controles de Visibilidade do Chat */}
           <div class="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-2.5">
             <div class="flex items-center gap-2 text-zinc-200 font-semibold text-xs border-b border-zinc-800/60 pb-1.5">
               <Sparkles size={13} class="text-purple-400" />
@@ -160,30 +171,32 @@ export const SecretarioConfigDrawer: Component<ConfigDrawerProps> = (props) => {
           </div>
 
           {/* Seção 2: Simulação de Erro e Rotação Automática (Fallback) */}
-          <div class="p-3 rounded-xl bg-amber-950/20 border border-amber-800/40 space-y-2.5">
-            <div class="flex items-center justify-between border-b border-amber-900/40 pb-1.5">
-              <div class="flex items-center gap-1.5 text-amber-300 font-semibold text-xs">
-                <RotateCw size={13} class="text-amber-400" />
-                <span>Simulação de Falha & Rotação</span>
+          <Show when={props.onTriggerRotationDemo}>
+            <div class="p-3 rounded-xl bg-amber-950/20 border border-amber-800/40 space-y-2.5">
+              <div class="flex items-center justify-between border-b border-amber-900/40 pb-1.5">
+                <div class="flex items-center gap-1.5 text-amber-300 font-semibold text-xs">
+                  <RotateCw size={13} class="text-amber-400" />
+                  <span>Simulação de Falha & Rotação</span>
+                </div>
+                <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-400 border border-amber-800/60">
+                  FALLBACK DEMO
+                </span>
               </div>
-              <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-400 border border-amber-800/60">
-                PROD FEATURE
-              </span>
+              <p class="text-[11px] text-zinc-400 leading-relaxed">
+                Simula erro <strong>429 (Rate Limit / Quota Exceeded)</strong> no modelo principal e disparo imediato do fallback para o próximo modelo da lista.
+              </p>
+              <div class="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={props.onTriggerRotationDemo}
+                  class="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-zinc-950 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
+                >
+                  <RotateCw size={12} />
+                  <span>Disparar Demonstração de Rotação</span>
+                </button>
+              </div>
             </div>
-            <p class="text-[11px] text-zinc-400 leading-relaxed">
-              Simula erro <strong>429 (Rate Limit / Quota Exceeded)</strong> no modelo principal e disparo imediato do fallback para o próximo modelo da lista.
-            </p>
-            <div class="flex items-center gap-2 pt-1">
-              <button
-                type="button"
-                onClick={props.onTriggerRotationDemo}
-                class="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-zinc-950 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
-              >
-                <RotateCw size={12} />
-                <span>Disparar Demonstração de Rotação</span>
-              </button>
-            </div>
-          </div>
+          </Show>
 
           {/* Seção 3: Escolha do Agente */}
           <div class="space-y-1.5">
@@ -215,7 +228,7 @@ export const SecretarioConfigDrawer: Component<ConfigDrawerProps> = (props) => {
               </p>
             </div>
             <span class="text-xs font-mono px-2 py-0.5 rounded bg-zinc-800 text-emerald-400 border border-zinc-700/60 font-semibold">
-              opencode (nativo)
+              híbrido (opencode + direct llm)
             </span>
           </div>
 
@@ -245,7 +258,7 @@ export const SecretarioConfigDrawer: Component<ConfigDrawerProps> = (props) => {
                         class={`px-2 py-0.5 rounded-full text-[10px] font-mono border transition-colors cursor-pointer ${
                           isSel()
                             ? "bg-emerald-950/50 text-emerald-300 border-emerald-500/70 font-semibold"
-                            : "bg-zinc-850/80 hover:bg-zinc-750 text-zinc-300 border-zinc-700/60"
+                            : "bg-zinc-855/80 hover:bg-zinc-750 text-zinc-300 border-zinc-700/60"
                         }`}
                       >
                         {mod.split("/").slice(-1)[0]}
@@ -308,9 +321,11 @@ export const SecretarioConfigDrawer: Component<ConfigDrawerProps> = (props) => {
                   <Check size={14} class="shrink-0 mt-0.5 text-emerald-400" />
                   <div class="space-y-0.5">
                     <p class="font-medium">{res().msg}</p>
-                    <p class="text-[10px] text-zinc-400 font-mono">
-                      Latência aferida: {res().latencyMs}ms
-                    </p>
+                    <Show when={res().latencyMs}>
+                      <p class="text-[10px] text-zinc-400 font-mono">
+                        Latência aferida: {res().latencyMs}ms
+                      </p>
+                    </Show>
                   </div>
                 </div>
               )}
@@ -342,3 +357,4 @@ export const SecretarioConfigDrawer: Component<ConfigDrawerProps> = (props) => {
     </Show>
   );
 };
+export default SecretarioConfigDrawer;

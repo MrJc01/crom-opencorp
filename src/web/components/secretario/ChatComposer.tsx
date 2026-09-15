@@ -31,14 +31,14 @@ export interface AutocompleteItem {
   icone: any;
 }
 
-interface SharedComposerProps {
+export interface ChatComposerProps {
   value: string;
   onInput: (val: string) => void;
   onSubmit: (val: string) => void;
-  selectedModel: string;
-  onSelectModel: (m: string) => void;
-  selectedContext: string;
-  onSelectContext: (c: string) => void;
+  selectedModel?: string;
+  onSelectModel?: (m: string) => void;
+  selectedContext?: string;
+  onSelectContext?: (c: string) => void;
   variant?: "pure" | "executive" | "terminal" | "glass";
   placeholder?: string;
   onOpenConfig?: () => void;
@@ -213,7 +213,7 @@ const AUTOCOMPLETE_CATALOG: AutocompleteItem[] = [
   },
 ];
 
-export const SharedComposer: Component<SharedComposerProps> = (props) => {
+export const ChatComposer: Component<ChatComposerProps> = (props) => {
   let textareaRef: HTMLTextAreaElement | undefined;
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
   const [contextDropdownOpen, setContextDropdownOpen] = createSignal(false);
@@ -223,6 +223,9 @@ export const SharedComposer: Component<SharedComposerProps> = (props) => {
   const [modoMenu, setModoMenu] = createSignal<"slash" | "at" | "bang" | null>(null);
   const [queryMenu, setQueryMenu] = createSignal("");
   const [indiceAtivo, setIndiceAtivo] = createSignal(0);
+
+  const currentModel = () => props.selectedModel || "openrouter/google/gemini-2.5-flash";
+  const currentContext = () => props.selectedContext || "Default (Workspace)";
 
   const containerStyle = () => {
     switch (props.variant) {
@@ -360,16 +363,13 @@ export const SharedComposer: Component<SharedComposerProps> = (props) => {
 
   return (
     <div class="w-full max-w-3xl mx-auto px-2 sm:px-4 pb-2 sm:pb-4 relative">
-      {/* ─────────────────────────────────────────────────────────────
-          POPOVER DE AUTOCOMPLETE FLUTUANTE (/ @ !)
-         ───────────────────────────────────────────────────────────── */}
+      {/* Popover de Autocomplete Flutuante */}
       <Show when={modoMenu() && itensFiltrados().length > 0}>
         <div
           data-autocomplete-popover
           class="absolute bottom-full mb-3 inset-x-2 sm:inset-x-4 rounded-2xl bg-zinc-950/98 border border-zinc-700 shadow-2xl backdrop-blur-xl p-2 z-50 text-xs max-h-72 overflow-y-auto scrollbar-thin animate-in fade-in slide-in-from-bottom-2 duration-150 text-zinc-100"
           onMouseDown={(e) => e.preventDefault()}
         >
-          {/* Header do Popover */}
           <div class="px-2.5 py-1 mb-1 border-b border-zinc-800/80 flex items-center justify-between text-[11px] font-mono">
             <div class="flex items-center gap-1.5 font-bold">
               <Show when={modoMenu() === "slash"}>
@@ -387,7 +387,6 @@ export const SharedComposer: Component<SharedComposerProps> = (props) => {
             </span>
           </div>
 
-          {/* Lista de Sugestões */}
           <div class="space-y-0.5">
             <For each={itensFiltrados()}>
               {(item, idx) => {
@@ -500,7 +499,7 @@ export const SharedComposer: Component<SharedComposerProps> = (props) => {
                 title="Alterar modelo ativo"
               >
                 <Cpu size={12} class="text-emerald-400 shrink-0" />
-                <span class="truncate max-w-[80px] sm:max-w-[130px]">{props.selectedModel.split("/").slice(-1)[0]}</span>
+                <span class="truncate max-w-[80px] sm:max-w-[130px]">{currentModel().split("/").slice(-1)[0]}</span>
                 <ChevronDown size={10} class={`text-zinc-500 ml-0.5 shrink-0 transition-transform ${modelDropdownOpen() ? "rotate-180" : ""}`} />
               </button>
 
@@ -514,11 +513,11 @@ export const SharedComposer: Component<SharedComposerProps> = (props) => {
                       <button
                         type="button"
                         onClick={() => {
-                          props.onSelectModel(m.id);
+                          props.onSelectModel?.(m.id);
                           setModelDropdownOpen(false);
                         }}
                         class={`w-full text-left px-2 py-1.5 rounded-lg text-xs flex flex-col transition-colors cursor-pointer ${
-                          props.selectedModel === m.id
+                          currentModel() === m.id
                             ? "bg-emerald-950/40 text-emerald-300 font-medium border border-emerald-800/40"
                             : "hover:bg-zinc-800 text-zinc-300"
                         }`}
@@ -544,7 +543,7 @@ export const SharedComposer: Component<SharedComposerProps> = (props) => {
                 title="Alterar escopo de contexto"
               >
                 <Layers size={12} class="text-sky-400 shrink-0" />
-                <span class="truncate max-w-[60px] sm:max-w-[90px]">{props.selectedContext}</span>
+                <span class="truncate max-w-[60px] sm:max-w-[90px]">{currentContext()}</span>
                 <ChevronDown size={10} class={`text-zinc-500 ml-0.5 shrink-0 transition-transform ${contextDropdownOpen() ? "rotate-180" : ""}`} />
               </button>
 
@@ -558,11 +557,11 @@ export const SharedComposer: Component<SharedComposerProps> = (props) => {
                       <button
                         type="button"
                         onClick={() => {
-                          props.onSelectContext(c);
+                          props.onSelectContext?.(c);
                           setContextDropdownOpen(false);
                         }}
                         class={`w-full text-left px-2 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                          props.selectedContext === c
+                          currentContext() === c
                             ? "bg-sky-950/40 text-sky-300 font-medium border border-sky-800/40"
                             : "hover:bg-zinc-800 text-zinc-300"
                         }`}
@@ -603,7 +602,7 @@ export const SharedComposer: Component<SharedComposerProps> = (props) => {
               </button>
             </div>
 
-            {/* Botão de Configuração do Secretário (abre Drawer Lateral) */}
+            {/* Botão de Configuração do Secretário */}
             <Show when={props.onOpenConfig}>
               <button
                 type="button"
@@ -652,3 +651,5 @@ export const SharedComposer: Component<SharedComposerProps> = (props) => {
     </div>
   );
 };
+export const SharedComposer = ChatComposer;
+export default ChatComposer;

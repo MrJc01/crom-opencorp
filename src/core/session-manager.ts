@@ -187,13 +187,12 @@ export const PADRAO_ERRO_CREDITOS =
   /requires more credits|can only afford|insufficient balance|payment_required|402|credit balance|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits/i;
 
 export const MODELOS_ROTACAO_PADRAO = [
-  "openrouter/openrouter/free",
+  "openrouter/minimax/minimax-m3:free",
   "opencode/nemotron-3-ultra-free",
-  "openrouter/liquid/lfm-2.5-2.6b:free",
   "openrouter/google/gemini-2.5-flash",
-  "openrouter/qwen/qwen3-coder-flash",
-  "openrouter/minimax/minimax-m3",
+  "openrouter/deepseek/deepseek-chat",
   "opencode-go/glm-5.3-flash",
+  "openrouter/meta-llama/llama-3.3-70b-instruct",
 ];
 
 const TETO_RUN_PADRAO_MIN = 20;
@@ -221,7 +220,13 @@ export async function tetoRunPadraoMs(homeDir?: string): Promise<number | undefi
 }
 
 export function proximoModeloRotacao(lista: string[], modeloFalho: string): string | null {
-  return proximoModeloDaCadeia({ cadeia: lista, modeloAtual: modeloFalho });
+  if (!lista || lista.length === 0) return null;
+  const idx = lista.findIndex((m) => m.trim().toLowerCase() === modeloFalho.trim().toLowerCase());
+  if (idx < 0) {
+    return lista[0] !== modeloFalho ? lista[0]! : null;
+  }
+  const prox = lista[(idx + 1) % lista.length]!;
+  return prox !== modeloFalho ? prox : null;
 }
 
 export async function obterListaRotacaoCompleta(
@@ -1166,7 +1171,7 @@ export class SessionManager {
             aoEstourar: async (decorrido, motivo) => {
               mortePorTimeout = true;
               motivoTimeout = motivo ?? `timeout de ${Math.round(tetoMs / 1000)}s excedido`;
-              const mensagem = `${motivoTimeout} — opencode encerrado (acionando rotação de modelo)`;
+              const mensagem = `${motivoTimeout} — opencode morto (modelo travado?)`;
               registro.status = "falhou";
               (registro as any).erro = mensagem;
               registro.exit_code = null;
@@ -1181,10 +1186,15 @@ export class SessionManager {
     const resolverAposTimeout = async (): Promise<ResultadoRun> => {
       const morte = watchdog?.quandoMorto;
       if (morte) await morte;
-      const textoFinal = captura.join("") + (motivoTimeout ? `\n[watchdog: ${motivoTimeout}]` : "");
-      const retry = await this.tentarRetry(ws, opcoes, registro, textoFinal);
+      const retry = await this.tentarRetry(ws, opcoes, registro, captura.join(""));
       if (retry) return retry;
-      return { ...registro, captura: captura.join(""), custo_usd: null };
+      return {
+        ...registro,
+        status: "falhou",
+        exit_code: null,
+        captura: captura.join(""),
+        custo_usd: null,
+      };
     };
 
     let resultado;
@@ -1596,32 +1606,16 @@ export class SessionManager {
     registro: RegistroExecucao,
     captura: string,
   ): Promise<ResultadoRun | null> {
-    const tentativas = (opcoes.retryDe?.tentativas ?? 0) + 1;
-    const modelosJaTentados = [...new Set([...(opcoes.retryDe?.modelosTentados ?? []), registro.modelo])];
-    if (tentativas > 6) return null;
+    if (opcoes.retryDe) return null;
     if (registro.status === "hitl_pendente") return null;
+    if (!PADRAO_ERRO_MODELO.test(captura)) return null;
 
-    // Captura profunda defensiva no log do opencode caso o binário tenha ocultado o erro em UnknownError/ref
-    let logOpencode = "";
-    if (registro.exit_code !== 0 || /UnknownError|err_[a-z0-9]+/i.test(captura)) {
-      logOpencode = lerUltimasLinhasLogOpencode(this.homeDir, ws.id);
-    }
-    const textoAnaliseErros = `${captura}\n${logOpencode}`;
-
-    const falhaTimeout =
-      /timeout|inatividade|travado|opencode encerrado|opencode morto|nenhuma resposta do modelo/i.test(textoAnaliseErros) ||
-      (registro as any).erro?.includes?.("timeout") ||
-      (registro as any).erro?.includes?.("inatividade");
-
-    const falhaModelo = PADRAO_ERRO_MODELO.test(textoAnaliseErros) || falhaTimeout;
-    if (!falhaModelo && registro.exit_code === 0) return null;
-
-    // 1. Rotação de Contas (Camada 3: cota da conta ativa do motor esgotou)
-    const falhaCreditos = PADRAO_ERRO_CREDITOS.test(textoAnaliseErros);
+    const falhaCreditos = PADRAO_ERRO_CREDITOS.test(captura);
     const falhaCota =
       falhaCreditos ||
-      /usage limit|rate limit|quota|429|resource exhausted|status_cota|Weekly usage|Monthly usage|Monthly usage limit|Weekly usage limit/i.test(textoAnaliseErros);
+      /usage limit|rate limit|quota|429|resource exhausted|status_cota|Weekly usage|Monthly usage/i.test(captura);
 
+    // 1. Rotação de Contas (se houver conta alternativa com cota disponível)
     if (falhaCota) {
       let motorId = "";
       const mLow = registro.modelo.trim().toLowerCase();
@@ -1659,8 +1653,6 @@ export class SessionManager {
               retryDe: {
                 de_modelo: registro.modelo,
                 de_exec: registro.id,
-                tentativas,
-                modelosTentados: modelosJaTentados,
               },
               gatilho: opcoes.gatilho
                 ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, `conta:${proxConta.nome}`) }
@@ -1673,15 +1665,15 @@ export class SessionManager {
       }
     }
 
-    // 2. Rotação de Modelos / Fallback de Motores
+    // 2. Rotação de Modelo
     const proximoModelo = await this.proximoModeloDaRotacao(
       registro.modelo,
       ws.path,
       opcoes.agente,
-      modelosJaTentados,
+      [registro.modelo],
       falhaCreditos,
     );
-    if (!proximoModelo || proximoModelo === registro.modelo || modelosJaTentados.includes(proximoModelo)) {
+    if (!proximoModelo || proximoModelo === registro.modelo) {
       return null;
     }
 
@@ -1691,7 +1683,7 @@ export class SessionManager {
         ts: new Date().toISOString(),
         por: "opencorp",
         evento: "retry_modelo",
-        resumo: `falha de modelo/API (${registro.modelo}) — tentativa ${tentativas} rotacionando para ${proximoModelo}${falhaCreditos ? " (filtrando apenas gratuitos)" : ""} → ${idRetry}`,
+        resumo: `falha de modelo/API (${registro.modelo}) — 1 retry com ${proximoModelo}${falhaCreditos ? " (filtrando apenas gratuitos)" : ""} → ${idRetry}`,
       });
     } catch {
       /* journal best-effort */
@@ -1704,8 +1696,6 @@ export class SessionManager {
       retryDe: {
         de_modelo: registro.modelo,
         de_exec: registro.id,
-        tentativas,
-        modelosTentados: [...modelosJaTentados, proximoModelo],
       },
       gatilho: opcoes.gatilho
         ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, proximoModelo) }
@@ -1727,6 +1717,31 @@ export class SessionManager {
     apenasGratuitos: boolean = false,
   ): Promise<string | null> {
     if (!wsPath) return null;
+
+    // 1. settings.tests.rotation tem prioridade máxima se configurada
+    try {
+      const r = await new SettingsStore({ homeDir: this.homeDir, cwd: wsPath ?? this.homeDir }).resolve();
+      const configurada = [...r.origens.entries()].some(
+        ([chave, origem]) => chave.startsWith("tests.rotation") && origem !== "default",
+      );
+      if (configurada && Array.isArray(r.settings?.tests?.rotation) && r.settings.tests.rotation.length > 0) {
+        let lista = r.settings.tests.rotation;
+        if (apenasGratuitos) {
+          lista = lista.filter((m) => ehModeloGratuito(m));
+        }
+        if (modelosJaTentados.length > 0) {
+          const tentadosSet = new Set(modelosJaTentados);
+          const restantes = lista.filter((m) => !tentadosSet.has(m));
+          if (restantes.length > 0) return restantes[0]!;
+          return null;
+        }
+        return proximoModeloRotacao(lista, modeloFalho);
+      }
+    } catch {
+      /* settings indisponível */
+    }
+
+    // 2. Se o agente possui rotation declarada no frontmatter
     let ag: any = undefined;
     if (this.agentes && agenteId) {
       try {
@@ -1734,23 +1749,28 @@ export class SessionManager {
       } catch {}
     }
 
-    try {
-      const { cadeia } = resolverCadeiaModelosAgente({
-        agente: ag?.frontmatter,
-        wsPath,
-        modeloSolicitado: undefined,
-      });
-
-      return proximoModeloDaCadeia({
-        cadeia,
-        modeloAtual: modeloFalho,
-        modelosJaTentados,
-        apenasGratuitos,
-      });
-    } catch (err) {
-      console.warn("[session-manager] aviso na resolução de modelos:", err);
-      return null;
+    const rotAgente = ag?.frontmatter?.rotation || ag?.frontmatter?.model_fallback;
+    if (Array.isArray(rotAgente) && rotAgente.length > 0) {
+      let lista = rotAgente;
+      if (apenasGratuitos) {
+        lista = lista.filter((m) => ehModeloGratuito(m));
+      }
+      return (
+        proximoModeloDaCadeia({
+          cadeia: lista,
+          modeloAtual: modeloFalho,
+          modelosJaTentados,
+          apenasGratuitos,
+        }) ?? proximoModeloRotacao(lista, modeloFalho)
+      );
     }
+
+    // 3. Fallback: MODELOS_ROTACAO_PADRAO
+    let lista = MODELOS_ROTACAO_PADRAO;
+    if (apenasGratuitos) {
+      lista = lista.filter((m) => ehModeloGratuito(m));
+    }
+    return proximoModeloRotacao(lista, modeloFalho);
   }
 
   async listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<ResumoExecucao[]> {

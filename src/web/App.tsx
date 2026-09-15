@@ -26,7 +26,6 @@ const NotificacoesView = lazy(() => import("./views/Notificacoes").then((m) => (
 const ConfigView = lazy(() => import("./views/Config").then((m) => ({ default: m.ConfigView })));
 const DocsView = lazy(() => import("./views/Docs").then((m) => ({ default: m.DocsView })));
 const SecretarioDock = lazy(() => import("./components/SecretarioDock"));
-const PrototypesIndexView = lazy(() => import("./prototypes/secretario-tabs/PrototypesIndexView"));
 
 const ViewLoader: Component = () => (
   <div class="flex h-full w-full min-h-[50vh] items-center justify-center">
@@ -79,70 +78,55 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
   createEffect(() => {
     const ws = wsAtivo();
     const rota = location.pathname;
-    const rotasGlobais = ["/", "/home", "/secretario", "/ativos", "/docs", "/config", "/secrets", "/prototypes", "/prototipos"];
+    const rotasGlobais = ["/", "/home", "/secretario", "/ativos", "/docs", "/config", "/secrets"];
     if (!ws && !rotasGlobais.some((r) => rota === r || rota.startsWith(r + "/"))) {
       navigate("/home", { replace: true });
     }
   });
 
-  const isPrototype = () =>
-    location.pathname.startsWith("/prototypes") || location.pathname.startsWith("/prototipos");
-
   return (
-    <Show
-      when={!isPrototype()}
-      fallback={
-        <div id="app" class="h-screen w-screen overflow-hidden bg-black text-zinc-100 antialiased font-sans">
-          <Suspense fallback={<ViewLoader />}>
-            {props.children}
-          </Suspense>
-          <ToastContainer />
-        </div>
-      }
-    >
-      <div id="app" class="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased font-sans">
-        <Show when={!autenticado()}>
-          <LoginModal />
-        </Show>
-        
-        {/* Sidebar montada quando há workspace ativo OU quando drawer mobile for aberta */}
-        <Show when={wsAtivo() || sidebarMobileAberta()}>
-          <Sidebar />
-        </Show>
+    <div id="app" class="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased font-sans">
+      <Show when={!autenticado()}>
+        <LoginModal />
+      </Show>
+      
+      {/* Sidebar montada quando há workspace ativo OU quando drawer mobile for aberta */}
+      <Show when={wsAtivo() || sidebarMobileAberta()}>
+        <Sidebar />
+      </Show>
 
-        <div class="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
-          <Show when={wsAtivo()} fallback={<GlobalTitlebar />}>
-            <Topbar />
-          </Show>
-          <div class="flex flex-1 min-h-0 overflow-hidden">
-            <main class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative bg-zinc-950">
-              <Suspense fallback={<ViewLoader />}>
-                {props.children}
-              </Suspense>
-            </main>
-            <Show when={dockSecretarioAberto() && location.pathname !== "/secretario"}>
-              <Suspense fallback={null}>
-                <SecretarioDock />
-              </Suspense>
-            </Show>
-          </div>
-        </div>
-        {/* Botão flutuante do Secretário: abre o chat lateral em qualquer página */}
-        <Show when={location.pathname !== "/secretario" && !dockSecretarioAberto()}>
-          <button
-            type="button"
-            data-testid="secretario-fab"
-            onClick={() => setDockSecretarioAberto(true)}
-            class="fixed bottom-4 right-4 lg:bottom-6 lg:right-6 z-40 h-12 w-12 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950/50 flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer"
-            title="Abrir Secretário (Ctrl+J)"
-            aria-label="Abrir Secretário"
-          >
-            <Bot size={22} />
-          </button>
+      <div class="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
+        <Show when={wsAtivo()} fallback={<GlobalTitlebar />}>
+          <Topbar />
         </Show>
-        <ToastContainer />
+        <div class="flex flex-1 min-h-0 overflow-hidden">
+          <main class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative bg-zinc-950">
+            <Suspense fallback={<ViewLoader />}>
+              {props.children}
+            </Suspense>
+          </main>
+          <Show when={dockSecretarioAberto() && location.pathname !== "/secretario"}>
+            <Suspense fallback={null}>
+              <SecretarioDock />
+            </Suspense>
+          </Show>
+        </div>
       </div>
-    </Show>
+      {/* Botão flutuante do Secretário: abre o chat lateral em qualquer página */}
+      <Show when={location.pathname !== "/secretario" && !dockSecretarioAberto()}>
+        <button
+          type="button"
+          data-testid="secretario-fab"
+          onClick={() => setDockSecretarioAberto(true)}
+          class="fixed bottom-4 right-4 lg:bottom-6 lg:right-6 z-40 h-12 w-12 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950/50 flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer"
+          title="Abrir Secretário (Ctrl+J)"
+          aria-label="Abrir Secretário"
+        >
+          <Bot size={22} />
+        </button>
+      </Show>
+      <ToastContainer />
+    </div>
   );
 };
 
@@ -153,10 +137,6 @@ export const App: Component = () => {
         <Route path="/" component={HomeView} />
         <Route path="/home" component={HomeView} />
         <Route path="/secretario" component={SecretarioView} />
-        <Route path="/prototypes" component={PrototypesIndexView} />
-        <Route path="/prototypes/:variant" component={PrototypesIndexView} />
-        <Route path="/prototipos" component={PrototypesIndexView} />
-        <Route path="/prototipos/:variant" component={PrototypesIndexView} />
         <Route path="/ativos" component={AtivosView} />
         <Route path="/agente/:id" component={AgentCard} />
         <Route path="/workspace" component={WorkspaceView} />

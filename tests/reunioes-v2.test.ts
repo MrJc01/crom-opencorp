@@ -43,7 +43,7 @@ describe("API — Reuniões v2 (sala viva)", () => {
 
   const fakeSessoes: SessaoApi = {
     async rodar(opcoes) {
-      if (roteiro.travar) {
+      if (roteiro.travar && opcoes.ordem?.includes("pauta interrompida")) {
         turnoEmVoo += 1;
         while (!gateAberto) await sleep(5);
       }

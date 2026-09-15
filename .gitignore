@@ -5,8 +5,7 @@ node_modules/
 
 # Compilação e Build
 dist/
-web-dist/app/
-web-dist/src/
+web-dist/
 
 # OpenCorp Runtime e Workspaces
 workspaces/

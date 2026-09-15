@@ -9,7 +9,7 @@ export * from "./agents.js";
 export * from "./scheduler.js";
 export * from "./config.js";
 export * from "./docs.js";
-export * from "./secretario.js";
+export * from "./secretario/index.js";
 export * from "./legacy.js";
 export * from "./system.js";
 export * from "./files.js";

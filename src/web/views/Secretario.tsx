@@ -15,16 +15,7 @@ import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { useChat, MODELOS_PRESETS_POPULARES } from "../lib/chat/store";
 import { fetchApi, wsAtivo } from "../lib/context";
-
-/** Sincroniza `?sessao=` da URL com o store (deep-link preservado). */
-function sincronizarUrlSessao(id: string | null) {
-  try {
-    const url = new URL(window.location.href);
-    if (id) url.searchParams.set("sessao", id);
-    else url.searchParams.delete("sessao");
-    window.history.replaceState({}, "", url.toString());
-  } catch {}
-}
+import { sincronizarUrlSessao } from "../lib/chat/sessions-store";
 
 export const SecretarioView: Component = () => {
   const chat = useChat();
@@ -68,7 +59,6 @@ export const SecretarioView: Component = () => {
   });
 
   const abrirPainelLateral = async () => {
-    // Abre na hora (conteúdo preenche ao chegar) — antes travava até 2 fetches sequenciais.
     setConfigLateralAberta(true);
     await chat.abrirPainelLateral();
   };
@@ -84,6 +74,7 @@ export const SecretarioView: Component = () => {
 
   return (
     <div class="flex flex-col h-full w-full overflow-hidden bg-zinc-950 relative">
+
       <Show when={chat.alertaFalhas()}>
         <div class="mx-3 mt-2 px-3 py-2 rounded-xl bg-amber-950/50 border border-amber-700/50 text-[12px] text-amber-200 flex items-center gap-2">
           <AlertCircle size={14} class="text-amber-400 flex-shrink-0" />
@@ -93,6 +84,7 @@ export const SecretarioView: Component = () => {
           </button>
         </div>
       </Show>
+
       <UniversalChat
         mensagens={chat.mensagens()}
         carregando={chat.carregando()}
@@ -220,7 +212,7 @@ export const SecretarioView: Component = () => {
               </div>
             </Show>
 
-            {/* Motor de Execução (Harness) - Inferido automaticamente pelo formato unificado */}
+            {/* Motor de Execução (Harness) */}
             <div class="p-2.5 rounded-lg bg-zinc-900/60 border border-zinc-800/80 flex items-center justify-between">
               <div class="space-y-0.5">
                 <span class="font-medium text-zinc-300 block">Motor de Execução (Harness)</span>
@@ -285,7 +277,6 @@ export const SecretarioView: Component = () => {
                 onInput={(e) => chat.setRotacaoConfig(e.currentTarget.value)}
               />
 
-              {/* Dica discreta de sintaxe */}
               <div class="p-2.5 rounded-lg bg-zinc-900/40 border border-zinc-800/80 space-y-1">
                 <div class="flex items-center gap-1 text-zinc-300 font-medium">
                   <Info size={12} class="text-emerald-400" />
