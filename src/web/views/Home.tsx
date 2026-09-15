@@ -296,7 +296,11 @@ export const HomeView: Component = () => {
       });
       const secSessoes = Array.isArray(getVal(sSec, [])) ? getVal(sSec, []) : [];
       const secExec = secSessoes.find((s: any) => s.executando || s.status === "executando") || dStatus?.secretario_executando;
-      const emAndamento = dExecs.find((e: any) => e.status === "executando")
+      const emAndamento = dExecs.find((e: any) => {
+        if (e.status !== "executando") return false;
+        const decorrido = e.inicio ? Date.now() - new Date(e.inicio).getTime() : 0;
+        return decorrido <= 20 * 60_000;
+      })
         || (fluxoExec ? {
           id: fluxoExec.id,
           agente: fluxoExec.agente || `flow:${fluxoExec.flow || "?"}`,

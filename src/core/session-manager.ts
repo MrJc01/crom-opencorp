@@ -1823,6 +1823,7 @@ export class SessionManager {
       registro.fim = new Date().toISOString();
       registro.duracao_ms = Number.isFinite(inicio) ? Date.now() - inicio : 0;
       registro.exit_code = null;
+      const erroMsg = `zombie: registro "executando" sem pid há >60s — processo morreu sem finalizar (reaper) — reconciliado em ${registro.fim}`;
       await this.finalizar(
         { path: wsPath, id: "" },
         registro,
@@ -1830,11 +1831,14 @@ export class SessionManager {
         "falhou",
         null,
         registro.duracao_ms,
-        `zombie: registro "executando" sem pid há >60s — processo morreu sem finalizar (reaper) — reconciliado em ${registro.fim}`,
+        erroMsg,
         "",
         null,
       );
-      meta.extras = { ...extras, status: "falhou", duracao_ms: registro.duracao_ms, fim: registro.fim, pid: null };
+      meta.extras = { ...extras, status: "falhou", duracao_ms: registro.duracao_ms, fim: registro.fim, pid: null, erro: erroMsg };
+      try {
+        this.registros.corpDb(wsPath).atualizarStatusExecucao(meta.id, "falhou", registro.fim, erroMsg);
+      } catch {}
       return;
     }
     let viva = true;
@@ -1866,6 +1870,9 @@ export class SessionManager {
     registro.fim = new Date().toISOString();
     registro.duracao_ms = duracao;
     registro.exit_code = null;
+    const erroMsg = viva
+      ? `zombie: processo (pid ${pid}) estourou TTL de 15min sem finalizar (reaper timeout) — terminado em ${registro.fim}`
+      : `zombie: processo (pid ${pid}) morreu sem finalizar (reaper) — reconciliado em ${registro.fim}`;
     await this.finalizar(
       { path: wsPath, id: "" },
       registro,
@@ -1873,13 +1880,14 @@ export class SessionManager {
       "falhou",
       null,
       duracao,
-      viva
-        ? `zombie: processo (pid ${pid}) estourou TTL de 15min sem finalizar (reaper timeout) — terminado em ${registro.fim}`
-        : `zombie: processo (pid ${pid}) morreu sem finalizar (reaper) — reconciliado em ${registro.fim}`,
+      erroMsg,
       "",
       null,
     );
-    meta.extras = { ...extras, status: "falhou", duracao_ms: duracao, fim: registro.fim, pid: null };
+    meta.extras = { ...extras, status: "falhou", duracao_ms: duracao, fim: registro.fim, pid: null, erro: erroMsg };
+    try {
+      this.registros.corpDb(wsPath).atualizarStatusExecucao(meta.id, "falhou", registro.fim, erroMsg);
+    } catch {}
   }
 
   async reconciliarZombieSeNecessario(wsPath: string, execId: string): Promise<MetaRegistro | null> {
@@ -1904,18 +1912,95 @@ export class SessionManager {
 
   /**
    * Anti-stale: reconcilia TODAS as execuções "executando" cujo processo já
-   * morreu sem finalizar (zombies). @returns ids que foram reconciliados.
+   * morreu sem finalizar (zombies) ou divergiram entre o registro em disco e o banco.
+   * @returns ids que foram reconciliados.
    */
   async reconciliarZombies(wsPath: string): Promise<string[]> {
-    const metas = await this.registros.listar(wsPath, "execucoes");
     const reconciliados: string[] = [];
+    const metas = await this.registros.listar(wsPath, "execucoes");
+    const metasPorId = new Map<string, MetaRegistro>();
+
     for (const meta of metas) {
+      metasPorId.set(meta.id, meta);
       const extras = (meta.extras ?? {}) as Record<string, unknown>;
-      if (extras.status !== "executando") continue;
-      await this.reconciliarZombie(wsPath, meta);
-      const depois = (meta.extras ?? {}) as Record<string, unknown>;
-      if (depois.status === "falhou") reconciliados.push(meta.id);
+      if (extras.status === "executando") {
+        await this.reconciliarZombie(wsPath, meta);
+        const depois = (meta.extras ?? {}) as Record<string, unknown>;
+        if (depois.status !== "executando") {
+          reconciliados.push(meta.id);
+          try {
+            this.registros.corpDb(wsPath).atualizarStatusExecucao(
+              meta.id,
+              String(depois.status || "falhou"),
+              depois.fim as string | undefined,
+              (depois.erro as string) ?? null,
+            );
+          } catch {}
+        }
+      } else {
+        // Se no meta.json já está finalizado, garante sincronização no banco corpDb
+        try {
+          const noBanco = this.registros.corpDb(wsPath).obterExecucao(meta.id);
+          if (noBanco && noBanco.status === "executando") {
+            this.registros.corpDb(wsPath).atualizarStatusExecucao(
+              meta.id,
+              String(extras.status || "falhou"),
+              (extras.fim as string) ?? new Date().toISOString(),
+              (extras.erro as string) ?? null,
+            );
+            reconciliados.push(meta.id);
+          }
+        } catch {}
+      }
     }
+
+    // Varre execuções no banco SQLite que ainda constem como "executando"
+    try {
+      const execsNoBanco = this.registros.corpDb(wsPath).listarExecucoes({ status: "executando" });
+      for (const e of execsNoBanco) {
+        if (reconciliados.includes(e.id)) continue;
+        const meta = metasPorId.get(e.id);
+        if (meta) {
+          const extras = (meta.extras ?? {}) as Record<string, unknown>;
+          if (extras.status !== "executando") {
+            this.registros.corpDb(wsPath).atualizarStatusExecucao(
+              e.id,
+              String(extras.status || "falhou"),
+              (extras.fim as string) ?? e.fim ?? new Date().toISOString(),
+              (extras.erro as string) ?? null,
+            );
+            reconciliados.push(e.id);
+          } else {
+            await this.reconciliarZombie(wsPath, meta);
+            const depois = (meta.extras ?? {}) as Record<string, unknown>;
+            if (depois.status !== "executando") {
+              reconciliados.push(e.id);
+              this.registros.corpDb(wsPath).atualizarStatusExecucao(
+                e.id,
+                String(depois.status || "falhou"),
+                (depois.fim as string) ?? new Date().toISOString(),
+                (depois.erro as string) ?? null,
+              );
+            }
+          }
+        } else {
+          // Sem meta.json: se iniciou há mais de 60s, finaliza no banco como falhou
+          const inicioMs = e.inicio ? Date.parse(e.inicio) : 0;
+          if (!inicioMs || Date.now() - inicioMs > 60_000) {
+            this.registros.corpDb(wsPath).atualizarStatusExecucao(
+              e.id,
+              "falhou",
+              new Date().toISOString(),
+              "zombie: processo morreu sem finalizar (reconciliado)",
+            );
+            reconciliados.push(e.id);
+          }
+        }
+      }
+    } catch {
+      /* best-effort na varredura do banco */
+    }
+
     return reconciliados;
   }
 

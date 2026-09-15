@@ -170,7 +170,11 @@ export const Topbar: Component = () => {
         return s === "em-andamento" || s === "em_andamento";
       });
       const emAndamento =
-        dExecs.find((e: any) => e.status === "executando") ||
+        dExecs.find((e: any) => {
+          if (e.status !== "executando") return false;
+          const decorrido = e.inicio ? Date.now() - new Date(e.inicio).getTime() : 0;
+          return decorrido <= 20 * 60_000;
+        }) ||
         (fluxoExec ? {
           id: fluxoExec.id,
           agente: fluxoExec.agente || `flow:${fluxoExec.flow || "?"}`,

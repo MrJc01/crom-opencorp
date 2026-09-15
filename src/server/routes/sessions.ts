@@ -428,6 +428,9 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
   // ── GET /execucoes ─────────────────────────────────────────────
   if (rota === "/execucoes" && req.method === "GET") {
     const ws = await resolverWs(url);
+    if (sessoes && typeof sessoes.reconciliarZombies === "function") {
+      await sessoes.reconciliarZombies(ws.path).catch(() => []);
+    }
     const filtro = {
       agente: url.searchParams.get("agente")?.trim() || undefined,
       gatilho_tipo: url.searchParams.get("gatilho")?.trim() || undefined,

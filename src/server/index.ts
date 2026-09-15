@@ -78,6 +78,7 @@ export interface SessaoApi {
   logDe(wsPath: string, id: string): Promise<string>;
   cancelar?(wsPath: string, id: string): Promise<boolean>;
   reconciliarZombieSeNecessario?(wsPath: string, id: string): Promise<unknown>;
+  reconciliarZombies?(wsPath: string): Promise<string[]>;
   proximoModeloDaRotacao?(modeloFalho: string, wsPath?: string, agenteId?: string, modelosJaTentados?: string[], apenasGratuitos?: boolean): Promise<string | null>;
 }
 

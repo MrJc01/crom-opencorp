@@ -458,7 +458,7 @@ export class CorpDb {
     };
   }
 
-  atualizarStatusExecucao(id: string, status: string, fim?: string): void {
+  atualizarStatusExecucao(id: string, status: string, fim?: string, erro?: string | null): void {
     try {
       const fimMs = fim ? parseDataParaMs(fim) : Date.now();
       this.db
@@ -466,10 +466,11 @@ export class CorpDb {
           `UPDATE sessions
            SET status = @status,
                fim_ms = @fim_ms,
-               duracao_ms = CASE WHEN inicio_ms > 0 THEN (@fim_ms - inicio_ms) ELSE duracao_ms END
+               duracao_ms = CASE WHEN inicio_ms > 0 THEN (@fim_ms - inicio_ms) ELSE duracao_ms END,
+               erro = CASE WHEN @erro IS NOT NULL THEN @erro ELSE erro END
            WHERE id = @id`,
         )
-        .run({ id, status, fim_ms: fimMs });
+        .run({ id, status, fim_ms: fimMs, erro: erro ?? null });
     } catch {}
   }
 

@@ -210,7 +210,8 @@ export const AgentesView: Component = () => {
       // Quem está executando agora (dot AO VIVO nos cards)
       const mapa: Record<string, string> = {};
       for (const e of listaExecs || []) {
-        if (e.status === "executando" && e.agente) mapa[e.agente] = e.id;
+        const decorrido = e.inicio ? Date.now() - new Date(e.inicio).getTime() : 0;
+        if (e.status === "executando" && e.agente && decorrido <= 20 * 60_000) mapa[e.agente] = e.id;
       }
       setExecutandoMapa(mapa);
       if (modInfo?.default_model) setModeloPadraoGlobal(modInfo.default_model);
