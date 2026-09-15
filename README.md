@@ -43,9 +43,9 @@ flowchart TD
         AGENTES["👷 Catálogo de Agentes Especialistas\nPautador, Editor, Redator, SRE, etc."]
     end
 
-    SCHEDULER -->|Ativa esteiras no horário (Cron)| FLUXOS
+    SCHEDULER -->|Ativa esteiras no horário via Cron| FLUXOS
     FLUXOS -->|Orquestra nós com prompts para| AGENTES
-    FLUXOS -->|Nós task_create geram| KANBAN
+    FLUXOS -->|Gera e atualiza tarefas no| KANBAN
     AGENTES <-->|Consultam e entregam trabalho no| KANBAN
     REUNIOES -->|Decisões da ATA viram| KANBAN
 
