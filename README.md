@@ -43,9 +43,10 @@ flowchart TD
         AGENTES["👷 Catálogo de Agentes Especialistas\nPautador, Editor, Redator, SRE, etc."]
     end
 
-    SCHEDULER -->|Ativa rotinas no horário| FLUXOS
-    SCHEDULER -->|Despacha tarefas da fila para| AGENTES
-    AGENTES -->|Executam o trabalho no| KANBAN
+    SCHEDULER -->|Ativa esteiras no horário (Cron)| FLUXOS
+    FLUXOS -->|Orquestra nós com prompts para| AGENTES
+    FLUXOS -->|Nós task_create geram| KANBAN
+    AGENTES <-->|Consultam e entregam trabalho no| KANBAN
     REUNIOES -->|Decisões da ATA viram| KANBAN
 
     style DONO fill:#181825,stroke:#89b4fa,color:#cdd6f4
@@ -56,10 +57,10 @@ flowchart TD
 
 ### Os 5 Pilares de uma Empresa no OpenCorp:
 1. **🤖 Secretário Executivo (`/secretario`)**: Seu braço direito com chat em tempo real via SSE. Ele tem permissões executivas completas (`@secretario-exec`) para investigar logs, rodar comandos no terminal, criar tarefas e resolver problemas de ponta a ponta.
-2. **📋 Tasks & Kanban (`/tasks`)**: O quadro de governança transparente baseado em SQLite (`tasks.db`). Evita trabalho invisível de agentes: tarefas fluem por `aguardando` → `fazendo` → `revisão/HITL` → `feito`. Ações sensíveis exigem aprovação humana (*Human-In-The-Loop*).
-3. **⚡ Fluxos & Studio Visual (`/fluxos`)**: Construtor visual de workflows em grafo (estilo n8n). Conecte nós de gatilho (*Cron/Webhook*), nós de agentes, nós de decisão/condição e nós de ação/script. Salvos em `.opencorp/flows/<id>.json`.
+2. **📋 Tasks & Kanban (`/tasks`)**: O quadro de governança transparente baseado em SQLite (`tasks.db`). Funciona como a camada de persistência e consulta/auditoria de trabalho para operadores e agentes: tarefas fluem por `aguardando` → `fazendo` → `revisão/HITL` → `feito`. Ações sensíveis exigem aprovação humana (*Human-In-The-Loop*).
+3. **⚡ Fluxos & Studio Visual (`/fluxos`)**: O cérebro orquestrador das esteiras em grafo (estilo n8n). Conecte nós de gatilho (*Cron/Webhook*), nós de agentes especialistas (com seus respectivos prompts e contextos), nós de tarefas (*task_create*), decisões e scripts. Salvos em `.opencorp/flows/<id>.json`.
 4. **👥 Reuniões Multi-Agente (`/reunioes`)**: Mesa redonda onde agentes de diferentes papéis (CEO, Especialista SEO, Dev, Redator) debatem um desafio, geram uma ATA oficial e transformam deliberações automaticamente em novas Tasks no Kanban.
-5. **⏰ Scheduler & Daemon 24/7 (`opencorp scheduler`)**: O relógio do sistema que roda em background (tick a cada 15-30s), despachando rotinas e executando automações com claim atômico e recarga instantânea de novos jobs sem downtime.
+5. **⏰ Scheduler & Daemon 24/7 (`opencorp scheduler`)**: O relógio do sistema que roda em background (tick a cada 15-30s), disparando gatilhos temporais para os Fluxos e rotinas com claim atômico e recarga instantânea de novos jobs sem downtime.
 
 ---
 
