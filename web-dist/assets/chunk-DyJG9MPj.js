@@ -1,1 +1,0 @@
-import{e as a,A as r,C as c}from"./app.js";var o=[["path",{d:"m21 21-4.34-4.34",key:"14j7rj"}],["circle",{cx:"11",cy:"11",r:"8",key:"4ej97u"}]],s=e=>a(c,r(e,{iconNode:o,name:"search"})),m=s;export{m as s};
