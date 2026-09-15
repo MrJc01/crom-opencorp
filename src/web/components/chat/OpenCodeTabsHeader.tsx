@@ -62,8 +62,8 @@ function salvarAbasNoStorage(ids: string[]) {
 function formatarTituloAba(titulo?: string): string {
   if (!titulo) return "Nova conversa";
   // Remove prefixos automáticos como [WORKSPACE ATIVO: "..."]
-  const limpo = titulo.replace(/^\[WORKSPACE[^\]]+\]\s*/i, "").trim();
-  return limpo || titulo;
+  const limpo = titulo.replace(/^\[WORKSPACE[^\]]+\]\s*(?:\([^)]*\)\s*)?/i, "").trim();
+  return limpo || "Conversa";
 }
 
 export const OpenCodeTabsHeader: Component<OpenCodeTabsHeaderProps> = (props) => {
@@ -196,16 +196,17 @@ export const OpenCodeTabsHeader: Component<OpenCodeTabsHeaderProps> = (props) =>
                   {/* Botão Fechar Aba (x) */}
                   <button
                     type="button"
+                    data-testid="btn-fechar-aba"
                     onClick={(e) => fecharAba(tab.id, e)}
-                    class={`h-5 w-5 rounded-md flex items-center justify-center transition-colors shrink-0 ml-0.5 ${
+                    class={`h-5.5 w-5.5 rounded-md flex items-center justify-center shrink-0 ml-1 cursor-pointer transition-colors ${
                       isActive()
-                        ? "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/70"
-                        : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
+                        ? "text-zinc-300 hover:text-rose-400 hover:bg-zinc-800/90 active:scale-95"
+                        : "text-zinc-400 hover:text-rose-400 hover:bg-zinc-800/80 active:scale-95"
                     }`}
                     title="Fechar aba"
                     aria-label={`Fechar aba ${tab.titulo}`}
                   >
-                    <X size={13} strokeWidth={2} />
+                    <X size={14} class="w-3.5 h-3.5 shrink-0" strokeWidth={2.2} />
                   </button>
                 </div>
               </div>
@@ -222,7 +223,7 @@ export const OpenCodeTabsHeader: Component<OpenCodeTabsHeaderProps> = (props) =>
           title="Nova sessão"
           aria-label="Nova sessão"
         >
-          <Plus size={16} strokeWidth={2} />
+          <Plus size={16} class="w-4 h-4 shrink-0" strokeWidth={2} />
         </button>
       </nav>
 

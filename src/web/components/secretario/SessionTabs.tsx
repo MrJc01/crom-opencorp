@@ -63,10 +63,11 @@ export const SessionTabs: Component<SessionTabsProps> = (props) => {
                       e.stopPropagation();
                       props.onFecharSessao?.(sessao.id);
                     }}
-                    class="opacity-0 group-hover:opacity-100 hover:text-rose-400 transition-opacity p-0.5 rounded cursor-pointer shrink-0 ml-0.5"
+                    class="text-zinc-400 hover:text-rose-400 hover:bg-zinc-800/80 p-1 rounded-md transition-all cursor-pointer shrink-0 ml-1"
                     title="Fechar sessão"
+                    aria-label={`Fechar sessão ${sessao.title || ""}`}
                   >
-                    <X size={11} />
+                    <X size={14} class="w-3.5 h-3.5 shrink-0" strokeWidth={2.2} />
                   </button>
                 </Show>
               </div>
