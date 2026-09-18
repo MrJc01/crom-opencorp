@@ -581,8 +581,8 @@ export class WorkspaceManager {
             : [
                 padrao,
                 "opencode/nemotron-3-ultra-free",
-                "openrouter/liquid/lfm-2.5-2.6b:free",
-                "openrouter/openrouter/free",
+                "opencode-go/glm-5.3-flash",
+                "openrouter/qwen/qwen3.8-27b:free",
               ];
       configWorkspace.modelos = { padrao, rotacao };
       alterado = true;
