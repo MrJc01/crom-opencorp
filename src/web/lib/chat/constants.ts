@@ -26,11 +26,17 @@ export const MODELOS_SUGERIDOS: Record<string, string[]> = {
     "github/gpt-4o-mini",
   ],
   opencode: [
-    "opencode-go/glm-5.3-flash",
-    "opencode-go/glm-5.3",
     "opencode/nemotron-3-ultra-free",
     "opencode/nemotron-3.5-lightning-free",
+    "opencode/mimo-v2.5-free",
+    "opencode/ling-3.0-flash-fin-free",
+    "opencode/muse-spark-1.3-contributor-free",
+    "opencode/muse-spark-1.2-contributor-free",
     "opencode/big-pickle",
+    "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+    "openrouter/nvidia/nemotron-3.5-lightning:free",
+    "openrouter/google/gemma-4-26b-a4b-it:free",
+    "opencode-go/glm-5.3-flash",
   ],
   "claude-code": [
     "claude-3-7-sonnet-20250219",
@@ -42,10 +48,14 @@ export const MODELOS_SUGERIDOS: Record<string, string[]> = {
 
 /** Presets modernos de modelos no formato unificado provedor/modelo. */
 export const MODELOS_PRESETS_POPULARES: string[] = [
-  "openrouter/google/gemini-2.5-flash",
   "opencode/nemotron-3-ultra-free",
-  "openrouter/liquid/lfm-2.5-2.6b:free",
-  "openrouter/openrouter/free",
+  "opencode/nemotron-3.5-lightning-free",
+  "opencode/mimo-v2.5-free",
+  "opencode/ling-3.0-flash-fin-free",
+  "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+  "openrouter/nvidia/nemotron-3.5-lightning:free",
+  "openrouter/google/gemma-4-26b-a4b-it:free",
+  "openrouter/google/gemini-2.5-flash",
   "openrouter/anthropic/claude-3.7-sonnet",
   "openrouter/openai/gpt-4o-mini",
 ];

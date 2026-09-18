@@ -24,20 +24,20 @@ function colorize(text: string, color: "green" | "red" | "yellow" | "cyan" | "ma
 
 const MODELOS_CATALOGO_BASE = [
   "opencode/nemotron-3-ultra-free",
-  "opencode-go/glm-5.3-flash",
-  "openrouter/google/gemini-2.5-flash",
-  "openrouter/qwen/qwen3.8-27b:free",
-  "openrouter/minimax/minimax-m3",
   "opencode/nemotron-3.5-lightning-free",
-  "opencode/big-pickle",
-  "opencode/ling-3.0-flash-fin-free",
   "opencode/mimo-v2.5-free",
+  "opencode/ling-3.0-flash-fin-free",
+  "opencode/muse-spark-1.3-contributor-free",
+  "opencode/muse-spark-1.2-contributor-free",
+  "opencode/big-pickle",
+  "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+  "openrouter/nvidia/nemotron-3.5-lightning:free",
+  "openrouter/google/gemma-4-26b-a4b-it:free",
+  "openrouter/nex-agi/nex-n2.5-mini:free",
+  "openrouter/google/gemini-2.5-flash",
+  "opencode-go/glm-5.3-flash",
   "opencode-go/deepseek-v4-flash",
   "opencode-go/qwen3.6-plus",
-  "openrouter/meta-llama/llama-3.3-70b-instruct:free",
-  "openrouter/meta-llama/llama-3.1-8b-instruct:free",
-  "openrouter/liquid/lfm-2.5-2.6b:free",
-  "openrouter/openrouter/free",
 ];
 
 function coletarModelosDisponiveis(home: string): string[] {

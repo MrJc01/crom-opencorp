@@ -850,6 +850,7 @@ export class FlowStore {
         extras: {
           status: "executando",
           tipo: "flow",
+          pid: process.pid,
           flow: flowId,
           nome: flow.nome,
           entrada,

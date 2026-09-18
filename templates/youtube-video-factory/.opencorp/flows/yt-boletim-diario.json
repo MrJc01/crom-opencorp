@@ -1,0 +1,109 @@
+{
+  "id": "yt-boletim-diario",
+  "nome": "yt-boletim-diario",
+  "nos": [
+    {
+      "id": "gatilho-cron",
+      "tipo": "cron",
+      "config": {
+        "expressao_cron": "17 9 * * *",
+        "job_id": "sch-mtugdpnj0ygm",
+        "job_nome": "yt-boletim-diario"
+      },
+      "pos": {
+        "x": 60,
+        "y": 120
+      }
+    },
+    {
+      "id": "checar-boletim",
+      "tipo": "script",
+      "config": {
+        "runtime": "node",
+        "codigo": "try { const fs = require('node:fs'); const path = require('node:path'); const ws = process.cwd(); const hoje = new Date().toLocaleDateString('sv-SE'); const bp = path.join(ws, 'registries/boletim', `boletim-${hoje}.json`); const sp = path.join(ws, 'exports/longos', `blt-${hoje.replace(/-/g, '')}/video_final.mp4`); if (fs.existsSync(sp)) { console.log('BOLETIM_JA_PRODUZIDO'); process.exit(0); } if (!fs.existsSync(bp)) { console.log(`PRECISA_BOLETIM:${hoje}`); } else { console.log('BOLETIM_ROTEIRO_OK'); } } catch (e) { console.log('ERRO_BOLETIM:' + e.message); }",
+        "timeout_ms": 30000
+      },
+      "pos": {
+        "x": 240,
+        "y": 120
+      }
+    },
+    {
+      "id": "tem-boletim",
+      "tipo": "condicao",
+      "config": {
+        "chave": "PRECISA_BOLETIM",
+        "entao": "redigir-boletim",
+        "senao": "produzir-boletim-longo"
+      },
+      "pos": {
+        "x": 420,
+        "y": 120
+      }
+    },
+    {
+      "id": "redigir-boletim",
+      "tipo": "agente",
+      "join": "any",
+      "config": {
+        "agente": "pautador-youtube",
+        "ordem": "Siga EXATAMENTE a ordem completa do arquivo registries/ordens/boletim-ordem.txt (leia-o primeiro). Pesquise as principais notícias de IA e tecnologia das últimas 24h e redija o roteiro do boletim diário gravando em registries/boletim/boletim-<AAAA-MM-DD>.json."
+      },
+      "pos": {
+        "x": 600,
+        "y": 40
+      }
+    },
+    {
+      "id": "produzir-boletim-longo",
+      "tipo": "script",
+      "join": "any",
+      "config": {
+        "comando": "node scripts/produzir_longo.mjs",
+        "timeout_ms": 300000
+      },
+      "pos": {
+        "x": 600,
+        "y": 200
+      }
+    },
+    {
+      "id": "saida",
+      "tipo": "saida",
+      "join": "any",
+      "config": {
+        "registro": "resultados/resultado"
+      },
+      "pos": {
+        "x": 780,
+        "y": 120
+      }
+    }
+  ],
+  "arestas": [
+    {
+      "de": "gatilho-cron",
+      "para": "checar-boletim"
+    },
+    {
+      "de": "checar-boletim",
+      "para": "tem-boletim"
+    },
+    {
+      "de": "tem-boletim",
+      "para": "redigir-boletim"
+    },
+    {
+      "de": "tem-boletim",
+      "para": "produzir-boletim-longo"
+    },
+    {
+      "de": "redigir-boletim",
+      "para": "produzir-boletim-longo"
+    },
+    {
+      "de": "produzir-boletim-longo",
+      "para": "saida"
+    }
+  ]
+}

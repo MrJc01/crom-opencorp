@@ -16,25 +16,66 @@
       }
     },
     {
-      "id": "executar-script",
+      "id": "checar-pauta",
       "tipo": "script",
       "config": {
-        "comando": "node /home/j/.opencorp/workspaces/yt-factory-01/scripts/produzir_video.mjs",
-        "timeout_ms": 120000
+        "runtime": "node",
+        "codigo": "try { const fs = require('node:fs'); const path = require('node:path'); const ws = process.cwd(); const pautasPath = path.join(ws, 'registries/pautas.json'); const rotDir = path.join(ws, 'registries/roteiros'); if (!fs.existsSync(pautasPath)) { console.log('SEM_PAUTAS'); process.exit(0); } const data = JSON.parse(fs.readFileSync(pautasPath, 'utf8')); const pendentes = (data.pautas || []).filter(p => p.status === 'pendente'); if (pendentes.length === 0) { console.log('SEM_PAUTAS'); process.exit(0); } const semRot = pendentes.find(p => !fs.existsSync(path.join(rotDir, `${p.id}.json`))); if (semRot) { console.log(`GERAR_ROTEIRO:${semRot.id}:${semRot.titulo_a || semRot.id}`); } else { console.log('ROTEIRO_OK'); } } catch (e) { console.log('ERRO_CHECAGEM:' + e.message); }",
+        "timeout_ms": 30000
       },
       "pos": {
-        "x": 300,
+        "x": 240,
         "y": 120
+      }
+    },
+    {
+      "id": "tem-roteiro",
+      "tipo": "condicao",
+      "config": {
+        "chave": "GERAR_ROTEIRO",
+        "entao": "redigir-roteiro",
+        "senao": "produzir-video"
+      },
+      "pos": {
+        "x": 420,
+        "y": 120
+      }
+    },
+    {
+      "id": "redigir-roteiro",
+      "tipo": "agente",
+      "join": "any",
+      "config": {
+        "agente": "roteirista-video",
+        "ordem": "Demanda de roteirização recebida: {{entrada}}. Inspecione registries/pautas.json para ler os fatos da pauta citada e a fonte_url. Escreva o roteiro completo no padrão estrito de 5 cenas (HOOK, CONTEXTO, DESENVOLVIMENTO, CLIMAX, FECHAMENTO_CTA) com 85 a 105 palavras no total e salve o arquivo JSON correspondente em registries/roteiros/<pauta_id>.json. Finalize confirmando ROTEIRO_GERADO_OK."
+      },
+      "pos": {
+        "x": 600,
+        "y": 40
+      }
+    },
+    {
+      "id": "produzir-video",
+      "tipo": "script",
+      "join": "any",
+      "config": {
+        "comando": "node scripts/produzir_video.mjs",
+        "timeout_ms": 180000
+      },
+      "pos": {
+        "x": 600,
+        "y": 200
       }
     },
     {
       "id": "saida",
       "tipo": "saida",
+      "join": "any",
       "config": {
         "registro": "resultados/resultado"
       },
       "pos": {
-        "x": 540,
+        "x": 780,
         "y": 120
       }
     }
@@ -42,10 +83,26 @@
   "arestas": [
     {
       "de": "gatilho-cron",
-      "para": "executar-script"
+      "para": "checar-pauta"
     },
     {
-      "de": "executar-script",
+      "de": "checar-pauta",
+      "para": "tem-roteiro"
+    },
+    {
+      "de": "tem-roteiro",
+      "para": "redigir-roteiro"
+    },
+    {
+      "de": "tem-roteiro",
+      "para": "produzir-video"
+    },
+    {
+      "de": "redigir-roteiro",
+      "para": "produzir-video"
+    },
+    {
+      "de": "produzir-video",
       "para": "saida"
     }
   ]

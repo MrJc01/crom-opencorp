@@ -90,11 +90,27 @@ describe("elo agenda↔fluxo (D: gatilho cron)", () => {
 });
 
 describe("zombie-reaper não toca fluxos em andamento (B: sem falso falhou)", () => {
-  it("flow executando há +60s mantém status (só sessão de agente vira falhou)", async () => {
+  it("flow executando com pid vivo mantém status; flow sem pid antigo vira falhou", async () => {
     const { ws, registros } = await ambiente();
     const sessoes = new SessionManager();
     const velho = new Date(Date.now() - 2 * 3600_000).toISOString();
 
+    // Cenário A: flow COM pid do processo atual → deve manter "executando"
+    await registros.criar(ws.path, {
+      categoria: "execucoes",
+      id: "exec-flow-com-pid",
+      descricao: "Flow com pid",
+      criadoPor: "flow:pipeline-hist",
+      extras: { status: "executando", tipo: "flow", flow: "pipeline-hist", nos: [], pid: process.pid },
+    });
+    const metaFlowPid = await registros.lerMeta(ws.path, "execucoes", "exec-flow-com-pid");
+    metaFlowPid.criado_em = velho;
+    await registros.salvarMeta(ws.path, "execucoes", "exec-flow-com-pid", metaFlowPid);
+    await (sessoes as any).reconciliarZombie(ws.path, metaFlowPid);
+    const depoisPid = await registros.lerMeta(ws.path, "execucoes", "exec-flow-com-pid");
+    expect((depoisPid.extras as any)?.status).toBe("executando");
+
+    // Cenário B: flow SEM pid e antigo (>10min) → deve virar "falhou" (zumbi legítimo)
     await registros.criar(ws.path, {
       categoria: "execucoes",
       id: "exec-flow-longo",
@@ -106,9 +122,10 @@ describe("zombie-reaper não toca fluxos em andamento (B: sem falso falhou)", ()
     metaFlow.criado_em = velho;
     await registros.salvarMeta(ws.path, "execucoes", "exec-flow-longo", metaFlow);
     await (sessoes as any).reconciliarZombie(ws.path, metaFlow);
-    const depois = await registros.lerMeta(ws.path, "execucoes", "exec-flow-longo");
-    expect((depois.extras as any)?.status).toBe("executando");
+    const depoisFlow = await registros.lerMeta(ws.path, "execucoes", "exec-flow-longo");
+    expect((depoisFlow.extras as any)?.status).toBe("falhou");
 
+    // Cenário C: sessão de agente sem pid e antiga → deve virar "falhou"
     await registros.criar(ws.path, {
       categoria: "execucoes",
       id: "exec-sessao-zumbi",

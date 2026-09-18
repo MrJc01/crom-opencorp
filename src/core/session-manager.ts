@@ -1809,10 +1809,56 @@ export class SessionManager {
   async reconciliarZombie(wsPath: string, meta: MetaRegistro): Promise<void> {
     const extras = (meta.extras ?? {}) as Record<string, unknown>;
     if (extras.status !== "executando") return;
-    // Flows têm ciclo de vida próprio (FlowStore escreve o status final ao
-    // concluir) e nunca têm pid — sem este guard, todo flow com +60s era
-    // marcado "falhou" no meio da execução (falso-positivo no Histórico).
-    if (extras.tipo === "flow") return;
+    if (extras.tipo === "flow") {
+      const pid = typeof extras.pid === "number" ? extras.pid : null;
+      let vivo = true;
+      if (pid) {
+        try {
+          process.kill(pid, 0);
+        } catch {
+          vivo = false;
+        }
+      } else {
+        // Flow sem pid registrado (legado ou processo morto): se >10min sem finalizar, considera zumbi
+        const inicio = Date.parse(meta.criado_em);
+        if (Number.isFinite(inicio) && Date.now() - inicio > 10 * 60_000) {
+          vivo = false;
+        }
+      }
+      if (!vivo) {
+        const agoraIso = new Date().toISOString();
+        const inicio = Date.parse(meta.criado_em);
+        const duracao = Number.isFinite(inicio) ? Date.now() - inicio : 0;
+        const erroMsg = pid
+          ? `zombie: processo pai do flow (pid ${pid}) morreu sem finalizar — reconciliado em ${agoraIso}`
+          : `zombie: flow sem pid há >10min sem finalizar — reconciliado em ${agoraIso}`;
+        const nos = Array.isArray(extras.nos) ? (extras.nos as Array<{ id?: string; status?: string }>) : [];
+        for (const n of nos) {
+          if (n.status === "executando") n.status = "falhou";
+        }
+        meta.extras = {
+          ...extras,
+          status: "falhou",
+          fim: agoraIso,
+          duracao_ms: duracao,
+          erro: erroMsg,
+          motivo: erroMsg,
+          nos,
+        };
+        await this.registros.salvarMeta(wsPath, "execucoes", meta.id, meta);
+        await this.registros.anexarEvento(wsPath, "execucoes", meta.id, {
+          ts: agoraIso,
+          por: "opencorp",
+          evento: "finalizado",
+          status: "falhou",
+          resumo: erroMsg,
+        });
+        try {
+          this.registros.corpDb(wsPath).atualizarStatusExecucao(meta.id, "falhou", agoraIso, erroMsg);
+        } catch {}
+      }
+      return;
+    }
     const pid = extras.pid as number | null;
     if (!pid) {
       // Sem pid (ex.: processo falhou ao iniciar ou mention sem fork): se já passou 60s do início, é zumbi
