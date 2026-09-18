@@ -162,12 +162,12 @@ export function classificarQualidadeModelo(modelo: string): QualidadeModelo {
     };
   }
 
-  // Tier A: Especialistas e Redatores (14B a 35B)
+  // Tier A: Especialistas e Redatores (14B a <70B)
   if (
     m.includes("glm-5.3") ||
     m.includes("qwen") ||
     m.includes("gemma-2-27b") ||
-    (parametrosB !== null && parametrosB >= 14 && parametrosB <= 35)
+    (parametrosB !== null && parametrosB >= 14 && parametrosB < 70)
   ) {
     return {
       modelo,
