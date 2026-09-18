@@ -4,16 +4,24 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: opencorp-server
+    init: true
+    command: sh -c "rm -f /data/*.pid /home/j/.opencorp/*.pid /home/j/.opencorp/.opencorp/*.pid && node bin/opencorp.mjs daemon start --foreground --com-serve --host 0.0.0.0"
     restart: unless-stopped
     ports:
       - "4100:4100"
     environment:
       - NODE_ENV=production
-      - OPENCORP_HOME=/data
+      - OPENCORP_HOME=/home/j/.opencorp
       - PORT=4100
       - HOST=0.0.0.0
+      - PATH=/home/j/.opencode/bin:/home/j/.local/bin:/data/.opencorp/bin:/root/.opencorp/bin:/root/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - GH_TOKEN=${GH_TOKEN}
     volumes:
-      - ./data:/data
+      - ~/.opencorp:/home/j/.opencorp
+      - ~/.opencode:/home/j/.opencode
+      - ~/.local/bin:/home/j/.local/bin:ro
+      - ~/.local/share:/home/j/.local/share:ro
+      - ~/.config/gh:/root/.config/gh:ro
     networks:
       - opencorp-network
 

@@ -20,6 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
+RUN curl -L https://github.com/cli/cli/releases/download/v2.45.0/gh_2.45.0_linux_amd64.tar.gz | tar -xz -C /tmp && \
+    mv /tmp/gh_2.45.0_linux_amd64/bin/gh /usr/local/bin/gh && \
+    rm -rf /tmp/gh_*
+
 WORKDIR /app
 
 # Instala dependências com cache otimizado
@@ -49,5 +53,5 @@ VOLUME ["/data"]
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://127.0.0.1:4100/health || curl -f http://127.0.0.1:4100/ || exit 1
 
-# Comando padrão para iniciar o OpenCorp serve
-CMD ["node", "bin/opencorp.mjs", "serve", "--host", "0.0.0.0", "--port", "4100"]
+# Comando padrão para iniciar o supervisor do OpenCorp (serve + scheduler) em foreground
+CMD ["node", "bin/opencorp.mjs", "daemon", "start", "--foreground", "--com-serve", "--host", "0.0.0.0"]
