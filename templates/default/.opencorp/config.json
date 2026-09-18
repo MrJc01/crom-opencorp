@@ -1,3 +1,13 @@
 {
-  "version": 1
+  "version": 1,
+  "modelos": {
+    "padrao": "opencode/nemotron-3-ultra-free",
+    "rotacao": [
+      "opencode/nemotron-3-ultra-free",
+      "opencode-go/glm-5.3-flash",
+      "openrouter/google/gemini-2.5-flash",
+      "openrouter/qwen/qwen3.8-27b:free",
+      "opencode/nemotron-3.5-lightning-free"
+    ]
+  }
 }

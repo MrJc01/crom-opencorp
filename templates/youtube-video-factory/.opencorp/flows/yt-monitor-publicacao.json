@@ -1,0 +1,52 @@
+{
+  "id": "yt-monitor-publicacao",
+  "nome": "yt-monitor-publicacao",
+  "nos": [
+    {
+      "id": "gatilho-cron",
+      "tipo": "cron",
+      "config": {
+        "expressao_cron": "20,50 * * * *",
+        "job_id": "sch-mttp8ueip2tn",
+        "job_nome": "yt-monitor-publicacao"
+      },
+      "pos": {
+        "x": 60,
+        "y": 120
+      }
+    },
+    {
+      "id": "executar-script",
+      "tipo": "script",
+      "config": {
+        "comando": "node /home/j/.opencorp/workspaces/yt-factory-01/scripts/run_python.mjs /home/j/.opencorp/workspaces/yt-factory-01/scripts/monitor_publicacao.py",
+        "timeout_ms": 120000
+      },
+      "pos": {
+        "x": 300,
+        "y": 120
+      }
+    },
+    {
+      "id": "saida",
+      "tipo": "saida",
+      "config": {
+        "registro": "resultados/resultado"
+      },
+      "pos": {
+        "x": 540,
+        "y": 120
+      }
+    }
+  ],
+  "arestas": [
+    {
+      "de": "gatilho-cron",
+      "para": "executar-script"
+    },
+    {
+      "de": "executar-script",
+      "para": "saida"
+    }
+  ]
+}

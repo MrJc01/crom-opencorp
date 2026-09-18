@@ -1,0 +1,46 @@
+{
+  "id": "fluxo-padrao",
+  "nome": "Fluxo Padrão de Operação",
+  "ativo": true,
+  "auto_agendar": false,
+  "nos": [
+    {
+      "id": "gatilho",
+      "tipo": "manual",
+      "pos": { "x": 60, "y": 120 },
+      "config": {}
+    },
+    {
+      "id": "checar-ambiente",
+      "tipo": "script",
+      "pos": { "x": 260, "y": 120 },
+      "config": {
+        "runtime": "node",
+        "codigo": "console.log('Ambiente OK: ' + process.cwd()); console.log('Data: ' + new Date().toISOString());",
+        "timeout_ms": 15000
+      }
+    },
+    {
+      "id": "executar-tarefa",
+      "tipo": "agente",
+      "pos": { "x": 460, "y": 120 },
+      "config": {
+        "agente": "executor-padrao",
+        "ordem": "Verifique os registros e tarefas pendentes no workspace e registre um resumo de status."
+      }
+    },
+    {
+      "id": "saida",
+      "tipo": "saida",
+      "pos": { "x": 660, "y": 120 },
+      "config": {
+        "registro": "resultados/resultado"
+      }
+    }
+  ],
+  "arestas": [
+    { "de": "gatilho", "para": "checar-ambiente" },
+    { "de": "checar-ambiente", "para": "executar-tarefa" },
+    { "de": "executar-tarefa", "para": "saida" }
+  ]
+}

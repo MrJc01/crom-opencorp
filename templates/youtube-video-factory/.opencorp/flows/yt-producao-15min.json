@@ -1,0 +1,52 @@
+{
+  "id": "yt-producao-15min",
+  "nome": "yt-producao-15min",
+  "nos": [
+    {
+      "id": "gatilho-cron",
+      "tipo": "cron",
+      "config": {
+        "expressao_cron": "3,18,33,48 * * * *",
+        "job_id": "sch-mttirss1743u",
+        "job_nome": "yt-producao-15min"
+      },
+      "pos": {
+        "x": 60,
+        "y": 120
+      }
+    },
+    {
+      "id": "executar-script",
+      "tipo": "script",
+      "config": {
+        "comando": "node /home/j/.opencorp/workspaces/yt-factory-01/scripts/produzir_video.mjs",
+        "timeout_ms": 120000
+      },
+      "pos": {
+        "x": 300,
+        "y": 120
+      }
+    },
+    {
+      "id": "saida",
+      "tipo": "saida",
+      "config": {
+        "registro": "resultados/resultado"
+      },
+      "pos": {
+        "x": 540,
+        "y": 120
+      }
+    }
+  ],
+  "arestas": [
+    {
+      "de": "gatilho-cron",
+      "para": "executar-script"
+    },
+    {
+      "de": "executar-script",
+      "para": "saida"
+    }
+  ]
+}

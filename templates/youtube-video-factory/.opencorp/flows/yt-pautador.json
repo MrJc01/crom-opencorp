@@ -1,0 +1,82 @@
+{
+  "id": "yt-pautador",
+  "nome": "Pautador YouTube (fluxo)",
+  "nos": [
+    {
+      "id": "gatilho",
+      "tipo": "manual",
+      "config": {}
+    },
+    {
+      "id": "checar-estoque",
+      "tipo": "script",
+      "config": {
+        "runtime": "node",
+        "codigo": "try{const fs=require('node:fs');const path=require('node:path');const ws=process.cwd();const pautas=JSON.parse(fs.readFileSync(path.join(ws,'registries/pautas.json'),'utf8'));const rot=new Set(fs.readdirSync(path.join(ws,'registries/roteiros')).map(f=>f.replace('.json','')));const n=pautas.pautas.filter(p=>p.status==='pendente'&&rot.has(p.id)).length;console.log((n>=8?'ESTOQUE_CHEIO:':'ESTOQUE_OK:')+n);}catch(e){console.log('ESTOQUE_OK:? (nota estoque: '+e.message+')');}",
+        "timeout_ms": 30000
+      }
+    },
+    {
+      "id": "tem-espaco",
+      "tipo": "condicao",
+      "config": {
+        "chave": "ESTOQUE_OK",
+        "entao": "pautar",
+        "senao": "saida"
+      }
+    },
+    {
+      "id": "pautar",
+      "tipo": "agente",
+      "join": "any",
+      "config": {
+        "agente": "pautador-youtube",
+        "ordem": "Siga EXATAMENTE a ordem completa do arquivo registries/ordens/pautador-ordem.txt (leia-o primeiro, é o contrato desta execução)."
+      }
+    },
+    {
+      "id": "sanitizar",
+      "tipo": "script",
+      "config": {
+        "runtime": "node",
+        "codigo": "try{const fs=require('node:fs');const path=require('node:path');const ws=process.cwd();const pp=path.join(ws,'registries/pautas.json');if(!fs.existsSync(pp)){console.log('Dedup: pautas.json ausente.');}else{const data=JSON.parse(fs.readFileSync(pp,'utf8'));const unicos=[];const vistos=new Set();let removidos=0;for(const p of data.pautas){const chave=String(p.titulo_a||p.titulo||p.id).toLowerCase().replace(/[^\\w\\s]/g,'').trim();if(vistos.has(chave)){removidos++;console.log('Dedup automatico: removendo pauta duplicada ['+p.id+']');const rf=path.join(ws,'registries/roteiros',p.id+'.json');if(fs.existsSync(rf)&&p.status==='pendente'){try{fs.unlinkSync(rf);}catch(e){}}}else{vistos.add(chave);unicos.push(p);}}if(removidos>0){data.pautas=unicos;data.total=unicos.length;fs.writeFileSync(pp,JSON.stringify(data,null,2));console.log('Deduplicacao concluida: '+removidos+' podadas.');}else{console.log('Dedup: nenhuma duplicada.');}}console.log('SANITIZADO_OK');}catch(e){console.log('Nota dedup pautas: '+e.message);}",
+        "timeout_ms": 30000
+      }
+    },
+    {
+      "id": "saida",
+      "tipo": "saida",
+      "join": "any",
+      "config": {
+        "registro": "resultados/resultado"
+      }
+    }
+  ],
+  "arestas": [
+    {
+      "de": "gatilho",
+      "para": "checar-estoque"
+    },
+    {
+      "de": "checar-estoque",
+      "para": "tem-espaco"
+    },
+    {
+      "de": "tem-espaco",
+      "para": "pautar"
+    },
+    {
+      "de": "tem-espaco",
+      "para": "saida"
+    },
+    {
+      "de": "pautar",
+      "para": "sanitizar"
+    },
+    {
+      "de": "sanitizar",
+      "para": "saida"
+    }
+  ],
+  "auto_agendar": false
+}

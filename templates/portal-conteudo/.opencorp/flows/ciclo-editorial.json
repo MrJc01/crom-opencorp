@@ -1,0 +1,47 @@
+{
+  "id": "ciclo-editorial",
+  "nome": "Ciclo Editorial Periódico de Notícias",
+  "ativo": true,
+  "auto_agendar": true,
+  "nos": [
+    {
+      "id": "gatilho-cron",
+      "tipo": "cron",
+      "pos": { "x": 60, "y": 120 },
+      "config": {
+        "expressao_cron": "0 */4 * * *"
+      }
+    },
+    {
+      "id": "pesquisar-pautas",
+      "tipo": "agente",
+      "pos": { "x": 260, "y": 120 },
+      "config": {
+        "agente": "pautador-noticias",
+        "ordem": "Pesquise as principais novidades das últimas 24h e selecione uma notícia relevante com fontes reais."
+      }
+    },
+    {
+      "id": "gerar-artigo",
+      "tipo": "agente",
+      "pos": { "x": 460, "y": 120 },
+      "config": {
+        "agente": "redator-artigo",
+        "ordem": "Redija o artigo completo em Markdown com título, resumo, subtítulos e referências em PT-BR."
+      }
+    },
+    {
+      "id": "saida",
+      "tipo": "saida",
+      "pos": { "x": 660, "y": 120 },
+      "config": {
+        "registro": "artigos/resultado"
+      }
+    }
+  ],
+  "arestas": [
+    { "de": "gatilho-cron", "para": "pesquisar-pautas" },
+    { "de": "pesquisar-pautas", "para": "gerar-artigo" },
+    { "de": "gerar-artigo", "para": "saida" }
+  ]
+}

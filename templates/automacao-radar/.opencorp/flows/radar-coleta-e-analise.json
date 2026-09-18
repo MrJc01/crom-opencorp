@@ -1,0 +1,47 @@
+{
+  "id": "radar-coleta-e-analise",
+  "nome": "Radar de Coleta e Análise de Oportunidades",
+  "ativo": true,
+  "auto_agendar": true,
+  "nos": [
+    {
+      "id": "gatilho-cron",
+      "tipo": "cron",
+      "pos": { "x": 60, "y": 120 },
+      "config": {
+        "expressao_cron": "*/30 * * * *"
+      }
+    },
+    {
+      "id": "coletar-oportunidades",
+      "tipo": "script",
+      "pos": { "x": 260, "y": 120 },
+      "config": {
+        "comando": "node scripts/coletar_radar.mjs",
+        "timeout_ms": 60000
+      }
+    },
+    {
+      "id": "analisar-oportunidades",
+      "tipo": "agente",
+      "pos": { "x": 460, "y": 120 },
+      "config": {
+        "agente": "agente-radar",
+        "ordem": "Avalie as novas oportunidades mineradas, pontue cada uma e registre no Kanban."
+      }
+    },
+    {
+      "id": "saida",
+      "tipo": "saida",
+      "pos": { "x": 660, "y": 120 },
+      "config": {
+        "registro": "oportunidades/resultado"
+      }
+    }
+  ],
+  "arestas": [
+    { "de": "gatilho-cron", "para": "coletar-oportunidades" },
+    { "de": "coletar-oportunidades", "para": "analisar-oportunidades" },
+    { "de": "analisar-oportunidades", "para": "saida" }
+  ]
+}

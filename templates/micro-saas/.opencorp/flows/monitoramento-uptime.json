@@ -1,0 +1,37 @@
+{
+  "id": "monitoramento-uptime",
+  "nome": "Sonda Periódica de Uptime e Resiliência",
+  "ativo": true,
+  "auto_agendar": true,
+  "nos": [
+    {
+      "id": "gatilho-cron",
+      "tipo": "cron",
+      "pos": { "x": 60, "y": 120 },
+      "config": {
+        "expressao_cron": "*/15 * * * *"
+      }
+    },
+    {
+      "id": "executar-sonda",
+      "tipo": "script",
+      "pos": { "x": 260, "y": 120 },
+      "config": {
+        "comando": "node scripts/executar_monitoramento.mjs",
+        "timeout_ms": 30000
+      }
+    },
+    {
+      "id": "saida",
+      "tipo": "saida",
+      "pos": { "x": 460, "y": 120 },
+      "config": {
+        "registro": "auditorias/resultado-sonda"
+      }
+    }
+  ],
+  "arestas": [
+    { "de": "gatilho-cron", "para": "executar-sonda" },
+    { "de": "executar-sonda", "para": "saida" }
+  ]
+}
