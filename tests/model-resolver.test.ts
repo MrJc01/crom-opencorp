@@ -9,6 +9,9 @@ import {
   ehModeloGratuito,
   resolverCadeiaModelosAgente,
   proximoModeloDaCadeia,
+  extrairParametrosB,
+  classificarQualidadeModelo,
+  filtrarModelosQualificados,
   ModelResolverError,
 } from "../src/core/model-resolver.js";
 import { WorkspaceManager } from "../src/core/workspace-manager.js";
@@ -246,6 +249,59 @@ describe("Módulo Central de Resolução de Modelos e Isolamento de Workspace (4
         "opencode/nemotron-3-ultra-free",
       ]);
       expect(wsConfig.execution_driver).toBe("sandbox");
+    });
+  });
+
+  describe("6. Governança de Parâmetros xB e Tiers de Qualidade", () => {
+    it("extrai parâmetros B por convenção de nomenclatura e mapeamento estático", () => {
+      expect(extrairParametrosB("openrouter/meta-llama/llama-3.1-8b-instruct:free")).toBe(8);
+      expect(extrairParametrosB("openrouter/qwen/qwen-2.5-coder-32b-instruct")).toBe(32);
+      expect(extrairParametrosB("openrouter/meta-llama/llama-3.3-70b-instruct")).toBe(70);
+      expect(extrairParametrosB("opencode/nemotron-3-ultra-free")).toBe(550);
+      expect(extrairParametrosB("openrouter/liquid/lfm-2.5-2.6b:free")).toBe(2.6);
+      expect(extrairParametrosB("openrouter/google/gemini-2.5-flash")).toBe(70);
+    });
+
+    it("classifica modelos em tiers apropriados e sinaliza não recomendados", () => {
+      const t1 = classificarQualidadeModelo("openrouter/liquid/lfm-2.5-2.6b:free");
+      expect(t1.tier).toBe("NAO_RECOMENDADO");
+      expect(t1.recomendado).toBe(false);
+
+      const t2 = classificarQualidadeModelo("openrouter/meta-llama/llama-3.1-8b-instruct:free");
+      expect(t2.tier).toBe("B");
+      expect(t2.categoria).toBe("mini");
+      expect(t2.recomendado).toBe(true);
+
+      const t3 = classificarQualidadeModelo("openrouter/qwen/qwen-2.5-coder-32b-instruct");
+      expect(t3.tier).toBe("A");
+      expect(t3.categoria).toBe("medio");
+      expect(t3.recomendado).toBe(true);
+
+      const t4 = classificarQualidadeModelo("opencode/nemotron-3-ultra-free");
+      expect(t4.tier).toBe("S");
+      expect(t4.categoria).toBe("grande");
+      expect(t4.recomendado).toBe(true);
+    });
+
+    it("filtra modelos com critérios de minB, maxB, free e recommended", () => {
+      const modelos = [
+        "openrouter/liquid/lfm-2.5-2.6b:free",
+        "openrouter/meta-llama/llama-3.1-8b-instruct:free",
+        "openrouter/qwen/qwen-2.5-coder-32b-instruct", // pago
+        "opencode/nemotron-3-ultra-free",
+      ];
+
+      // Apenas free e >= 30B
+      const f1 = filtrarModelosQualificados(modelos, { apenasGratuitos: true, minB: 30 });
+      expect(f1.map((m) => m.modelo)).toEqual(["opencode/nemotron-3-ultra-free"]);
+
+      // Apenas recomendados e <= 14B
+      const f2 = filtrarModelosQualificados(modelos, { apenasRecomendados: true, maxB: 14 });
+      expect(f2.map((m) => m.modelo)).toEqual(["openrouter/meta-llama/llama-3.1-8b-instruct:free"]);
+
+      // Modelos pagos entre 14B e 35B
+      const f3 = filtrarModelosQualificados(modelos, { minB: 14, maxB: 35 });
+      expect(f3.map((m) => m.modelo)).toEqual(["openrouter/qwen/qwen-2.5-coder-32b-instruct"]);
     });
   });
 });

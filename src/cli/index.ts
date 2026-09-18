@@ -42,6 +42,7 @@ import { registerLogsCommand } from "./commands/logs.js";
 import { registerSecretsCommand } from "./commands/secrets.js";
 import { registerTokensCommand } from "./commands/tokens.js";
 import { registerMotoresCommand } from "./commands/motores.js";
+import { registerModelosCommand } from "./commands/modelos.js";
 import { notImplementedAction } from "./placeholder.js";
 import { instalarTriggers, pendentesTriggers } from "../core/trigger-runner.js";
 import { instalarMencoes, pendentesMencoes } from "../core/mention-runner.js";
@@ -113,6 +114,7 @@ export function buildProgram(isOc: boolean = isModoOc()): Command {
   registerSecretsCommand(program);
   registerTokensCommand(program);
   registerMotoresCommand(program);
+  registerModelosCommand(program);
   registerStatusCommand(program);
   registerContextCommand(program);
   registerHistoricoCommand(program);

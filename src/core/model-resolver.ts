@@ -84,6 +84,136 @@ export function ehModeloGratuito(modelo: string): boolean {
   return false;
 }
 
+/**
+ * Extrai a contagem estimada de parâmetros em bilhões (xB).
+ */
+export function extrairParametrosB(modelo: string): number | null {
+  const m = (modelo ?? "").trim().toLowerCase();
+  if (!m) return null;
+  const match = m.match(/(?:^|[^a-z0-9])(\d+(?:\.\d+)?)\s*b(?:[^a-z0-9]|$)/i);
+  if (match && match[1]) {
+    return parseFloat(match[1]);
+  }
+  if (m.includes("nemotron-3-ultra")) return 550;
+  if (m.includes("nemotron-3.5-lightning")) return 120;
+  if (m.includes("gemini-2.5-pro")) return 150;
+  if (m.includes("gemini")) return 70;
+  if (m.includes("glm-5.3")) return 30;
+  if (m.includes("minimax-m3")) return 230;
+  if (m.includes("claude-3")) return 200;
+  if (m.includes("deepseek-r1")) return 671;
+  return null;
+}
+
+export interface QualidadeModelo {
+  modelo: string;
+  parametrosB: number | null;
+  gratuito: boolean;
+  tier: "S" | "A" | "B" | "NAO_RECOMENDADO";
+  recomendado: boolean;
+  categoria: "mini" | "medio" | "grande" | "inadequado";
+  motivo: string;
+}
+
+/**
+ * Classifica a qualidade e recomendações operacionais do modelo.
+ */
+export function classificarQualidadeModelo(modelo: string): QualidadeModelo {
+  const m = (modelo ?? "").trim().toLowerCase();
+  const parametrosB = extrairParametrosB(modelo);
+  const gratuito = ehModeloGratuito(modelo);
+
+  // Blacklist de modelos não recomendados para agentes com ferramentas
+  if (
+    m === "openrouter/openrouter/free" ||
+    (parametrosB !== null && parametrosB < 4) ||
+    m.includes("liquid/lfm-2.5-2.6b") ||
+    m.includes("llama-3.2-1b") ||
+    m.includes("llama-3.2-3b")
+  ) {
+    return {
+      modelo,
+      parametrosB: parametrosB ?? 2.6,
+      gratuito,
+      tier: "NAO_RECOMENDADO",
+      recomendado: false,
+      categoria: "inadequado",
+      motivo: "Modelo muito pequeno (<4B) ou roteador cego. Falha em tool-calling e raciocínio multi-step.",
+    };
+  }
+
+  // Tier S: Flagships e Raciocínio Profundo (>70B)
+  if (
+    m.includes("gemini-2.5") ||
+    m.includes("gemini-3.8") ||
+    m.includes("claude-3") ||
+    m.includes("nemotron-3-ultra") ||
+    m.includes("deepseek-r1") ||
+    (parametrosB !== null && parametrosB >= 70)
+  ) {
+    return {
+      modelo,
+      parametrosB: parametrosB ?? 70,
+      gratuito,
+      tier: "S",
+      recomendado: true,
+      categoria: "grande",
+      motivo: "Raciocínio profundo e tool-calling confiável. Ideal para Secretário e orquestração.",
+    };
+  }
+
+  // Tier A: Especialistas e Redatores (14B a 35B)
+  if (
+    m.includes("glm-5.3") ||
+    m.includes("qwen") ||
+    m.includes("gemma-2-27b") ||
+    (parametrosB !== null && parametrosB >= 14 && parametrosB <= 35)
+  ) {
+    return {
+      modelo,
+      parametrosB: parametrosB ?? 27,
+      gratuito,
+      tier: "A",
+      recomendado: true,
+      categoria: "medio",
+      motivo: "Excelente equilíbrio entre velocidade e redação estruturada.",
+    };
+  }
+
+  // Tier B: Mini-agentes rápidos (7B a 14B)
+  return {
+    modelo,
+    parametrosB: parametrosB ?? 8,
+    gratuito,
+    tier: "B",
+    recomendado: true,
+    categoria: "mini",
+    motivo: "Ultrarrápido para tarefas pontuais (dedup, validação de JSON, sanitização).",
+  };
+}
+
+export function filtrarModelosQualificados(
+  modelos: string[],
+  filtros: {
+    apenasGratuitos?: boolean;
+    minB?: number;
+    maxB?: number;
+    apenasRecomendados?: boolean;
+  } = {},
+): QualidadeModelo[] {
+  const { apenasGratuitos = false, minB, maxB, apenasRecomendados = false } = filtros;
+
+  return modelos
+    .map((m) => classificarQualidadeModelo(m))
+    .filter((q) => {
+      if (apenasGratuitos && !q.gratuito) return false;
+      if (apenasRecomendados && !q.recomendado) return false;
+      if (minB !== undefined && q.parametrosB !== null && q.parametrosB < minB) return false;
+      if (maxB !== undefined && q.parametrosB !== null && q.parametrosB > maxB) return false;
+      return true;
+    });
+}
+
 export interface OpcoesResolucaoModelos {
   agente?: Partial<Agente> & {
     model?: string;
