@@ -1,120 +1,111 @@
-# 02 — Arquitetura
+# 02 — Arquitetura do OpenCorp (v0.7.0)
 
-## Visão em camadas
+## Visão Geral em Camadas
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  CLI opencorp (bin/opencorp)                                 │
-│  init · settings · workspace · agent · registry · template   │
-│  session · run · subcorp · test · doctor · cloud             │
-└───────────────┬──────────────────────────────────────────────┘
-                │ chama
-┌───────────────▼──────────────────────────────────────────────┐
-│  CORE (src/core)                                             │
-│  ├─ SettingsStore    — settings global/workspace (JSON+zod)  │
-│  ├─ WorkspaceManager — criar/listar/trocar workspaces        │
-│  ├─ AgentStore       — CRUD de agentes (.md + frontmatter)   │
-│  ├─ RegistryStore    — registros globais por categoria       │
-│  ├─ SessionManager   — spawn/kill de sessões OpenCode        │
-│  ├─ OpenCodeBridge   — converte agente opencorp → opencode   │
-│  ├─ SecurityGuard    — intercepta comandos (policy JSON)     │
-│  ├─ BudgetManager    — teto de gastos, pausa, notificação    │
-│  └─ Journal          — append-only (execuções, custos, logs) │
-└───────────────┬──────────────────────────────────────────────┘
-                │ spawn (child_process / node-pty)
-┌───────────────▼──────────────────────────────────────────────┐
-│  SESSÕES OPENCODE (opencorp run --agent X -m provider/model) │
-│  cada agente = sessão isolada, CWD = workspace               │
-└───────────────┬──────────────────────────────────────────────┘
-                │ grava/consulta
-┌───────────────▼──────────────────────────────────────────────┐
-│  ARMAZENAMENTO                                               │
-│  ~/.opencorp/ (global) + /workspaces/<id>/.opencorp/ (corp)  │
-│  JSON (config) · MD (agentes, docs) · JSONL (journals)       │
-│  SQLite (índice de registros e sessões)                      │
-└──────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TB
+    subgraph SupervisorGlobal ["Supervisor Global OpenCorp (Daemon / Scheduler Central)"]
+        TickLoop["Loop Global de Ticks (Verifica crons a cada 15s/1m)"]
+        WebhookRouter["Servidor de Webhooks HTTP (/api/webhooks/:ws/:flow)"]
+        EngineHub["Hub de Motores (AGY / Gemini, Codex, Copilot, OpenCode)"]
+    end
 
-## Estrutura de pastas do projeto
+    subgraph WorkspaceLayer ["Camada de Workspace (~/.opencorp/workspaces/<id>/)"]
+        Secretario["Secretário Executivo Residente (Supervisão & Diagnóstico)"]
+        KanbanTasks["Quadro Kanban de Tarefas (tasks.db: Agentes criam e movem cards)"]
 
-```
-opencorp/
-├── bin/opencorp.mjs            # entrypoint executável
-├── src/
-│   ├── cli/                    # comandos (commander)
-│   │   ├── index.ts            # setup do programa
-│   │   └── commands/           # settings.ts, workspace.ts, agent.ts, ...
-│   ├── core/                   # módulos core (tabela acima)
-│   ├── schemas/                # schemas zod (settings, agente, registro)
-│   └── utils/                  # fs-safe, paths, logger
-├── templates/                  # template "padrão" de workspace novo
-│   └── default/                # agentes iniciais: secretario, ceo-documentos, executor-padrao
-├── docs/                       # esta documentação
-├── tests/                      # testes unitários (vitest)
-└── package.json
+        subgraph FluxoCore ["O FLUXO COMANDA TUDO (Paradigma n8n)"]
+            NodeGatilho["Nó Gatilho: cron / webhook / manual"]
+            NodeLogica["Nós de Lógica: script / condicao / loop / fanout"]
+            NodeAgente["Nós de Agente: mini-agente (<14B) / especialista (>30B)"]
+            NodeSubflow["Nós de Integração: subflow / http_request / reuniao"]
+            NodeSaida["Nó Saída: registro no banco / gravação de arquivo"]
+            
+            NodeGatilho --> NodeLogica --> NodeAgente --> NodeSubflow --> NodeSaida
+        end
+    end
+
+    TickLoop -->|Dispara Fluxos Ativos| NodeGatilho
+    WebhookRouter -->|Dispara Fluxos Ativos| NodeGatilho
+    Secretario -->|Gerencia & Inspeciona| FluxoCore
+    Secretario <-->|Consulta & Acompanha| KanbanTasks
+    NodeAgente <-->|Registram & Movem Cards| KanbanTasks
+    NodeAgente -.->|Executado via| EngineHub
+    Secretario -.->|Executado via| EngineHub
 ```
 
-## Estrutura de um workspace
+---
+
+## 1. O Supervisor Global (Daemon Central)
+
+Em vez de agendadores múltiplos e fragmentados por workspace, o OpenCorp opera com um **Supervisor Global Unificado**:
+- **Loop de Ticks**: A cada tick (intervalo regular de 15 segundos ou 1 minuto), o supervisor consulta a base global de agendamentos e fluxos ativos (`scheduler.db` e `.opencorp/flows/*.json`).
+- **Verificação de Gatilhos**: Se um fluxo ativo possui um nó `cron` cuja expressão coincide com o timestamp atual, o supervisor despacha uma execução assíncrona isolada.
+- **Roteador de Webhooks**: Escuta chamadas HTTP externas e encaminha o payload como contexto de entrada para fluxos que possuem o nó de início do tipo `webhook`.
+- **Circuit Breaker (Auto-Cura)**: Se um fluxo falha consecutivamente (por exemplo, 3 falhas seguidas), o supervisor coloca o job em quarentena preventiva (`quarentena: 1`, `ativo: 0`), notificando o Secretário e evitando queima inútil de tokens ou travamento do host.
+
+---
+
+## 2. A Camada do Workspace
+
+Cada workspace é uma empresa autônoma e autocontida:
 
 ```
-/workspaces/<corp-id>/
+~/.opencorp/workspaces/<workspace-id>/
 ├── .opencorp/
-│   ├── config.json             # settings do workspace (sobrepõe global)
-│   ├── security_policy.json    # allowlist/blocklist de comandos
-│   ├── budget.json             # orçamento e consumo acumulado
-│   ├── agents/                 # definições de agentes (*.md + frontmatter)
-│   ├── registries/             # registros globais por categoria
-│   │   ├── chats/
-│   │   ├── documentos/
-│   │   ├── execucoes/
-│   │   ├── agentes/
-│   │   ├── custos/
-│   │   ├── logs/
-│   │   └── custom/<nome>/
-│   ├── opencode/               # gerado pelo bridge (.opencode do opencode)
-│   ├── reports/testes/         # relatórios de teste cego
-│   └── corp.db                 # SQLite: índice de registros/sessões
-├── sandbox/                    # área livre para agentes rodarem código
-├── docs/                       # documentos/SOPs (categoria documentos)
-└── logs/                       # stdout/stderr bruto das sessões
+│   ├── config.json              # Configurações do workspace (modelos, rotação, limites)
+│   ├── security_policy.json     # Allowlist e blocklist de comandos e domínios
+│   ├── budget.json              # Teto orçamentário diário e histórico de consumo
+│   ├── tasks.db                 # Banco SQLite do Kanban de tarefas
+│   ├── flows/                   # Arquivos de fluxo JSON (yt-producao, yt-pautador, etc.)
+│   └── agents/                  # Definições Markdown dos agentes (.md com frontmatter)
+├── registries/                  # Memória viva e dados estruturados
+│   ├── pautas.json              # Catálogo de pautas apuradas
+│   ├── roteiros/                # Roteiros estruturados em JSON para produção
+│   ├── execucoes/               # Journals de execuções de fluxos e agentes
+│   └── auditorias/              # Relatórios de validação e pareceres de qualidade
+├── apps/                        # Mini-aplicativos e esteiras do workspace (ex: youtube-factory)
+├── assets/                      # Imagens de banco, áudios, trilhas, fontes
+├── exports/                     # Arquivos gerados (vídeos MP4, artigos, relatórios)
+└── logs/                        # Logs detalhados de stdout e stderr de cada sessão
 ```
 
-> O **CWD de toda sessão OpenCode é o workspace** — o agente não enxerga nada fora dele (isolamento Fase A).
+---
 
-## Fluxo de uma ordem (exemplo end-to-end)
+## 3. O Fluxo como Orquestrador Mestre
 
-```
-humano> opencorp agent run executor-padrao "crie o relatório de vendas em docs/"
-  │
-  ├─ 1. SessionManager carrega agente .opencorp/agents/executor-padrao.md
-  ├─ 2. BudgetManager verifica saldo do agente/dia      → bloqueia se estourado
-  ├─ 3. Journal registra INÍCIO em registries/execucoes/ (append-only)
-  ├─ 4. OpenCodeBridge escreve .opencorp/opencode/agent/executor-padrao.md
-  ├─ 5. spawn: opencode run --agent executor-padrao --dir <workspace> --model <modelo>
-  │     └─ toda ação do agente passa pelo SecurityGuard (policy)
-  ├─ 6. saída → terminal + logs/ + registries/chats/
-  └─ 7. Journal registra FIM + custo (tokens×preço) em registries/custos/
-```
+Os fluxos são definidos em JSON seguindo o schema rigoroso do Zod (`flowSchema`):
+- **Nós de Gatilho**:
+  - `cron`: Gatilho periódico configurável com sintaxe cron padrão de 5 campos.
+  - `webhook`: Gatilho disparado por requisições HTTP REST.
+  - `manual`: Disparado sob demanda pelo operador humano ou pelo Secretário (`oc flow run <id>`).
+- **Nós de Execução**:
+  - `script`: Executa scripts em Node.js, Python ou Bash em ambiente controlado.
+  - `agente`: Despacha um agente autônomo com prompt, ferramentas e modelo configurados.
+  - `subflow`: Encapsula e executa outro fluxo existente, permitindo composição modular.
+  - `reuniao`: Conduz reunião multi-agente deliberativa entre diferentes papéis.
+- **Nós de Controle de Fluxo**:
+  - `condicao`: Roteamento condicional baseado no contexto ou saída do nó anterior.
+  - `loop`: Execução iterativa com guardrails de juiz (limite de voltas, custo ou padrão regex).
+  - `fanout`: Disparo paralelo de múltiplos ramos com barreira de junção (`join: all` ou `join: any`).
 
-## Stack oficial (Fase A)
+---
 
-| Camada | Escolha | Motivo |
-|---|---|---|
-| Runtime | Node.js 22 + TypeScript | igual ao ecossistema opencode |
-| CLI | `commander` + `@clack/prompts` | comandos + painel de settings interativo |
-| Validação | `zod` | schemas de settings/agente/registro |
-| Índice | `better-sqlite3` | índice local, sem servidor |
-| Spawn | `execa` / `node-pty` | sessões CLI streaming |
-| Testes | `vitest` | unitários; QA externo = teste cego |
+## 4. O Quadro Kanban (CRUD de Tasks)
 
-## Regras de arquitetura (não negociáveis)
+O CRUD de tarefas (`oc task`) cumpre um papel operacional fundamental:
+- **Organização Própria dos Agentes**: Os agentes criam cards de backlog, assumem responsabilidades (`doing`) e marcam conclusão (`done`) automaticamente ao longo do fluxo.
+- **Visibilidade Instantânea**: Permite ao **Operador Humano** e ao **Secretário** inspecionarem em tempo real o que está pendente, em execução ou concluído, sem necessidade de ler logs brutos.
 
-1. `src/core` **não importa** `src/cli` — o core é biblioteca pura (permitirá web/API depois).
-2. Toda escrita em registros passa pelo `RegistryStore` (nunca fs direto) — garante journal e permissões.
-3. Toda sessão passa por `SecurityGuard` e `BudgetManager` — sem exceção.
-4. Nenhum segredo dentro do workspace — chaves ficam em `~/.opencorp/secrets.json` (fora de git).
-5. Journal é append-only; correção = nova entrada que referencia a anterior.
+---
 
-## Canais de integração (WhatsApp, Telegram, e-mail)
+## 5. O Hub de Motores (Engine Registry)
 
-Integrações de mensagem (P-11) entram no opencorp como **canais** mantidos fora do core: um *gateway* externo por canal (`opencorp-channel-gateway`) recebe/envia mensagens do provider e fala com o server pelos endpoints existentes (hooks inbound `POST /hooks/:ws/:id`, `POST /notifications` como fallback, futuro `POST /canais/:canal/enviar`), mantendo dependências pesadas (Baileys, telegraf) e crashes isolados do processo do painel. O esqueleto de interface já vive em `src/core/canal.ts` (`Canal`, `RegistroDeCanais`, `CanalNotificacao`) e credenciais por canal usam os perfis de secrets `app:whatsapp:<id>` / `app:telegram:<id>` com allowlist de chats e rate limit. **Canais de integração — ver `docs/adr/ADR-0001-canais-integracoes.md`.**
+O OpenCorp desacopla a lógica dos agentes do runtime da LLM através de drivers de motor padronizados:
+
+| Motor | ID | Mantenedor | Modelo Recomendado | Casos de Uso |
+| :--- | :--- | :--- | :--- | :--- |
+| **Google Antigravity** | `antigravity` | Google DeepMind | `google/gemini-2.5-flash`, `google/gemini-3.8-flash` | Secretário, pesquisa complexa, análise de código, raciocínio avançado |
+| **OpenCode Engine** | `opencode` | OpenCode | `nemotron-3-ultra-free`, `glm-5.3-flash`, `qwen3.8-27b` | Rotação de cota zero, mini-agentes, esteiras de texto |
+| **OpenAI Codex** | `codex` | OpenAI | Modelos de geração e edição de código | Refatoração de scripts, manutenção automatizada |
+| **GitHub Copilot** | `copilot` | GitHub / Microsoft | CLI herdado | Auxílio em tarefas de repositório e git |

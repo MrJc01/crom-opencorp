@@ -6,24 +6,26 @@
 
 ## 1 · Mapa geral — quem é o que
 
-| Painel (web) | Módulo core | Onde vive | Fonte de verdade |
-|---|---|---|---|
-| **Tasks** (kanban) | `task-store.ts` | `<ws>/.opencorp/tasks.db` (SQLite: `tasks` + `task_mensagens`) | SQLite |
-| **Agenda** (rotinas) | `scheduler.ts` | `~/.opencorp/scheduler.db` (global: `jobs` + `job_runs`) | SQLite global |
-| **Fluxos** | `flow-store.ts` | `<ws>/.opencorp/flows/<id>.json` | JSON no filesystem |
-| **Teams** | `team-store.ts` + `team-orchestrator.ts` | `<ws>/.opencorp/teams/<id>.json` | JSON no filesystem |
-| **Reuniões** | `meeting-manager.ts` | registro em `<ws>/.opencorp/registries/chats/<id>/` | Registry (MD + meta) |
-| **Secretário** (chat) | `opencode-server.ts` + server SSE | storage do opencode + espelho `mensagens` no corp.db | opencode serve |
-| **Automação** (hooks/triggers) | `hook-store.ts` + `trigger-runner.ts` | `<ws>/.opencorp/hooks/` + triggers globais | JSON no filesystem |
-| **Histórico** | `registry-store.ts` + corp.db | `<ws>/.opencorp/registries/<categoria>/` | Filesystem (MD) + índice |
+| Painel (web) | Módulo core | Onde vive | Fonte de verdade | Papel Arquitetural |
+|---|---|---|---|---|
+| **Fluxos** | `flow-store.ts` | `<ws>/.opencorp/flows/<id>.json` | JSON no filesystem | **Motor Mestre**: comanda toda execução, agendamentos, webhooks e lógica |
+| **Agenda** (rotinas) | `scheduler.ts` | `~/.opencorp/scheduler.db` (global: `jobs` + `job_runs`) | SQLite global | **Supervisor Global**: dispara fluxos nos horários de cron definidos |
+| **Tasks** (kanban) | `task-store.ts` | `<ws>/.opencorp/tasks.db` (SQLite: `tasks` + `task_mensagens`) | SQLite | **Quadro de Trabalho**: agentes se organizam, movem cards e exibem progresso para Cliente e Secretário |
+| **Secretário** (chat) | `opencode-server.ts` + server SSE | storage do opencode + espelho `mensagens` no corp.db | opencode serve | **Supervisor Residente**: analisa, diagnostica, consulta docs e orienta o operador |
+| **Teams** | `team-store.ts` + `team-orchestrator.ts` | `<ws>/.opencorp/teams/<id>.json` | JSON no filesystem | Orquestração de equipes multi-agente |
+| **Reuniões** | `meeting-manager.ts` | registro em `<ws>/.opencorp/registries/chats/<id>/` | Registry (MD + meta) | Salas interativas e atas deliberativas |
+| **Automação** (hooks/triggers) | `hook-store.ts` + `trigger-runner.ts` | `<ws>/.opencorp/hooks/` + triggers globais | JSON no filesystem | Webhooks e reações orientadas a eventos |
+| **Histórico** | `registry-store.ts` + corp.db | `<ws>/.opencorp/registries/<categoria>/` | Filesystem (MD) + índice | Memória persistente e dados de negócio |
 
-**Princípio central:** o **eventBus** (`event-bus.ts`) é o sistema nervoso. `task-store`, `flow-store`, `meeting-manager` e `team-orchestrator` emitem eventos (`task.criada`, `task.mensagem`, `flow-inicio`, `reuniao-inicio`…). Dois ouvintes instalados no server/daemon reagem: **triggers** (automations declarativas) e **mention-runner** (menções `@agente` no chat de tasks). Quem mantém tudo vivo: `opencorp daemon` (systemd do usuário) → scheduler + serve com restart.
+**Princípio central:** O **Fluxo é o que comanda tudo**. O **eventBus** (`event-bus.ts`) conecta o sistema nervoso, o **Supervisor Global** dispara os fluxos por tempo ou evento, e os **agentes movem os cards no Kanban** para dar visibilidade imediata ao operador e ao Secretário.
 
 ---
 
-## 2 · Tasks — o kanban (espinha dorsal)
+## 2 · Tasks — o Kanban dos Agentes
 
 `src/core/task-store.ts` · banco por workspace: `<ws>/.opencorp/tasks.db`.
+
+O Kanban não é uma fila cega de scripts soltos: é o ambiente visual onde os **próprios agentes se organizam** e comunicam seu progresso para o **Cliente** e para o **Secretário Executivo**.
 
 ### 2.1 Modelo da task
 

@@ -1,57 +1,57 @@
-# 01 — Visão Geral
+# 01 — Visão Geral do OpenCorp (v0.7.0)
 
-## O que é o opencorp
+## O que é o OpenCorp
 
-O **opencorp** é um **Sistema Operacional de Empresas Autônomas** dirigido por CLI. Você cria "corps" (workspaces) — cada um é uma empresa de agentes com:
+O **OpenCorp** é um **Sistema Operacional de Empresas Autônomas Multi-Agente** desenhado para orquestrar fluxos de trabalho inteligentes, supervisão executiva e esteiras de produção digital de ponta a ponta.
 
-- **Hierarquia de agentes**: CEO(s) que planejam e documentam, Secretário que conversa com o humano, Operários que executam.
-- **Registros globais por categoria**: histórico de chats, documentos gerais, histórico de execuções, históricos de custos, logs referenciais — e qualquer categoria nova que um agente crie.
-- **Governança por arquivos**: nada de banco invisível; tudo é Markdown/JSON/SQLite legível e versionável em git.
-- **Isolamento**: cada workspace roda restrito à sua própria pasta.
+No OpenCorp, cada empresa ou projeto opera como um **Workspace** isolado com:
+- **Fluxos como Motor Central (Paradigma n8n)**: Automações visuais e declarativas onde gatilhos (`cron`, `webhook`, `manual`, `subflow`), mini-agentes, scripts, condições e saídas trabalham em um grafo executivo. O fluxo é a espinha dorsal de tudo.
+- **Supervisor e Scheduler Global Unificado**: Um daemon central que gerencia os ciclos de execução (ticks), escuta webhooks e despacha os fluxos ativos de todos os workspaces sem necessidade de agendadores fragmentados.
+- **Secretário Executivo Residente**: O cérebro supervisor de cada workspace. Ele audita histórico, responde ao operador humano, diagnostica falhas, analisa métricas e orquestra ações.
+- **Quadro Kanban de Tarefas (CRUD de Tasks)**: O painel operacional onde os próprios agentes se organizam (criando e movendo cards durante o fluxo) e exibem de forma transparente o progresso para o cliente e para o Secretário.
+- **Hub Multi-Motor de IA**: Suporte desacoplado aos principais motores de execução da indústria:
+  - **Google Antigravity Engine (AGY)**: Raciocínio avançado nativo com modelos Gemini 2.5/3.8 Flash e Pro, suporte a skills e subagentes.
+  - **OpenCode Engine**: Motor de execução flexível com suporte a modelos de cota zero e OpenRouter.
+  - **OpenAI Codex CLI & GitHub Copilot CLI**: Especialistas em geração de código e refatoração.
+  - **Claude Code & Cursor**: Runtimes complementares integrados.
 
-A base é **CLI** de propósito: CLI é a API mais simples e testável. A UI web (painel, canvas visual) virá depois **reusando o mesmo core**, sem reescrever lógica.
+---
 
-## Relação com o OpenCode
+## O Fluxo é o que Comanda Tudo
 
-O opencorp **não substitui** o OpenCode — ele o orquestra:
+Diferente de sistemas legados orientados a scripts infinitos (`while true`), o OpenCorp adota o paradigma declarativo moderno:
 
-- Cada agente opencorp = uma **sessão separada** do `opencode run` com seu próprio agente/modelo/prompt.
-- O opencorp gera a definição do agente em formato OpenCode (`.opencode/agent/<id>.md`) a partir da definição opencorp.
-- O opencorp adiciona o que o OpenCode não tem: workspaces múltiplos, registros globais entre agentes, orçamento, histórico de execuções e governança.
+```mermaid
+flowchart LR
+    G["Gatilho Embutido\n(Cron / Webhook / Manual)"] --> Cond["Condição / Checagem\n(Script Node / Mini-Agente)"]
+    Cond --> Work["Agente Especialista\n(Redação / Produção / Pesquisa)"]
+    Work --> Out["Registro de Saída\n& Atualização no Kanban"]
+```
 
-## Conceitos fundamentais
+- **Agendamento vive no Fluxo**: Cada fluxo define seu gatilho temporal (`cron`) ou de chamada externa (`webhook`).
+- **Nós Especializados**: Suporte a nós de `agente`, `mini-agente`, `script` (Node/Python/Bash), `condicao`, `fanout`, `review`, `debate`, `reuniao`, `subflow` e `http_request`.
+- **Mini-Agentes vs Modelos de Raciocínio**: Nós simples usam modelos leves (<14B) para economia e velocidade; nós complexos usam modelos de raciocínio (>70B / Flagships).
 
-| Conceito | Definição |
+---
+
+## Conceitos Fundamentais
+
+| Conceito | Definição no OpenCorp v0.7.0 |
 |---|---|
-| **Workspace (corp)** | Uma empresa/projeto isolado em `/workspaces/<id>/` com config, agentes, registros e sandbox próprios |
-| **Agente** | Arquivo Markdown com frontmatter (papel, modelo, ferramentas, permissões, orçamento) + prompt do sistema |
-| **Sessão** | Uma instância viva do OpenCode executando um agente; cada agente tem sessões separadas |
-| **Ordem** | Instrução enviada a um agente; toda ordem gera registro no histórico de execuções |
-| **Registro** | Unidade de memória global com categoria, descrição, dono e permissões de leitura/modificação |
-| **Template (.corp)** | Pacote exportável de um workspace (agentes + registros + configs) para reuso |
-| **Subcorp** | Workspace filho importado por um pai, com escopo de permissões limitado |
-| **Teste cego** | QA executado por uma sessão OpenCode com modelo leve/free que só usa o CLI, sem ler código |
+| **Workspace (Corp)** | Diretório autocontido em `~/.opencorp/workspaces/<id>/` com fluxos, agentes, registros e configurações próprios. |
+| **Fluxo (Flow)** | Grafo direcionado de execução (`.opencorp/flows/<id>.json`) que comanda as rotinas e automações do workspace. |
+| **Gatilho (Trigger)** | Nó de entrada do fluxo que dispara a execução: temporal (`cron`), evento HTTP (`webhook`) ou ação manual. |
+| **Secretário Executivo** | Agente inteligente supervisor que conhece a documentação, os fluxos e orienta o operador humano. |
+| **Kanban de Tasks** | Banco de dados SQLite (`tasks.db`) onde os agentes registram seus cards de trabalho para fácil consulta visual. |
+| **Motor (Engine)** | Runtime que executa os turnos de LLM e ferramentas (`AGY`, `OpenCode`, `Codex`, `Copilot`). |
+| **Registros (Registries)** | Memória viva e estruturada do workspace (`pautas.json`, `roteiros/`, `execucoes/`, `chats/`). |
 
-## Princípios de design
+---
 
-1. **CLI-first**: toda funcionalidade existe primeiro como comando; a web é só uma pele.
-2. **Arquivo-vivo**: agentes e registros são arquivos que humanos e agentes editam igualmente.
-3. **Isolamento por workspace**: um corp nunca vê os dados de outro por padrão.
-4. **Append-only para histórico**: execuções, chats e custos nunca são apagados, apenas anexados (journal).
-5. **Agente modificável por arquivo**: criar/alterar um agente = editar (ou clonar) um `.md`. Sem migrations.
-6. **Barato por padrão**: modelos leves/free para testes e tarefas simples; modelos fortes apenas onde precisam.
-7. **HITL (humano no loop)**: ações críticas sempre exigem confirmação explícita.
+## Princípios de Design e Governança
 
-## Roadmap macro
-
-```
-FASE A (CLI core)          FASE B (inteligência)        FASE C (web)
-├─ settings + workspaces   ├─ reunião geral (boardroom)  ├─ API server (mesmo core)
-├─ agentes + sessões       ├─ canvas visual              ├─ painel de configurações web
-├─ registros               ├─ automodificação de fluxos  └─ monitoramento multi-corp
-├─ templates/subcorp       └─ self-healing
-├─ segurança + budget
-└─ nuvem backup/sync (opcional)
-```
-
-**Este repositório está construindo a FASE A.** O plano detalhado está em `10-plano-e-checklist.md`.
+1. **O Fluxo comanda a execução**: Não há scripts de loop soltos. O supervisor global invoca os fluxos nos horários ou eventos determinados.
+2. **Dimensionamento Inteligente de Modelos (xB)**: Alocar mini-modelos para checagens simples e flagships para supervisão e criação. Proibição estrita de modelos < 4B e roteadores cegos em agentes com ferramentas.
+3. **Isolamento Rigoroso**: Um workspace nunca altera dados de outro workspace sem autorização de subcorp.
+4. **Resiliência e Auto-Cura (Circuit Breaker)**: Fluxos que falham consecutivamente entram em quarentena preventiva para não queimar cotas nem travar o host.
+5. **Transparência Visual**: O operador e o Secretário podem inspecionar todo o progresso via Studio Web ou CLI `oc`.
