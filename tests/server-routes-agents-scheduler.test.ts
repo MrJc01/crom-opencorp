@@ -246,89 +246,52 @@ describe("Rotas Modulares de Agentes e Scheduler (Micro-Passo 12)", () => {
       expect((st2.json as any).ok).toBe(true);
     });
 
-    it("POST /scheduler/jobs cria agendamento com validação de whitelist", async () => {
-      // Comando inválido (não permitido na whitelist)
-      const inv = await fetchApi("/scheduler/jobs", {
+    it("POST /scheduler/jobs retorna 410 Gone (rotinas avulsas foram unificadas em fluxos)", async () => {
+      const resp = await fetchApi("/scheduler/jobs", {
         method: "POST",
         body: JSON.stringify({
-          nome: "Rotina Inválida",
-          agenda_tipo: "intervalo_min",
-          agenda_valor: 15,
-          args: ["comando_inexistente_nao_permitido"],
-        }),
-      });
-      expect(inv.status).toBe(422);
-
-      // Comando válido
-      const val = await fetchApi("/scheduler/jobs", {
-        method: "POST",
-        body: JSON.stringify({
-          nome: "Rotina de Verificação",
+          nome: "Rotina Legada",
           agenda_tipo: "cron",
           agenda_valor: "*/10 * * * *",
           args: ["task", "list"],
         }),
       });
-      expect(val.status).toBe(201);
-      const valJson = val.json as any;
-      expect(valJson.id).toBeDefined();
-      expect(valJson.nome).toBe("Rotina de Verificação");
-      jobIdCriado = valJson.id;
+      expect(resp.status).toBe(410);
+      expect((resp.json as any).erro).toContain("removida");
     });
 
     it("GET /jobs lista jobs e aliases /scheduler/jobs /schedules", async () => {
       const rJobs = await fetchApi("/jobs");
       expect(rJobs.status).toBe(200);
       expect(Array.isArray(rJobs.json)).toBe(true);
-      expect((rJobs.json as any[]).some((j) => j.id === jobIdCriado)).toBe(true);
 
       const rSched = await fetchApi("/scheduler/jobs");
       expect(rSched.status).toBe(200);
       expect(Array.isArray(rSched.json)).toBe(true);
+
+      const rSchedules = await fetchApi("/schedules");
+      expect(rSchedules.status).toBe(200);
+      expect(Array.isArray(rSchedules.json)).toBe(true);
     });
 
-    it("GET /scheduler/jobs/:id obtém detalhes do agendamento", async () => {
-      const det = await fetchApi(`/scheduler/jobs/${jobIdCriado}`);
-      expect(det.status).toBe(200);
-      expect((det.json as any).id).toBe(jobIdCriado);
-    });
+    it("Mutações em jobs legados retornam 410 Gone", async () => {
+      const p1 = await fetchApi("/scheduler/jobs/job-legado/pausar", { method: "POST" });
+      expect(p1.status).toBe(410);
 
-    it("POST /scheduler/jobs/:id/toggle ou /pausar e /ativar gerencia estado", async () => {
-      // Pausa
-      const p1 = await fetchApi(`/scheduler/jobs/${jobIdCriado}/pausar`, { method: "POST" });
-      expect(p1.status).toBe(200);
-      expect((p1.json as any).ativo).toBe(false);
+      const p2 = await fetchApi("/scheduler/jobs/job-legado/ativar", { method: "POST" });
+      expect(p2.status).toBe(410);
 
-      // Ativa
-      const p2 = await fetchApi(`/scheduler/jobs/${jobIdCriado}/ativar`, { method: "POST" });
-      expect(p2.status).toBe(200);
-      expect((p2.json as any).ativo).toBe(true);
+      const p3 = await fetchApi("/scheduler/jobs/job-legado/toggle", { method: "POST" });
+      expect(p3.status).toBe(410);
 
-      // Toggle
-      const p3 = await fetchApi(`/scheduler/jobs/${jobIdCriado}/toggle`, { method: "POST" });
-      expect(p3.status).toBe(200);
-      expect((p3.json as any).ativo).toBe(false);
-    });
+      const runResp = await fetchApi("/scheduler/jobs/job-legado/run", { method: "POST" });
+      expect(runResp.status).toBe(410);
 
-    it("POST /scheduler/jobs/:id/run dispara execução forçada", async () => {
-      const runResp = await fetchApi(`/scheduler/jobs/${jobIdCriado}/run`, { method: "POST" });
-      expect(runResp.status).toBe(200);
-      expect((runResp.json as any).ok).toBe(true);
-    });
+      const runs = await fetchApi("/scheduler/jobs/job-legado/runs");
+      expect(runs.status).toBe(410);
 
-    it("GET /scheduler/jobs/:id/runs lista histórico de runs", async () => {
-      const runs = await fetchApi(`/scheduler/jobs/${jobIdCriado}/runs`);
-      expect(runs.status).toBe(200);
-      expect(Array.isArray(runs.json)).toBe(true);
-    });
-
-    it("DELETE /scheduler/jobs/:id remove o agendamento", async () => {
-      const del = await fetchApi(`/scheduler/jobs/${jobIdCriado}`, { method: "DELETE" });
-      expect(del.status).toBe(200);
-      expect((del.json as any).ok).toBe(true);
-
-      const check = await fetchApi(`/scheduler/jobs/${jobIdCriado}`);
-      expect(check.status).toBe(404);
+      const del = await fetchApi("/scheduler/jobs/job-legado", { method: "DELETE" });
+      expect(del.status).toBe(410);
     });
   });
 });

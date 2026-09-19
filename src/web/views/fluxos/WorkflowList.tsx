@@ -2,11 +2,12 @@ import {
   type Component,
   createSignal,
   createMemo,
+  createEffect,
   For,
   Show,
   type Accessor,
 } from "solid-js";
-import { useNavigate } from "@solidjs/router";
+import { useNavigate, useSearchParams } from "@solidjs/router";
 import {
   GitBranch,
   Play,
@@ -39,14 +40,26 @@ export interface WorkflowListProps {
   onImportarArquivo: (e: Event) => void;
   onSalvarAlteracoes: (f: FluxoCompleto) => Promise<void>;
   onAbrirModalNovo: () => void;
+  onExecutarAgora?: (f: FluxoCompleto, e?: MouseEvent) => void;
 }
 
 export const WorkflowList: Component<WorkflowListProps> = (props) => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   let inputImportarRef: HTMLInputElement | undefined;
 
   const [buscaTexto, setBuscaTexto] = createSignal("");
-  const [filtroTipo, setFiltroTipo] = createSignal<"todos" | "cron" | "webhook" | "manual">("todos");
+  const [filtroTipo, setFiltroTipo] = createSignal<"todos" | "cron" | "webhook" | "manual">(
+    searchParams.filtro === "cron" ? "cron" :
+    searchParams.filtro === "webhook" ? "webhook" :
+    searchParams.filtro === "manual" ? "manual" : "todos"
+  );
+
+  createEffect(() => {
+    if (searchParams.filtro === "cron") setFiltroTipo("cron");
+    else if (searchParams.filtro === "webhook") setFiltroTipo("webhook");
+    else if (searchParams.filtro === "manual") setFiltroTipo("manual");
+  });
 
   const fluxosFiltrados = createMemo(() => {
     const termo = buscaTexto().toLowerCase().trim();
@@ -310,7 +323,7 @@ export const WorkflowList: Component<WorkflowListProps> = (props) => {
                   </p>
 
                   <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1" onClick={(e) => e.stopPropagation()}>
-                    <label class="flex items-center gap-1.5 text-[11px] text-zinc-300 cursor-pointer" title="Desativado: remove o job do scheduler e bloqueia execução manual">
+                    <label class="flex items-center gap-1.5 text-[11px] text-zinc-300 cursor-pointer" title="Habilita ou desabilita o fluxo e seus agendamentos no scheduler">
                       <input
                         type="checkbox"
                         data-testid={`toggle-ativo-${f.id}`}
@@ -326,25 +339,18 @@ export const WorkflowList: Component<WorkflowListProps> = (props) => {
                       <span>Ativo</span>
                     </label>
 
-                    <label class="flex items-center gap-1.5 text-[11px] text-zinc-300 cursor-pointer" title="Cria job no scheduler se houver gatilho cron (PUT /flows/:id)">
-                      <input
-                        type="checkbox"
-                        data-testid={`toggle-auto-${f.id}`}
-                        checked={f.auto_agendar ?? false}
-                        onChange={(e) => {
-                          const p = { ...f, auto_agendar: e.currentTarget.checked };
-                          if (typeof p.nos === "number") delete p.nos;
-                          if (typeof p.arestas === "number") delete p.arestas;
-                          void props.onSalvarAlteracoes(p);
-                        }}
-                        class="accent-orange-500 h-3.5 w-3.5"
-                      />
-                      <span>Auto-agendar</span>
-                    </label>
-
-                    <span class="text-[11px] text-zinc-500 font-mono">
+                    <span data-testid={`trigger-${f.id}`} class="text-[11px] text-zinc-500 font-mono">
                       cron: {cronResumo(f)}
                     </span>
+
+                    <button
+                      type="button"
+                      data-testid={`executar-agora-${f.id}`}
+                      onClick={(e) => props.onExecutarAgora?.(f, e)}
+                      class="px-2 py-0.5 rounded-lg bg-zinc-800 hover:bg-orange-600 hover:text-white text-zinc-300 text-[11px] font-medium transition-colors cursor-pointer"
+                    >
+                      Executar agora
+                    </button>
                   </div>
                 </div>
               </div>

@@ -1021,3 +1021,12 @@ export class Scheduler {
     }
   }
 }
+
+export function argsComGatilhoCron(job: { id: string; args?: string[] }): string {
+  const args = job.args ?? [];
+  if ((args[0] === "agent" && args[1] === "run") || (args[0] === "flow" && args[1] === "run")) {
+    return `cron:${job.id}`;
+  }
+  return "";
+}
+

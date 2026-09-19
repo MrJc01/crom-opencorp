@@ -90,7 +90,6 @@ test.describe("Web Fluxos: lista, canvas, NDV e execução", () => {
         nos: [{ id: "inicio", tipo: "manual", config: {} }],
         arestas: [],
         ativo: true,
-        auto_agendar: false,
       },
     });
 
@@ -104,12 +103,7 @@ test.describe("Web Fluxos: lista, canvas, NDV e execução", () => {
     await page.locator('input[placeholder="Pesquisar fluxos..."]').fill(fid);
     await expect(page.getByText("Flow Toggle Test").first()).toBeVisible({ timeout: 10000 });
 
-    // Clica no toggle Auto-agendar (que envia PUT /flows/:id com os dados do card)
-    const toggleAuto = page.locator(`[data-testid="toggle-auto-${fid}"]`);
-    await expect(toggleAuto).toBeVisible({ timeout: 5000 });
-    await toggleAuto.click();
-
-    // Clica no toggle Ativo
+    // Clica no toggle Ativo (que envia PUT /flows/:id com os dados do card)
     const toggleAtivo = page.locator(`[data-testid="toggle-ativo-${fid}"]`);
     await expect(toggleAtivo).toBeVisible({ timeout: 5000 });
     await toggleAtivo.click();

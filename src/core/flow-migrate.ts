@@ -59,7 +59,7 @@ export function specTeamParaFlow(team: TeamSpec): Flow {
     arestas.push({ de: "gatilho", para: "debate" });
   }
 
-  return { id: team.id, nome: team.titulo || team.id, nos, arestas, auto_agendar: false, ativo: true };
+  return { id: team.id, nome: team.titulo || team.id, nos, arestas, ativo: true };
 }
 
 /** Migra TODOS os teams do workspace para flows. Idempotente: flow existente é pulado.

@@ -214,13 +214,11 @@ describe("Rotas Modulares de Flows e Sessões (Micro-Passo 11)", () => {
         body: JSON.stringify({
           id: "meu-fluxo-1",
           ativo: false,
-          auto_agendar: true,
         }),
       });
       expect(res.status).toBe(200);
-      const flow = res.json as { id: string; ativo: boolean; auto_agendar: boolean; nos?: Array<{ id: string }> };
+      const flow = res.json as { id: string; ativo: boolean; nos?: Array<{ id: string }> };
       expect(flow.ativo).toBe(false);
-      expect(flow.auto_agendar).toBe(true);
       expect(flow.nos?.length).toBe(1);
     });
 

@@ -271,10 +271,11 @@ describe("checkScheduler", () => {
     mkdirSync(join(home, ".opencorp"), { recursive: true });
     const pidfile = schedulerPidfilePath(home);
     await writeFile(pidfile, JSON.stringify({ pid: 999_999, iniciado: new Date().toISOString() }));
-    // cria scheduler.db com 1 job ativo usando o módulo real (mais simples)
-    const { Scheduler } = await import("../src/core/scheduler.js");
-    const s = new Scheduler({ homeDir: home });
-    await s.criar({ nome: "r", agenda: { tipo: "intervalo_min", valor: 30 }, args: ["task", "list"] });
+    // cria scheduler.db com 1 job ativo para simular resíduo de migração
+    const Database = (await import("better-sqlite3")).default;
+    const db = new Database(join(home, ".opencorp", "scheduler.db"));
+    db.exec("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, ativo INTEGER); INSERT INTO jobs (id, ativo) VALUES ('j1', 1);");
+    db.close();
     const check = await checkScheduler(home);
     expect(check.status).toBe("warn");
     expect(check.detail).toContain("scheduler morto");

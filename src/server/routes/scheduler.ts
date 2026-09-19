@@ -51,6 +51,10 @@ export async function handleSchedulerRoutes(ctx: RouteContext): Promise<boolean>
         ativo: schedulerVivo,
         pid: schedulerPid,
       },
+      jobs: {
+        total: agendamentos.length,
+        ativos: ativos.length,
+      },
       agendamentos: {
         total: agendamentos.length,
         ativos: ativos.length,

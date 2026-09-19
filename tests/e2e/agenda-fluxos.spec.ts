@@ -34,25 +34,20 @@ test.describe("Agenda → Fluxos (Etapa 12, item 12.5)", () => {
     await expect(page.getByTestId("secao-fluxos-agendados")).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("trigger-agfx-cron")).toContainText("0 2 * * *", { timeout: 15000 });
     await expect(page.getByText("Agfx Rotina Madrugada").first()).toBeVisible();
-    await expect(page.getByTestId("toggle-auto-agfx-cron")).toBeVisible();
+    await expect(page.getByTestId("toggle-ativo-agfx-cron")).toBeVisible();
     await expect(page.getByTestId("executar-agora-agfx-cron")).toBeVisible();
     await expect(page.getByTestId("abrir-editor-agfx-cron")).toBeVisible();
   });
 
-  test("toggle auto_agendar cria job flow:<id> no scheduler", async ({ page }) => {
+  test("fluxo com cron ativo aparece no scheduler", async ({ page }) => {
     await semearFlowCron(page, "agfx-auto", "Agfx Auto", "0 3 * * *");
 
     await page.goto("/agenda");
     await page.waitForURL("**/fluxos?filtro=cron*", { timeout: 10000 });
 
-    const toggle = page.getByTestId("toggle-auto-agfx-auto");
+    const toggle = page.getByTestId("toggle-ativo-agfx-auto");
     await expect(toggle).toBeVisible({ timeout: 15000 });
-    if (!(await toggle.isChecked())) await toggle.check();
-    await expect(page.getByText(/Agendamento automático ativado/).first()).toBeVisible({ timeout: 10000 });
-
-    const detResp = await api(page).get("/flows/agfx-auto", { headers: { authorization: `Bearer ${TOKEN}` } });
-    const det = await detResp.json();
-    test.skip(!det?.auto_agendar, "core ainda filtra auto_agendar no PUT /flows/:id — toggle em no-op até a Etapa 12 pousar");
+    expect(await toggle.isChecked()).toBe(true);
 
     const jobsResp = await api(page).get("/schedules", { headers: { authorization: `Bearer ${TOKEN}` } });
     const jobs = (await jobsResp.json()) as Array<{ id: string; nome: string }>;

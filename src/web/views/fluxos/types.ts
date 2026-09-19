@@ -31,7 +31,6 @@ export interface FluxoCompleto {
   id: string;
   nome: string;
   descricao?: string;
-  auto_agendar?: boolean;
   ativo?: boolean;
   nos: NoGrafo[];
   arestas: ArestaGrafo[];

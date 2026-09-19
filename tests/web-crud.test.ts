@@ -75,35 +75,19 @@ describe("API — CRUD da web (B/C)", () => {
 
   const wsq = "?workspace=ws1";
 
-  it("B1 — PATCH /schedules/:id edita nome/agenda/args (e valida args)", async () => {
+  it("B1 — POST e PATCH /schedules retornam 410 Gone (rotinas migradas para flows n8n)", async () => {
     const criado = await fetchApi("/schedules", {
       method: "POST",
       body: JSON.stringify({ nome: "rotina-x", agenda_tipo: "intervalo_min", agenda_valor: "30", args: ["doctor"], workspace: "ws1" }),
     });
-    expect(criado.status).toBe(201);
-    const id = (criado.json as { id: string }).id;
+    expect(criado.status).toBe(410);
+    expect((criado.json as { erro: string }).erro).toContain("removida");
 
-    const editado = await fetchApi(`/schedules/${id}`, {
+    const patch = await fetchApi("/schedules/job-qualquer", {
       method: "PATCH",
-      body: JSON.stringify({ nome: "rotina-y", agenda_tipo: "cron", agenda_valor: "*/5 * * * *", args: ["doctor", "--rapido"] }),
+      body: JSON.stringify({ nome: "rotina-y" }),
     });
-    expect(editado.status).toBe(200);
-    expect((editado.json as { nome: string }).nome).toBe("rotina-y");
-    expect((editado.json as { agenda: { tipo: string } }).agenda.tipo).toBe("cron");
-    expect((editado.json as { args: string[] }).args).toEqual(["doctor", "--rapido"]);
-
-    const invalido = await fetchApi(`/schedules/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ args: ["rm-rf-tudo"] }),
-    });
-    expect(invalido.status).toBe(422);
-
-    // auditoria #4: agenda_valor sem agenda_tipo → 422 (não converte cron em intervalo)
-    const parIncompleto = await fetchApi(`/schedules/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ agenda_valor: "*/10 * * * *" }),
-    });
-    expect(parIncompleto.status).toBe(422);
+    expect(patch.status).toBe(410);
   });
 
   it("A6 — GET /hooks NÃO expõe token na lista (só no detalhe)", async () => {

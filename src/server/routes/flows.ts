@@ -48,7 +48,6 @@ export async function handleFlowRoutes(ctx: RouteContext): Promise<boolean> {
       nome?: string;
       nos?: Flow["nos"];
       arestas?: Flow["arestas"];
-      auto_agendar?: boolean;
       ativo?: boolean;
     };
     const flowId = (corpo.id ?? "").trim();
@@ -62,7 +61,6 @@ export async function handleFlowRoutes(ctx: RouteContext): Promise<boolean> {
         nome: corpo.nome ?? atual.nome,
         nos: corpo.nos,
         arestas: corpo.arestas ?? [],
-        auto_agendar: corpo.auto_agendar ?? atual.auto_agendar ?? false,
         ativo: corpo.ativo ?? atual.ativo ?? true,
       });
       eventBus.emit("flow-salvo", { flow: flowId });
@@ -77,18 +75,12 @@ export async function handleFlowRoutes(ctx: RouteContext): Promise<boolean> {
         nome: corpo.nome ?? flowId,
         nos: corpo.nos,
         arestas: corpo.arestas ?? [],
-        auto_agendar: corpo.auto_agendar ?? false,
         ativo: corpo.ativo ?? true,
       });
       enviar(res, 201, f);
       return true;
     }
     const f = await flows.criar(ws.path, flowId, corpo.nome ?? flowId);
-    if (corpo.auto_agendar === true) {
-      await flows.salvar(ws.path, { ...f, auto_agendar: true });
-      enviar(res, 201, await flows.obter(ws.path, flowId));
-      return true;
-    }
     enviar(res, 201, f);
     return true;
   }
@@ -153,7 +145,6 @@ export async function handleFlowRoutes(ctx: RouteContext): Promise<boolean> {
       nos,
       arestas,
       nome: String(corpo.nome ?? atual.nome),
-      auto_agendar: typeof corpo.auto_agendar === "boolean" ? corpo.auto_agendar : (atual.auto_agendar ?? false),
       ativo: typeof corpo.ativo === "boolean" ? corpo.ativo : (atual.ativo ?? true),
     } as Parameters<typeof flows.salvar>[1]);
     eventBus.emit("flow-salvo", { flow: flowId });

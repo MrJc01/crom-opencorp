@@ -100,25 +100,6 @@ export const WorkflowHeader: Component<WorkflowHeaderProps> = (props) => {
           <span>Ativo</span>
         </label>
 
-        <label
-          class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-950 border border-zinc-800 text-[11px] text-zinc-300 cursor-pointer"
-          title="Cria job no scheduler (PUT auto_agendar)"
-        >
-          <input
-            type="checkbox"
-            data-testid="toggle-auto-detalhe"
-            checked={props.fluxo()?.auto_agendar ?? false}
-            onChange={(e) => {
-              const f = props.fluxo();
-              if (!f) return;
-              void props.onSalvarAlteracoes({ ...f, auto_agendar: e.currentTarget.checked });
-            }}
-            class="accent-orange-500 h-3.5 w-3.5"
-          />
-          <span class="hidden sm:inline">Agendar automaticamente</span>
-          <span class="sm:hidden">Auto</span>
-        </label>
-
         <div class="hidden xl:flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5 text-xs text-zinc-400">
           <IconButton size="xs" variant="ghost" onClick={() => props.setZoom((z) => Math.max(z - 0.15, 0.4))} title="Zoom Out">
             <ZoomOut size={13} />

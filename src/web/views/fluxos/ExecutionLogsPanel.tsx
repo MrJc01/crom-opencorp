@@ -44,8 +44,8 @@ export const ExecutionLogsPanel: Component<ExecutionLogsPanelProps> = (props) =>
           {/* Topo do Painel */}
           <div class="h-9 px-3 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-950/60">
             <div class="flex items-center gap-2">
-              <History size={13} class="text-orange-400" />
-              <span class="text-xs font-bold text-zinc-200">Histórico de Execuções & Telemetria I/O</span>
+              <History size={14} class="text-orange-400" />
+              <span class="text-xs font-bold text-zinc-200">Execuções & Dados I/O</span>
               <span class="text-[10px] text-zinc-500 font-mono">({props.logs().length} execuções)</span>
             </div>
             <div class="flex items-center gap-1">

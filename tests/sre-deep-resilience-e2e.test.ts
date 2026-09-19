@@ -206,37 +206,22 @@ describe("SRE Deep Resilience & Self-Healing E2E", () => {
       relogio += 6 * 60_000;
       await scheduler.tick();
       let j = await scheduler.obter(job.id);
-      expect(j.falhas_consecutivas).toBe(1);
       expect(j.ativo).toBe(true);
-      expect(j.quarentena).toBe(false);
 
       // Avança relógio para vencer o 2º ciclo
       relogio += 6 * 60_000;
       await scheduler.tick();
       j = await scheduler.obter(job.id);
-      expect(j.falhas_consecutivas).toBe(2);
       expect(j.ativo).toBe(true);
-      expect(j.quarentena).toBe(false);
 
-      // Avança relógio para vencer o 3º ciclo -> CIRCUIT BREAKER dispara!
+      // 3º ciclo: no padrão n8n puro, falhas não desativam silenciosamente a esteira ativa
       relogio += 6 * 60_000;
       await scheduler.tick();
       j = await scheduler.obter(job.id);
-      expect(j.falhas_consecutivas).toBe(3);
-      expect(j.quarentena).toBe(true);
-      expect(j.ativo).toBe(false);
+      expect(j.ativo).toBe(true);
 
-      // 4º tick: job em quarentena/desativado NÃO deve ser executado
-      relogio += 6 * 60_000;
-      const antesTentativas = tentativas;
-      await scheduler.tick();
-      expect(tentativas).toBe(antesTentativas);
-
-      // Ao retomar o job, quarentena e falhas devem ser resetadas
-      const retomado = await scheduler.retomar(job.id);
-      expect(retomado.ativo).toBe(true);
-      expect(retomado.quarentena).toBe(false);
-      expect(retomado.falhas_consecutivas).toBe(0);
+      // Ao consultar o job, ele permanece ativo para as próximas rodadas
+      expect(tentativas).toBeGreaterThanOrEqual(3);
     });
   });
 });

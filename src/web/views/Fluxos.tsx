@@ -427,6 +427,21 @@ export const FluxosView: Component = () => {
     if (paramFluxo) void abrirEditorCanvas(paramFluxo);
   });
 
+  const executarAgoraList = async (f: FluxoCompleto, e?: MouseEvent) => {
+    e?.stopPropagation();
+    try {
+      const res = await fetchApi<{ status?: string; exec_id?: string }>(`/flows/${encodeURIComponent(f.id)}/run`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      const eid = res?.exec_id || "exec-" + Date.now();
+      showToast(`Execução do fluxo iniciada: exec_id ${eid}`, "sucesso");
+      void carregarFluxos();
+    } catch (err: any) {
+      showToast(`Erro ao rodar: ${err.message}`, "erro");
+    }
+  };
+
   return (
     <div class="flex flex-col h-full w-full overflow-hidden bg-zinc-950 select-none">
       {/* Listagem Principal de Workflows */}
@@ -444,6 +459,7 @@ export const FluxosView: Component = () => {
           onImportarArquivo={importarWorkflowArquivo}
           onSalvarAlteracoes={salvarAlteracoesWorkflow}
           onAbrirModalNovo={() => setModalNovoFluxo(true)}
+          onExecutarAgora={executarAgoraList}
         />
       </Show>
 

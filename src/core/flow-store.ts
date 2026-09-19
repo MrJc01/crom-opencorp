@@ -186,7 +186,6 @@ export class FlowStore {
       nome: nome.trim(),
       nos: [{ id: "gatilho", tipo: "manual", config: {} }],
       arestas: [],
-      auto_agendar: false,
       ativo: true,
     };
     await this.salvar(wsPath, flow);
@@ -194,7 +193,7 @@ export class FlowStore {
   }
 
   /** POST com grafo completo (editor da web): 409 se id existe + validação semântica do grafo */
-  async salvarComId(wsPath: string, bruto: { id: string; nome: string; nos: Flow["nos"]; arestas: Flow["arestas"]; auto_agendar?: boolean; ativo?: boolean }): Promise<Flow> {
+  async salvarComId(wsPath: string, bruto: { id: string; nome: string; nos: Flow["nos"]; arestas: Flow["arestas"]; ativo?: boolean }): Promise<Flow> {
     const id = validarIdFlow(bruto.id);
     if (existsSync(this.caminho(wsPath, id))) {
       throw new FlowError(`flow "${id}" já existe (${this.caminho(wsPath, id)})`);
@@ -207,7 +206,6 @@ export class FlowStore {
       nome: bruto.nome.trim(),
       nos: bruto.nos,
       arestas: bruto.arestas,
-      auto_agendar: bruto.auto_agendar ?? false,
       ativo: bruto.ativo ?? true,
     };
     await this.salvar(wsPath, flow);
@@ -221,7 +219,6 @@ export class FlowStore {
     arestas: number;
     gatilhos: Array<{ tipo: string; detalhe?: string }>;
     temLoop: boolean;
-    auto_agendar: boolean;
     ativo: boolean;
   }[]> {
     const dir = this.dir(wsPath);
@@ -233,7 +230,6 @@ export class FlowStore {
       arestas: number;
       gatilhos: Array<{ tipo: string; detalhe?: string }>;
       temLoop: boolean;
-      auto_agendar: boolean;
       ativo: boolean;
     }[] = [];
     for (const f of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
@@ -253,7 +249,6 @@ export class FlowStore {
           arestas: flow.arestas.length,
           gatilhos,
           temLoop,
-          auto_agendar: flow.auto_agendar ?? false,
           ativo: flow.ativo ?? true,
         });
       } catch {
