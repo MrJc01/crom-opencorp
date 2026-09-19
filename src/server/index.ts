@@ -16,7 +16,7 @@ import { RegistryStore } from "../core/registry-store.js";
 import { ApprovalsStore } from "../core/approvals-store.js";
 import { SettingsError, SettingsStore } from "../core/settings-store.js";
 import { FlowStore, type SessaoFlow } from "../core/flow-store.js";
-import { sincronizarJobsParaFluxos } from "../core/scheduler-flow-bridge.js";
+
 import { MeetingManager } from "../core/meeting-manager.js";
 import { TaskStore } from "../core/task-store.js";
 import { PromptStore } from "../core/prompt-store.js";
@@ -170,7 +170,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   const secretsStore = new SecretsStore(opcoes.homeDir ?? opencorpHome());
   const engineAccounts = new EngineAccountStore({ homeDir: opcoes.homeDir ?? opencorpHome() });
   const flows = new FlowStore({ ...base, sessoes: opcoes.sessoes as unknown as SessaoFlow | undefined });
-  void sincronizarJobsParaFluxos(opcoes.homeDir ?? opencorpHome()).catch(() => undefined);
+
   const meetings = new MeetingManager({ ...base, sessoes: opcoes.sessoes as never });
   const tasks = new TaskStore();
   const prompts = new PromptStore(base);

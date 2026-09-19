@@ -9,7 +9,7 @@ import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
 import { PromptStore } from "./prompt-store.js";
 
-import { sincronizarFluxoParaScheduler, removerJobDoScheduler, sincronizarJobsParaFluxos } from "./scheduler-flow-bridge.js";
+
 
 export const nosFlowSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "use kebab-case para o id do nó"),
@@ -57,9 +57,10 @@ export const flowSchema = z.object({
   nome: z.string().min(1),
   nos: z.array(nosFlowSchema).min(1),
   arestas: z.array(arestaFlowSchema).default([]),
-  auto_agendar: z.boolean().default(false),
   // Interruptor mestre do flow: false = sem job no scheduler + run manual bloqueado.
-  // Default true preserva todos os flows existentes (ausência = ativo).
+  // @deprecated Obsoleto. O motor unificado (n8n) depende exclusivamente de `ativo` + presença de nó cron.
+  // Mantido no schema apenas para retrocompatibilidade de leitura de JSONs legados.
+  auto_agendar: z.boolean().default(false).optional(),
   ativo: z.boolean().default(true),
 });
 
@@ -223,11 +224,6 @@ export class FlowStore {
     auto_agendar: boolean;
     ativo: boolean;
   }[]> {
-    try {
-      await sincronizarJobsParaFluxos(this.homeDir);
-    } catch {
-      /* não bloqueia listagem */
-    }
     const dir = this.dir(wsPath);
     if (!existsSync(dir)) return [];
     const saida: {
@@ -695,11 +691,6 @@ export class FlowStore {
       this.caminho(wsPath, flow.id),
       `${JSON.stringify(normalizado, null, 2)}\n`,
     );
-    try {
-      await sincronizarFluxoParaScheduler(wsPath, normalizado, this.homeDir);
-    } catch {
-      /* não interrompe salvar */
-    }
   }
 
   async deletar(wsPath: string, id: string): Promise<void> {
@@ -709,11 +700,6 @@ export class FlowStore {
     }
     const { rm } = await import("node:fs/promises");
     await rm(path, { force: true });
-    try {
-      await removerJobDoScheduler(wsPath, id, this.homeDir);
-    } catch {
-      /* não interrompe exclusão */
-    }
   }
 
   textoAtual(wsPath: string, id: string): string {

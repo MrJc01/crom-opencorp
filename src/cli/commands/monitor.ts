@@ -5,7 +5,7 @@ import { SessionManager } from "../../core/session-manager.js";
 import { ApprovalsStore } from "../../core/approvals-store.js";
 import { BudgetManager } from "../../core/budget-manager.js";
 import { RegistryStore } from "../../core/registry-store.js";
-import { Scheduler, type Job } from "../../core/scheduler.js";
+import { Scheduler } from "../../core/scheduler.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -154,19 +154,19 @@ async function imprimir(wsId: string | undefined, horas: number): Promise<void> 
     const pend = await approvals.pendentes(ws.path);
     console.log(`approvals    ${pend.length} pendente(s)${pend.length ? ` — use "opencorp approvals list"` : ""}`);
 
-    // ── Scheduler ──
+    // ── Scheduler (fluxos com cron) ──
     try {
-      const jobs = await new Scheduler().listar(true);
-      const doWs = jobs.filter((j: Job) => !j.workspace || j.workspace === ws.id);
+      const agendamentos = await new Scheduler().listarAgendamentos();
+      const doWs = agendamentos.filter((a) => !a.workspace || a.workspace === ws.id);
       if (doWs.length) {
         const proximos = doWs
-          .map((j: Job) => j.proxima_exec ?? "")
+          .map((a) => a.proxima_exec ?? "")
           .filter(Boolean)
           .sort()[0];
-        console.log(`scheduler    ${doWs.length} job(s) ativo(s)${proximos ? ` · próxima: ${formatarDataExecucao(proximos)}` : ""}`);
+        console.log(`scheduler    ${doWs.length} fluxo(s) agendado(s)${proximos ? ` · próxima: ${formatarDataExecucao(proximos)}` : ""}`);
       }
     } catch {
-      // scheduler store indisponível — silencioso
+      // scheduler indisponível — silencioso
     }
 
     // ── Registros (crescimento acúmulo) ──

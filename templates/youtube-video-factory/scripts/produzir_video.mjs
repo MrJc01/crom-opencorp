@@ -153,7 +153,23 @@ async function buscarImagem(consulta, destAbs) {
 // ---------- 2. Seleção de pauta (roteiro real obrigatório) ----------
 const pautasFile = path.join(registriesDir, "pautas.json");
 if (!fs.existsSync(pautasFile)) { log("ERRO: registries/pautas.json ausente. Rode setup_inicial.mjs."); process.exit(1); }
-const dadosPautas = JSON.parse(fs.readFileSync(pautasFile, "utf8"));
+
+function salvarPautasAtomico(caminho, dados) {
+  const tmp = `${caminho}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, JSON.stringify(dados, null, 2), "utf8");
+  fs.renameSync(tmp, caminho);
+}
+
+let dadosPautas;
+try {
+  dadosPautas = JSON.parse(fs.readFileSync(pautasFile, "utf8"));
+  if (!dadosPautas || !Array.isArray(dadosPautas.pautas)) {
+    throw new Error("Formato inválido: campo 'pautas' não é array.");
+  }
+} catch (err) {
+  log(`ERRO ao ler registries/pautas.json: ${err.message}`);
+  process.exit(1);
+}
 const candidatas = dadosPautas.pautas.filter((p) => p.status === "em_producao" || p.status === "pendente");
 let pauta = null, roteiro = null;
 for (const p of candidatas) {
@@ -183,7 +199,7 @@ for (const p of candidatas) {
       if (jaProduzido) {
         log(`Pauta [${p.id}] "${p.titulo_a}" já possui vídeo gerado no catálogo. Marcando como duplicado.`);
         p.status = "duplicado";
-        fs.writeFileSync(pautasFile, JSON.stringify(dadosPautas, null, 2));
+        salvarPautasAtomico(pautasFile, dadosPautas);
         continue;
       }
       pauta = p; roteiro = r; break;
@@ -454,7 +470,7 @@ if (veredito === "FAIL") {
 pauta.status = "concluido";
 pauta.video_gerado = videoId;
 pauta.data_conclusao = new Date().toISOString();
-fs.writeFileSync(pautasFile, JSON.stringify(dadosPautas, null, 2));
+salvarPautasAtomico(pautasFile, dadosPautas);
 try {
   const db = new Database(tasksDbPath);
   const now = new Date().toISOString();

@@ -3,11 +3,7 @@ import type { Command } from "commander";
 import {
   Scheduler,
   validarCron,
-  type Agenda,
-  type Job,
 } from "../../core/scheduler.js";
-import { SchedulerError } from "../../core/errors.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
 import { spawnDaemon, pidVivo } from "../../core/supervisor.js";
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -32,33 +28,6 @@ async function comErros(fn: () => Promise<void>): Promise<void> {
   }
 }
 
-function dividirArgs(texto: string): string[] {
-  const saida: string[] = [];
-  for (const m of texto.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) {
-    saida.push(m[1] ?? m[2] ?? m[3] ?? "");
-  }
-  return saida;
-}
-
-function agendaDe(opts: { cron?: string; intervaloMin?: number; as?: string }): Agenda {
-  if (opts.cron) return { tipo: "cron", valor: opts.cron };
-  if (opts.intervaloMin) return { tipo: "intervalo_min", valor: opts.intervaloMin };
-  if (opts.as) return { tipo: "data_unica", valor: opts.as };
-  throw new SchedulerError("informe a agenda: --cron \"...\" | --intervalo-min N | --as <ISO>");
-}
-
-function linhaJob(j: Job): string {
-  const agenda =
-    j.agenda.tipo === "cron"
-      ? `cron "${j.agenda.valor}"`
-      : j.agenda.tipo === "intervalo_min"
-        ? `cada ${j.agenda.valor} min`
-        : `em ${j.agenda.valor}`;
-  const status = j.ativo ? "ativo" : "pausado";
-  const proxima = j.proxima_exec ? j.proxima_exec.slice(0, 16).replace("T", " ") : "-";
-  return `${j.id}  ${status.padEnd(8)}${agenda.padEnd(22)}próxima: ${proxima}  ${j.nome} [${j.args.join(" ")}]`;
-}
-
 function pidPathScheduler(): string {
   return join(opencorpHome(), ".opencorp", "scheduler.pid");
 }
@@ -75,115 +44,57 @@ async function lerPid(): Promise<{ pid: number } | null> {
 
 export function registerScheduleCommands(program: Command): void {
   const scheduler = new Scheduler();
-  const manager = new WorkspaceManager();
-
-  function wsDe(opts: { workspace?: string }): string | undefined {
-    return opts.workspace ?? (program.opts() as { workspace?: string }).workspace;
-  }
 
   const schedule = program
     .command("schedule")
     .description(
-      "jobs agendados (cron de 5 campos, intervalo em minutos ou data única) que executam comandos opencorp — ex.: schedule create --nome rotina --intervalo-min 60 --args \"task create --titulo 'Checar fila'\"",
-    );
-
-  schedule
-    .command("create")
-    .requiredOption("--nome <nome>", "nome do job")
-    .requiredOption("--args <comando>", 'comando opencorp (sem o binário), ex.: "agent run executor-padrao \'oi\'" (ordem é posicional — não use --ordem)')
-    .option("--cron <expr>", "expressão cron de 5 campos (min hora dom mês dow)")
-    .option("--intervalo-min <n>", "repete a cada N minutos", Number)
-    .option("--as <data>", "data única (ISO) — executa uma vez e desativa")
-    .option("--workspace <id>", "workspace alvo (padrão: ativo)")
-    .option("--graca-min <n>", "tolerância de atraso antes de pular (padrão 5)", Number)
-    .description("cria um job agendado")
-    .action((opts: { nome: string; args: string; cron?: string; intervaloMin?: number; as?: string; workspace?: string; gracaMin?: number }) =>
-      comErros(async () => {
-        const ws = await manager.resolver(wsDe(opts));
-        const j = await scheduler.criar({
-          nome: opts.nome,
-          agenda: agendaDe(opts),
-          args: dividirArgs(opts.args),
-          workspace: ws.id,
-          graca_min: opts.gracaMin,
-        });
-        console.log(`ok: ${j.id} criado — próxima execução ${j.proxima_exec}`);
-      }),
+      "agendamentos baseados em fluxos — todo agendamento é um fluxo com nó cron. Use 'flow create' para criar novos agendamentos.",
     );
 
   schedule
     .command("list")
-    .option("--todos", "inclui pausados (padrão: todos)")
-    .description("lista os jobs agendados")
-    .action(() =>
+    .option("--workspace <id>", "filtrar por workspace")
+    .description("lista os fluxos agendados (com nó cron) de todos os workspaces")
+    .action((opts: { workspace?: string }) =>
       comErros(async () => {
-        const jobs = await scheduler.listar();
-        if (jobs.length === 0) {
-          console.log('nenhum job — crie com: opencorp schedule create --nome "..." --intervalo-min 60 --args "..."');
+        const agendamentos = await scheduler.listarAgendamentos();
+        const filtrado = opts.workspace
+          ? agendamentos.filter((a) => a.workspace === opts.workspace)
+          : agendamentos;
+        if (filtrado.length === 0) {
+          console.log('nenhum fluxo agendado — crie um flow com nó "cron" via: opencorp flow create --nome "..." e adicione um nó cron');
           return;
         }
-        for (const j of jobs) console.log(linhaJob(j));
+        for (const a of filtrado) {
+          const status = a.ativo ? "ativo" : "inativo";
+          const proxima = a.proxima_exec ? a.proxima_exec.slice(0, 16).replace("T", " ") : "-";
+          console.log(`${a.id}  ${status.padEnd(8)}cron "${a.expressao_cron}"`.padEnd(40) + `próxima: ${proxima}  ${a.nome} [ws: ${a.workspace}]`);
+        }
       }),
     );
 
   schedule
     .command("show")
-    .argument("<id>", "id do job")
-    .description("detalhes do job")
+    .argument("<id>", "id do fluxo agendado")
+    .description("detalhes do agendamento de um fluxo")
     .action((id: string) =>
       comErros(async () => {
-        const j = await scheduler.obter(id);
-        console.log(JSON.stringify(j, null, 2));
+        const agendamentos = await scheduler.listarAgendamentos();
+        const encontrado = agendamentos.find((a) => a.id === id);
+        if (!encontrado) {
+          console.error(`erro: fluxo agendado "${id}" não encontrado — veja "opencorp schedule list"`);
+          process.exitCode = 1;
+          return;
+        }
+        console.log(JSON.stringify(encontrado, null, 2));
       }),
     );
 
-  schedule
-    .command("pause")
-    .argument("<id>", "id do job")
-    .description("pausa o job")
-    .action((id: string) =>
-      comErros(async () => {
-        const j = await scheduler.pausar(id);
-        console.log(`ok: ${j.id} pausado`);
-      }),
-    );
-
-  schedule
-    .command("resume")
-    .argument("<id>", "id do job")
-    .description("retoma o job (reagenda a partir de agora)")
-    .action((id: string) =>
-      comErros(async () => {
-        const j = await scheduler.retomar(id);
-        console.log(`ok: ${j.id} ativo — próxima execução ${j.proxima_exec}`);
-      }),
-    );
-
-  schedule
-    .command("run-now")
-    .argument("<id>", "id do job")
-    .description("executa o job imediatamente (sem mudar a agenda)")
-    .action((id: string) =>
-      comErros(async () => {
-        const { resultado } = await scheduler.runNow(id);
-        console.log(`ok: executado — ${resultado}`);
-      }),
-    );
-
-  schedule
-    .command("delete")
-    .argument("<id>", "id do job")
-    .description("exclui o job")
-    .action((id: string) =>
-      comErros(async () => {
-        await scheduler.excluir(id);
-        console.log(`ok: ${id} excluído`);
-      }),
-    );
+  // ── Daemon commands ─────────────────────────────────────────────────
 
   const daemon = program
     .command("scheduler")
-    .description("daemon do scheduler — executa os jobs agendados de todos os workspaces");
+    .description("daemon do scheduler — executa os fluxos agendados de todos os workspaces");
 
   daemon
     .command("start")
@@ -203,8 +114,8 @@ export function registerScheduleCommands(program: Command): void {
         if (opts.foreground) {
           const s = new Scheduler({ homeDir: home });
           s.iniciar(opts.intervaloSeg, true);
-          const jobs = (await s.listar(true)).length;
-          console.log(`[scheduler] foreground (pid ${process.pid}) — ${jobs} job(s) ativo(s), tick ${opts.intervaloSeg}s`);
+          const agendamentos = await s.listarAgendamentos();
+          console.log(`[scheduler] foreground (pid ${process.pid}) — ${agendamentos.length} fluxo(s) agendado(s), tick ${opts.intervaloSeg}s`);
           await writeFile(pidfile, JSON.stringify({ pid: process.pid, iniciado: new Date().toISOString() }), "utf8");
           process.on("SIGINT", () => {
             console.log("\n[scheduler] encerrando...");
@@ -249,13 +160,17 @@ export function registerScheduleCommands(program: Command): void {
 
   daemon
     .command("status")
-    .description("mostra se o daemon está vivo e os próximos jobs")
+    .description("mostra se o daemon está vivo e os próximos fluxos agendados")
     .action(() =>
       comErros(async () => {
         const pid = await lerPid();
         const vivo = pid ? await pidVivo(pid.pid) : false;
         console.log(`daemon: ${pid ? (vivo ? `vivo (pid ${pid.pid})` : `morto (pid ${pid.pid} obsoleto)`) : "parado"}`);
-        for (const j of (await scheduler.listar(true)).slice(0, 5)) console.log(`  ${linhaJob(j)}`);
+        const agendamentos = await scheduler.listarAgendamentos();
+        for (const a of agendamentos.slice(0, 5)) {
+          const proxima = a.proxima_exec ? a.proxima_exec.slice(0, 16).replace("T", " ") : "-";
+          console.log(`  ${a.id}  cron "${a.expressao_cron}"  próxima: ${proxima}  ${a.nome}`);
+        }
       }),
     );
 }

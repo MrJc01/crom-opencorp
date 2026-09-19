@@ -160,18 +160,18 @@ export async function coletarStatus(wsId?: string): Promise<StatusInfo> {
     pendencias = [];
   }
 
-  // 4. Scheduler
+  // 4. Scheduler (varredura de fluxos com cron)
   const scheduler = new Scheduler();
   let jobsAtivos = 0;
   let proximaExec: string | null = null;
   let proximoJob: string | null = null;
   try {
-    const jobs = await scheduler.listar(true);
-    const jobsWs = jobs.filter((j) => j.workspace === ws.id || !j.workspace);
-    jobsAtivos = jobsWs.length;
+    const agendamentos = await scheduler.listarAgendamentos();
+    const agendamentosWs = agendamentos.filter((a) => a.workspace === ws.id);
+    jobsAtivos = agendamentosWs.length;
 
-    const ordenados = jobsWs
-      .filter((j) => !!j.proxima_exec)
+    const ordenados = agendamentosWs
+      .filter((a) => !!a.proxima_exec)
       .sort((a, b) => (a.proxima_exec! > b.proxima_exec! ? 1 : -1));
 
     if (ordenados.length > 0 && ordenados[0]) {

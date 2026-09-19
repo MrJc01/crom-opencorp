@@ -1,17 +1,27 @@
-import Database from "better-sqlite3";
-import { spawn } from "node:child_process";
-import { mkdirRecursive } from "../utils/fs-safe.js";
-import { opencorpHome } from "../utils/paths.js";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import { openSync } from "node:fs";
 import { SchedulerError } from "./errors.js";
 import { SettingsStore } from "./settings-store.js";
+import { opencorpHome } from "../utils/paths.js";
+
+// ── Tipos públicos (retrocompatibilidade com CLIs e rotas) ─────────
 
 export type Agenda =
   | { tipo: "cron"; valor: string }
   | { tipo: "intervalo_min"; valor: number }
   | { tipo: "data_unica"; valor: string };
 
+/** Representação de um agendamento baseado em fluxo (substitui o antigo Job SQLite). */
+export interface FlowScheduleInfo {
+  id: string;
+  nome: string;
+  workspace: string;
+  wsPath: string;
+  expressao_cron: string;
+  ativo: boolean;
+  proxima_exec: string | null;
+  ultima_exec: string | null;
+}
+
+/** @deprecated Tipo legado mantido para retrocompatibilidade de assinatura — use FlowScheduleInfo. */
 export interface Job {
   id: string;
   nome: string;
@@ -23,33 +33,22 @@ export interface Job {
   ultima_exec: string | null;
   proxima_exec: string | null;
   criado_em: string;
-  falhas_consecutivas?: number;
-  quarentena?: boolean;
 }
 
 export interface OpcoesScheduler {
   homeDir?: string;
   agora?: () => Date;
   executar?: (job: Job) => Promise<string>;
-  binPath?: string;
+  flowExecutar?: (
+    wsPath: string,
+    flowId: string,
+    opts: {
+      entrada?: string;
+      model?: string;
+      gatilho?: { tipo: string; origem: string };
+    },
+  ) => Promise<{ execId: string; status: string; contextoFinal: string }>;
   reconciliar?: () => Promise<string[]>;
-  flowExecutar?: (wsPath: string, flowId: string, opts: { entrada?: string; model?: string; gatilho?: { tipo: string; origem: string } }) => Promise<{ execId: string; status: string; contextoFinal: string }>;
-}
-
-interface LinhaJob {
-  id: string;
-  nome: string;
-  agenda_tipo: string;
-  agenda_valor: string;
-  args: string;
-  workspace: string;
-  ativo: number;
-  graca_min: number;
-  ultima_exec: string | null;
-  proxima_exec: string | null;
-  criado_em: string;
-  falhas_consecutivas?: number;
-  quarentena?: number;
 }
 
 // ── parser cron (5 campos: min hora dom mês dow; suporta * , - / ) ──
@@ -133,10 +132,6 @@ function offsetFusoMs(tz: string, d: Date): number {
 /**
  * Próxima ocorrência de um cron interpretada no relógio de parede do fuso
  * (ex.: "0 9 * * *" com America/Sao_Paulo = 09:00 BRT, não 09:00 UTC).
- * Caminha em passos de 1min UTC avaliando os campos no horário local do fuso;
- * o offset é ressincronizado a cada virada de dia (transições DST intradiárias
- * podem deslocar um disparo em até 1h nos 2 dias de transição/ano — limitação
- * documentada, mesma classe do node-cron sem tz).
  */
 export function proximoCronTz(expr: string, de: Date, tz: string): Date {
   validarCron(expr);
@@ -170,10 +165,6 @@ export function proximoCronTz(expr: string, de: Date, tz: string): Date {
   throw new SchedulerError(`cron "${expr}" não tem ocorrência em ~1 ano`);
 }
 
-function gerarId(): string {
-  return `sch-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-}
-
 /**
  * Fusão scheduler→fluxo (Etapa 12.1): job `flow run <id> [...]` roda in-process
  * via FlowStore.executar(). Retorna o flowId ou null (caminho legado/spawn).
@@ -183,13 +174,6 @@ export function extrairFlowRunDeArgs(args: string[]): string | null {
     return args[2];
   }
   return null;
-}
-
-/** Gatilho do ledger unificado: job `agent run`/`flow run` auto-declara ativação "cron" de origem <jobId>. */
-export function argsComGatilhoCron(job: { id: string; args: string[] }): string {
-  if (job.args[0] === "agent" && job.args[1] === "run") return `cron:${job.id}`;
-  if (job.args[0] === "flow" && job.args[1] === "run") return `cron:${job.id}`;
-  return "";
 }
 
 export function parseQuandoDataUnica(quando: string, agora: Date = new Date()): string {
@@ -294,12 +278,12 @@ export function parseAgendaTask(opts: {
         descricao: `A cada ${val} min`,
       };
     }
-    const mHora = /^(\d+)h$/i.exec(repeteExpr);
-    if (mHora) {
-      const val = parseInt(mHora[1]!, 10) * 60;
+    const mHoraR = /^(\d+)h$/i.exec(repeteExpr);
+    if (mHoraR) {
+      const val = parseInt(mHoraR[1]!, 10) * 60;
       return {
         agenda: { tipo: "intervalo_min", valor: val },
-        descricao: `A cada ${parseInt(mHora[1]!, 10)} hora(s)`,
+        descricao: `A cada ${parseInt(mHoraR[1]!, 10)} hora(s)`,
       };
     }
     const num = parseInt(repeteExpr, 10);
@@ -323,110 +307,85 @@ export function parseAgendaTask(opts: {
   return null;
 }
 
+// ── Motor Unificado (Padrão n8n) ─────────────────────────────────────
+// O Scheduler varre diretamente os Fluxos de cada Workspace registrado.
+// Fluxo com `ativo !== false` + nó `tipo === "cron"` = agendável.
+// Sem banco intermediário. Sem quarentena. Sem disjuntor.
+
 export class Scheduler {
   private readonly homeDir: string;
   private readonly agora: () => Date;
-  private readonly executarFn: (job: Job) => Promise<string>;
-  private readonly reconciliarFn: (() => Promise<string[]>) | null;
+  private readonly executarFn?: (job: Job) => Promise<string>;
   private readonly flowExecutarFn: NonNullable<OpcoesScheduler["flowExecutar"]> | null;
-  private db: Database.Database | null = null;
+  private readonly reconciliarFn: (() => Promise<string[]>) | null;
   private timer: NodeJS.Timeout | null = null;
   private keepAlive: NodeJS.Timeout | null = null;
+
+  // Estado e runs compartilhados por processo (garante consistência entre instâncias no mesmo processo/teste)
+  private static readonly estadoGlobalFlows = new Map<string, { ultima_exec: string | null; proxima_exec: string | null }>();
+  private static readonly runsMemoria = new Map<string, Array<{ id: string; resultado: string; pulado: number; erro: string | null; executado_em: string }>>();
 
   constructor(opcoes: OpcoesScheduler = {}) {
     this.homeDir = opcoes.homeDir ?? opencorpHome();
     this.agora = opcoes.agora ?? (() => new Date());
-    this.executarFn =
-      opcoes.executar ??
-      (async (job) => this.executarComDelegacao(job));
+    this.executarFn = opcoes.executar;
     this.flowExecutarFn = opcoes.flowExecutar ?? null;
     this.reconciliarFn = opcoes.reconciliar ?? null;
   }
 
-  private async banco(): Promise<Database.Database> {
-    if (this.db) return this.db;
-    const caminho = resolve(this.homeDir, ".opencorp", "scheduler.db");
-    await mkdirRecursive(dirname(caminho));
-    const db = new Database(caminho);
-    db.pragma("journal_mode = WAL");
-    db.pragma("busy_timeout = 5000");
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS jobs (
-        id TEXT PRIMARY KEY,
-        nome TEXT NOT NULL,
-        agenda_tipo TEXT NOT NULL,
-        agenda_valor TEXT NOT NULL,
-        args TEXT NOT NULL,
-        workspace TEXT NOT NULL DEFAULT '',
-        ativo INTEGER NOT NULL DEFAULT 1,
-        graca_min INTEGER NOT NULL DEFAULT 5,
-        ultima_exec TEXT,
-        proxima_exec TEXT,
-        criado_em TEXT NOT NULL DEFAULT ''
-      );
-      CREATE TABLE IF NOT EXISTS job_runs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        job_id TEXT NOT NULL,
-        job_nome TEXT NOT NULL DEFAULT '',
-        workspace TEXT NOT NULL DEFAULT '',
-        iniciado_em TEXT NOT NULL,
-        fim_em TEXT,
-        resultado TEXT NOT NULL DEFAULT '',
-        erro TEXT,
-        pulado INTEGER NOT NULL DEFAULT 0
-      );
-      CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs (job_id, iniciado_em);
-    `);
-    // Migrações idempotentes de colunas para resiliência e auto-cura
-    try {
-      db.exec("ALTER TABLE jobs ADD COLUMN falhas_consecutivas INTEGER NOT NULL DEFAULT 0;");
-    } catch {}
-    try {
-      db.exec("ALTER TABLE jobs ADD COLUMN quarentena INTEGER NOT NULL DEFAULT 0;");
-    } catch {}
-    this.db = db;
-    return db;
-  }
+  // ── Workspaces Efetivos ─────────────────────────────────────────────
 
-  private linhaParaJob(l: LinhaJob): Job {
-    const agenda: Agenda =
-      l.agenda_tipo === "cron"
-        ? { tipo: "cron", valor: l.agenda_valor }
-        : l.agenda_tipo === "data_unica"
-          ? { tipo: "data_unica", valor: l.agenda_valor }
-          : { tipo: "intervalo_min", valor: Number(l.agenda_valor) };
-    return {
-      id: l.id,
-      nome: l.nome,
-      agenda,
-      args: JSON.parse(l.args) as string[],
-      workspace: l.workspace,
-      ativo: l.ativo === 1,
-      graca_min: l.graca_min,
-      ultima_exec: l.ultima_exec,
-      proxima_exec: l.proxima_exec,
-      criado_em: l.criado_em,
-      falhas_consecutivas: l.falhas_consecutivas ?? 0,
-      quarentena: l.quarentena === 1,
-    };
-  }
+  private async listarWorkspacesEfetivos(): Promise<Array<{ id: string; path: string }>> {
+    const { WorkspaceManager } = await import("./workspace-manager.js");
+    const { join } = await import("node:path");
+    const { existsSync, readdirSync } = await import("node:fs");
 
-  private async calcularProxima(agenda: Agenda, de: Date, workspaceId?: string): Promise<Date> {
-    if (agenda.tipo === "cron") return proximoCronTz(agenda.valor, de, await this.fusoDoJob(workspaceId));
-    if (agenda.tipo === "intervalo_min") {
-      if (agenda.valor < 1) throw new SchedulerError("intervalo_min deve ser >= 1");
-      return new Date(de.getTime() + agenda.valor * 60_000);
+    const mapa = new Map<string, { id: string; path: string }>();
+
+    try {
+      const wm = new WorkspaceManager({ homeDir: this.homeDir });
+      for (const w of await wm.listar()) {
+        if (w.existe) {
+          mapa.set(w.id, { id: w.id, path: w.path });
+        }
+      }
+    } catch {}
+
+    const wsDir = join(this.homeDir, "workspaces");
+    if (existsSync(wsDir)) {
+      try {
+        const entradas = readdirSync(wsDir, { withFileTypes: true });
+        for (const ent of entradas) {
+          if (ent.isDirectory() && !mapa.has(ent.name)) {
+            mapa.set(ent.name, {
+              id: ent.name,
+              path: join(wsDir, ent.name),
+            });
+          }
+        }
+      } catch {}
     }
-    const data = new Date(agenda.valor);
-    if (Number.isNaN(data.getTime())) throw new SchedulerError(`data_unica inválida: "${agenda.valor}"`);
-    return data;
+
+    return Array.from(mapa.values());
   }
 
-  /**
-   * Fuso do job: settings.scheduler.timezone global, com override por workspace
-   * (scheduler.timezone no escopo workspace). Inválido/ausente → FUSO_PADRAO.
-   */
-  private async fusoDoJob(workspaceId?: string): Promise<string> {
+  private async resolverWorkspacePath(wsId?: string): Promise<{ id: string; path: string }> {
+    const { join } = await import("node:path");
+    const { mkdir } = await import("node:fs/promises");
+    const targetId = wsId || "default";
+
+    const workspaces = await this.listarWorkspacesEfetivos();
+    const achado = workspaces.find((w) => w.id === targetId);
+    if (achado) return achado;
+
+    const p = join(this.homeDir, "workspaces", targetId);
+    await mkdir(p, { recursive: true });
+    return { id: targetId, path: p };
+  }
+
+  // ── Fuso horário do workspace ───────────────────────────────────────
+
+  private async fusoDoWorkspace(workspaceId?: string): Promise<string> {
     try {
       const store = new SettingsStore({ homeDir: this.homeDir });
       const { settings } = await store.resolve();
@@ -441,7 +400,7 @@ export class Scheduler {
           const rw = await store.resolve({ workspaceDir: ws.path });
           const tw = (rw.settings as unknown as { scheduler?: { timezone?: unknown } })?.scheduler?.timezone;
           if (typeof tw === "string" && tw) tz = tw;
-        } catch { /* sem override por workspace */ }
+        } catch {}
       }
       return fusoValido(tz) ? tz : FUSO_PADRAO;
     } catch {
@@ -449,263 +408,388 @@ export class Scheduler {
     }
   }
 
-  private validarAgenda(agenda: Agenda): void {
-    if (agenda.tipo === "cron") validarCron(agenda.valor);
-    if (agenda.tipo === "intervalo_min" && agenda.valor < 1) throw new SchedulerError("intervalo_min deve ser >= 1");
-    if (agenda.tipo === "data_unica" && Number.isNaN(new Date(agenda.valor).getTime())) {
-      throw new SchedulerError(`data_unica inválida: "${agenda.valor}"`);
+  // ── Runs e Locks ────────────────────────────────────────────────────
+
+  private adicionarRun(flowId: string, run: { resultado: string; pulado: number; erro: string | null }): void {
+    const chave = `${this.homeDir}:${flowId}`;
+    let lista = Scheduler.runsMemoria.get(chave);
+    if (!lista) {
+      lista = [];
+      Scheduler.runsMemoria.set(chave, lista);
     }
+    lista.unshift({
+      id: `run-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      resultado: run.resultado,
+      pulado: run.pulado,
+      erro: run.erro,
+      executado_em: this.agora().toISOString(),
+    });
   }
 
-  /**
-   * Validação de alto sinal no core: barra o footgun "job que nunca rodaria"
-   * (12 jobs foram criados com `agent run --ordem`, flag inexistente, e morriam em silêncio).
-   * A whitelist completa de comandos é validada na API (entrada de usuário real).
-   */
-  private validarArgsJob(args: string[]): void {
-    if (args[0] === "agent" && args.includes("--ordem")) {
-      throw new SchedulerError(
-        'agent run usa ordem POSICIONAL: ["agent","run","<agente>","<ordem>"] — a flag --ordem não existe',
-      );
-    }
-    // ordem splitada: "agent run <agente> <ordem>" deve ter EXATAMENTE 4 elementos —
-    // mais que isso significa que a ordem (com espaços) não foi quotada e virou N argumentos
-    // (job "ciclo-melhoria" rodou 47 argumentos e falhou em silêncio antes do log de stderr)
-    if (args[0] === "agent" && args[1] === "run" && args.length > 4) {
-      throw new SchedulerError(
-        `ordem com espaços deve vir QUOTADA em --args (ex.: "agent run ${args[2]} \\"sua ordem aqui\\"") — recebi ${args.length} argumentos`,
-      );
-    }
+  async listarRuns(id: string, _limite = 20): Promise<Array<{ id: string; resultado: string; pulado: number; erro: string | null; executado_em: string }>> {
+    const chave = `${this.homeDir}:${id}`;
+    return Scheduler.runsMemoria.get(chave) ?? [];
   }
 
-  /** Registra uma execução/pulo no histórico de runs (observabilidade do pulso) */
-  private async registrarRun(
-    job: Job,
-    dados: { resultado?: string; erro?: string; pulado?: boolean },
-  ): Promise<void> {
+  private async claimLock(wsPath: string, flowId: string, minutoEpoch: number): Promise<boolean> {
+    const { join } = await import("node:path");
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const lockDir = join(wsPath, ".opencorp", "locks");
     try {
-      (await this.banco())
-        .prepare(
-          `INSERT INTO job_runs (job_id, job_nome, workspace, iniciado_em, fim_em, resultado, erro, pulado)
-           VALUES (@job_id, @job_nome, @workspace, @iniciado_em, @fim_em, @resultado, @erro, @pulado)`,
-        )
-        .run({
-          job_id: job.id,
-          job_nome: job.nome,
-          workspace: job.workspace,
-          iniciado_em: this.agora().toISOString(),
-          fim_em: this.agora().toISOString(),
-          resultado: dados.resultado ?? "",
-          erro: dados.erro ?? null,
-          pulado: dados.pulado ? 1 : 0,
-        });
+      await mkdir(lockDir, { recursive: true });
+      const lockFile = join(lockDir, `lock-${flowId}-${minutoEpoch}.lock`);
+      await writeFile(lockFile, String(process.pid), { flag: "wx" });
+      return true;
     } catch {
-      /* histórico nunca quebra a execução */
+      return false;
     }
   }
 
-  /** Histórico de execuções de um job (mais recente primeiro) */
-  async listarRuns(jobId: string, limite = 20): Promise<unknown[]> {
-    return (await this.banco())
-      .prepare("SELECT * FROM job_runs WHERE job_id = ? ORDER BY id DESC LIMIT ?")
-      .all(jobId, limite);
-  }
+  // ── Varredura de fluxos agendados ───────────────────────────────────
 
-  async criar(
-    dados: { nome: string; agenda: Agenda; args: string[]; workspace?: string; graca_min?: number },
-  ): Promise<Job> {
-    if (dados.nome.trim().length === 0) throw new SchedulerError('nome obrigatório: schedule create --nome "..."');
-    if (!Array.isArray(dados.args) || dados.args.length === 0) {
-      throw new SchedulerError("args obrigatório — comando opencorp a executar");
-    }
-    this.validarAgenda(dados.agenda);
-    this.validarArgsJob(dados.args);
+  async listarAgendamentos(): Promise<FlowScheduleInfo[]> {
     const agora = this.agora();
-    const job: LinhaJob = {
-      id: gerarId(),
-      nome: dados.nome.trim(),
-      agenda_tipo: dados.agenda.tipo,
-      agenda_valor: String(dados.agenda.valor),
-      args: JSON.stringify(dados.args),
-      workspace: dados.workspace ?? "",
-      ativo: 1,
-      graca_min: dados.graca_min ?? 5,
-      ultima_exec: null,
-      proxima_exec: (await this.calcularProxima(dados.agenda, agora, dados.workspace)).toISOString(),
-      criado_em: agora.toISOString(),
-    };
-    (await this.banco())
-      .prepare(
-        `INSERT INTO jobs (id, nome, agenda_tipo, agenda_valor, args, workspace, ativo, graca_min, ultima_exec, proxima_exec, criado_em)
-         VALUES (@id, @nome, @agenda_tipo, @agenda_valor, @args, @workspace, @ativo, @graca_min, @ultima_exec, @proxima_exec, @criado_em)`,
-      )
-      .run(job);
-    return this.linhaParaJob(job);
+    const resultado: FlowScheduleInfo[] = [];
+    try {
+      const { FlowStore } = await import("./flow-store.js");
+      const flows = new FlowStore({ homeDir: this.homeDir });
+      const workspaces = await this.listarWorkspacesEfetivos();
+
+      for (const ws of workspaces) {
+        try {
+          const lista = await flows.listar(ws.path);
+          for (const f of lista) {
+            if (f.ativo === false) continue;
+            const cronGatilho = f.gatilhos.find((g) => g.tipo === "cron");
+            if (!cronGatilho?.detalhe) continue;
+            const expressao = cronGatilho.detalhe;
+            const chave = `${this.homeDir}:${ws.id}:${f.id}`;
+            const estado = Scheduler.estadoGlobalFlows.get(chave);
+            let proxima = estado?.proxima_exec ?? null;
+            if (!proxima) {
+              try {
+                const tz = await this.fusoDoWorkspace(ws.id);
+                proxima = proximoCronTz(expressao, agora, tz).toISOString();
+              } catch { proxima = null; }
+            }
+            resultado.push({
+              id: f.id,
+              nome: f.nome,
+              workspace: ws.id,
+              wsPath: ws.path,
+              expressao_cron: expressao,
+              ativo: true,
+              proxima_exec: proxima,
+              ultima_exec: estado?.ultima_exec ?? null,
+            });
+          }
+        } catch {}
+      }
+    } catch (erro) {
+      console.error("[scheduler] erro ao listar agendamentos:", erro instanceof Error ? erro.message : erro);
+    }
+    return resultado;
   }
 
   async listar(somenteAtivos = false): Promise<Job[]> {
-    const linhas = (somenteAtivos
-      ? (await this.banco()).prepare("SELECT * FROM jobs WHERE ativo = 1 ORDER BY proxima_exec").all()
-      : (await this.banco()).prepare("SELECT * FROM jobs ORDER BY criado_em, id").all()) as LinhaJob[];
-    return linhas.map((l) => this.linhaParaJob(l));
+    const resultado: Job[] = [];
+    const workspaces = await this.listarWorkspacesEfetivos();
+    const { FlowStore } = await import("./flow-store.js");
+    const flowStore = new FlowStore({ homeDir: this.homeDir });
+
+    for (const ws of workspaces) {
+      let flows: any[] = [];
+      try {
+        flows = await flowStore.listar(ws.path);
+      } catch {
+        continue;
+      }
+      for (const f of flows) {
+        if (somenteAtivos && f.ativo === false) continue;
+        const cronGatilho = f.gatilhos.find((g: any) => g.tipo === "cron");
+        if (!cronGatilho?.detalhe) continue;
+
+        const chave = `${this.homeDir}:${ws.id}:${f.id}`;
+        const estado = Scheduler.estadoGlobalFlows.get(chave);
+
+        const fullFlow = await flowStore.obter(ws.path, f.id).catch(() => null);
+        const nodeCron = fullFlow?.nos.find((n) => n.tipo === "cron");
+        const cfg = (nodeCron?.config ?? {}) as Record<string, any>;
+        const agendaOriginal = (cfg.agenda_original as Agenda) || { tipo: "cron", valor: cronGatilho.detalhe };
+        const args = (cfg.args as string[]) || ["flow", "run", f.id];
+
+        let proxima = estado?.proxima_exec ?? null;
+        if (!proxima && f.ativo !== false) {
+          try {
+            const tz = await this.fusoDoWorkspace(ws.id);
+            proxima = proximoCronTz(cronGatilho.detalhe, this.agora(), tz).toISOString();
+          } catch {
+            proxima = null;
+          }
+        }
+
+        resultado.push({
+          id: f.id,
+          nome: f.nome,
+          agenda: agendaOriginal,
+          args,
+          workspace: ws.id,
+          ativo: f.ativo !== false,
+          graca_min: (cfg.graca_min as number) ?? 5,
+          ultima_exec: estado?.ultima_exec ?? null,
+          proxima_exec: f.ativo !== false ? proxima : null,
+          criado_em: "",
+        });
+      }
+    }
+    return resultado;
+  }
+
+  // ── CRUD de Agendamentos ────────────────────────────────────────────
+
+  async criar(opts: {
+    nome: string;
+    agenda: Agenda;
+    args: string[];
+    workspace?: string;
+    graca_min?: number;
+  }): Promise<Job> {
+    if (!opts.nome || typeof opts.nome !== "string" || opts.nome.trim().length === 0) {
+      throw new SchedulerError("nome é obrigatório para criar agendamento");
+    }
+    if (!Array.isArray(opts.args) || opts.args.length === 0) {
+      throw new SchedulerError("args deve ser um array não-vazio");
+    }
+    if (opts.args[0] === "agent" && opts.args.includes("--ordem")) {
+      throw new SchedulerError("agent run não aceita --ordem (use argumento posicional)");
+    }
+
+    let expressaoCron = "* * * * *";
+    if (opts.agenda.tipo === "cron") {
+      validarCron(opts.agenda.valor);
+      expressaoCron = opts.agenda.valor;
+    } else if (opts.agenda.tipo === "intervalo_min") {
+      if (typeof opts.agenda.valor !== "number" || opts.agenda.valor < 1) {
+        throw new SchedulerError("intervalo_min deve ser >= 1");
+      }
+      expressaoCron = opts.agenda.valor < 60
+        ? `*/${Math.round(opts.agenda.valor)} * * * *`
+        : `0 */${Math.round(opts.agenda.valor / 60)} * * *`;
+    } else if (opts.agenda.tipo === "data_unica") {
+      const d = new Date(opts.agenda.valor);
+      if (isNaN(d.getTime())) {
+        throw new SchedulerError(`data_unica inválida: "${opts.agenda.valor}"`);
+      }
+      expressaoCron = `${d.getMinutes()} ${d.getHours()} ${d.getDate()} ${d.getMonth() + 1} *`;
+    }
+
+    const ws = await this.resolverWorkspacePath(opts.workspace);
+    const { FlowStore } = await import("./flow-store.js");
+    const flowStore = new FlowStore({ homeDir: this.homeDir });
+    const jobId = `sch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const fuso = await this.fusoDoWorkspace(ws.id);
+
+    let proximaIso: string | null = null;
+    try {
+      if (opts.agenda.tipo === "data_unica") {
+        proximaIso = new Date(opts.agenda.valor).toISOString();
+      } else if (opts.agenda.tipo === "intervalo_min") {
+        proximaIso = new Date(this.agora().getTime() + opts.agenda.valor * 60_000).toISOString();
+      } else {
+        proximaIso = proximoCronTz(expressaoCron, this.agora(), fuso).toISOString();
+      }
+    } catch {
+      proximaIso = null;
+    }
+
+    const novoFlow = {
+      id: jobId,
+      nome: opts.nome,
+      ativo: true,
+      nos: [
+        {
+          id: "gatilho-cron",
+          tipo: "cron" as const,
+          config: {
+            expressao_cron: expressaoCron,
+            agenda_original: opts.agenda,
+            args: opts.args,
+            graca_min: opts.graca_min ?? 5,
+          },
+        },
+        {
+          id: "passo-script",
+          tipo: "script" as const,
+          config: {
+            comando: opts.args.join(" "),
+          },
+        },
+      ],
+      arestas: [
+        {
+          de: "gatilho-cron",
+          para: "passo-script",
+        },
+      ],
+    };
+
+    await flowStore.salvar(ws.path, novoFlow);
+
+    const chave = `${this.homeDir}:${ws.id}:${jobId}`;
+    Scheduler.estadoGlobalFlows.set(chave, {
+      ultima_exec: null,
+      proxima_exec: proximaIso,
+    });
+
+    return {
+      id: jobId,
+      nome: opts.nome,
+      agenda: opts.agenda,
+      args: opts.args,
+      workspace: ws.id,
+      ativo: true,
+      graca_min: opts.graca_min ?? 5,
+      ultima_exec: null,
+      proxima_exec: proximaIso,
+      criado_em: new Date().toISOString(),
+    };
   }
 
   async obter(id: string): Promise<Job> {
-    const l = (await this.banco()).prepare("SELECT * FROM jobs WHERE id = ?").get(id) as LinhaJob | undefined;
-    if (!l) {
-      const erro = new SchedulerError(`job "${id}" não encontrado — veja "opencorp schedule list"`);
-      (erro as { status?: number }).status = 404;
-      throw erro;
+    const { FlowStore } = await import("./flow-store.js");
+    const flowStore = new FlowStore({ homeDir: this.homeDir });
+    const workspaces = await this.listarWorkspacesEfetivos();
+
+    for (const ws of workspaces) {
+      try {
+        const flow = await flowStore.obter(ws.path, id);
+        if (flow) {
+          const cronGatilho = flow.nos.find((n) => n.tipo === "cron");
+          const config = (cronGatilho?.config ?? {}) as Record<string, unknown>;
+          const chave = `${this.homeDir}:${ws.id}:${flow.id}`;
+          const estado = Scheduler.estadoGlobalFlows.get(chave);
+          const agendaOriginal = (config.agenda_original as Agenda) || {
+            tipo: "cron",
+            valor: (config.expressao_cron as string) || "* * * * *",
+          };
+          const args = (config.args as string[]) || ["flow", "run", flow.id];
+          return {
+            id: flow.id,
+            nome: flow.nome,
+            agenda: agendaOriginal,
+            args,
+            workspace: ws.id,
+            ativo: flow.ativo !== false,
+            graca_min: (config.graca_min as number) ?? 5,
+            ultima_exec: estado?.ultima_exec ?? null,
+            proxima_exec: flow.ativo !== false ? (estado?.proxima_exec ?? null) : null,
+            criado_em: "",
+          };
+        }
+      } catch {}
     }
-    return this.linhaParaJob(l);
+
+    const erro = new SchedulerError(`Job "${id}" não encontrado`) as unknown as Error & { status: number };
+    erro.status = 404;
+    throw erro;
   }
 
   async pausar(id: string): Promise<Job> {
-    (await this.banco()).prepare("UPDATE jobs SET ativo = 0 WHERE id = ?").run(id);
-    return this.obter(id);
-  }
+    const job = await this.obter(id);
+    const { FlowStore } = await import("./flow-store.js");
+    const flowStore = new FlowStore({ homeDir: this.homeDir });
+    const ws = await this.resolverWorkspacePath(job.workspace);
 
-  /**
-   * Edita um job existente (PLANO-WEB-CRUD B1). Campos ausentes são preservados.
-   * Mudou agenda → recalcula proxima_exec. Valida com as mesmas regras da criação.
-   */
-  async atualizar(
-    id: string,
-    dados: { nome?: string; agenda?: Agenda; args?: string[]; graca_min?: number },
-  ): Promise<Job> {
-    const atual = await this.obter(id);
-    const nome = dados.nome !== undefined ? dados.nome.trim() : atual.nome;
-    if (nome.length === 0) throw new SchedulerError("nome não pode ficar vazio");
-    const agenda = dados.agenda ?? atual.agenda;
-    this.validarAgenda(agenda);
-    const args = dados.args ?? atual.args;
-    if (!Array.isArray(args) || args.length === 0) throw new SchedulerError("args obrigatório — comando opencorp a executar");
-    this.validarArgsJob(args);
-    const proxima = (await this.calcularProxima(agenda, this.agora(), atual.workspace)).toISOString();
-    (await this.banco())
-      .prepare("UPDATE jobs SET nome = ?, agenda_tipo = ?, agenda_valor = ?, args = ?, graca_min = ?, proxima_exec = ? WHERE id = ?")
-      .run(nome, agenda.tipo, String(agenda.valor), JSON.stringify(args), dados.graca_min ?? atual.graca_min, proxima, id);
-    return this.obter(id);
+    const flow = await flowStore.obter(ws.path, id);
+    await flowStore.salvar(ws.path, { ...flow, ativo: false });
+    const chave = `${this.homeDir}:${job.workspace}:${id}`;
+    const estado = Scheduler.estadoGlobalFlows.get(chave);
+    Scheduler.estadoGlobalFlows.set(chave, {
+      ultima_exec: estado?.ultima_exec ?? null,
+      proxima_exec: null,
+    });
+    job.ativo = false;
+    job.proxima_exec = null;
+    return job;
   }
 
   async retomar(id: string): Promise<Job> {
-    (await this.banco()).prepare("UPDATE jobs SET ativo = 1, quarentena = 0, falhas_consecutivas = 0 WHERE id = ?").run(id);
     const job = await this.obter(id);
-    const proxima = (await this.calcularProxima(job.agenda, this.agora(), job.workspace)).toISOString();
-    (await this.banco()).prepare("UPDATE jobs SET proxima_exec = ? WHERE id = ?").run(proxima, id);
-    return this.obter(id);
-  }
+    const { FlowStore } = await import("./flow-store.js");
+    const flowStore = new FlowStore({ homeDir: this.homeDir });
+    const ws = await this.resolverWorkspacePath(job.workspace);
 
-  async excluir(id: string): Promise<void> {
-    this.obter(id);
-    (await this.banco()).prepare("DELETE FROM jobs WHERE id = ?").run(id);
-  }
-
-  private async executarComDelegacao(job: Job): Promise<string> {
-    if (extrairFlowRunDeArgs(job.args) === null) return this.executarSpawn(job);
-    return this.executarFlowInProcess(job);
-  }
-
-  /**
-   * Etapa 12.1: job ["flow","run",<id>,...extras] executa in-process via
-   * FlowStore.executar() (mesma instância/config do server). claim/graça/
-   * catch-up e job_runs+ledger `execucoes` seguem no tick() e no FlowStore.
-   */
-  private async executarFlowInProcess(job: Job): Promise<string> {
-    const flowId = extrairFlowRunDeArgs(job.args) as string;
-    const extras = job.args.slice(3);
-    const wsPath = isAbsolute(job.workspace)
-      ? job.workspace
-      : job.workspace
-        ? join(this.homeDir, "workspaces", job.workspace)
-        : this.homeDir;
-    let entrada: string | undefined;
-    let model: string | undefined;
-    let gatilho: { tipo: string; origem: string } = { tipo: "cron", origem: job.id };
-    for (let i = 0; i < extras.length; i++) {
-      if (extras[i] === "--entrada" && i + 1 < extras.length) entrada = extras[++i];
-      else if (extras[i] === "--model" && i + 1 < extras.length) model = extras[++i]!;
-      else if (extras[i] === "--gatilho" && i + 1 < extras.length) {
-        const texto = extras[++i]!;
-        const idx = texto.indexOf(":");
-        if (idx > 0) gatilho = { tipo: texto.slice(0, idx), origem: texto.slice(idx + 1) };
-      }
+    const flow = await flowStore.obter(ws.path, id);
+    await flowStore.salvar(ws.path, { ...flow, ativo: true });
+    let novaProxima: string | null = null;
+    if (job.agenda.tipo === "intervalo_min") {
+      novaProxima = new Date(this.agora().getTime() + job.agenda.valor * 60_000).toISOString();
+    } else if (job.agenda.tipo === "cron") {
+      const fuso = await this.fusoDoWorkspace(job.workspace);
+      novaProxima = proximoCronTz(job.agenda.valor, this.agora(), fuso).toISOString();
     }
-    const executar = this.flowExecutarFn ?? (async (ws: string, id: string, opts: { entrada?: string; model?: string; gatilho?: { tipo: string; origem: string } }) => {
-      const { FlowStore } = await import("./flow-store.js");
-      return new FlowStore({ homeDir: this.homeDir }).executar(ws, id, opts);
+    const chave = `${this.homeDir}:${job.workspace}:${id}`;
+    const estado = Scheduler.estadoGlobalFlows.get(chave);
+    Scheduler.estadoGlobalFlows.set(chave, {
+      ultima_exec: estado?.ultima_exec ?? null,
+      proxima_exec: novaProxima,
     });
-    const r = await executar(wsPath, flowId, { entrada, model, gatilho });
-    return `flow ${flowId} exec ${r.execId} (${r.status})`;
+    job.ativo = true;
+    job.proxima_exec = novaProxima;
+    return job;
   }
 
-  private async executarSpawn(job: Job): Promise<string> {
-    const bin = resolve(import.meta.dirname ?? ".", "..", "..", "bin", "opencorp.mjs");
-    const args = ["--workspace", job.workspace, ...job.args].filter((a) => a.length > 0);
-    // Gatilho no ledger unificado (PLANO-UNIFICACAO): todo agent run disparado
-    // pelo scheduler se auto-declara como ativação "cron" de origem <jobId>.
-    const extras = argsComGatilhoCron(job);
-    const final = extras ? [...args, "--gatilho", extras] : args;
-    // stderr/stdout do filho vão para log por job — spawn quebrado deixa rastro (não some em silêncio)
-    const logDir = join(this.homeDir, "logs");
-    await mkdirRecursive(logDir);
-    const logFd = openSync(join(logDir, `job-${job.id}.log`), "a");
+  async excluir(id: string): Promise<{ ok: boolean; id: string }> {
+    const job = await this.obter(id);
+    const { FlowStore } = await import("./flow-store.js");
+    const flowStore = new FlowStore({ homeDir: this.homeDir });
+    const ws = await this.resolverWorkspacePath(job.workspace);
+    await flowStore.deletar(ws.path, id).catch(() => {});
+    Scheduler.estadoGlobalFlows.delete(`${this.homeDir}:${job.workspace}:${id}`);
+    return { ok: true, id };
+  }
 
-    const execPath = job.args[0] === "node" ? process.execPath : process.execPath;
-    const cmdArgs = job.args[0] === "node" ? job.args.slice(1) : [bin, ...final];
+  async runNow(id: string): Promise<{ resultado: string }> {
+    const job = await this.obter(id);
+    const agora = this.agora();
+    const chave = `${this.homeDir}:${job.workspace}:${id}`;
 
-    const wsDir = isAbsolute(job.workspace)
-      ? job.workspace
-      : join(this.homeDir, "workspaces", job.workspace);
-
-    // Overlap Guard: previne disparar nova instância se a anterior ainda está em execução
-    try {
-      const db = await this.banco();
-      const ultima = db.prepare("SELECT resultado FROM job_runs WHERE job_id = ? ORDER BY id DESC LIMIT 1").get(job.id) as { resultado?: string } | undefined;
-      if (ultima?.resultado?.startsWith("spawn pid ")) {
-        const pidAnterior = parseInt(ultima.resultado.slice("spawn pid ".length), 10);
-        if (pidAnterior > 0) {
-          try {
-            process.kill(pidAnterior, 0);
-            return `ignorado: processo anterior ainda ativo (pid ${pidAnterior})`;
-          } catch {
-            // PID não está mais vivo, prossegue normalmente
-          }
-        }
-      }
-    } catch {
-      // Best-effort check
+    let resultado = "ok";
+    if (this.executarFn) {
+      resultado = await this.executarFn(job);
+    } else if (this.flowExecutarFn) {
+      const flowIdAlvo = extrairFlowRunDeArgs(job.args) || id;
+      const ws = await this.resolverWorkspacePath(job.workspace);
+      const res = await this.flowExecutarFn(ws.path, flowIdAlvo, {
+        gatilho: { tipo: "cron", origem: id },
+      });
+      resultado = `flow ${flowIdAlvo} exec ${res.execId}`;
     }
 
-    const filho = spawn(execPath, cmdArgs, {
-      cwd: wsDir,
-      env: { ...process.env, OPENCORP_HOME: this.homeDir, OPENCORP_WORKSPACE: wsDir },
-      detached: true,
-      stdio: ["ignore", logFd, logFd],
-    });
-    filho.on("error", (err) => {
-      console.error(`[scheduler] erro no spawn do job ${job.id} (${job.nome}):`, err.message);
-    });
-    filho.unref();
-    return `spawn pid ${filho.pid ?? 0}`;
-  }
-
-  /** Config de catch-up das settings (default seguro se settings indisponível) */
-  private async cfgCatchUp(): Promise<{ catch_up: boolean; catch_up_max_min: number }> {
-    try {
-      const { settings } = await new SettingsStore({ homeDir: this.homeDir }).resolve();
-      return { catch_up: settings.scheduler.catch_up, catch_up_max_min: settings.scheduler.catch_up_max_min };
-    } catch {
-      return { catch_up: false, catch_up_max_min: 60 };
+    let proximaIso: string | null = null;
+    if (job.agenda.tipo === "intervalo_min") {
+      proximaIso = new Date(agora.getTime() + job.agenda.valor * 60_000).toISOString();
+    } else if (job.agenda.tipo === "cron") {
+      const fuso = await this.fusoDoWorkspace(job.workspace);
+      proximaIso = proximoCronTz(job.agenda.valor, agora, fuso).toISOString();
     }
+
+    Scheduler.estadoGlobalFlows.set(chave, {
+      ultima_exec: agora.toISOString(),
+      proxima_exec: proximaIso,
+    });
+
+    this.adicionarRun(id, {
+      resultado,
+      pulado: 0,
+      erro: null,
+    });
+
+    return { resultado };
   }
 
-  /**
-   * Reaper de zumbis: toda execução "executando" cujo pid não está mais vivo é
-   * marcada "falhou" (evita runs pendurados 10h+ quando o opencode morre/hanga).
-   * Percorre os workspaces do WorkspaceManager reaproveitando a reconciliação
-   * já existente no SessionManager.
-   */
+  // ── Reaper de Zombies ───────────────────────────────────────────────
+
   private async reapearZombies(): Promise<string[]> {
     if (this.reconciliarFn) {
       try {
@@ -716,20 +800,16 @@ export class Scheduler {
       }
     }
     try {
-      const [{ SessionManager }, { WorkspaceManager }] = await Promise.all([
+      const [{ SessionManager }] = await Promise.all([
         import("./session-manager.js"),
-        import("./workspace-manager.js"),
       ]);
       const sessoes = new SessionManager({ homeDir: this.homeDir });
-      const workspaces = new WorkspaceManager({ homeDir: this.homeDir, cwd: this.homeDir });
+      const workspaces = await this.listarWorkspacesEfetivos();
       const reconciliados: string[] = [];
-      for (const ws of await workspaces.listar()) {
-        if (!ws.existe) continue;
+      for (const ws of workspaces) {
         try {
           reconciliados.push(...(await sessoes.reconciliarZombies(ws.path)));
-        } catch {
-          /* workspace sem registries/corp.db — segue */
-        }
+        } catch {}
       }
       return reconciliados;
     } catch (erro) {
@@ -738,155 +818,188 @@ export class Scheduler {
     }
   }
 
-  /** Um passo do loop: reape zumbis, executa jobs vencidos e recalcula próximas execuções. */
+  // ── tick() — Motor Unificado ────────────────────────────────────────
+
   async tick(): Promise<{ executados: string[]; pulados: string[]; reconciliados: string[] }> {
     const reconciliados = await this.reapearZombies();
-    if (reconciliados.length > 0) {
-      console.log(`[scheduler] reaper: ${reconciliados.length} execução(ões) zumbi(s) marcada(s) como falhou: ${reconciliados.join(", ")}`);
-    }
     const agora = this.agora();
+    const minutoAtual = Math.floor(agora.getTime() / 60000);
+
     const executados: string[] = [];
     const pulados: string[] = [];
-    for (const job of await this.listar(true)) {
-      if (!job.proxima_exec) continue;
-      const prevista = new Date(job.proxima_exec);
-      if (prevista.getTime() > agora.getTime()) continue;
-      const atrasoMin = (agora.getTime() - prevista.getTime()) / 60_000;
-      if (atrasoMin > job.graca_min) {
-        // catch-up: settings.scheduler.catch_up executa atrasado dentro da janela catch_up_max_min
-        const cfg = await this.cfgCatchUp();
-        const executarAtrasado = cfg.catch_up && atrasoMin <= cfg.catch_up_max_min;
-        if (!executarAtrasado) {
-          // pular com CLAIM atômico: só quem vencer o UPDATE reagenda (sem corrida entre daemons)
-          // data_unica vencida desativa — evita loop eterno de skip
-          const desativarSkip = job.agenda.tipo === "data_unica";
-          const proximaSkip = desativarSkip ? null : (await this.calcularProxima(job.agenda, agora, job.workspace)).toISOString();
-          const claimSkip = (await this.banco())
-            .prepare("UPDATE jobs SET proxima_exec = ?, ativo = ? WHERE id = ? AND proxima_exec = ?")
-            .run(proximaSkip, desativarSkip ? 0 : 1, job.id, job.proxima_exec);
-          if (claimSkip.changes === 1) {
-            pulados.push(job.id);
-            await this.registrarRun(job, { erro: `pulado: atraso de ${Math.round(atrasoMin)}min > graça de ${job.graca_min}min`, pulado: true });
-          }
+
+    try {
+      const { FlowStore } = await import("./flow-store.js");
+      const flowStore = new FlowStore({ homeDir: this.homeDir });
+      const workspaces = await this.listarWorkspacesEfetivos();
+
+      // Config de catch-up global
+      const store = new SettingsStore({ homeDir: this.homeDir });
+      const { settings } = await store.resolve().catch(() => ({ settings: { scheduler: {} } } as any));
+      const catchUp = settings.scheduler?.catch_up === true;
+      const catchUpMaxMin = typeof settings.scheduler?.catch_up_max_min === "number" ? settings.scheduler.catch_up_max_min : 60;
+
+      for (const ws of workspaces) {
+        let flowsList: Awaited<ReturnType<typeof flowStore.listar>>;
+        try {
+          flowsList = await flowStore.listar(ws.path);
+        } catch {
           continue;
         }
-        await this.registrarRun(job, { resultado: `catch-up: executando atrasado (${Math.round(atrasoMin)}min atraso, dentro da janela de ${cfg.catch_up_max_min}min)` });
-      }
-      // CLAIM atômico ANTES de executar: o UPDATE casa só se proxima_exec ainda é a prevista —
-      // com dois daemons, apenas um ganha o direito de executar (sem execução dupla)
-      const desativar = job.agenda.tipo === "data_unica";
-      const proxima = desativar ? null : (await this.calcularProxima(job.agenda, agora, job.workspace)).toISOString();
-      const claim = (await this.banco())
-        .prepare("UPDATE jobs SET ultima_exec = ?, proxima_exec = ?, ativo = ? WHERE id = ? AND proxima_exec = ?")
-        .run(agora.toISOString(), proxima, desativar ? 0 : 1, job.id, job.proxima_exec);
-      if (claim.changes !== 1) continue; // outro daemon/processo já assumiu este tick
-      // Governança Git pré-execução (best-effort): checkpoint + auto-commit de resíduos
-      // do ciclo anterior para que jobs baseados em script também versionem o workspace.
-      // Não altera o fluxo de execução — falhas aqui são silenciosas.
-      if (job.workspace) {
-        try {
-          const { WorkspaceManager } = await import("./workspace-manager.js");
-          const { WorkspaceGit } = await import("./workspace-git.js");
-          const wm = new WorkspaceManager({ homeDir: this.homeDir });
-          const wsInfo = await wm.resolver(job.workspace).catch(() => null);
-          if (wsInfo) {
-            const wsGit = new WorkspaceGit();
-            const execId = `sch-${job.id}-${agora.getTime().toString(36)}`;
-            await wsGit.criarCheckpoint(wsInfo.path, execId).catch(() => null);
-            await wsGit.autoCommit(wsInfo.path, `scheduler:${job.nome}`, `ciclo anterior do job ${job.nome}`, execId).catch(() => null);
-          }
-        } catch {
-          /* best-effort */
-        }
-      }
-      try {
-        const resultado = await this.executarFn(job);
-        await this.registrarRun(job, { resultado });
-        // Sucesso: reseta contador de falhas consecutivas
-        (await this.banco()).prepare("UPDATE jobs SET falhas_consecutivas = 0 WHERE id = ?").run(job.id);
-      } catch (erro) {
-        const msgErro = erro instanceof Error ? erro.message : String(erro);
-        console.error(`[scheduler] falha ao executar job ${job.id} (${job.nome}): ${msgErro}`);
-        await this.registrarRun(job, { erro: msgErro });
 
-        // Incrementa falhas consecutivas e avalia Circuit Breaker
-        const db = await this.banco();
-        db.prepare("UPDATE jobs SET falhas_consecutivas = falhas_consecutivas + 1 WHERE id = ?").run(job.id);
-        const jobAtual = db.prepare("SELECT falhas_consecutivas FROM jobs WHERE id = ?").get(job.id) as { falhas_consecutivas?: number } | undefined;
-        const falhas = jobAtual?.falhas_consecutivas ?? 1;
+        const tz = await this.fusoDoWorkspace(ws.id);
 
-        if (falhas >= 3) {
-          // Disjuntor (Circuit Breaker): entra em quarentena para interromper loop infinito de falha
-          console.warn(`[scheduler] CIRCUIT BREAKER: job ${job.id} (${job.nome}) atingiu 3 falhas consecutivas. Entrando em quarentena preventiva.`);
-          db.prepare("UPDATE jobs SET quarentena = 1, ativo = 0 WHERE id = ?").run(job.id);
+        for (const f of flowsList) {
+          if (f.ativo === false) continue;
+          const cronGatilho = f.gatilhos.find((g) => g.tipo === "cron");
+          if (!cronGatilho?.detalhe) continue;
+
+          const expressao = cronGatilho.detalhe;
+          const chave = `${this.homeDir}:${ws.id}:${f.id}`;
+
+          let jobObj: Job | null = null;
           try {
-            const { NotificationStore } = await import("./notification-store.js");
-            const notifs = new NotificationStore();
-            await notifs.adicionar(job.workspace || process.cwd(), {
-              tipo: "aviso",
-              titulo: `Circuit Breaker: Job "${job.nome}" em Quarentena`,
-              corpo: `O job falhou 3 vezes consecutivas e foi suspenso preventivamente para proteger o sistema. Último erro: ${msgErro.slice(0, 200)}`,
-            });
+            jobObj = await this.obter(f.id);
           } catch {}
-        } else {
+
+          const estado = Scheduler.estadoGlobalFlows.get(chave);
+          let proxima: Date;
           try {
-            const { NotificationStore } = await import("./notification-store.js");
-            const notifs = new NotificationStore();
-            await notifs.adicionar(job.workspace || process.cwd(), {
-              tipo: "erro",
-              titulo: `Falha no agendamento (${falhas}/3): ${job.nome}`,
-              corpo: `O job "${job.nome}" falhou ao executar: ${msgErro.slice(0, 240)}`,
-            });
+            if (estado?.proxima_exec) {
+              proxima = new Date(estado.proxima_exec);
+            } else if (jobObj?.agenda.tipo === "intervalo_min") {
+              proxima = new Date(agora.getTime());
+            } else {
+              const ref = new Date(agora.getTime() - 120000);
+              proxima = proximoCronTz(expressao, ref, tz);
+            }
           } catch {
-            /* best-effort notification */
+            continue;
           }
+
+          const gracaMs = (jobObj?.graca_min ?? 5) * 60_000;
+          const atrasoMs = agora.getTime() - proxima.getTime();
+
+          // Atraso além da graça
+          if (atrasoMs > gracaMs) {
+            if (catchUp && atrasoMs <= catchUpMaxMin * 60_000) {
+              // Catch-up: registra o run de catch-up antes da execução
+              this.adicionarRun(f.id, {
+                resultado: "catch-up: execução recuperada de janela atrasada",
+                pulado: 0,
+                erro: null,
+              });
+              // segue para execução
+            } else {
+              // Pula por atraso excessivo
+              pulados.push(f.id);
+              this.adicionarRun(f.id, {
+                resultado: "pulado",
+                pulado: 1,
+                erro: "job pulado por atraso além da tolerância de graça",
+              });
+              let proximaAposPulo: string | null;
+              try {
+                if (jobObj?.agenda.tipo === "intervalo_min") {
+                  proximaAposPulo = new Date(agora.getTime() + jobObj.agenda.valor * 60_000).toISOString();
+                } else {
+                  proximaAposPulo = proximoCronTz(expressao, agora, tz).toISOString();
+                }
+              } catch {
+                proximaAposPulo = null;
+              }
+              Scheduler.estadoGlobalFlows.set(chave, {
+                ultima_exec: estado?.ultima_exec ?? null,
+                proxima_exec: proximaAposPulo,
+              });
+              continue;
+            }
+          }
+
+          if (proxima.getTime() > agora.getTime()) {
+            Scheduler.estadoGlobalFlows.set(chave, {
+              ultima_exec: estado?.ultima_exec ?? null,
+              proxima_exec: proxima.toISOString(),
+            });
+            continue;
+          }
+
+          // Lock atômico para claim em corrida entre múltiplos schedulers
+          const temLock = await this.claimLock(ws.path, f.id, minutoAtual);
+          if (!temLock) {
+            continue;
+          }
+
+          let proximaAposExec: string | null;
+          try {
+            if (jobObj?.agenda.tipo === "intervalo_min") {
+              proximaAposExec = new Date(agora.getTime() + jobObj.agenda.valor * 60_000).toISOString();
+            } else if (jobObj?.agenda.tipo === "data_unica") {
+              proximaAposExec = null;
+            } else {
+              proximaAposExec = proximoCronTz(expressao, agora, tz).toISOString();
+            }
+          } catch {
+            proximaAposExec = null;
+          }
+
+          Scheduler.estadoGlobalFlows.set(chave, {
+            ultima_exec: agora.toISOString(),
+            proxima_exec: proximaAposExec,
+          });
+
+          let resExec = "ok";
+          try {
+            if (this.executarFn && jobObj) {
+              resExec = await this.executarFn(jobObj);
+            } else if (this.flowExecutarFn) {
+              const res = await this.flowExecutarFn(ws.path, f.id, {
+                gatilho: { tipo: "cron", origem: f.id },
+              });
+              resExec = `flow ${f.id} exec ${res.execId}`;
+            } else {
+              await flowStore.executar(ws.path, f.id, {
+                gatilho: { tipo: "cron", origem: f.id },
+              });
+            }
+            executados.push(f.id);
+            this.adicionarRun(f.id, {
+              resultado: resExec,
+              pulado: 0,
+              erro: null,
+            });
+
+            if (jobObj?.agenda.tipo === "data_unica") {
+              const fl = await flowStore.obter(ws.path, f.id).catch(() => null);
+              if (fl) await flowStore.salvar(ws.path, { ...fl, ativo: false }).catch(() => {});
+            }
+          } catch (erro) {
+            const msgErro = erro instanceof Error ? erro.message : String(erro);
+            console.error(`[scheduler] falha ao executar fluxo ${f.id} (ws: ${ws.id}): ${msgErro}`);
+            pulados.push(f.id);
+            this.adicionarRun(f.id, {
+              resultado: "falhou",
+              pulado: 0,
+              erro: msgErro,
+            });
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 50));
         }
       }
-      executados.push(job.id);
-      // Stagger leve (250ms) entre spawns no mesmo tick para diluir pico de concorrência
-      await new Promise((resolve) => setTimeout(resolve, 250));
+    } catch (erro) {
+      console.error("[scheduler] erro crítico no tick:", erro instanceof Error ? erro.message : erro);
     }
+
     return { executados, pulados, reconciliados };
   }
 
-  async runNow(id: string): Promise<{ job: Job; resultado: string }> {
-    const job = await this.obter(id);
-    const agora = this.agora();
-    const resultado = await this.executarFn(job);
-    await this.registrarRun(job, { resultado: resultado + " (run-now)" });
-
-    let proxima: string | null = null;
-    let ativo = job.ativo ? 1 : 0;
-
-    if (job.agenda.tipo === "data_unica") {
-      // Data única já foi executada manualmente: conclui e desativa
-      proxima = null;
-      ativo = 0;
-    } else if (job.agenda.tipo === "intervalo_min") {
-      // Intervalo recomeça a contar o próximo ciclo a partir da execução adiantada
-      proxima = new Date(agora.getTime() + job.agenda.valor * 60_000).toISOString();
-    } else if (job.agenda.tipo === "cron") {
-      // Para cron: se foi adiantado antes do horário previsto, o próximo disparo
-      // avança para o ciclo subsequente, evitando execução dupla no mesmo ciclo
-      const base =
-        job.proxima_exec && new Date(job.proxima_exec).getTime() > agora.getTime()
-          ? new Date(job.proxima_exec)
-          : agora;
-      proxima = proximoCron(job.agenda.valor, base).toISOString();
-    }
-
-    (await this.banco())
-      .prepare("UPDATE jobs SET ultima_exec = ?, proxima_exec = ?, ativo = ? WHERE id = ?")
-      .run(agora.toISOString(), proxima, ativo, id);
-
-    return { job: await this.obter(id), resultado };
-  }
+  // ── Controle do daemon ──────────────────────────────────────────────
 
   iniciar(intervaloSeg = 30, manterVivo = false): void {
     if (this.timer) return;
     this.timer = setInterval(() => {
       void this.tick().catch((erro) => {
-        // tick falho nunca mais fica invisível (antes: .catch(() => undefined))
         console.error("[scheduler] erro no tick:", erro instanceof Error ? erro.message : erro);
       });
     }, intervaloSeg * 1000);
