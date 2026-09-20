@@ -55,6 +55,8 @@ export interface OpcoesRun {
   execId?: string;
   /** teto de execução em ms — watchdog HITL-aware mata o opencode (SIGTERM→SIGKILL) e finaliza "falhou" */
   timeoutMs?: number;
+  /** timeout de inatividade em ms (padrão 60s) — mata o processo se o modelo não gerar tokens */
+  inatividadeMs?: number;
   /** intervalo de checagem do watchdog em ms (padrão 30s) — knob de teste */
   watchdogIntervalMs?: number;
   /** graça SIGTERM→SIGKILL do watchdog em ms (padrão 5s) — knob de teste */
@@ -181,7 +183,7 @@ function gerarId(prefixo: string): string {
 }
 
 export const PADRAO_ERRO_MODELO =
-  /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found|not available|Provider not found|from --model flag|insufficient balance|payment_required|402|credit balance|temporarily unavailable|Provider returned error|requires more credits|can only afford|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits|in-flight requests|database is locked|sqlite_busy/i;
+  /usage limit|Cannot connect to API|AI_APICallError|rate limit|free-models-per-day|quota|429|overloaded|resource exhausted|unavailable for free|model not found|not available|Provider not found|from --model flag|insufficient balance|payment_required|402|credit balance|temporarily unavailable|Provider returned error|requires more credits|can only afford|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits|in-flight requests|database is locked|sqlite_busy|nenhuma resposta do modelo|ETIMEDOUT|ECONNRESET|socket hang up|504 Gateway Timeout|502 Bad Gateway|503 Service Unavailable|deadline exceeded|connection refused|econnrefused|fetch failed|aborterror/i;
 
 export const PADRAO_ERRO_CREDITOS =
   /requires more credits|can only afford|insufficient balance|payment_required|402|credit balance|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits/i;
@@ -1186,7 +1188,7 @@ export class SessionManager {
     const resolverAposTimeout = async (): Promise<ResultadoRun> => {
       const morte = watchdog?.quandoMorto;
       if (morte) await morte;
-      const retry = await this.tentarRetry(ws, opcoes, registro, captura.join(""));
+      const retry = await this.tentarRetry(ws, opcoes, registro, captura.join(""), motivoTimeout || "timeout/inatividade");
       if (retry) return retry;
       return {
         ...registro,
@@ -1605,15 +1607,28 @@ export class SessionManager {
     opcoes: OpcoesRun,
     registro: RegistroExecucao,
     captura: string,
+    motivoMorteTimeout?: string,
   ): Promise<ResultadoRun | null> {
     if (opcoes.retryDe) return null;
     if (registro.status === "hitl_pendente") return null;
-    if (!PADRAO_ERRO_MODELO.test(captura)) return null;
 
-    const falhaCreditos = PADRAO_ERRO_CREDITOS.test(captura);
+    const erroRegistro = String((registro as any).erro ?? "");
+    const textoValidar = `${captura}\n${erroRegistro}\n${motivoMorteTimeout ?? ""}`;
+
+    // Apenas inatividade do modelo (travamento sem tokens) dispara rotação automática por watchdog
+    const ehInatividadeModelo = Boolean(
+      (motivoMorteTimeout && /inatividade/i.test(motivoMorteTimeout)) ||
+      (registro.exit_code === null && /inatividade/i.test(erroRegistro)),
+    );
+
+    if (!ehInatividadeModelo && !PADRAO_ERRO_MODELO.test(textoValidar)) {
+      return null;
+    }
+
+    const falhaCreditos = PADRAO_ERRO_CREDITOS.test(textoValidar);
     const falhaCota =
       falhaCreditos ||
-      /usage limit|rate limit|quota|429|resource exhausted|status_cota|Weekly usage|Monthly usage/i.test(captura);
+      /usage limit|rate limit|quota|429|resource exhausted|status_cota|Weekly usage|Monthly usage/i.test(textoValidar);
 
     // 1. Rotação de Contas (se houver conta alternativa com cota disponível)
     if (falhaCota) {
@@ -1755,14 +1770,44 @@ export class SessionManager {
       if (apenasGratuitos) {
         lista = lista.filter((m) => ehModeloGratuito(m));
       }
-      return (
-        proximoModeloDaCadeia({
-          cadeia: lista,
-          modeloAtual: modeloFalho,
-          modelosJaTentados,
-          apenasGratuitos,
-        }) ?? proximoModeloRotacao(lista, modeloFalho)
-      );
+      const prox = proximoModeloDaCadeia({
+        cadeia: lista,
+        modeloAtual: modeloFalho,
+        modelosJaTentados,
+        apenasGratuitos,
+      });
+      if (prox) return prox;
+
+      // 2.1 Se a rotação própria do agente esgotou, tenta fallback no workspace se autorizado
+      const herdarWorkspace =
+        ag?.frontmatter?.workspace_rotation_fallback !== undefined
+          ? Boolean(ag.frontmatter.workspace_rotation_fallback)
+          : ag?.frontmatter?.rotacao_global !== undefined
+            ? Boolean(ag.frontmatter.rotacao_global)
+            : true;
+
+      if (herdarWorkspace && wsPath) {
+        try {
+          const wsCfgPath = join(wsPath, ".opencorp", "config.json");
+          if (existsSync(wsCfgPath)) {
+            const wsCfg = JSON.parse(readFileSync(wsCfgPath, "utf8"));
+            const rotWs = wsCfg?.modelos?.rotacao || wsCfg?.tests?.rotation;
+            if (Array.isArray(rotWs) && rotWs.length > 0) {
+              let listaWs = rotWs;
+              if (apenasGratuitos) {
+                listaWs = listaWs.filter((m: string) => ehModeloGratuito(m));
+              }
+              const proxWs = proximoModeloDaCadeia({
+                cadeia: listaWs,
+                modeloAtual: modeloFalho,
+                modelosJaTentados,
+                apenasGratuitos,
+              });
+              if (proxWs) return proxWs;
+            }
+          }
+        } catch {}
+      }
     }
 
     // 3. Fallback: MODELOS_ROTACAO_PADRAO

@@ -54,6 +54,14 @@ describe("Rotação de Modelos e Detecção de Erros de API (TEST-04)", () => {
     expect(PADRAO_ERRO_MODELO.test(saidaUnavailable)).toBe(true);
   });
 
+  it("detecta inatividade, timeout e modelo travado", () => {
+    expect(PADRAO_ERRO_MODELO.test("inatividade: nenhuma resposta do modelo por 60s (modelo travado)")).toBe(true);
+    expect(PADRAO_ERRO_MODELO.test("ETIMEDOUT: connection timed out")).toBe(true);
+    expect(PADRAO_ERRO_MODELO.test("504 Gateway Timeout")).toBe(true);
+    expect(PADRAO_ERRO_MODELO.test("502 Bad Gateway")).toBe(true);
+    expect(PADRAO_ERRO_MODELO.test("503 Service Unavailable")).toBe(true);
+  });
+
   it("não dispara falso positivo para saída de sucesso ou erros normais de aplicação", () => {
     const saidaOk = 'Processamento concluído com sucesso. 10 arquivos atualizados.';
     expect(PADRAO_ERRO_MODELO.test(saidaOk)).toBe(false);

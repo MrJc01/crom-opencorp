@@ -89,3 +89,12 @@ Thumbs.db
 *.temp
 .parcel-cache/
 .turbo/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Caches de agentes e resíduos locais
+.crom/
+.crom*
+patch_agents.js
+corp-deep-sre/
+data/
