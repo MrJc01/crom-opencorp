@@ -1,7 +1,7 @@
 {
   "$schema": "https://opencorp.ai/schemas/contexto-v1.json",
-  "_instrucoes": "Este é o TEMPLATE DO SISTEMA (somente leitura para referência). Ele documenta todos os campos que o OpenCorp entende e injeta nativamente nos agentes. Para personalizar o seu workspace, edite o arquivo .opencorp/contexto.json.",
-  "versao": "1.0",
+  "_instrucoes": "Este é o TEMPLATE DO SISTEMA (somente leitura para referência). Ele documenta todos os campos que o OpenCorp entende e injeta nativamente no prompt dos agentes. Para personalizar o seu workspace, edite o arquivo .opencorp/contexto.json ou use os comandos 'oc context set <chave> <valor>' e 'oc context push <campo> <item>'.",
+  "versao": "1.1",
   "campos": {
     "nome": {
       "tipo": "string",
@@ -12,13 +12,13 @@
     "categoria": {
       "tipo": "string",
       "obrigatorio": false,
-      "descricao": "Segmento de mercado ou vertical de atuação (ex: portal_noticias, engenharia, saas, ecommerce, juridico)",
+      "descricao": "Segmento de mercado ou vertical de atuação (ex: portal_noticias, engenharia, saas, ecommerce, juridico, youtube_factory)",
       "exemplo": "portal_noticias"
     },
     "descricao_curta": {
       "tipo": "string",
       "obrigatorio": false,
-      "descricao": "Resumo de 1 ou 2 frases da missão, produto ou serviço do workspace",
+      "descricao": "Resumo de 1 ou 2 frases da missão, produto ou serviço do workspace (injetado automaticamente no prompt de todos os agentes)",
       "exemplo": "Portal de notícias e análises sobre automação de processos para PMEs brasileiras."
     },
     "publico_alvo": {
@@ -30,46 +30,61 @@
     "tom_de_voz": {
       "tipo": "string",
       "obrigatorio": false,
-      "descricao": "Diretrizes de linguagem, tom e estilo que todos os agentes devem seguir",
-      "exemplo": "Direto, profissional, focado em dados e exemplos práticos; evitar jargões desnecessários."
+      "descricao": "Diretrizes de linguagem, tom e estilo que todos os agentes devem seguir (injetado automaticamente no prompt)",
+      "exemplo": "Direto, profissional, focado em dados e exemplos práticos em Português do Brasil (PT-BR); evitar jargões desnecessários."
     },
     "regras_de_negocio": {
       "tipo": "array<string>",
       "obrigatorio": false,
-      "descricao": "Regras inegociáveis do negócio que nenhum agente deve violar",
+      "descricao": "Regras inegociáveis do negócio que nenhum agente deve violar (injetadas como lista de restrições)",
       "exemplo": [
         "Nunca prometer ganhos financeiros sem embasamento técnico",
         "Sempre citar fontes primárias com URL completa ao produzir conteúdo",
-        "Não publicar rascunhos sem ao menos uma categoria válida atribuída"
+        "Não publicar rascunhos sem ao menos uma categoria válida atribuída",
+        "Operar sempre em Português do Brasil (PT-BR)"
       ]
     },
     "glossario": {
       "tipo": "record<string, string>",
       "obrigatorio": false,
-      "descricao": "Termos técnicos, jargões internos e siglas específicas do negócio",
+      "descricao": "Termos técnicos, jargões internos e siglas específicas do negócio (injetado até 8 termos prioritários)",
       "exemplo": {
         "SOP": "Procedimento Operacional Padrão",
         "PME": "Pequena e Média Empresa",
-        "BYOK": "Bring Your Own Key — usar credencial própria de API"
+        "BYOK": "Bring Your Own Key — usar credencial própria de API",
+        "WAL": "Write-Ahead Logging do SQLite para alta concorrência"
       }
     },
     "canais_de_saida": {
       "tipo": "record<string, string>",
       "obrigatorio": false,
-      "descricao": "Endpoints e plataformas de publicação ou entrega (ex: blog, repositório, drive)",
+      "descricao": "Endpoints e plataformas de publicação ou entrega (ex: blog, canal_youtube, repositorio_github)",
       "exemplo": {
         "site_principal": "https://meusite.com/",
+        "canal_youtube": "https://www.youtube.com/@meucanal",
         "repositorio_github": "https://github.com/org/repo"
       }
     },
     "notas_operacionais": {
       "tipo": "array<string>",
       "obrigatorio": false,
-      "descricao": "Descobertas e aprendizados que os agentes registraram ao longo das rondas para compartilhar com outros agentes",
+      "descricao": "Descobertas e aprendizados que os agentes registraram ao longo das execuções para compartilhar com outros agentes (injetadas no contexto adaptativo)",
       "exemplo": [
         "A categoria 3 do site é dedicada a Casos de Sucesso e performa 40% melhor nos testes.",
-        "O endpoint de sanitização deve ser chamado sempre antes do encerramento das rondas diárias."
+        "O endpoint de sanitização deve ser chamado sempre antes do encerramento das rondas diárias.",
+        "O motor visual Remotion gera cards 9:16 HD em 1080x1920 com transições fluidas."
       ]
+    },
+    "governanca_modelos": {
+      "tipo": "record<string, string>",
+      "obrigatorio": false,
+      "descricao": "Dimensionamento xB de modelos conforme AGENTS.md",
+      "exemplo": {
+        "mini_agentes": "Modelos < 14B para checagens determinísticas e sanitização",
+        "redatores": "Modelos de 14B a 35B (ex: Qwen 27B) para roteiros e artigos",
+        "raciocinio_secretario": "Modelos > 70B ou Flagships (ex: Nemotron Ultra 550B, Gemini Flash/Pro via AGY) para curadoria e supervisão",
+        "modelos_proibidos": "Proibido modelos < 4B ou roteadores cegos sem ferramentas"
+      }
     },
     "metadados_extras": {
       "tipo": "record<string, any>",
@@ -77,7 +92,8 @@
       "descricao": "Chaves e valores adicionais customizados livremente pelo operador ou agentes para regras específicas",
       "exemplo": {
         "fuso_horario": "America/Sao_Paulo",
-        "idioma_padrao": "pt-BR"
+        "idioma_padrao": "pt-BR",
+        "cota_diaria_uploads": 6
       }
     }
   }

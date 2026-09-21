@@ -19,7 +19,7 @@
       "id": "executar-script",
       "tipo": "script",
       "config": {
-        "comando": "node /home/j/.opencorp/workspaces/yt-factory-01/scripts/run_python.mjs /home/j/.opencorp/workspaces/yt-factory-01/scripts/publicar_youtube.py --auto",
+        "comando": "node scripts/run_python.mjs scripts/publicar_youtube.py --auto",
         "timeout_ms": 120000
       },
       "pos": {

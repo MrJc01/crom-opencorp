@@ -2,7 +2,7 @@
 id: analista-radar
 role: Analista de Radar
 category: operario
-model: opencode-go/glm-5.3-flash
+model: opencode/nemotron-3-ultra-free
 tools: [read, write, bash, registry]
 permissions: level-2
 budget:

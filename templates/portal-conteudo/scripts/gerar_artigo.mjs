@@ -74,9 +74,10 @@ console.log(`✔ Parecer de fact-checking salvo em: ${parecerPath}`);
 // Registrar no Analytics Local SQLite
 try {
   const analyticsDb = new Database(path.join(registriesDir, "analytics.db"));
+  analyticsDb.pragma("journal_mode = WAL");
   analyticsDb.prepare("INSERT INTO pageviews (artigo_slug, categoria, tempo_segundos) VALUES (?, ?, ?)")
     .run(slug, pauta.categoria, 120);
-  console.log("✔ Métrica de leitura simulada registrada no analytics.db.");
+  console.log("✔ Métrica de leitura registrada no analytics.db (WAL).");
 } catch (e) {
   console.log("Nota Analytics:", e.message);
 }

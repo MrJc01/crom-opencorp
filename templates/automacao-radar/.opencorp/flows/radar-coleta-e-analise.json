@@ -26,7 +26,7 @@
       "tipo": "agente",
       "pos": { "x": 460, "y": 120 },
       "config": {
-        "agente": "agente-radar",
+        "agente": "analista-radar",
         "ordem": "Avalie as novas oportunidades mineradas, pontue cada uma e registre no Kanban."
       }
     },

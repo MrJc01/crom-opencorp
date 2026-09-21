@@ -3,9 +3,12 @@
   "nome": "Pautador YouTube (fluxo)",
   "nos": [
     {
-      "id": "gatilho",
-      "tipo": "manual",
-      "config": {}
+      "id": "gatilho-cron",
+      "tipo": "cron",
+      "config": {
+        "expressao_cron": "7 */3 * * *",
+        "job_nome": "Pautador YouTube (fluxo)"
+      }
     },
     {
       "id": "checar-estoque",
@@ -54,7 +57,7 @@
   ],
   "arestas": [
     {
-      "de": "gatilho",
+      "de": "gatilho-cron",
       "para": "checar-estoque"
     },
     {

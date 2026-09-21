@@ -2,7 +2,7 @@
 id: analista-metricas
 role: Analista de Métricas
 category: operario
-model: opencode-go/glm-5.3-flash
+model: openrouter/qwen/qwen3.8-27b:free
 tools: [read, write, bash, registry]
 permissions: level-2
 budget:

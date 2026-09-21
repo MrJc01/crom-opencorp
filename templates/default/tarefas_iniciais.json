@@ -1,0 +1,32 @@
+[
+  {
+    "id": "tsk-setup-01-contexto",
+    "titulo": "[SETUP] Definição do Contexto Adaptativo do Workspace",
+    "descricao": "Personalizar .opencorp/contexto.json com a missão da empresa, tom de voz, regras de negócio inegociáveis e canais de entrega.",
+    "coluna": "backlog",
+    "pos": 1,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "governanca", "contexto"],
+    "responsavel": "agente:secretario-exec"
+  },
+  {
+    "id": "tsk-setup-02-auditoria",
+    "titulo": "[SETUP] Auditoria Inicial de Conexões e Ferramentas",
+    "descricao": "Verificar se as credenciais necessárias (.opencorp/secrets/) e integrações (git, banco de dados, APIs) estão ativas e documentadas.",
+    "coluna": "backlog",
+    "pos": 2,
+    "prioridade": "alta",
+    "labels": ["setup-inicial", "auditoria", "infra"],
+    "responsavel": "agente:auditor"
+  },
+  {
+    "id": "tsk-setup-03-fluxos",
+    "titulo": "[SETUP] Homologação dos Fluxos Declarativos",
+    "descricao": "Inspecionar .opencorp/flows/ para garantir que as rotinas periódicas possuem nós de cron válidos e operam sem loops infinitos.",
+    "coluna": "backlog",
+    "pos": 3,
+    "prioridade": "media",
+    "labels": ["setup-inicial", "fluxos", "automacao"],
+    "responsavel": "agente:secretario-exec"
+  }
+]

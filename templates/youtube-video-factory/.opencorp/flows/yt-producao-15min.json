@@ -47,7 +47,7 @@
       "join": "any",
       "config": {
         "agente": "roteirista-video",
-        "ordem": "Demanda de roteirização recebida: {{entrada}}. Inspecione registries/pautas.json para ler os fatos da pauta citada e a fonte_url. Escreva o roteiro completo no padrão estrito de 5 cenas (HOOK, CONTEXTO, DESENVOLVIMENTO, CLIMAX, FECHAMENTO_CTA) com 85 a 105 palavras no total e salve o arquivo JSON correspondente em registries/roteiros/<pauta_id>.json. Finalize confirmando ROTEIRO_GERADO_OK."
+        "ordem": "Demanda de roteirização recebida: {{entrada}}. Inspecione registries/pautas.json para ler os fatos da pauta citada e a fonte_url. Escreva o roteiro completo no padrão estrito de 5 cenas no array \"cenas\" (Cena 1: HOOK, Cena 2: CONTEXTO, Cena 3: DESENVOLVIMENTO, Cena 4: CLIMAX, Cena 5: FECHAMENTO_CTA) com 85 a 105 palavras no total. OBRIGATÓRIO: inclua para cada cena (1 a 5, SEM EXCEÇÃO) o array \"imagens\": [\"termo_especifico_em_ingles\", \"termo_commons\"] e o campo \"texto_tela\". Salve o arquivo JSON correspondente em registries/roteiros/<pauta_id>.json no formato estrito: { \"pauta_id\": \"<id>\", \"titulo_escolhido\": \"...\", \"fonte_fatos\": \"...\", \"cenas\": [ { \"tipo\": \"HOOK\", \"templateId\": \"video-hero-bg\", \"fala\": \"...\", \"texto_tela\": \"...\", \"imagens\": [...] }, ... ] }. Finalize confirmando ROTEIRO_GERADO_OK."
       },
       "pos": {
         "x": 600,
