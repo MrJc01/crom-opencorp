@@ -55,9 +55,10 @@ function wsDe(opts: { workspace?: string }): string | undefined {
       console.log('nenhum flow — crie com: opencorp flow create <id> --nome "..."');
       return;
     }
-    console.log("id                    nome                                 nós  arestas");
+    console.log("id                    nome                                 ativo    nós  arestas");
     for (const f of lista) {
-      console.log(`${f.id.padEnd(22)}${f.nome.padEnd(37)}${String(f.nos).padEnd(5)}${f.arestas}`);
+      const statusAtivo = f.ativo !== false ? "ativo" : "pausado";
+      console.log(`${f.id.padEnd(22)}${f.nome.padEnd(37)}${statusAtivo.padEnd(9)}${String(f.nos).padEnd(5)}${f.arestas}`);
     }
   };
 
@@ -169,6 +170,71 @@ function wsDe(opts: { workspace?: string }): string | undefined {
         const ws = await manager.resolver(wsDe(opts));
         await store.deletar(ws.path, id);
         console.log(`ok: flow "${id}" apagado`);
+      }),
+    );
+
+  flow
+    .command("pause [id]")
+    .option("-a, --all", "pausa todos os flows do workspace")
+    .option("-w, --workspace <id>", "workspace alvo (padrão: ativo)")
+    .description("pausa/desativa um flow ou todos os flows do workspace (ativo: false)")
+    .action((id: string | undefined, opts: { all?: boolean; workspace?: string }) =>
+      comErros(async () => {
+        const ws = await manager.resolver(wsDe(opts));
+        if (opts.all) {
+          const lista = await store.listar(ws.path);
+          let pausados = 0;
+          for (const f of lista) {
+            const flow = await store.obter(ws.path, f.id);
+            if (flow.ativo !== false) {
+              await store.salvar(ws.path, { ...flow, ativo: false });
+              pausados++;
+            }
+          }
+          console.log(`ok: ${pausados} flow(s) pausado(s) no workspace "${ws.id}"`);
+          return;
+        }
+        if (!id) {
+          console.error("erro: informe o id do flow ou use --all para pausar todos");
+          process.exitCode = 1;
+          return;
+        }
+        const flow = await store.obter(ws.path, id);
+        await store.salvar(ws.path, { ...flow, ativo: false });
+        console.log(`ok: flow "${id}" pausado no workspace "${ws.id}" (ativo: false)`);
+      }),
+    );
+
+  flow
+    .command("activate [id]")
+    .alias("unpause")
+    .option("-a, --all", "ativa todos os flows do workspace")
+    .option("-w, --workspace <id>", "workspace alvo (padrão: ativo)")
+    .description("ativa um flow ou todos os flows do workspace (ativo: true)")
+    .action((id: string | undefined, opts: { all?: boolean; workspace?: string }) =>
+      comErros(async () => {
+        const ws = await manager.resolver(wsDe(opts));
+        if (opts.all) {
+          const lista = await store.listar(ws.path);
+          let ativados = 0;
+          for (const f of lista) {
+            const flow = await store.obter(ws.path, f.id);
+            if (flow.ativo === false) {
+              await store.salvar(ws.path, { ...flow, ativo: true });
+              ativados++;
+            }
+          }
+          console.log(`ok: ${ativados} flow(s) ativado(s) no workspace "${ws.id}"`);
+          return;
+        }
+        if (!id) {
+          console.error("erro: informe o id do flow ou use --all para ativar todos");
+          process.exitCode = 1;
+          return;
+        }
+        const flow = await store.obter(ws.path, id);
+        await store.salvar(ws.path, { ...flow, ativo: true });
+        console.log(`ok: flow "${id}" ativado no workspace "${ws.id}" (ativo: true)`);
       }),
     );
 

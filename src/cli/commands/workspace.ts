@@ -162,6 +162,52 @@ export function registerWorkspaceCommands(program: Command): void {
       }),
     );
 
+  grupo
+    .command("pause [id]")
+    .option("-w, --workspace <id>", "workspace alvo (padrão: ativo)")
+    .description("pausa o workspace: desativa todos os seus fluxos agendados mantendo arquivos e configs intactos")
+    .action((id: string | undefined, opts: { workspace?: string }) =>
+      comErros(async () => {
+        const alvo = await manager.resolver(id ?? opts.workspace);
+        const { FlowStore } = await import("../../core/flow-store.js");
+        const flowStore = new FlowStore();
+        const lista = await flowStore.listar(alvo.path);
+        let pausados = 0;
+        for (const f of lista) {
+          const flow = await flowStore.obter(alvo.path, f.id);
+          if (flow.ativo !== false) {
+            await flowStore.salvar(alvo.path, { ...flow, ativo: false });
+            pausados++;
+          }
+        }
+        console.log(`ok: workspace "${alvo.id}" pausado (${pausados} fluxo(s) desativado(s)).`);
+        console.log(`todos os arquivos, configurações e registros foram preservados em ${alvo.path}`);
+      }),
+    );
+
+  grupo
+    .command("resume [id]")
+    .alias("unpause")
+    .option("-w, --workspace <id>", "workspace alvo (padrão: ativo)")
+    .description("retoma o workspace: reativa todos os seus fluxos")
+    .action((id: string | undefined, opts: { workspace?: string }) =>
+      comErros(async () => {
+        const alvo = await manager.resolver(id ?? opts.workspace);
+        const { FlowStore } = await import("../../core/flow-store.js");
+        const flowStore = new FlowStore();
+        const lista = await flowStore.listar(alvo.path);
+        let ativados = 0;
+        for (const f of lista) {
+          const flow = await flowStore.obter(alvo.path, f.id);
+          if (flow.ativo === false) {
+            await flowStore.salvar(alvo.path, { ...flow, ativo: true });
+            ativados++;
+          }
+        }
+        console.log(`ok: workspace "${alvo.id}" retomado (${ativados} fluxo(s) reativado(s)).`);
+      }),
+    );
+
   // ── Subcomandos de Git & Versionamento ──
   const gitCmd = grupo.command("git").description("governança e versionamento Git do workspace");
 
