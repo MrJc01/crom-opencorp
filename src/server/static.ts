@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { existsSync, statSync, readFileSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
+import { projectRoot } from "../utils/paths.js";
 
-const DEFAULT_WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "web-dist");
+const DEFAULT_WEB_DIST = join(projectRoot(), "web-dist");
 
 const TIPOS_TEXTO: Record<string, string> = {
   html: "text/html; charset=utf-8",

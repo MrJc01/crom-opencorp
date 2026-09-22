@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readlinkSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { execa } from "execa";
+import { projectRoot } from "../utils/paths.js";
 
 export type TipoDriver = "sandbox" | "host" | "docker" | "podman";
 
@@ -205,10 +206,10 @@ export class SandboxDriver implements ExecutionDriver {
     // Só DIRETÓRIOS: bind de arquivo dentro de /usr (já montado ro) falha com
     // "Can't create file" — Chrome/Playwright resolve pelo cache ms-playwright.
     const caminhosLeituraOpcionais = [
-      "/home/j/Documentos/GitHub/crom-worker-opencode/node_modules",
       "/home/j/.local/share/myvoice",
       "/usr/local",
       "/home/j/.cache/ms-playwright",
+      join(projectRoot(), "node_modules"),
       homeBase ? resolve(homeBase, ".opencorp", "node_modules") : "",
       homeBase ? resolve(homeBase, ".opencorp", "bin") : "",
       homeBase ? resolve(homeBase, ".opencorp", "lib") : "",

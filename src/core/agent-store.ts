@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, mkdirSync, cpSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { projectRoot } from "../utils/paths.js";
 import {
   AgentSchemaError,
   parseAgenteMd,
@@ -88,7 +88,7 @@ export class AgentStore {
   constructor(opts: { templatesDir?: string } = {}) {
     this.templatesDir =
       opts.templatesDir ??
-      join(dirname(fileURLToPath(import.meta.url)), "..", "..", "templates");
+      join(projectRoot(), "templates");
   }
 
   dirAgentes(wsPath: string): string {

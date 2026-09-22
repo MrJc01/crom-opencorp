@@ -1,8 +1,7 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
-import { join, dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { opencorpHome } from "../utils/paths.js";
+import { join, dirname } from "node:path";
+import { opencorpHome, projectRoot } from "../utils/paths.js";
 import { eventBus } from "./event-bus.js";
 import { WorkspaceManager } from "./workspace-manager.js";
 import { SettingsStore } from "./settings-store.js";
@@ -260,9 +259,7 @@ async function adotarOrfaoSaudavel(homeDir: string): Promise<OpencodeServerInfo 
 }
 
 function binOpencodePath(): string {
-  const aqui = dirname(fileURLToPath(import.meta.url));
-  const bin = resolve(aqui, "..", "..", "bin", "opencorp.mjs");
-  return bin;
+  return join(projectRoot(), "bin", "opencorp.mjs");
 }
 
 async function garantirOpencodeConfig(homeDir: string, homeOpencorp: string): Promise<boolean> {
@@ -305,7 +302,7 @@ async function garantirOpencodeConfig(homeDir: string, homeOpencorp: string): Pr
 async function garantirAgentesSecretario(homeDir: string, modeloForcado?: string): Promise<AgentesConfig> {
   const manager = new WorkspaceManager({ homeDir });
   const workspaces = await manager.listar();
-  const templateDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "templates", "default", ".opencorp", "agents");
+  const templateDir = join(projectRoot(), "templates", "default", ".opencorp", "agents");
   const bridge = new OpenCodeBridge();
   let total = 0;
   const wsNomes: string[] = [];

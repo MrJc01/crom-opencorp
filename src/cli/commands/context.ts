@@ -1,13 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
 import type { Command } from "commander";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
 import { writeFileAtomic } from "../../utils/fs-safe.js";
+import { projectRoot } from "../../utils/paths.js";
 
-const aqui = dirname(fileURLToPath(import.meta.url));
-const templateSistemaPath = join(aqui, "../../../templates/contexto.template.json");
+const templateSistemaPath = join(projectRoot(), "templates", "contexto.template.json");
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

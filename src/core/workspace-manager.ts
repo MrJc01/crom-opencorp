@@ -1,7 +1,6 @@
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { z } from "zod";
 import { AgentStore, type AgenteResumo } from "./agent-store.js";
@@ -10,7 +9,7 @@ import { PromptStore } from "./prompt-store.js";
 import { RegistryStore } from "./registry-store.js";
 import { SettingsStore } from "./settings-store.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
-import { expandTilde, opencorpHome } from "../utils/paths.js";
+import { expandTilde, opencorpHome, projectRoot } from "../utils/paths.js";
 
 export { WorkspaceError };
 
@@ -102,7 +101,7 @@ export class WorkspaceManager {
     this.cwd = opts.cwd ?? process.cwd();
     this.templatesDir =
       opts.templatesDir ??
-      join(dirname(fileURLToPath(import.meta.url)), "..", "..", "templates");
+      join(projectRoot(), "templates");
     this.workspacesRootOverride = opts.workspacesRoot;
     this.store = new SettingsStore({ homeDir: this.homeDir, cwd: this.cwd });
     this.agentes = new AgentStore({ templatesDir: this.templatesDir });
@@ -305,7 +304,7 @@ export class WorkspaceManager {
       }
 
       // Garante resolução de dependências compartilhadas (ex: better-sqlite3) criando symlink para node_modules da raiz
-      const repoNodeModules = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "node_modules");
+      const repoNodeModules = join(projectRoot(), "node_modules");
       const destNodeModules = join(destino, "node_modules");
       if (existsSync(repoNodeModules) && !existsSync(destNodeModules)) {
         try {

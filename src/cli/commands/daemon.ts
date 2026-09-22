@@ -15,7 +15,7 @@ import { existsSync, openSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import { spawn, execSync } from "node:child_process";
 import { mkdirRecursive, writeFileAtomic } from "../../utils/fs-safe.js";
-import { opencorpHome } from "../../utils/paths.js";
+import { opencorpHome, projectRoot } from "../../utils/paths.js";
 import { spawnDaemon } from "./serve.js";
 
 const PIDFILE = "daemon.pid";
@@ -158,11 +158,13 @@ export function registerDaemonCommand(program: Command): void {
     .action((opts: { comServe?: boolean; host?: string }) =>
       (async () => {
         const home = opencorpHome();
-        const repoPath = resolve(home, "Documentos/GitHub/crom-worker-opencode");
-        const workDir = existsSync(repoPath) ? repoPath : home;
-        const bin = existsSync(join(workDir, "bin", "opencorp.mjs"))
-          ? join(workDir, "bin", "opencorp.mjs")
-          : (process.argv[1] || resolve(import.meta.dirname ?? ".", "..", "..", "..", "bin", "opencorp.mjs"));
+        const workDir = projectRoot();
+        const bin = join(workDir, "bin", "opencorp.mjs");
+        if (!existsSync(bin)) {
+          console.error(`erro: binário não encontrado em ${bin}`);
+          process.exitCode = 1;
+          return;
+        }
         const unitDir = join(home, ".config", "systemd", "user");
         const unitPath = join(unitDir, "opencorp-daemon.service");
         await mkdirRecursive(unitDir);

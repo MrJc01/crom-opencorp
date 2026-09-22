@@ -637,7 +637,7 @@ export const ChatComposer: Component<ChatComposerProps> = (props) => {
       <div class="flex items-center justify-between px-2 pt-1.5 text-[10px] text-zinc-500 font-mono select-none">
         <div class="flex items-center gap-1.5 hover:text-zinc-400 transition-colors cursor-pointer truncate max-w-[240px] sm:max-w-none">
           <FolderGit2 size={11} class="text-zinc-500 shrink-0" />
-          <span class="truncate">crom-worker-opencode</span>
+          <span class="truncate">opencorp</span>
           <span class="text-zinc-600">/</span>
           <GitBranch size={10} class="text-emerald-500/80 shrink-0" />
           <span class="text-zinc-400 truncate">feat/ecossistema</span>

@@ -120,7 +120,7 @@ export const SecretarioView: Component = () => {
         onExcluirSessao={(id) => void chat.excluirSessao(id)}
         modeloAtivo={chat.modeloAtivoChat() || chat.modeloConfig() || "openrouter/google/gemini-2.5-flash"}
         onMudarModelo={(m) => chat.setModeloConfig(m)}
-        workspaceId={wsAtivo() || "crom-worker-opencode"}
+        workspaceId={wsAtivo() || "opencorp"}
         branchAtiva={branchAtiva()}
         onNovaSessao={() => { chat.novaConversa(); }}
         onAbrirHistorico={() => setHistoricoAberto(true)}

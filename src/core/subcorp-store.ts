@@ -1,11 +1,10 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, join, resolve } from "node:path";
 import { SubcorpError } from "./errors.js";
 import { CATEGORIAS_PADRAO } from "./registry-store.js";
 import { writeFileAtomic } from "../utils/fs-safe.js";
 import { validarIdAgente } from "../schemas/agent.js";
-import { opencorpHome } from "../utils/paths.js";
+import { opencorpHome, projectRoot } from "../utils/paths.js";
 
 export type PermissaoSubcorp = "read" | "ask" | "write";
 
@@ -29,7 +28,7 @@ export class SubcorpStore {
     this.homeDir = opts.homeDir ?? opencorpHome();
     this.projectTemplatesDir =
       opts.projectTemplatesDir ??
-      join(dirname(fileURLToPath(import.meta.url)), "..", "..", "templates");
+      join(projectRoot(), "templates");
   }
 
   private configPath(wsPath: string): string {

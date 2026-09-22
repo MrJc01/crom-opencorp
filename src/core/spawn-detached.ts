@@ -1,12 +1,11 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { projectRoot } from "../utils/paths.js";
 
-/** Caminho do binário opencorp.mjs (resolve a partir de dist/core ou src/core). */
+/** Caminho do binário opencorp.mjs resolvido dinamicamente pela raiz do projeto. */
 export function binOpencorpPath(): string {
-  const aqui = dirname(fileURLToPath(import.meta.url));
-  return resolve(aqui, "..", "..", "bin", "opencorp.mjs");
+  return join(projectRoot(), "bin", "opencorp.mjs");
 }
 
 export interface SpawnDetachedResultado {

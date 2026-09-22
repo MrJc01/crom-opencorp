@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { readdir, rm, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { writeFileAtomic } from "../../utils/fs-safe.js";
+import { projectRoot } from "../../utils/paths.js";
 import type { RouteContext } from "./types.js";
 
-const DEFAULT_DOCS_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "docs");
+const DEFAULT_DOCS_ROOT = join(projectRoot(), "docs");
 
 export interface DocumentoItem {
   slug: string;
