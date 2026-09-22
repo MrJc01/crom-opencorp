@@ -1,4 +1,4 @@
-import { type Component, createSignal, Show, onCleanup, createEffect } from "solid-js";
+import { type Component, createSignal, Show, For, onCleanup, createEffect } from "solid-js";
 import {
   ShieldCheck,
   Terminal,
@@ -28,7 +28,19 @@ export interface EngineAuthModalProps {
   motor: any | null;
   onSuccess?: () => void;
   onGoToKeysTab?: () => void;
+  provedorInicial?: string;
 }
+
+export const PROVEDORES_OPENSETS = [
+  { id: "openrouter", nome: "OpenRouter (Universal & BYOK)", envVar: "OPENROUTER_API_KEY", url: "https://openrouter.ai/keys", urlText: "OpenRouter Keys", placeholder: "sk-or-v1-...", desc: "Roteador universal com suporte a BYOK Google AI Studio ($0), NVIDIA e centenas de modelos." },
+  { id: "google", nome: "Google AI Studio / Gemini", envVar: "GEMINI_API_KEY", url: "https://aistudio.google.com/app/apikey", urlText: "Google AI Studio", placeholder: "AIzaSy...", desc: "Gemini 2.5 e 3.8 Flash/Pro gratuitos no tier padrão do Google AI Studio." },
+  { id: "anthropic", nome: "Anthropic Claude Direto", envVar: "ANTHROPIC_API_KEY", url: "https://console.anthropic.com/settings/keys", urlText: "Console Anthropic", placeholder: "sk-ant-api03-...", desc: "Claude 3.7 Sonnet, Claude 3.5 Sonnet e Haiku com acesso direto oficial." },
+  { id: "openai", nome: "OpenAI API Direta", envVar: "OPENAI_API_KEY", url: "https://platform.openai.com/api-keys", urlText: "Plataforma OpenAI", placeholder: "sk-proj-...", desc: "Acesso a GPT-4o, o3-mini e modelos de raciocínio da OpenAI." },
+  { id: "deepseek", nome: "DeepSeek Oficial", envVar: "DEEPSEEK_API_KEY", url: "https://platform.deepseek.com/api_keys", urlText: "DeepSeek Platform", placeholder: "sk-...", desc: "DeepSeek-V3 e DeepSeek-R1 oficial com custo por token extremamente baixo." },
+  { id: "groq", nome: "Groq LPU", envVar: "GROQ_API_KEY", url: "https://console.groq.com/keys", urlText: "Groq Console", placeholder: "gsk_...", desc: "Inferência em altíssima velocidade para Llama 3.3 70B e modelos abertos." },
+  { id: "ollama", nome: "Ollama (Local)", envVar: "OLLAMA_HOST", url: "https://ollama.com", urlText: "Ollama Docs", placeholder: "http://localhost:11434", desc: "Servidor Ollama local para execução privada e offline sem custos." },
+  { id: "custom", nome: "Provedor Customizado (OpenAI-Compatible)", envVar: "CUSTOM_API_KEY", url: "", urlText: "", placeholder: "Chave de API do provedor", desc: "Qualquer endpoint compatível com a API da OpenAI (vLLM, LM Studio, etc.)." },
+];
 
 interface WebLoginSession {
   id: string;
@@ -93,9 +105,19 @@ export const EngineAuthModal: Component<EngineAuthModalProps> = (props) => {
       setWebSession(null);
       setTestResult(null);
       limparPolling();
-      // If engine supports web login, default to 'web', otherwise 'direto'
+      if (props.provedorInicial) {
+        setProvedorSelecionado(props.provedorInicial);
+      } else if (props.motor.id === "opencode") {
+        setProvedorSelecionado("openrouter");
+      }
+      setBaseUrlCustom("");
+      if (props.motor.id === "opencode") {
+        const prov = PROVEDORES_OPENSETS.find((p) => p.id === (props.provedorInicial || "openrouter"));
+        setNomeConta(`${prov ? prov.nome.split(" ")[0] : "OpenCode"} Principal`);
+      }
+      // If engine supports web login and no direct provider forced, default to 'web', otherwise 'direto'
       const webEngines = ["codex", "cursor", "copilot", "claude-code", "antigravity"];
-      if (webEngines.includes(props.motor.id)) {
+      if (webEngines.includes(props.motor.id) && !props.provedorInicial) {
         setAbaModal("web");
       } else {
         setAbaModal("direto");
@@ -182,18 +204,21 @@ export const EngineAuthModal: Component<EngineAuthModalProps> = (props) => {
           webPrompt: "Utilize o provedor OpenRouter já conectado no OpenCorp para executar agentes autónomos.",
         };
       case "opencode":
-      default:
+      default: {
+        const prov = PROVEDORES_OPENSETS.find((p) => p.id === provedorSelecionado()) || PROVEDORES_OPENSETS[0]!;
         return {
           title: "OpenCode Engine",
-          webTitle: "Conexão OpenCode Engine",
+          webTitle: `Conexão OpenCode — ${prov.nome}`,
           cliCommand: "opencode auth login",
           cliAlt: "Configurações > Chaves de API",
-          envVar: "OPENROUTER_API_KEY",
-          url: "https://openrouter.ai/settings/keys",
-          urlText: "OpenRouter Keys",
-          desc: "O OpenCode utiliza OpenRouter BYOK ou provedores diretos configurados no OpenCorp.",
-          webPrompt: "Conecte sua conta OpenRouter ou adicione chaves de provedores em Chaves de API.",
+          envVar: prov.envVar,
+          url: prov.url,
+          urlText: prov.urlText,
+          desc: prov.desc,
+          webPrompt: `Conecte sua conta ${prov.nome} para utilização pelo runtime OpenCode nos workspaces.`,
+          placeholder: prov.placeholder,
         };
+      }
     }
   };
 
@@ -361,16 +386,22 @@ export const EngineAuthModal: Component<EngineAuthModalProps> = (props) => {
   const [cotaDiariaUsd, setCotaDiariaUsd] = createSignal(10);
   const [rateLimitRpm, setRateLimitRpm] = createSignal(30);
   const [salvandoConta, setSalvandoConta] = createSignal(false);
+  const [provedorSelecionado, setProvedorSelecionado] = createSignal("openrouter");
+  const [baseUrlCustom, setBaseUrlCustom] = createSignal("");
 
   const conectarContaDireta = async () => {
     if (!props.motor?.id) return;
     const nome = nomeConta().trim() || `${props.motor.name} #${Date.now().toString().slice(-4)}`;
     setSalvandoConta(true);
     try {
+      const provAtual = props.motor?.id === "opencode" ? provedorSelecionado() : undefined;
+      const isCustomOrOllama = provAtual === "custom" || provAtual === "ollama";
       await fetchApi(`/api/motores/${encodeURIComponent(props.motor.id)}/contas`, {
         method: "POST",
         body: JSON.stringify({
           nome,
+          provider: provAtual,
+          baseUrl: isCustomOrOllama ? baseUrlCustom().trim() || undefined : undefined,
           tokenOuChave: tokenOuChave().trim() || undefined,
           authType: tokenOuChave().trim() ? "token" : "deviceOAuth",
           limits: {
@@ -382,6 +413,7 @@ export const EngineAuthModal: Component<EngineAuthModalProps> = (props) => {
       showToast(`Conta "${nome}" conectada ao motor ${props.motor.name}!`, "sucesso");
       setNomeConta("");
       setTokenOuChave("");
+      setBaseUrlCustom("");
       props.onSuccess?.();
       props.onClose();
     } catch (err: any) {
@@ -712,6 +744,46 @@ export const EngineAuthModal: Component<EngineAuthModalProps> = (props) => {
         {/* TAB 2: TOKEN / CHAVE MANUAL */}
         <Show when={abaModal() === "direto"}>
           <div class="space-y-3">
+            <Show when={props.motor?.id === "opencode"}>
+              <div>
+                <label class="block text-xs font-medium text-zinc-300 mb-1">
+                  Provedor de Inteligência Artificial
+                </label>
+                <select
+                  value={provedorSelecionado()}
+                  onChange={(e) => {
+                    const val = e.currentTarget.value;
+                    setProvedorSelecionado(val);
+                    const p = PROVEDORES_OPENSETS.find((item) => item.id === val);
+                    if (p) setNomeConta(`${p.nome.split(" ")[0]} Principal`);
+                  }}
+                  class="w-full bg-zinc-900/80 border border-zinc-800 rounded px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-zinc-600"
+                >
+                  <For each={PROVEDORES_OPENSETS}>
+                    {(p) => <option value={p.id}>{p.nome}</option>}
+                  </For>
+                </select>
+                <p class="text-[11px] text-zinc-500 mt-1">
+                  {PROVEDORES_OPENSETS.find((p) => p.id === provedorSelecionado())?.desc}
+                </p>
+              </div>
+
+              <Show when={provedorSelecionado() === "custom" || provedorSelecionado() === "ollama"}>
+                <div>
+                  <label class="block text-xs font-medium text-zinc-300 mb-1">
+                    {provedorSelecionado() === "ollama" ? "Endpoint Ollama Host" : "Base URL da API (Compatível com OpenAI)"}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={provedorSelecionado() === "ollama" ? "http://localhost:11434" : "https://api.provedor.com/v1"}
+                    value={baseUrlCustom()}
+                    onInput={(e) => setBaseUrlCustom(e.currentTarget.value)}
+                    class="w-full bg-zinc-900/80 border border-zinc-800 rounded px-3 py-1.5 text-xs text-zinc-200 font-mono placeholder-zinc-500 focus:outline-none focus:border-zinc-600"
+                  />
+                </div>
+              </Show>
+            </Show>
+
             <div>
               <label class="block text-xs font-medium text-zinc-300 mb-1">Nome / Identificador da Conta</label>
               <input
@@ -726,26 +798,28 @@ export const EngineAuthModal: Component<EngineAuthModalProps> = (props) => {
             <div>
               <div class="flex items-center justify-between mb-1">
                 <label class="text-xs font-medium text-zinc-300">
-                  Token, Chave de API ou Credencial ({getInstructions().envVar})
+                  {provedorSelecionado() === "ollama" ? "Chave de Autenticação (Opcional)" : `Token, Chave de API ou Credencial (${getInstructions().envVar})`}
                 </label>
-                <a
-                  href={getInstructions().url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1"
-                >
-                  Obter no {getInstructions().urlText} <ExternalLink size={10} />
-                </a>
+                <Show when={getInstructions().url}>
+                  <a
+                    href={getInstructions().url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1"
+                  >
+                    Obter no {getInstructions().urlText} <ExternalLink size={10} />
+                  </a>
+                </Show>
               </div>
               <input
                 type="password"
-                placeholder="Insira a credencial / token de acesso"
+                placeholder={(getInstructions() as any).placeholder || "Insira a credencial / token de acesso"}
                 value={tokenOuChave()}
                 onInput={(e) => setTokenOuChave(e.currentTarget.value)}
                 class="w-full bg-zinc-900/80 border border-zinc-800 rounded px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 font-mono focus:outline-none focus:border-zinc-600"
               />
               <p class="text-[11px] text-zinc-500 mt-1">
-                Credencial armazenada localmente de forma isolada em ~/.opencorp/engine-accounts.json.
+                Credencial sincronizada de forma segura em ~/.opencorp/engine-accounts.json e no runtime OpenCode.
               </p>
             </div>
 

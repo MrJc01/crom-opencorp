@@ -527,6 +527,9 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
     if (req.method === "POST") {
       const corpo = (await lerCorpo(req)) as {
         nome: string;
+        provider?: string;
+        baseUrl?: string;
+        modeloPadrao?: string;
         authType?: "token" | "apiKey" | "deviceOAuth";
         tokenOuChave?: string;
         limits?: any;

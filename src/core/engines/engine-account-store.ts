@@ -18,8 +18,12 @@ export interface EngineAccount {
   id: string;
   motorId: string;
   nome: string;
+  provider?: string;
+  baseUrl?: string;
+  modeloPadrao?: string;
   authType: "token" | "apiKey" | "deviceOAuth";
   tokenOuChave?: string;
+  previewChave?: string;
   ativa: boolean;
   criada_em: string;
   ultimo_uso?: string;
@@ -86,6 +90,13 @@ export const LIMITES_PADRAO_MOTORES: Record<string, EngineLimitsConfig> = {
   },
 };
 
+export function mascararChave(chave?: string): string | undefined {
+  if (!chave) return undefined;
+  const c = chave.trim();
+  if (c.length < 8) return "••••••••";
+  return `${c.slice(0, 4)}...${c.slice(-4)}`;
+}
+
 export class EngineAccountStore {
   private readonly homeDir: string;
   private readonly filePath: string;
@@ -128,6 +139,9 @@ export class EngineAccountStore {
     motorId: string,
     dados: {
       nome: string;
+      provider?: string;
+      baseUrl?: string;
+      modeloPadrao?: string;
       authType?: "token" | "apiKey" | "deviceOAuth";
       tokenOuChave?: string;
       limits?: Partial<EngineAccountLimits>;
@@ -150,8 +164,12 @@ export class EngineAccountStore {
       id: `${motorId}-${randomUUID().slice(0, 6)}`,
       motorId,
       nome: dados.nome.trim() || `Conta ${contasDoMotor.length + 1}`,
+      provider: dados.provider?.trim() || (motorId === "opencode" ? "openrouter" : motorId),
+      baseUrl: dados.baseUrl?.trim() || undefined,
+      modeloPadrao: dados.modeloPadrao?.trim() || undefined,
       authType: dados.authType || (dados.tokenOuChave ? "token" : "deviceOAuth"),
       tokenOuChave: dados.tokenOuChave?.trim() || undefined,
+      previewChave: mascararChave(dados.tokenOuChave),
       ativa: primeiraConta,
       criada_em: new Date().toISOString(),
       limits: {
@@ -175,14 +193,24 @@ export class EngineAccountStore {
     try {
       const ativa = await this.obterContaAtiva(motorOuProvedorId);
       const authPath = join(this.homeDir, ".opencorp", "opencode-data", "opencode", "auth.json");
+      const aplicarEmAuth = (auth: Record<string, any>) => {
+        if (!ativa?.tokenOuChave) return;
+        const chave = ativa.tokenOuChave;
+        const prov = ativa.provider || motorOuProvedorId;
+        auth[prov] = { type: "api", key: chave };
+        auth[motorOuProvedorId] = { type: "api", key: chave };
+        if (prov === "google" || prov === "gemini") {
+          auth["google"] = { type: "api", key: chave };
+          auth["gemini"] = { type: "api", key: chave };
+        }
+        if (prov === "opencode-go") {
+          auth["opencode"] = { type: "api", key: chave };
+        }
+      };
+
       if (existsSync(authPath)) {
         const auth = JSON.parse(readFileSync(authPath, "utf8"));
-        if (ativa?.tokenOuChave) {
-          auth[motorOuProvedorId] = { type: "api", key: ativa.tokenOuChave };
-          if (motorOuProvedorId === "opencode-go") {
-            auth["opencode"] = { type: "api", key: ativa.tokenOuChave };
-          }
-        }
+        aplicarEmAuth(auth);
         await writeFileAtomic(authPath, `${JSON.stringify(auth, null, 2)}\n`);
       }
       const wsBase = join(this.homeDir, ".opencorp", "opencode-data", "workspaces");
@@ -194,12 +222,7 @@ export class EngineAccountStore {
             if (existsSync(wsAuthPath)) {
               try {
                 const wsAuth = JSON.parse(readFileSync(wsAuthPath, "utf8"));
-                if (ativa?.tokenOuChave) {
-                  wsAuth[motorOuProvedorId] = { type: "api", key: ativa.tokenOuChave };
-                  if (motorOuProvedorId === "opencode-go") {
-                    wsAuth["opencode"] = { type: "api", key: ativa.tokenOuChave };
-                  }
-                }
+                aplicarEmAuth(wsAuth);
                 await writeFileAtomic(wsAuthPath, `${JSON.stringify(wsAuth, null, 2)}\n`);
               } catch {}
             }

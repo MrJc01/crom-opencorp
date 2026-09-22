@@ -54,12 +54,30 @@ export interface MotorInfo {
 export interface ContaMotor {
   id: string;
   motorId: string;
-  label: string;
-  email?: string;
+  nome?: string;
+  label?: string;
+  provider?: string;
+  baseUrl?: string;
+  modeloPadrao?: string;
+  authType?: string;
+  tokenOuChave?: string;
+  previewChave?: string;
+  ativa?: boolean;
   ativo?: boolean;
+  email?: string;
+  criada_em?: string;
+  ultimo_uso?: string;
   expiraEm?: string;
   authMethod?: string;
   metadados?: Record<string, unknown>;
+  limits?: {
+    timeout_min?: number;
+    max_turns?: number;
+    rate_limit_rpm?: number;
+    daily_cost_usd?: number;
+    gasto_hoje_usd?: number;
+    status_cota?: string;
+  };
 }
 
 export interface SecretItem {

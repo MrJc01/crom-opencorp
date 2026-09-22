@@ -71,6 +71,7 @@ export const TabEngines: Component<TabEnginesProps> = (props) => {
   const [conectandoMotor, setConectandoMotor] = createSignal<string | null>(null);
   const [desconectandoMotor, setDesconectandoMotor] = createSignal<string | null>(null);
   const [motorSelecionadoAuth, setMotorSelecionadoAuth] = createSignal<any | null>(null);
+  const [provedorInicialAuth, setProvedorInicialAuth] = createSignal<string | undefined>(undefined);
   const [testandoModelo, setTestandoModelo] = createSignal<string | null>(null);
   const [resultadoTeste, setResultadoTeste] = createSignal<Record<string, any>>({});
 
@@ -838,7 +839,8 @@ export const TabEngines: Component<TabEnginesProps> = (props) => {
                                   variant="secondary"
                                   class="text-[11px] px-2 py-1 whitespace-nowrap text-zinc-300 hover:text-zinc-100"
                                   onClick={() => {
-                                    if (props.onGoToKeysTab) props.onGoToKeysTab();
+                                    setProvedorInicialAuth(prov.id);
+                                    setMotorSelecionadoAuth(currentMotor());
                                   }}
                                 >
                                   <Plus size={10} class="mr-1 shrink-0" /> Chave
@@ -849,7 +851,10 @@ export const TabEngines: Component<TabEnginesProps> = (props) => {
                                 size="xs"
                                 variant="secondary"
                                 class="text-[11px] px-2 py-1 whitespace-nowrap text-zinc-300 hover:text-zinc-100"
-                                onClick={() => setMotorSelecionadoAuth(currentMotor())}
+                                onClick={() => {
+                                  setProvedorInicialAuth(prov.id);
+                                  setMotorSelecionadoAuth(currentMotor());
+                                }}
                               >
                                 <Key size={10} class="mr-1 text-zinc-400 shrink-0" /> Login
                               </Button>
@@ -863,22 +868,25 @@ export const TabEngines: Component<TabEnginesProps> = (props) => {
               </div>
             </div>
 
-            {/* CONTAS CONECTADAS DO MOTOR */}
+            {/* CONTAS & CREDENCIAIS CONECTADAS DO MOTOR */}
             <div class="space-y-3 pt-3 border-t border-zinc-800/40">
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
                   <Users size={14} class="text-zinc-400" />
                   <h4 class="text-xs font-semibold text-zinc-200">
-                    Contas Conectadas ({contasDoMotorAtual().length})
+                    Contas & Credenciais Conectadas ({contasDoMotorAtual().length})
                   </h4>
                 </div>
                 <Button
                   size="xs"
                   variant="secondary"
                   class="text-xs text-zinc-300 hover:text-white"
-                  onClick={() => setMotorSelecionadoAuth(currentMotor())}
+                  onClick={() => {
+                    setProvedorInicialAuth(undefined);
+                    setMotorSelecionadoAuth(currentMotor());
+                  }}
                 >
-                  <Plus size={12} class="mr-1 text-emerald-400" /> Conectar Mais Uma Conta
+                  <Plus size={12} class="mr-1 text-emerald-400" /> Adicionar Conta / Provedor
                 </Button>
               </div>
 
@@ -892,95 +900,143 @@ export const TabEngines: Component<TabEnginesProps> = (props) => {
                         size="xs"
                         variant="ghost"
                         class="text-xs text-emerald-400 hover:text-emerald-300"
-                        onClick={() => setMotorSelecionadoAuth(currentMotor())}
+                        onClick={() => {
+                          setProvedorInicialAuth(undefined);
+                          setMotorSelecionadoAuth(currentMotor());
+                        }}
                       >
                         + Adicionar Conta
                       </Button>
                     </div>
                   }
                 >
-                  {(c) => (
-                    <div class="p-2.5 rounded-lg bg-zinc-900/40 border border-zinc-800/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                      <div class="flex items-center gap-2.5 min-w-0">
-                        <span
-                          class={`w-2 h-2 rounded-full shrink-0 ${
-                            c.ativa ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.4)]" : "bg-zinc-600"
-                          }`}
-                        />
-                        <div class="min-w-0">
-                          <div class="flex items-center gap-2 flex-wrap">
-                            <span class="font-medium text-zinc-200 truncate">{c.nome}</span>
-                            <span
-                              class={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${
-                                c.ativa
-                                  ? "bg-emerald-950/30 text-emerald-300 border-emerald-800/50"
-                                  : "bg-zinc-800/50 text-zinc-400 border-zinc-700/40"
-                              }`}
-                            >
-                              {c.ativa ? "CONTA ATIVA" : "SECUNDÁRIA"}
-                            </span>
-                            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded border bg-cyan-950/30 text-cyan-300 border-cyan-800/40">
-                              {c.motorId}
-                            </span>
-                          </div>
-                          <div class="text-[11px] text-zinc-500 font-mono flex items-center gap-2 mt-0.5 flex-wrap">
-                            <span>Auth: {c.authType}</span>
-                            <span>•</span>
-                            <span class="text-amber-400/80">
-                              {c.tokenOuChave
-                                ? `${c.tokenOuChave.slice(0, 6)}…${c.tokenOuChave.slice(-4)}`
-                                : "—"}
-                            </span>
-                            <span>•</span>
-                            <span>Cota: {c.limits?.status_cota || "normal"}</span>
-                            <span>•</span>
-                            <span>Teto: ${c.limits?.daily_cost_usd || 10}/dia</span>
-                            <span>•</span>
-                            <span>{c.limits?.rate_limit_rpm || 30} RPM</span>
-                          </div>
-                          <Show when={tokensContas()[c.id]}>
-                            <div class="mt-1 p-1.5 rounded bg-zinc-950/70 border border-zinc-800/60 text-[11px] font-mono text-emerald-300 flex items-center justify-between">
-                              <span>Tokens da Conta: {tokensContas()[c.id].mensagem}</span>
-                              <span class="text-[10px] text-zinc-500 ml-2">
-                                {new Date(tokensContas()[c.id].consultadoEm).toLocaleTimeString()}
+                  {(c) => {
+                    const provNome = () => {
+                      const map: Record<string, string> = {
+                        openrouter: "OpenRouter",
+                        google: "Google AI Studio",
+                        anthropic: "Anthropic",
+                        openai: "OpenAI",
+                        deepseek: "DeepSeek",
+                        groq: "Groq",
+                        ollama: "Ollama",
+                        custom: "Customizado",
+                      };
+                      return map[c.provider || ""] || c.provider || c.authType || "Padrão";
+                    };
+                    const provColor = () => {
+                      const map: Record<string, string> = {
+                        openrouter: "bg-violet-950/40 text-violet-300 border-violet-800/50",
+                        google: "bg-blue-950/40 text-blue-300 border-blue-800/50",
+                        anthropic: "bg-orange-950/40 text-orange-300 border-orange-800/50",
+                        openai: "bg-emerald-950/40 text-emerald-300 border-emerald-800/50",
+                        deepseek: "bg-cyan-950/40 text-cyan-300 border-cyan-800/50",
+                        groq: "bg-amber-950/40 text-amber-300 border-amber-800/50",
+                        ollama: "bg-teal-950/40 text-teal-300 border-teal-800/50",
+                        custom: "bg-pink-950/40 text-pink-300 border-pink-800/50",
+                      };
+                      return map[c.provider || ""] || "bg-zinc-800/50 text-zinc-400 border-zinc-700/40";
+                    };
+                    const chavePreview = () => c.previewChave || (c.tokenOuChave
+                      ? `${c.tokenOuChave.slice(0, 6)}…${c.tokenOuChave.slice(-4)}`
+                      : "—");
+
+                    return (
+                      <div class="p-2.5 rounded-lg bg-zinc-900/40 border border-zinc-800/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                        <div class="flex items-center gap-2.5 min-w-0">
+                          <span
+                            class={`w-2 h-2 rounded-full shrink-0 ${
+                              c.ativa ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.4)]" : "bg-zinc-600"
+                            }`}
+                          />
+                          <div class="min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap">
+                              <span class="font-medium text-zinc-200 truncate">{c.nome || c.label || provNome()}</span>
+                              <span
+                                class={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${
+                                  c.ativa
+                                    ? "bg-emerald-950/30 text-emerald-300 border-emerald-800/50"
+                                    : "bg-zinc-800/50 text-zinc-400 border-zinc-700/40"
+                                }`}
+                              >
+                                {c.ativa ? "CONTA ATIVA" : "SECUNDÁRIA"}
+                              </span>
+                              {/* Badge do Provedor */}
+                              <span class={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${provColor()}`}>
+                                {provNome()}
+                              </span>
+                              <span class="text-[10px] font-mono px-1.5 py-0.2 rounded border bg-cyan-950/30 text-cyan-300 border-cyan-800/40">
+                                {c.motorId}
                               </span>
                             </div>
-                          </Show>
+                            {/* Linha de metadados ricos */}
+                            <div class="text-[11px] text-zinc-500 font-mono flex items-center gap-2 mt-0.5 flex-wrap">
+                              <span class="text-amber-400/80" title="Preview mascarado da chave">
+                                {chavePreview()}
+                              </span>
+                              <Show when={c.modeloPadrao}>
+                                <span>•</span>
+                                <span class="text-zinc-400" title="Modelo padrão">
+                                  Modelo: {c.modeloPadrao}
+                                </span>
+                              </Show>
+                              <Show when={c.baseUrl}>
+                                <span>•</span>
+                                <span class="text-zinc-400 truncate max-w-[180px]" title={`Endpoint: ${c.baseUrl}`}>
+                                  {c.baseUrl}
+                                </span>
+                              </Show>
+                              <span>•</span>
+                              <span>Cota: {c.limits?.status_cota || "normal"}</span>
+                              <span>•</span>
+                              <span>Teto: ${c.limits?.daily_cost_usd || 10}/dia</span>
+                              <span>•</span>
+                              <span>{c.limits?.rate_limit_rpm || 30} RPM</span>
+                            </div>
+                            <Show when={tokensContas()[c.id]}>
+                              <div class="mt-1 p-1.5 rounded bg-zinc-950/70 border border-zinc-800/60 text-[11px] font-mono text-emerald-300 flex items-center justify-between">
+                                <span>Tokens da Conta: {tokensContas()[c.id].mensagem}</span>
+                                <span class="text-[10px] text-zinc-500 ml-2">
+                                  {new Date(tokensContas()[c.id].consultadoEm).toLocaleTimeString()}
+                                </span>
+                              </div>
+                            </Show>
+                          </div>
                         </div>
-                      </div>
 
-                      <div class="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          class="text-[11px] text-zinc-400 hover:text-white"
-                          loading={consultandoConta() === c.id}
-                          onClick={() => consultarTokensConta(currentMotor().id, c.id)}
-                        >
-                          <Coins size={11} class="mr-1 text-amber-400" /> Consultar Tokens
-                        </Button>
-                        <Show when={!c.ativa}>
+                        <div class="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
                           <Button
                             size="xs"
                             variant="ghost"
-                            class="text-[11px] text-zinc-300 hover:text-white"
-                            onClick={() => ativarContaMotor(currentMotor().id, c.id)}
+                            class="text-[11px] text-zinc-400 hover:text-white"
+                            loading={consultandoConta() === c.id}
+                            onClick={() => consultarTokensConta(currentMotor().id, c.id)}
                           >
-                            Tornar Ativa
+                            <Coins size={11} class="mr-1 text-amber-400" /> Consultar
                           </Button>
-                        </Show>
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          class="text-[11px] text-red-400 hover:text-red-300 hover:bg-red-950/30"
-                          onClick={() => desconectarContaMotor(currentMotor().id, c.id)}
-                          title="Desconectar esta conta"
-                        >
-                          <Trash2 size={12} class="mr-1" /> Desconectar
-                        </Button>
+                          <Show when={!c.ativa}>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              class="text-[11px] text-zinc-300 hover:text-white"
+                              onClick={() => ativarContaMotor(currentMotor().id, c.id)}
+                            >
+                              Tornar Ativa
+                            </Button>
+                          </Show>
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            class="text-[11px] text-red-400 hover:text-red-300 hover:bg-red-950/30"
+                            onClick={() => desconectarContaMotor(currentMotor().id, c.id)}
+                            title="Desconectar esta conta"
+                          >
+                            <Trash2 size={12} class="mr-1" /> Desconectar
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  }}
                 </For>
               </div>
             </div>
@@ -1508,8 +1564,12 @@ export const TabEngines: Component<TabEnginesProps> = (props) => {
 
       <EngineAuthModal
         open={Boolean(motorSelecionadoAuth())}
-        onClose={() => setMotorSelecionadoAuth(null)}
+        onClose={() => {
+          setMotorSelecionadoAuth(null);
+          setProvedorInicialAuth(undefined);
+        }}
         motor={motorSelecionadoAuth()}
+        provedorInicial={provedorInicialAuth()}
         onSuccess={carregarStatusMotores}
         onGoToKeysTab={() => {
           if (props.onGoToKeysTab) props.onGoToKeysTab();
