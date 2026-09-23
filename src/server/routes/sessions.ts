@@ -17,6 +17,7 @@ import {
 import { opencorpHome } from "../../utils/paths.js";
 import type { MetaRegistro } from "../../core/registry-store.js";
 import type { RouteContext } from "./types.js";
+import { streamsSecretarioAtivos } from "./secretario/stream.js";
 
 function fallbackGerarIdExec(): string {
   return `exec-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -152,7 +153,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
   }
 
   // ── POST/DELETE /execucoes/:id/cancelar ou /abort ou /parar ────
-  const mExecCancelar = /^\/(?:execucoes|sessions|sessoes)\/([^/]+)\/(?:cancelar|cancel|abort|parar)$/.exec(rota);
+  const mExecCancelar = /^(?:\/secretario)?\/(?:execucoes|sessions|sessoes)\/([^/]+)\/(?:cancelar|cancel|abort|parar)$/.exec(rota);
   if (mExecCancelar && (req.method === "POST" || req.method === "DELETE")) {
     const ws = await resolverWs(url);
     const id = decodeURIComponent(mExecCancelar[1]!);
@@ -735,13 +736,24 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
 
           const agora = Date.now();
           const criadoEmMs = m.info?.time?.created ?? 0;
-          const expirou = !isSessaoBusy && !m.info?.time?.completed && criadoEmMs > 0 && agora - criadoEmMs > 600_000;
-          const temErro = Boolean((m.info as any)?.error);
-          const erroDesc = temErro ? (((m.info as any)?.error as any)?.data?.message || ((m.info as any)?.error as any)?.message || ((m.info as any)?.error as any)?.name || "interrompido") : "";
+          const temStreamAtivo = streamsSecretarioAtivos.has(sessionId);
+          // Se a sessão está reportada como busy no motor, mas não possui nenhum stream SSE ativo
+          // e a mensagem foi criada há mais de 45 segundos sem progresso, o motor está em estado zumbi.
+          const sessaoZumbi = isSessaoBusy && !temStreamAtivo && criadoEmMs > 0 && (agora - criadoEmMs > 45_000);
+          if (sessaoZumbi) {
+            isSessaoBusy = false;
+            void fetch(`http://127.0.0.1:${porta}/session/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }).catch(() => {});
+          }
+
+          const expirou = (!isSessaoBusy || sessaoZumbi) && !m.info?.time?.completed && criadoEmMs > 0 && (agora - criadoEmMs > 45_000);
+          const temErro = Boolean((m.info as any)?.error) || sessaoZumbi;
+          const erroDesc = temErro
+            ? (((m.info as any)?.error as any)?.data?.message || ((m.info as any)?.error as any)?.message || ((m.info as any)?.error as any)?.name || (sessaoZumbi ? "tempo limite esgotado sem resposta do modelo" : "interrompido"))
+            : "";
           const isCompleted = isSessaoBusy
             ? Boolean(m.info?.time?.completed && (m.info as any)?.finish !== "tool-calls")
             : Boolean(m.info?.time?.completed || expirou || temErro || !isSessaoBusy);
-          const textoFinal = content || (expirou ? "(geração anterior interrompida ou expirada)" : (temErro && !content ? `⚠️ **Erro na resposta**: ${erroDesc}` : ""));
+          const textoFinal = content || (expirou ? (sessaoZumbi ? "⚠️ **Execução interrompida**: o processamento excedeu o tempo limite sem retorno do modelo." : "(geração anterior interrompida ou expirada)") : (temErro && !content ? `⚠️ **Erro na resposta**: ${erroDesc}` : ""));
 
           const modNome = (m.info as any)?.providerID && (m.info as any)?.modelID
             ? `${(m.info as any).providerID}/${(m.info as any).modelID}`

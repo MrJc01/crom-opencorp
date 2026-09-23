@@ -757,17 +757,46 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
           }
         }
 
-        if (tentativasSemMudanca > 1800) {
-          const sessaoOcupada = sessoes().find((s) => s.id === sessaoId && (s as any).executando);
-          if (sessaoOcupada || (ult && ult.role === "assistant" && ult.concluida === false)) {
-            tentativasSemMudanca = 0;
-            monitorTimeout = setTimeout(tick, 1500);
-            return;
-          }
+        // Se o servidor confirma que a sessão não está ocupada mas a mensagem do assistente ficou incompleta,
+        // aguarda 5s para confirmação e destrava a interface sem disparar abort desnecessário.
+        if (!sessaoOcupadaNoTick && ult && ult.role === "assistant" && ult.concluida === false && tentativasSemMudanca >= 5) {
           setMensagens((prev) => {
             const u = prev[prev.length - 1];
-            if (u && u.role === "assistant") {
-              return [...prev.slice(0, -1), { ...u, concluida: true }];
+            if (u && u.role === "assistant" && u.concluida === false) {
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...u,
+                  concluida: true,
+                  content: u.content || "⚠️ O processamento foi finalizado.",
+                },
+              ];
+            }
+            return prev;
+          });
+          pararMonitoramento();
+          setCarregando(false);
+          if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+          }
+          return;
+        }
+
+        // Teto de segurança: apenas se houver inatividade absoluta por mais de 5 minutos (300 ticks)
+        if (tentativasSemMudanca > 300) {
+          void fetchApi(`/secretario/sessoes/${encodeURIComponent(sessaoId)}/abort`, { method: "POST" }).catch(() => {});
+          setMensagens((prev) => {
+            const u = prev[prev.length - 1];
+            if (u && u.role === "assistant" && u.concluida === false) {
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...u,
+                  concluida: true,
+                  content: u.content || "⚠️ Tempo limite de espera esgotado. A sessão foi liberada.",
+                },
+              ];
             }
             return prev;
           });

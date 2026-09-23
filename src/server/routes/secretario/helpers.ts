@@ -103,11 +103,11 @@ export async function resolverModelos(
   } catch {
     return {
       modelos: [
-        modeloRequisicao || "openrouter/google/gemini-2.5-flash",
-        "opencode/nemotron-3-ultra-free",
-        "openrouter/liquid/lfm-2.5-2.6b:free",
-        "openrouter/openrouter/free",
-      ],
+        modeloRequisicao,
+        "openrouter/nvidia/nemotron-3.5-lightning:free",
+        "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+        "openrouter/google/gemma-4-31b-it:free",
+      ].filter(Boolean) as string[],
       motorPadrao: "opencode",
     };
   }

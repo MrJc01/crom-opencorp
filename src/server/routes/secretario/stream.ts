@@ -104,7 +104,11 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
         engine?: string;
         imagens?: Array<{ nome?: string; mime?: string; url?: string }>;
         contexto?: string[];
+        workspace?: string;
       };
+      if (corpo.workspace && !url.searchParams.has("workspace")) {
+        url.searchParams.set("workspace", String(corpo.workspace));
+      }
       const mensagemBruta = limparPrefixoWorkspace((corpo.mensagem ?? corpo.prompt ?? "").trim());
       const imagens = (corpo.imagens ?? []).filter((i) => i && typeof i.url === "string" && i.url.startsWith("data:image/")).slice(0, 4);
       if (!mensagemBruta && imagens.length === 0) {
@@ -116,6 +120,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
 
       const executarStream = async (): Promise<void> => {
         const emSegundoPlano = res.writableEnded;
+        let onClientClose: (() => void) | null = null;
         try {
           if (sessaoCandidata) {
             const ocupante = streamsSecretarioAtivos.get(sessaoCandidata);
@@ -321,11 +326,19 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
           const baseMsgs = (await listarMensagens()) ?? [];
           const baseAssistant = [...baseMsgs].reverse().find((m) => m.info?.role === "assistant");
           const baselineId = baseAssistant?.info?.id ?? null;
+          const idsBaseInicial = new Set(baseMsgs.map((m) => m.info?.id).filter(Boolean));
 
           let modeloIdx = 0;
           let tentativasTotais = 0;
-          const maxTentativas = modelosFallback.length * 3;
+          const maxTentativas = Math.max(1, modelosFallback.length);
           let concluida = false;
+
+          onClientClose = () => {
+            if (!concluida && !emSegundoPlano) {
+              void fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+            }
+          };
+          res.on("close", onClientClose);
           let postData: MensagemOc | null = null;
           let enviado = "";
           let enviadoPensamento = "";
@@ -415,6 +428,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
             while (Date.now() - inicioTentativa < tentativaTimeoutMs) {
               await sleep(700);
               if (!emSegundoPlano && (res.destroyed || res.writableEnded)) {
+                void fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
                 liberarStreamSecretario(sessaoId, res);
                 return;
               }
@@ -461,6 +475,8 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
                   }
                   break;
                 } else {
+                  await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
+                  await limparMensagensTentativaFalha(baseUrlSessao, idsMensagensAntesTentativa, false);
                   sse("erro", { erro: `Falha ao conectar com o modelo (${postErro}). Todos os modelos de contingência foram tentados sem sucesso.`, sessao_id: sessaoId });
                   eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
                   liberarStreamSecretario(sessaoId, res);
@@ -568,6 +584,9 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
           }
 
           if (!concluida) {
+            res.off("close", onClientClose);
+            await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
+            await limparMensagensTentativaFalha(baseUrlSessao, idsBaseInicial, false);
             sse("erro", { erro: "Todos os modelos candidatos esgotaram timeout ou falharam. Tente novamente em instantes.", sessao_id: sessaoId });
             eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
             liberarStreamSecretario(sessaoId, res);
@@ -633,11 +652,13 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
             agente,
             modelo: modeloAtivoFinal,
           });
+          if (onClientClose) res.off("close", onClientClose);
           liberarStreamSecretario(sessaoId, res);
           res.end();
           void sincronizarCorp(ctx, porta, sessaoId);
           return;
         } catch (erro) {
+          if (onClientClose) { try { res.off("close", onClientClose); } catch {} }
           if (chaveStreamRegistrada) liberarStreamSecretario(chaveStreamRegistrada, res);
           if (!res.headersSent) {
             if (erro instanceof SecretarioError) {

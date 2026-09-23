@@ -2,7 +2,8 @@
 id: secretario
 role: Secretário
 category: secretario
-model: opencode/nemotron-3-ultra-free
+model: openrouter/nvidia/nemotron-3.5-lightning:free
+rotation: [openrouter/nvidia/nemotron-3.5-lightning:free, openrouter/nvidia/nemotron-3-super-120b-a12b:free, openrouter/google/gemma-4-31b-it:free]
 tools: [read, bash, registry]
 permissions: level-1
 budget:
