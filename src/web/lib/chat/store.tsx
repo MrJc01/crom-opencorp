@@ -881,6 +881,30 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
     }
   };
 
+  // Isolamento estrito de sessões por workspace:
+  // Ao trocar de workspace no topo, limpa as mensagens e carrega as sessões do novo workspace
+  let wsRastreado = wsAtivo();
+  createEffect(() => {
+    const wsAtual = wsAtivo();
+    if (wsAtual !== wsRastreado) {
+      wsRastreado = wsAtual;
+      pararMonitoramento();
+      if (abortController) {
+        abortController.abort();
+        abortController = null;
+      }
+      setCarregando(false);
+      setMensagens([]);
+      setSessaoAtivaId(null);
+      try {
+        const u = new URL(window.location.href);
+        u.searchParams.delete("sessao");
+        window.history.replaceState({}, "", u.toString());
+      } catch {}
+      void carregarSessoes();
+    }
+  });
+
   let syncEmAndamento = false;
   let ultimoHashSincronizado = "";
 

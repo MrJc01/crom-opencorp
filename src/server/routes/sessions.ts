@@ -571,21 +571,50 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
           }
           const db = registros.corpDb(ws.path);
           const primeiras = db.primeirasMensagensUsuario(ids);
+          const sessoesDesteWs = new Set(primeiras.map((p) => p.sessao_id));
+          const sessoesRegistradasNoDb = new Set(db.listarSessoes().map((s) => s.id));
+
+          // Mapeia sessões que pertencem a outros workspaces para isolamento estrito
+          const sessoesOutrosWs = new Set<string>();
+          try {
+            const todosWs = await workspaces.listar();
+            for (const outro of todosWs) {
+              if (outro.id !== ws.id && outro.existe) {
+                const dbOutro = registros.corpDb(outro.path);
+                const primOutro = dbOutro.primeirasMensagensUsuario(ids);
+                for (const p of primOutro) sessoesOutrosWs.add(p.sessao_id);
+              }
+            }
+          } catch {}
+
           const primeiraPorSessao = new Map<string, string>();
           for (const p of primeiras) {
             if (!primeiraPorSessao.has(p.sessao_id)) primeiraPorSessao.set(p.sessao_id, p.conteudo);
           }
-          for (const s of itens) {
+
+          // Filtra sessões: inclui apenas as que pertencem a este workspace ou são novas/sem histórico em outro
+          const itensFiltrados = itens.filter((s) => {
+            const id = String(s.id ?? "");
+            if (sessoesDesteWs.has(id) || sessoesRegistradasNoDb.has(id)) return true;
+            if (sessoesOutrosWs.has(id)) return false;
+            return true;
+          });
+
+          for (const s of itensFiltrados) {
             const id = String(s.id ?? "");
             const tituloAtual = String(s.title ?? "").trim();
             const real = primeiraPorSessao.get(id);
             if (real) {
-              (s as Record<string, unknown>).titulo_real = real.length > 70 ? real.slice(0, 69) + "…" : real;
+              const limpo = limparPrefixoWorkspace(real);
+              (s as Record<string, unknown>).titulo_real = limpo.length > 70 ? limpo.slice(0, 69) + "…" : limpo;
               (s as Record<string, unknown>).sem_conteudo = false;
             } else if (!tituloAtual || tituloAtual.startsWith("New session")) {
               (s as Record<string, unknown>).sem_conteudo = true;
             }
           }
+
+          enviar(res, 200, itensFiltrados);
+          return true;
         }
       } catch (erro) {
         console.error("[enriquecimento] falhou:", erro instanceof Error ? erro.message : erro);

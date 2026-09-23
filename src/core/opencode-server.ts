@@ -476,11 +476,17 @@ export interface PassoChat {
 
 /**
  * Remove qualquer preâmbulo de isolamento de workspace injetado automaticamente
- * na mensagem do usuário, garantindo que o usuário veja apenas o que digitou.
+ * na mensagem do usuário (tanto formato novo quanto legado), garantindo que
+ * o usuário veja apenas o que digitou.
  */
 export function limparPrefixoWorkspace(texto: string): string {
   if (!texto) return "";
   let t = texto;
+  // Remove preâmbulo estruturado completo com metadados e regras
+  while (/^\[CONTEXTO OPERACIONAL DO WORKSPACE:[^\]]+\][\s\S]*?---\s*\n?/i.test(t)) {
+    t = t.replace(/^\[CONTEXTO OPERACIONAL DO WORKSPACE:[^\]]+\][\s\S]*?---\s*\n?/i, "").trim();
+  }
+  // Remove preâmbulo legado de linha simples
   while (/^\[WORKSPACE ATIVO:[^\]]+\]\s*\([^\)]+\)\s*/i.test(t)) {
     t = t.replace(/^\[WORKSPACE ATIVO:[^\]]+\]\s*\([^\)]+\)\s*/i, "").trim();
   }
@@ -722,12 +728,10 @@ export class OpencodeServerManager {
     try {
       const res = await fetch(`http://127.0.0.1:${info.porta}/health`, { signal: AbortSignal.timeout(2000) });
       if (!res.ok && res.status !== 401 && res.status !== 404) {
-        await removerPidfile(this.homeDir);
-        return { rodando: false, pid: null, porta: null };
+        return { rodando: false, pid: info.pid, porta: info.porta };
       }
     } catch {
-      await removerPidfile(this.homeDir);
-      return { rodando: false, pid: null, porta: null };
+      return { rodando: false, pid: info.pid, porta: info.porta };
     }
     return { rodando: true, pid: info.pid, porta: info.porta };
   }

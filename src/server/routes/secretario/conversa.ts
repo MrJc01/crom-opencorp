@@ -12,6 +12,7 @@ import {
   resolverModelos,
   limparMensagensTentativaFalha,
 } from "./helpers.js";
+import { construirContextoWorkspace } from "./context-builder.js";
 import { resolverMencoes } from "./mentions.js";
 import { processarSlash, textoAjudaSlash } from "./slash.js";
 import type { RouteContext } from "../types.js";
@@ -124,6 +125,23 @@ export async function handleConversaRoutes(ctx: RouteContext): Promise<boolean> 
 
       const modeloInicial = modelosFallbackConv[0]!;
 
+      const { registros, workspaces } = ctx;
+      if (sessaoId && registros && workspaces) {
+        try {
+          const todosWs = await workspaces.listar().catch(() => []);
+          for (const outroWs of todosWs) {
+            if (outroWs.id !== ws.id && outroWs.existe) {
+              const msgsOutro = registros.corpDb(outroWs.path).listarMensagens(sessaoId);
+              if (msgsOutro && msgsOutro.length > 0) {
+                console.warn(`[secretario/conversa] Sessão ${sessaoId} pertence ao workspace "${outroWs.id}". Criando nova sessão para "${ws.id}".`);
+                sessaoId = undefined;
+                break;
+              }
+            }
+          }
+        } catch {}
+      }
+
       let sessaoExiste = false;
       if (sessaoId) {
         try {
@@ -162,8 +180,8 @@ export async function handleConversaRoutes(ctx: RouteContext): Promise<boolean> 
       const extrair = (m: { parts?: Array<{ type: string; text?: string }> }): string =>
         (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim();
 
-      const wsPrefixo = `[WORKSPACE ATIVO: "${ws.id}" | CAMINHO: ${ws.path}]\n(Atenção Secretário: O usuário está operando estritamente no workspace "${ws.id}". Ao rodar comandos 'oc', use SEMPRE a flag '--workspace ${ws.id}'. Suas análises, listagens e tarefas devem ser restritas exclusivamente a este workspace. Não consulte outros workspaces.)\n\n`;
-      const mensagemComWs = `${wsPrefixo}${mensagem}`;
+      const contextoWs = await construirContextoWorkspace(ws);
+      const mensagemComWs = `${contextoWs}\n${mensagem}`;
 
       for (let mIdx = 0; mIdx < modelosFallbackConv.length; mIdx++) {
         const mod = modelosFallbackConv[mIdx]!;

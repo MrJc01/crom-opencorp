@@ -19,6 +19,7 @@ import {
   resolverModelos,
   limparMensagensTentativaFalha,
 } from "./helpers.js";
+import { construirContextoWorkspace } from "./context-builder.js";
 import { resolverMencoes } from "./mentions.js";
 import { processarSlash, textoAjudaSlash } from "./slash.js";
 import type { RouteContext } from "../types.js";
@@ -82,7 +83,7 @@ export function liberarStreamSecretario(sessaoId: string, res: { destroyed: bool
 }
 
 export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
-  const { req, res, url, rota, resolverWs, lerCorpo, enviar, registros, homeDir } = ctx;
+  const { req, res, url, rota, resolverWs, lerCorpo, enviar, registros, homeDir, workspaces } = ctx;
   const home = homeDir ?? opencorpHome();
 
   if (rota === "/secretario/conversa/stream" && req.method === "POST") {
@@ -116,7 +117,28 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
         return true;
       }
 
-      const sessaoCandidata = corpo.sessao_id || url.searchParams.get("sessao") || undefined;
+      const ws = await resolverWs(url);
+      let sessaoCandidata = corpo.sessao_id || url.searchParams.get("sessao") || undefined;
+
+      // Isolamento estrito de Workspace:
+      // Se a sessão possui mensagens registradas no corpDb de outro workspace,
+      // não contamina o histórico anterior e inicia uma nova sessão dedicada neste workspace.
+      if (sessaoCandidata && registros && workspaces) {
+        try {
+          const todosWs = await workspaces.listar().catch(() => []);
+          for (const outroWs of todosWs) {
+            if (outroWs.id !== ws.id && outroWs.existe) {
+              const msgsOutro = registros.corpDb(outroWs.path).listarMensagens(sessaoCandidata);
+              if (msgsOutro && msgsOutro.length > 0) {
+                console.warn(`[secretario/stream] Sessão ${sessaoCandidata} pertence ao workspace "${outroWs.id}". Isolando e criando nova sessão para "${ws.id}".`);
+                sessaoCandidata = undefined;
+                if (corpo.sessao_id) delete corpo.sessao_id;
+                break;
+              }
+            }
+          }
+        } catch {}
+      }
 
       const executarStream = async (): Promise<void> => {
         const emSegundoPlano = res.writableEnded;
@@ -370,8 +392,8 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
               await sleep(200);
             }
 
-            const wsPrefixoStream = `[WORKSPACE ATIVO: "${ws.id}" | CAMINHO: ${ws.path}]\n(Atenção Secretário: O usuário está operando estritamente no workspace "${ws.id}". Ao rodar comandos 'oc', use SEMPRE a flag '--workspace ${ws.id}'. Suas análises, listagens e tarefas devem ser restritas exclusivamente a este workspace. Não consulte outros workspaces.)\n\n`;
-            const mensagemStreamComWs = `${wsPrefixoStream}${mensagem}`;
+            const contextoWs = await construirContextoWorkspace(ws);
+            const mensagemStreamComWs = `${contextoWs}\n${mensagem}`;
 
             const msgsPreExistentes = (await listarMensagens()) ?? [];
             const idsMensagensAntesTentativa = new Set(msgsPreExistentes.map((m) => m.info?.id).filter(Boolean));
