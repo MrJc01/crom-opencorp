@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { opencorpHome } from "../utils/paths.js";
 import { mascararChave } from "./opencode-server.js";
+import { EngineAccountStore, type EngineAccount } from "./engines/engine-account-store.js";
 
 export interface MensagemChat {
   role: "system" | "user" | "assistant";
@@ -192,7 +193,7 @@ export function listarProvedoresStatus(homeDir?: string): ProvedorInfo[] {
 export async function completarChatDirect(opcoes: OpcoesCompletar): Promise<RespostaCompletar> {
   const home = opcoes.homeDir ?? opencorpHome();
   const chaves = obterChavesProvedores(home);
-  const timeoutMs = opcoes.timeoutMs ?? 30_000;
+  const timeoutMs = opcoes.timeoutMs ?? 60_000;
   const inicio = Date.now();
 
   let modelo = opcoes.model.trim();
@@ -207,7 +208,38 @@ export async function completarChatDirect(opcoes: OpcoesCompletar): Promise<Resp
     "Content-Type": "application/json",
   };
 
-  if (modelo.startsWith("opencode-go/")) {
+  const acctStore = new EngineAccountStore({ homeDir: home });
+  const todasContas: EngineAccount[] = await acctStore.listar();
+  const contaComBaseUrl = todasContas.find((c: EngineAccount) => c.baseUrl && c.baseUrl.trim().length > 0 && c.ativa)
+    || todasContas.find((c: EngineAccount) => c.baseUrl && c.baseUrl.trim().length > 0);
+
+  let providerParam: string | undefined = undefined;
+  let provedorNome: string | undefined = undefined;
+
+  if (
+    modelo.startsWith("custom/") ||
+    modelo.startsWith("g4f/") ||
+    modelo.startsWith("local/")
+  ) {
+    let prefixo = "custom/";
+    if (modelo.startsWith("g4f/")) prefixo = "g4f/";
+    else if (modelo.startsWith("local/")) prefixo = "local/";
+
+    modelParam = modelo.slice(prefixo.length);
+    const contaAlvo = todasContas.find((c: EngineAccount) => (c.provider === "custom" || c.provider === "g4f" || c.motorId === "custom") && c.baseUrl)
+      || contaComBaseUrl;
+
+    const baseUrl = contaAlvo?.baseUrl || "http://127.0.0.1:8080/v1";
+    const baseLimpa = baseUrl.replace(/\/+$/, "");
+    url = baseLimpa.endsWith("/chat/completions") ? baseLimpa : `${baseLimpa}/chat/completions`;
+    apiKey = contaAlvo?.tokenOuChave || "g4f-local";
+    provedorNome = contaAlvo?.nome || "GPT4Free";
+    headersReq["Authorization"] = `Bearer ${apiKey}`;
+
+    if (modelParam === "gpt-4o-mini" || modelParam === "default" || modelParam === "") {
+      providerParam = "ChatGPTLightweight";
+    }
+  } else if (modelo.startsWith("opencode-go/")) {
     url = "https://opencode.ai/zen/go/v1/chat/completions";
     apiKey = chaves["opencode-go"] || chaves["opencode"];
     modelParam = modelo.slice("opencode-go/".length);
@@ -238,15 +270,20 @@ export async function completarChatDirect(opcoes: OpcoesCompletar): Promise<Resp
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    const payloadReq: Record<string, any> = {
+      model: modelParam,
+      messages: opcoes.messages,
+      temperature: opcoes.temperature ?? 0.7,
+      max_tokens: opcoes.maxTokens ?? 1500,
+    };
+    if (providerParam) {
+      payloadReq.provider = providerParam;
+    }
+
     const res = await fetch(url, {
       method: "POST",
       headers: headersReq,
-      body: JSON.stringify({
-        model: modelParam,
-        messages: opcoes.messages,
-        temperature: opcoes.temperature ?? 0.7,
-        max_tokens: opcoes.maxTokens ?? 1500,
-      }),
+      body: JSON.stringify(payloadReq),
       signal: opcoes.signal ?? controller.signal,
     });
 
@@ -264,7 +301,7 @@ export async function completarChatDirect(opcoes: OpcoesCompletar): Promise<Resp
     return {
       content,
       model: data?.model || modelParam,
-      provider: data?.provider,
+      provider: data?.provider || provedorNome,
       is_byok: data?.usage?.is_byok ?? false,
       cost: data?.usage?.cost ?? 0,
       usage: data?.usage
@@ -296,7 +333,7 @@ export async function testarModeloDirect(
       maxTokens: 10,
       temperature: 0.1,
       homeDir,
-      timeoutMs: 15_000,
+      timeoutMs: 60_000,
     });
 
     return {
