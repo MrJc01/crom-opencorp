@@ -102,4 +102,20 @@ export class AgentsResource {
       headers: this.resolverHeaders(opts),
     });
   }
+
+  /** POST /agents/:id/run — dispara execução do agente com uma ordem. */
+  async executar(
+    id: string,
+    payload: { ordem: string; [key: string]: unknown },
+    opts?: AgentOptions,
+  ): Promise<{ exec_id?: string; [key: string]: unknown }> {
+    return this.http.post<{ exec_id?: string }>(
+      `/agents/${encodeURIComponent(id)}/run`,
+      payload,
+      {
+        ...opts,
+        headers: this.resolverHeaders(opts),
+      },
+    );
+  }
 }

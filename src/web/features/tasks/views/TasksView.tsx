@@ -1,25 +1,20 @@
-import React, { useState, useEffect, useCallback, type FC } from "react";
+import React, { useState, useEffect, useCallback, useMemo, type FC } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
-import { type Task } from "@opencorp/sdk";
-import { showToast } from "../../../shared/ui/Toast.js";
 import {
-  Kanban,
-  Plus,
-  Trash2,
-  Play,
-  ArrowRight,
-  ArrowLeft,
-  Clock,
-  AlertCircle,
-  CheckCircle2,
-  User,
-  X,
-  Sparkles,
-} from "lucide-react";
+  type Task,
+  type AgentResumo,
+  type CriarTaskInput,
+} from "@opencorp/sdk";
+import { showToast } from "../../../shared/ui/Toast.js";
+import { TaskFilters } from "../components/TaskFilters.js";
+import { TaskCard } from "../components/TaskCard.js";
+import { TaskDetailsDrawer } from "../components/TaskDetailsDrawer.js";
+import { TaskCreateModal } from "../components/TaskCreateModal.js";
 
 interface ColunaDef {
   id: "backlog" | "fazendo" | "bloqueado" | "feito";
-  titulo: string;
+  nome: string;
   corBorda: string;
   badgeCor: string;
 }
@@ -27,356 +22,328 @@ interface ColunaDef {
 const COLUNAS: ColunaDef[] = [
   {
     id: "backlog",
-    titulo: "A Fazer",
-    corBorda: "border-zinc-800",
+    nome: "A Fazer",
+    corBorda: "border-zinc-700 text-zinc-300",
     badgeCor: "bg-zinc-800 text-zinc-300",
   },
   {
     id: "fazendo",
-    titulo: "Em Progresso",
-    corBorda: "border-emerald-800/60",
-    badgeCor: "bg-emerald-950/60 border border-emerald-800/40 text-emerald-300",
+    nome: "Em Progresso",
+    corBorda: "border-blue-500 text-blue-400",
+    badgeCor: "bg-blue-950/60 border border-blue-800/40 text-blue-300",
   },
   {
     id: "bloqueado",
-    titulo: "Revisão / Bloqueado",
-    corBorda: "border-amber-800/60",
+    nome: "Revisão / Bloqueado",
+    corBorda: "border-amber-500 text-amber-400",
     badgeCor: "bg-amber-950/60 border border-amber-800/40 text-amber-300",
   },
   {
     id: "feito",
-    titulo: "Concluído",
-    corBorda: "border-blue-800/60",
-    badgeCor: "bg-blue-950/60 border border-blue-800/40 text-blue-300",
+    nome: "Concluído",
+    corBorda: "border-emerald-500 text-emerald-400",
+    badgeCor: "bg-emerald-950/60 border border-emerald-800/40 text-emerald-300",
   },
 ];
 
 export const TasksView: FC = () => {
   const { client, tratarErro } = useOpenCorp();
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [agentes, setAgentes] = useState<AgentResumo[]>([]);
   const [carregando, setCarregando] = useState(true);
+
+  // Filtros
+  const [busca, setBusca] = useState("");
+  const [filtroResponsavel, setFiltroResponsavel] = useState("todos");
+
+  // Modais e Drawer
   const [modalCriarAberto, setModalCriarAberto] = useState(false);
+  const [taskSelecionada, setTaskSelecionada] = useState<Task | null>(null);
+  const [executandoIds, setExecutandoIds] = useState<Set<string>>(new Set());
 
-  // Form states
-  const [novoTitulo, setNovoTitulo] = useState("");
-  const [novaDescricao, setNovaDescricao] = useState("");
-  const [novaPrioridade, setNovaPrioridade] = useState<"baixa" | "media" | "alta">("media");
-  const [novoResponsavel, setNovoResponsavel] = useState("");
-
-  const carregarTasks = useCallback(async () => {
-    setCarregando(true);
+  // Carregamento de Tarefas e Agentes
+  const carregarDados = useCallback(async (silencioso = false) => {
+    if (!silencioso) setCarregando(true);
     try {
-      const lista = await client.tasks.listar();
-      setTasks(lista || []);
+      const [listaTasks, listaAgentes] = await Promise.all([
+        client.tasks.listar(),
+        client.agents.listar(),
+      ]);
+      setTasks(listaTasks || []);
+      setAgentes(listaAgentes || []);
     } catch (err) {
-      tratarErro(err, "Falha ao listar tarefas");
+      if (!silencioso) {
+        tratarErro(err, "Falha ao carregar tarefas do Kanban");
+      }
     } finally {
-      setCarregando(false);
+      if (!silencioso) setCarregando(false);
     }
   }, [client, tratarErro]);
 
   useEffect(() => {
-    void carregarTasks();
-  }, [carregarTasks]);
+    void carregarDados();
+  }, [carregarDados]);
 
-  const criarTask = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!novoTitulo.trim()) return;
+  // Polling inteligente de 4 segundos quando a janela estiver ativa
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (typeof document !== "undefined" && !document.hidden) {
+        void carregarDados(true);
+      }
+    }, 4000);
 
-    try {
-      const criada = await client.tasks.criar({
-        titulo: novoTitulo.trim(),
-        descricao: novaDescricao.trim() || undefined,
-        prioridade: novaPrioridade,
-        responsavel: novoResponsavel.trim() || undefined,
-        coluna: "backlog",
-      });
+    return () => clearInterval(timer);
+  }, [carregarDados]);
 
-      setTasks((prev) => [criada, ...prev]);
-      showToast(`Tarefa "${criada.titulo || novoTitulo}" criada com sucesso`, "sucesso");
-      setNovoTitulo("");
-      setNovaDescricao("");
-      setNovoResponsavel("");
-      setModalCriarAberto(false);
-    } catch (err) {
-      tratarErro(err, "Falha ao criar tarefa");
+  // Sincronização com URL (?task=tsk-xxx)
+  const taskIdUrl = searchParams.get("task");
+  useEffect(() => {
+    if (taskIdUrl) {
+      const t = tasks.find((item) => item.id === taskIdUrl);
+      if (t) {
+        setTaskSelecionada(t);
+      } else {
+        void client.tasks.obter(taskIdUrl).then((encontrada) => {
+          if (encontrada) setTaskSelecionada(encontrada);
+        }).catch(() => {});
+      }
+    } else {
+      setTaskSelecionada(null);
     }
+  }, [taskIdUrl, tasks, client.tasks]);
+
+  const abrirDetalhes = (task: Task) => {
+    setTaskSelecionada(task);
+    setSearchParams({ task: task.id });
   };
 
-  const moverColuna = async (
-    id: string,
-    direcao: "proximo" | "anterior",
-    colunaAtual: string = "backlog",
-  ) => {
-    const ordem: ColunaDef["id"][] = ["backlog", "fazendo", "bloqueado", "feito"];
-    const idx = ordem.indexOf(colunaAtual as any);
-    const novoIdx = direcao === "proximo" ? idx + 1 : idx - 1;
+  const fecharDetalhes = () => {
+    setTaskSelecionada(null);
+    setSearchParams({});
+  };
 
-    if (novoIdx < 0 || novoIdx >= ordem.length) return;
-    const destino = ordem[novoIdx];
-
+  // Mutações de Tarefas
+  const moverTask = async (task: Task, novaColuna: string) => {
     try {
-      await client.tasks.mover(id, destino);
+      await client.tasks.mover(task.id, novaColuna);
       setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, coluna: destino } : t)),
+        prev.map((t) => (t.id === task.id ? { ...t, coluna: novaColuna } : t)),
       );
-      showToast(`Tarefa movida para "${destino}"`, "info");
+      if (taskSelecionada?.id === task.id) {
+        setTaskSelecionada((prev) => (prev ? { ...prev, coluna: novaColuna } : null));
+      }
+      showToast(`Tarefa movida para "${novaColuna}"`, "info");
     } catch (err) {
       tratarErro(err, "Erro ao mover tarefa");
     }
   };
 
-  const executarTask = async (id: string, titulo: string) => {
-    try {
-      await client.tasks.mover(id, "fazendo");
-      setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, coluna: "fazendo" } : t)),
-      );
-      showToast(`Execução iniciada pelo Secretário para: ${titulo}`, "sucesso");
-    } catch (err) {
-      tratarErro(err, "Falha ao disparar execução da tarefa");
-    }
-  };
-
-  const excluirTask = async (id: string, titulo: string) => {
-    if (!window.confirm(`Deseja realmente excluir a tarefa "${titulo}"?`)) return;
-
+  const excluirTask = async (id: string) => {
     try {
       await client.tasks.deletar(id);
       setTasks((prev) => prev.filter((t) => t.id !== id));
+      if (taskSelecionada?.id === id) {
+        fecharDetalhes();
+      }
       showToast("Tarefa excluída com sucesso", "sucesso");
     } catch (err) {
-      tratarErro(err, "Falha ao excluir tarefa");
+      tratarErro(err, "Erro ao excluir tarefa");
     }
   };
 
-  return (
-    <div className="flex flex-col h-full w-full p-6 md:p-8 space-y-6 overflow-hidden">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
-            <Kanban className="text-emerald-400" size={20} />
-            Quadro Kanban Operacional
-          </h1>
-          <p className="text-xs text-zinc-400 mt-1">
-            Gestão de tarefas autônomas distribuídas entre o Secretário e os agentes do workspace.
-          </p>
-        </div>
+  const executarTask = async (task: Task, instrucaoExtra?: string) => {
+    const rawResp = task.responsavel || "";
+    const semPrefixo = rawResp.replace(/^@/, "").replace(/^agente:/, "").trim();
+    const agenteId = semPrefixo || agentes[0]?.id || "secretario-exec";
 
-        <button
-          type="button"
-          onClick={() => setModalCriarAberto(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md shadow-emerald-950/60 transition-all cursor-pointer self-start md:self-auto"
-        >
-          <Plus size={15} />
-          <span>Nova Tarefa</span>
-        </button>
+    setExecutandoIds((prev) => new Set(prev).add(task.id));
+
+    try {
+      let ordem = `Executar tarefa [${task.id}] "${task.titulo || ""}": ${task.descricao || ""}`.trim();
+      if (instrucaoExtra && instrucaoExtra.trim()) {
+        ordem = `${ordem}\n\n[Instrução do Operador]:\n${instrucaoExtra.trim()}`;
+      }
+
+      const disp = await client.agents.executar(agenteId, { ordem });
+      const execId = disp?.exec_id;
+
+      // Se estiver em backlog ou bloqueado, move automaticamente para fazendo
+      if (task.coluna === "backlog" || task.coluna === "bloqueado") {
+        await client.tasks.mover(task.id, "fazendo").catch(() => {});
+        setTasks((prev) =>
+          prev.map((t) => (t.id === task.id ? { ...t, coluna: "fazendo" } : t)),
+        );
+        if (taskSelecionada?.id === task.id) {
+          setTaskSelecionada((prev) => (prev ? { ...prev, coluna: "fazendo" } : null));
+        }
+      }
+
+      // Registra mensagem informativa no chat da task
+      await client.tasks.adicionarMensagem(task.id, {
+        corpo: `[EXECUÇÃO INICIADA] Disparado agente @${agenteId} para trabalhar nesta tarefa.${
+          execId ? ` (exec ${execId})` : ""
+        }`,
+        autor: "sistema",
+        tipo: "sistema",
+        refs: execId ? [execId] : undefined,
+      }).catch(() => {});
+
+      showToast(
+        `Execução da tarefa iniciada com @${agenteId}!${execId ? ` (exec ${execId})` : ""}`,
+        "sucesso",
+      );
+    } catch (err) {
+      tratarErro(err, "Erro ao disparar execução da tarefa");
+    } finally {
+      setExecutandoIds((prev) => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
+    }
+  };
+
+  const desbloquearEAprovarTask = async (task: Task) => {
+    try {
+      await client.tasks.mover(task.id, "fazendo");
+      await client.tasks.adicionarMensagem(task.id, {
+        corpo: "[DESBLOQUEIO / APROVAÇÃO] Tarefa aprovada e desbloqueada pelo operador.",
+        autor: "humano",
+        tipo: "aprovacao",
+      }).catch(() => {});
+
+      setTasks((prev) =>
+        prev.map((t) => (t.id === task.id ? { ...t, coluna: "fazendo", bloqueada: false } : t)),
+      );
+
+      if (taskSelecionada?.id === task.id) {
+        setTaskSelecionada((prev) =>
+          prev ? { ...prev, coluna: "fazendo", bloqueada: false } : null,
+        );
+      }
+
+      showToast("Tarefa aprovada e desbloqueada!", "sucesso");
+      void executarTask({ ...task, coluna: "fazendo", bloqueada: false });
+    } catch (err) {
+      tratarErro(err, "Erro ao desbloquear tarefa");
+    }
+  };
+
+  const criarTask = async (payload: CriarTaskInput) => {
+    try {
+      const criada = await client.tasks.criar(payload);
+      setTasks((prev) => [...prev, criada]);
+      showToast(`Tarefa "${criada.titulo || criada.id}" criada com sucesso!`, "sucesso");
+
+      if (payload.executar_agora) {
+        void executarTask(criada);
+      }
+    } catch (err) {
+      tratarErro(err, "Erro ao criar tarefa");
+    }
+  };
+
+  // Filtragem
+  const semPrefixoAgente = (r?: string | null) =>
+    String(r || "").replace(/^@/, "").replace(/^agente:/, "");
+
+  const tasksFiltradas = useMemo(() => {
+    return tasks.filter((t) => {
+      const matchResp =
+        filtroResponsavel === "todos" ||
+        semPrefixoAgente(t.responsavel) === filtroResponsavel;
+
+      const termo = busca.toLowerCase().trim();
+      const matchBusca =
+        !termo ||
+        (t.titulo && t.titulo.toLowerCase().includes(termo)) ||
+        (t.descricao && t.descricao.toLowerCase().includes(termo)) ||
+        t.id.toLowerCase().includes(termo);
+
+      return matchResp && matchBusca;
+    });
+  }, [tasks, busca, filtroResponsavel]);
+
+  return (
+    <div className="flex flex-col h-full w-full overflow-hidden p-6 space-y-4 bg-zinc-950">
+      {/* Barra de Filtros e Ações */}
+      <TaskFilters
+        busca={busca}
+        aoMudarBusca={setBusca}
+        responsavel={filtroResponsavel}
+        aoMudarResponsavel={setFiltroResponsavel}
+        agentes={agentes}
+        aoNovaTarefa={() => setModalCriarAberto(true)}
+        aoAtualizar={() => void carregarDados()}
+        carregando={carregando}
+      />
+
+      {/* Grid Kanban das 4 Colunas */}
+      <div className="flex-1 flex gap-4 min-h-0 overflow-x-auto pb-4 scrollbar-thin">
+        {COLUNAS.map((col) => {
+          const itens = tasksFiltradas.filter((t) => (t.coluna || "backlog") === col.id);
+
+          return (
+            <div
+              key={col.id}
+              className="flex flex-col h-full bg-zinc-900/40 rounded-2xl border border-zinc-800/80 p-3.5 flex-1 min-w-[280px] max-w-[360px] shrink-0 shadow-xs"
+            >
+              {/* Header da Coluna */}
+              <div className={`flex items-center justify-between pb-2.5 mb-2.5 border-b-2 ${col.corBorda}`}>
+                <span className="text-xs font-bold tracking-tight text-zinc-100">
+                  {col.nome}
+                </span>
+                <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full ${col.badgeCor}`}>
+                  {itens.length}
+                </span>
+              </div>
+
+              {/* Cards da Coluna */}
+              <div className="flex-1 overflow-y-auto space-y-2.5 scrollbar-thin pr-1">
+                {itens.length === 0 && (
+                  <div className="h-28 flex items-center justify-center text-xs text-zinc-600 border border-dashed border-zinc-800/80 rounded-xl">
+                    Nenhuma tarefa
+                  </div>
+                )}
+
+                {itens.map((task) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    selecionada={taskSelecionada?.id === task.id}
+                    aoSelecionar={abrirDetalhes}
+                    aoMover={moverTask}
+                    aoExcluir={excluirTask}
+                    aoExecutar={executarTask}
+                    executando={executandoIds.has(task.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Grid de 4 Colunas */}
-      {carregando ? (
-        <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs">
-          Carregando quadro de tarefas...
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 flex-1 min-h-0 overflow-y-auto">
-          {COLUNAS.map((col) => {
-            const tarefasColuna = tasks.filter(
-              (t) => (t.coluna || "backlog").toLowerCase() === col.id,
-            );
+      {/* Drawer Lateral de Detalhes da Tarefa */}
+      <TaskDetailsDrawer
+        task={taskSelecionada}
+        agentes={agentes}
+        aoFechar={fecharDetalhes}
+        aoMover={moverTask}
+        aoExcluir={excluirTask}
+        aoExecutar={executarTask}
+        aoDesbloquearEAprovar={desbloquearEAprovarTask}
+      />
 
-            return (
-              <div
-                key={col.id}
-                className="flex flex-col rounded-2xl bg-zinc-900/40 border border-zinc-850 p-4 space-y-3 min-h-[320px] overflow-hidden"
-              >
-                {/* Cabeçalho da Coluna */}
-                <div className="flex items-center justify-between pb-2 border-b border-zinc-850/60">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-xs text-zinc-200">{col.titulo}</span>
-                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${col.badgeCor}`}>
-                      {tarefasColuna.length}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Cards de Tarefa */}
-                <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-                  {tarefasColuna.length === 0 ? (
-                    <div className="h-28 flex items-center justify-center border border-dashed border-zinc-850 rounded-xl text-[11px] text-zinc-600">
-                      Nenhuma tarefa
-                    </div>
-                  ) : (
-                    tarefasColuna.map((task) => (
-                      <div
-                        key={task.id}
-                        className="p-3.5 rounded-xl bg-zinc-900/80 border border-zinc-800/80 hover:border-zinc-700 transition-all shadow-sm space-y-2.5 text-xs group"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <h4 className="font-medium text-zinc-100 leading-snug break-words">
-                            {task.titulo}
-                          </h4>
-
-                          <button
-                            type="button"
-                            onClick={() => excluirTask(task.id, task.titulo || "")}
-                            className="text-zinc-600 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity p-1 cursor-pointer"
-                            title="Excluir tarefa"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-
-                        {task.descricao && (
-                          <p className="text-[11px] text-zinc-400 line-clamp-2 leading-relaxed">
-                            {task.descricao}
-                          </p>
-                        )}
-
-                        {/* Metadados e Controles */}
-                        <div className="flex items-center justify-between pt-2 border-t border-zinc-800/40 text-[10px] text-zinc-500">
-                          <div className="flex items-center gap-1.5">
-                            {task.responsavel ? (
-                              <span className="flex items-center gap-1 font-mono text-zinc-400">
-                                <User size={10} />
-                                {task.responsavel}
-                              </span>
-                            ) : (
-                              <span>Sem responsável</span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => executarTask(task.id, task.titulo || "")}
-                              className="p-1 rounded bg-zinc-800 hover:bg-emerald-950 hover:text-emerald-400 text-zinc-400 transition-colors cursor-pointer"
-                              title="Disparar execução pelo Secretário"
-                            >
-                              <Play size={11} />
-                            </button>
-
-                            {col.id !== "backlog" && (
-                              <button
-                                type="button"
-                                onClick={() => moverColuna(task.id, "anterior", task.coluna)}
-                                className="p-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 transition-colors cursor-pointer"
-                                title="Mover para coluna anterior"
-                              >
-                                <ArrowLeft size={11} />
-                              </button>
-                            )}
-
-                            {col.id !== "feito" && (
-                              <button
-                                type="button"
-                                onClick={() => moverColuna(task.id, "proximo", task.coluna)}
-                                className="p-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 transition-colors cursor-pointer"
-                                title="Mover para próxima coluna"
-                              >
-                                <ArrowRight size={11} />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Modal Rápido de Criação */}
-      {modalCriarAberto && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
-              <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
-                <Kanban size={16} className="text-emerald-400" />
-                Criar Nova Tarefa Operacional
-              </h3>
-              <button
-                type="button"
-                onClick={() => setModalCriarAberto(false)}
-                className="text-zinc-500 hover:text-zinc-300 cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={criarTask} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block text-zinc-300 font-medium mb-1">Título da Tarefa *</label>
-                <input
-                  type="text"
-                  required
-                  value={novoTitulo}
-                  onChange={(e) => setNovoTitulo(e.target.value)}
-                  placeholder="Ex: Auditoria de segurança de dependências"
-                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-zinc-300 font-medium mb-1">Descrição</label>
-                <textarea
-                  rows={3}
-                  value={novaDescricao}
-                  onChange={(e) => setNovaDescricao(e.target.value)}
-                  placeholder="Instruções e escopo detalhado para os agentes..."
-                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 resize-none font-sans"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-zinc-300 font-medium mb-1">Prioridade</label>
-                  <select
-                    value={novaPrioridade}
-                    onChange={(e) => setNovaPrioridade(e.target.value as any)}
-                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 focus:outline-none focus:border-emerald-500"
-                  >
-                    <option value="baixa">Baixa</option>
-                    <option value="media">Média</option>
-                    <option value="alta">Alta</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-zinc-300 font-medium mb-1">Responsável</label>
-                  <input
-                    type="text"
-                    value={novoResponsavel}
-                    onChange={(e) => setNovoResponsavel(e.target.value)}
-                    placeholder="Ex: secretario, dev"
-                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
-                <button
-                  type="button"
-                  onClick={() => setModalCriarAberto(false)}
-                  className="px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-all shadow-md cursor-pointer"
-                >
-                  Criar Tarefa
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Modal de Criação de Tarefa */}
+      <TaskCreateModal
+        aberto={modalCriarAberto}
+        agentes={agentes}
+        aoFechar={() => setModalCriarAberto(false)}
+        aoCriar={criarTask}
+      />
     </div>
   );
 };

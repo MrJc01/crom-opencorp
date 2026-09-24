@@ -40,6 +40,27 @@ export interface TaskDetalhada extends TaskResumo {
 
 export type Task = TaskDetalhada;
 
+export interface MensagemTask {
+  id: string;
+  autor: string;
+  corpo: string;
+  tipo?: string;
+  criado_em: string;
+  refs?: string[];
+  [key: string]: unknown;
+}
+
+export interface ExecucaoVinculada {
+  id: string;
+  agente: string;
+  inicio: string;
+  status: string;
+  duracao_ms?: number;
+  modelo?: string;
+  ordem?: string;
+  [key: string]: unknown;
+}
+
 // ── Entradas de Mutação ─────────────────────────────────────────────
 
 export interface CriarTaskInput {
@@ -200,6 +221,38 @@ export class TasksResource {
   /** DELETE /tasks/:id — exclui uma tarefa do workspace. */
   async deletar(id: string, opts?: TaskOptions): Promise<{ ok: boolean; id: string }> {
     return this.http.delete<{ ok: boolean; id: string }>(`/tasks/${encodeURIComponent(id)}`, {
+      ...opts,
+      headers: this.resolverHeaders(opts),
+    });
+  }
+
+  /** GET /tasks/:id/mensagens — lista comentários e histórico de mensagens da tarefa. */
+  async mensagens(id: string, opts?: TaskOptions): Promise<MensagemTask[]> {
+    return this.http.get<MensagemTask[]>(`/tasks/${encodeURIComponent(id)}/mensagens`, {
+      ...opts,
+      headers: this.resolverHeaders(opts),
+    });
+  }
+
+  /** POST /tasks/:id/mensagens — registra um comentário ou instrução para a tarefa. */
+  async adicionarMensagem(
+    id: string,
+    payload: { autor?: string; corpo: string; tipo?: string; refs?: string[] },
+    opts?: TaskOptions,
+  ): Promise<MensagemTask> {
+    return this.http.post<MensagemTask>(
+      `/tasks/${encodeURIComponent(id)}/mensagens`,
+      payload,
+      {
+        ...opts,
+        headers: this.resolverHeaders(opts),
+      },
+    );
+  }
+
+  /** GET /tasks/:id/execucoes — lista execuções do agente vinculadas à tarefa. */
+  async execucoes(id: string, opts?: TaskOptions): Promise<ExecucaoVinculada[]> {
+    return this.http.get<ExecucaoVinculada[]>(`/tasks/${encodeURIComponent(id)}/execucoes`, {
       ...opts,
       headers: this.resolverHeaders(opts),
     });

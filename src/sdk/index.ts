@@ -52,6 +52,8 @@ export {
   type Task,
   type TaskResumo,
   type TaskDetalhada,
+  type MensagemTask,
+  type ExecucaoVinculada,
   type ListarTasksOpts,
   type CriarTaskInput,
   type AtualizarTaskInput,
