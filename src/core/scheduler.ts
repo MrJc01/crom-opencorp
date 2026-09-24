@@ -51,119 +51,32 @@ export interface OpcoesScheduler {
   reconciliar?: () => Promise<string[]>;
 }
 
-// ── parser cron (5 campos: min hora dom mês dow; suporta * , - / ) ──
+// ── Motor cron e fusos horários (delegado ao domínio puro) ────────
+import {
+  validarExpressaoCron,
+  compilarCampoCron,
+  calcularProximoCron,
+  calcularProximoCronEmTimezone,
+  CronExpressionError,
+  validarCron,
+  proximoCron,
+  proximoCronTz,
+  fusoValido,
+  FUSO_PADRAO,
+} from "./domain/scheduling/cron-evaluator.js";
 
-function campoCron(spec: string, min: number, max: number, onde: string): (v: number) => boolean {
-  if (spec === "*") return () => true;
-  const valores = new Set<number>();
-  for (const parte of spec.split(",")) {
-    const m = /^(?:(\d+)(?:-(\d+))?|\*)(?:\/(\d+))?$/.exec(parte);
-    if (!m) throw new SchedulerError(`cron inválido (${onde}): "${parte}"`);
-    const passo = m[3] ? Number(m[3]) : 1;
-    if (passo < 1) throw new SchedulerError(`cron inválido (${onde}): passo ${passo}`);
-    const ini = m[1] === undefined ? min : Number(m[1]);
-    const fim = m[1] === undefined ? max : m[2] === undefined ? ini : Number(m[2]);
-    if (ini < min || fim > max || ini > fim) {
-      throw new SchedulerError(`cron inválido (${onde}): faixa ${ini}-${fim} fora de ${min}-${max}`);
-    }
-    for (let v = ini; v <= fim; v += passo) valores.add(v);
-  }
-  return (v) => valores.has(v);
-}
-
-export function validarCron(expr: string): void {
-  const campos = expr.trim().split(/\s+/);
-  if (campos.length !== 5) throw new SchedulerError(`cron precisa de 5 campos: "${expr}"`);
-  campoCron(campos[0]!, 0, 59, "minuto");
-  campoCron(campos[1]!, 0, 23, "hora");
-  campoCron(campos[2]!, 1, 31, "dia-do-mês");
-  campoCron(campos[3]!, 1, 12, "mês");
-  campoCron(campos[4]!, 0, 6, "dia-da-semana");
-}
-
-export function proximoCron(expr: string, de: Date): Date {
-  validarCron(expr);
-  const [mm, hh, dom, mes, dow] = expr.trim().split(/\s+/).map((s, i) => {
-    const faixas: [number, number][] = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 6]];
-    return campoCron(s, faixas[i]![0], faixas[i]![1], ["minuto", "hora", "dia-do-mês", "mês", "dia-da-semana"][i]!);
-  });
-  const t = new Date(de.getTime());
-  t.setSeconds(0, 0);
-  for (let i = 0; i < 527040; i++) {
-    t.setMinutes(t.getMinutes() + 1);
-    if (mm(t.getMinutes()) && hh(t.getHours()) && dom(t.getDate()) && mes(t.getMonth() + 1) && dow(t.getDay())) {
-      return new Date(t.getTime());
-    }
-  }
-  throw new SchedulerError(`cron "${expr}" não tem ocorrência em ~1 ano`);
-}
-
-/** Fuso padrão quando nenhum está configurado ou o configurado é inválido. */
-export const FUSO_PADRAO = "America/Sao_Paulo";
-
-/** true se o IANA timezone é aceito pelo runtime. */
-export function fusoValido(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Offset wall-clock − UTC em ms para um instante num fuso (via Intl). */
-function offsetFusoMs(tz: string, d: Date): number {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    hour12: false,
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    second: "numeric",
-  });
-  const p: Record<string, string> = {};
-  for (const x of dtf.formatToParts(d)) p[x.type] = x.value;
-  const comoUTC = Date.UTC(+p["year"]!, +p["month"]! - 1, +p["day"]!, (+p["hour"]!) % 24, +p["minute"]!, +p["second"]!);
-  return comoUTC - d.getTime();
-}
-
-/**
- * Próxima ocorrência de um cron interpretada no relógio de parede do fuso
- * (ex.: "0 9 * * *" com America/Sao_Paulo = 09:00 BRT, não 09:00 UTC).
- */
-export function proximoCronTz(expr: string, de: Date, tz: string): Date {
-  validarCron(expr);
-  if (!fusoValido(tz)) throw new SchedulerError(`fuso horário inválido: "${tz}" (use IANA, ex.: America/Sao_Paulo)`);
-  const [mm, hh, dom, mes, dow] = expr.trim().split(/\s+/).map((s, i) => {
-    const faixas: [number, number][] = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 6]];
-    return campoCron(s, faixas[i]![0], faixas[i]![1], ["minuto", "hora", "dia-do-mês", "mês", "dia-da-semana"][i]!);
-  });
-  let t = Math.ceil((de.getTime() + 1) / 60000) * 60000;
-  let off = offsetFusoMs(tz, new Date(t));
-  let ultimoDia: number | null = null;
-  for (let i = 0; i < 527040; i++) {
-    let parede = new Date(t + off);
-    const dia = parede.getUTCDate();
-    if (ultimoDia !== null && dia !== ultimoDia) {
-      off = offsetFusoMs(tz, new Date(t));
-      parede = new Date(t + off);
-    }
-    ultimoDia = parede.getUTCDate();
-    if (
-      mm(parede.getUTCMinutes()) &&
-      hh(parede.getUTCHours()) &&
-      dom(parede.getUTCDate()) &&
-      mes(parede.getUTCMonth() + 1) &&
-      dow(parede.getUTCDay())
-    ) {
-      return new Date(t);
-    }
-    t += 60000;
-  }
-  throw new SchedulerError(`cron "${expr}" não tem ocorrência em ~1 ano`);
-}
+export {
+  validarExpressaoCron,
+  compilarCampoCron,
+  calcularProximoCron,
+  calcularProximoCronEmTimezone,
+  CronExpressionError,
+  validarCron,
+  proximoCron,
+  proximoCronTz,
+  fusoValido,
+  FUSO_PADRAO,
+};
 
 /**
  * Fusão scheduler→fluxo (Etapa 12.1): job `flow run <id> [...]` roda in-process
