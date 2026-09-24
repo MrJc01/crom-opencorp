@@ -1,202 +1,648 @@
-import React, { useState, useEffect, useCallback, type FC } from "react";
+import React, { useState, useEffect, useCallback, useMemo, type FC } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
-import { type FlowResumo } from "@opencorp/sdk";
 import { showToast } from "../../../shared/ui/Toast.js";
+import type { FluxoCompleto, NoGrafo, FlowRunLog } from "../types.js";
 import {
-  Workflow,
-  Play,
-  Clock,
-  Radio,
-  CheckCircle2,
-  RefreshCw,
-  GitFork,
-  ArrowRight,
-  Layers,
-  Sparkles,
-  Zap,
-} from "lucide-react";
+  GraphCanvas,
+  ComponentPalette,
+  NodeConfigDrawer,
+  WorkflowHeader,
+  WorkflowList,
+  ModalNovoWorkflow,
+  ModalExecutarWorkflow,
+  ExecutionLogsPanel,
+} from "../components/index.js";
 
 export const FluxosView: FC = () => {
   const { client, workspaceId, tratarErro } = useOpenCorp();
-  const [fluxos, setFluxos] = useState<FlowResumo[]>([]);
-  const [carregando, setCarregando] = useState(true);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const fluxoParam = searchParams.get("fluxo");
+
+  // Estado da Lista de Fluxos
+  const [fluxos, setFluxos] = useState<FluxoCompleto[]>([]);
+  const [carregandoLista, setCarregandoLista] = useState(true);
   const [executandoId, setExecutandoId] = useState<string | null>(null);
 
+  // Estado do Studio / Fluxo Ativo
+  const [fluxoAtivo, setFluxoAtivo] = useState<FluxoCompleto | null>(null);
+  const [carregandoFluxo, setCarregandoFluxo] = useState(false);
+  const [salvandoGrafo, setSalvandoGrafo] = useState(false);
+  const [noSelecionado, setNoSelecionado] = useState<NoGrafo | null>(null);
+
+  // Catálogos auxiliares (Agentes, etc.)
+  const [agentes, setAgentes] = useState<any[]>([]);
+
+  // Gavetas e Painéis
+  const [paletaAberta, setPaletaAberta] = useState(false);
+  const [painelLogsAberto, setPainelLogsAberto] = useState(false);
+  const [logsExecucoes, setLogsExecucoes] = useState<FlowRunLog[]>([]);
+  const [carregandoLogs, setCarregandoLogs] = useState(false);
+
+  // Modais
+  const [modalNovoAberto, setModalNovoAberto] = useState(false);
+  const [salvandoNovo, setSalvandoNovo] = useState(false);
+  const [modalExecutarAberto, setModalExecutarAberto] = useState(false);
+
+  const wsEfetivo = useMemo(() => {
+    if (workspaceId) return workspaceId;
+    if (typeof window !== "undefined") {
+      const salvo = localStorage.getItem("opencorp_workspace_id");
+      if (salvo) return salvo;
+    }
+    return "yt-factory-01";
+  }, [workspaceId]);
+
+  // ── Carregar Lista de Fluxos ──────────────────────────────────────────
   const carregarFluxos = useCallback(async () => {
-    setCarregando(true);
+    setCarregandoLista(true);
     try {
       const lista = await client.flows.listar({
-        workspaceId: workspaceId || undefined,
+        workspaceId: wsEfetivo,
       });
-      setFluxos(lista || []);
+      setFluxos((lista as unknown as FluxoCompleto[]) || []);
     } catch (err) {
-      tratarErro(err, "Falha ao carregar fluxos de automação");
+      tratarErro(err, "Falha ao carregar lista de fluxos");
     } finally {
-      setCarregando(false);
+      setCarregandoLista(false);
     }
-  }, [client, workspaceId, tratarErro]);
+  }, [client, wsEfetivo, tratarErro]);
+
+  // Carregar Agentes para o NodeConfigDrawer
+  const carregarAgentes = useCallback(async () => {
+    try {
+      const lista = await client.agents.listar({
+        workspaceId: wsEfetivo,
+      });
+      setAgentes(lista || []);
+    } catch {
+      setAgentes([]);
+    }
+  }, [client, wsEfetivo]);
 
   useEffect(() => {
     void carregarFluxos();
-  }, [carregarFluxos]);
+    void carregarAgentes();
+  }, [carregarFluxos, carregarAgentes]);
 
-  const dispararFluxo = async (id: string, nome?: string) => {
+  // ── Carregar Logs do Fluxo Ativo ───────────────────────────────────────
+  const carregarLogs = useCallback(
+    async (id: string) => {
+      setCarregandoLogs(true);
+      try {
+        const runs = await client.http.get<FlowRunLog[]>(
+          `/flows/${encodeURIComponent(id)}/runs`,
+          {
+            headers: { "x-opencorp-workspace": wsEfetivo },
+          }
+        );
+        setLogsExecucoes(Array.isArray(runs) ? runs : []);
+      } catch {
+        setLogsExecucoes([]);
+      } finally {
+        setCarregandoLogs(false);
+      }
+    },
+    [client, wsEfetivo]
+  );
+
+  // ── Carregar Fluxo Específico (Studio) ──────────────────────────────────
+  const carregarFluxoAtivo = useCallback(
+    async (id: string) => {
+      setCarregandoFluxo(true);
+      try {
+        const f = await client.flows.obter(id, {
+          workspaceId: wsEfetivo,
+        });
+        setFluxoAtivo((f as unknown as FluxoCompleto) || null);
+        setNoSelecionado(null);
+        void carregarLogs(id);
+      } catch (err) {
+        tratarErro(err, `Falha ao carregar o fluxo "${id}"`);
+        // Se não encontrar o fluxo, volta à lista
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("fluxo");
+          return next;
+        }, { replace: true });
+        setFluxoAtivo(null);
+      } finally {
+        setCarregandoFluxo(false);
+      }
+    },
+    [client, wsEfetivo, tratarErro, carregarLogs, setSearchParams]
+  );
+
+  // Sincroniza parâmetro da URL com o fluxo ativo
+  useEffect(() => {
+    if (fluxoParam) {
+      if (!fluxoAtivo || fluxoAtivo.id !== fluxoParam) {
+        void carregarFluxoAtivo(fluxoParam);
+      }
+    } else {
+      if (fluxoAtivo) {
+        setFluxoAtivo(null);
+        setNoSelecionado(null);
+        setLogsExecucoes([]);
+        setPainelLogsAberto(false);
+      }
+    }
+  }, [fluxoParam, fluxoAtivo, carregarFluxoAtivo]);
+
+  // ── Navegação: Abrir Studio vs Voltar para Lista ───────────────────────
+  const handleAbrirStudio = (id: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("fluxo", id);
+      return next;
+    });
+  };
+
+  const handleVoltarParaLista = () => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("fluxo");
+      return next;
+    }, { replace: true });
+    setFluxoAtivo(null);
+    setNoSelecionado(null);
+    setPainelLogsAberto(false);
+    void carregarFluxos();
+  };
+
+  // ── Atualizações do Grafo ─────────────────────────────────────────────
+  const handleAtualizarGrafo = useCallback(
+    (novosNos: NoGrafo[], novasArestas: any[]) => {
+      if (!fluxoAtivo) return;
+      setFluxoAtivo({
+        ...fluxoAtivo,
+        nos: novosNos,
+        arestas: novasArestas,
+      });
+    },
+    [fluxoAtivo]
+  );
+
+  // Salvar Grafo no Servidor
+  const handleSalvarGrafo = async () => {
+    if (!fluxoAtivo) return;
+    setSalvandoGrafo(true);
+    try {
+      const payload = {
+        id: fluxoAtivo.id,
+        nome: fluxoAtivo.nome,
+        descricao: fluxoAtivo.descricao,
+        ativo: fluxoAtivo.ativo ?? true,
+        nos: fluxoAtivo.nos || [],
+        arestas: fluxoAtivo.arestas || [],
+      };
+
+      await client.flows.atualizar(fluxoAtivo.id, payload as any, {
+        workspaceId: wsEfetivo,
+      });
+
+      showToast(`Fluxo "${fluxoAtivo.nome || fluxoAtivo.id}" salvo com sucesso!`, "sucesso");
+    } catch (err) {
+      tratarErro(err, "Falha ao salvar grafo de fluxo");
+    } finally {
+      setSalvandoGrafo(false);
+    }
+  };
+
+  // ── Operações de Nós (Adicionar, Configurar, Excluir) ───────────────────
+  const handleAdicionarNodeTipo = (tipo: string, posicao?: { x: number; y: number }) => {
+    if (!fluxoAtivo) return;
+
+    // Gera ID único
+    const countExistente = (fluxoAtivo.nos || []).filter((n) => n.tipo === tipo).length;
+    const novoId = `${tipo}-${countExistente + 1}`;
+
+    const pos = posicao || {
+      x: 100 + (fluxoAtivo.nos?.length || 0) * 80,
+      y: 120 + ((fluxoAtivo.nos?.length || 0) % 3) * 100,
+    };
+
+    const novoNo: NoGrafo = {
+      id: novoId,
+      tipo,
+      config:
+        tipo === "cron"
+          ? { cron: "0 */3 * * *" }
+          : tipo === "agente"
+          ? { modelo: "nemotron-3-super-120b", ordem: "" }
+          : tipo === "script"
+          ? { runtime: "python", script: "", timeout_ms: 30000 }
+          : tipo === "condicao"
+          ? { expressao: "ctx.ok === true" }
+          : {},
+      pos,
+    };
+
+    const novosNos = [...(fluxoAtivo.nos || []), novoNo];
+    setFluxoAtivo({
+      ...fluxoAtivo,
+      nos: novosNos,
+    });
+
+    setNoSelecionado(novoNo);
+    setPaletaAberta(false);
+    showToast(`Nó "${novoId}" adicionado ao canvas.`, "info");
+  };
+
+  const handleSalvarNoConfig = (noAtualizado: NoGrafo) => {
+    if (!fluxoAtivo) return;
+
+    const antigosNos = fluxoAtivo.nos || [];
+    const idAntigo = noSelecionado?.id || noAtualizado.id;
+
+    const novosNos = antigosNos.map((n) => (n.id === idAntigo ? noAtualizado : n));
+
+    // Se o ID do nó mudou, atualiza referências nas arestas
+    let novasArestas = fluxoAtivo.arestas || [];
+    if (idAntigo !== noAtualizado.id) {
+      novasArestas = novasArestas.map((a) => ({
+        ...a,
+        de: a.de === idAntigo ? noAtualizado.id : a.de,
+        para: a.para === idAntigo ? noAtualizado.id : a.para,
+      }));
+    }
+
+    setFluxoAtivo({
+      ...fluxoAtivo,
+      nos: novosNos,
+      arestas: novasArestas,
+    });
+    setNoSelecionado(noAtualizado);
+  };
+
+  const handleExcluirNo = (noId: string) => {
+    if (!fluxoAtivo) return;
+
+    const novosNos = (fluxoAtivo.nos || []).filter((n) => n.id !== noId);
+    const novasArestas = (fluxoAtivo.arestas || []).filter(
+      (a) => a.de !== noId && a.para !== noId
+    );
+
+    setFluxoAtivo({
+      ...fluxoAtivo,
+      nos: novosNos,
+      arestas: novasArestas,
+    });
+    setNoSelecionado(null);
+    showToast(`Nó "${noId}" removido do fluxo.`, "info");
+  };
+
+  // ── Auto-Layout DAG Simples ───────────────────────────────────────────
+  const handleAutoLayout = () => {
+    if (!fluxoAtivo) return;
+    const nos = fluxoAtivo.nos || [];
+    const arestas = fluxoAtivo.arestas || [];
+
+    // Calcula níveis a partir dos nós sem entrada (raízes)
+    const entradasCount = new Map<string, number>();
+    nos.forEach((n) => entradasCount.set(n.id, 0));
+    arestas.forEach((a) => {
+      entradasCount.set(a.para, (entradasCount.get(a.para) || 0) + 1);
+    });
+
+    const niveis = new Map<string, number>();
+    const fila: string[] = [];
+
+    nos.forEach((n) => {
+      if ((entradasCount.get(n.id) || 0) === 0) {
+        niveis.set(n.id, 0);
+        fila.push(n.id);
+      }
+    });
+
+    while (fila.length > 0) {
+      const atual = fila.shift()!;
+      const nivelAtual = niveis.get(atual) || 0;
+      const sucessores = arestas.filter((a) => a.de === atual).map((a) => a.para);
+
+      sucessores.forEach((suc) => {
+        const nivelExistente = niveis.get(suc) || 0;
+        if (nivelAtual + 1 > nivelExistente) {
+          niveis.set(suc, nivelAtual + 1);
+          fila.push(suc);
+        }
+      });
+    }
+
+    // Agrupa nós por nível
+    const nósPorNivel = new Map<number, string[]>();
+    nos.forEach((n) => {
+      const lvl = niveis.get(n.id) || 0;
+      if (!nósPorNivel.has(lvl)) nósPorNivel.set(lvl, []);
+      nósPorNivel.get(lvl)!.push(n.id);
+    });
+
+    const novosNos = nos.map((n) => {
+      const lvl = niveis.get(n.id) || 0;
+      const listaDoNivel = nósPorNivel.get(lvl) || [n.id];
+      const indexNoNivel = listaDoNivel.indexOf(n.id);
+
+      return {
+        ...n,
+        pos: {
+          x: lvl * 320 + 80,
+          y: indexNoNivel * 180 + 80,
+        },
+      };
+    });
+
+    setFluxoAtivo({
+      ...fluxoAtivo,
+      nos: novosNos,
+    });
+    showToast("Layout automático aplicado com sucesso.", "info");
+  };
+
+  // ── Execuções de Fluxo ────────────────────────────────────────────────
+  const dispararExecucao = async (id: string, payload?: any, nome?: string) => {
     setExecutandoId(id);
     try {
-      await client.flows.executar(id, undefined, {
-        workspaceId: workspaceId || undefined,
+      await client.flows.executar(id, payload, {
+        workspaceId: wsEfetivo,
       });
-      showToast(`Fluxo "${nome || id}" disparado com sucesso!`, "sucesso");
+      showToast(`Fluxo "${nome || id}" iniciado com sucesso!`, "sucesso");
+      if (fluxoAtivo && fluxoAtivo.id === id) {
+        setPainelLogsAberto(true);
+        void carregarLogs(id);
+      }
     } catch (err) {
-      tratarErro(err, "Falha ao executar fluxo");
+      tratarErro(err, `Falha ao executar fluxo "${nome || id}"`);
     } finally {
       setExecutandoId(null);
     }
   };
 
-  const formatarGatilhos = (gatilhos?: any[]): string => {
-    if (!Array.isArray(gatilhos) || gatilhos.length === 0) {
-      return "Disparo manual";
+  // ── Criar Novo Fluxo (Templates) ──────────────────────────────────────
+  const handleCriarFluxo = async ({
+    id,
+    nome,
+    descricao,
+    template,
+  }: {
+    id: string;
+    nome: string;
+    descricao: string;
+    template: "pipeline" | "fanout" | "review" | "debate";
+  }) => {
+    setSalvandoNovo(true);
+    try {
+      let nos: NoGrafo[] = [];
+      let arestas: any[] = [];
+
+      if (template === "pipeline") {
+        nos = [
+          { id: "gatilho-manual", tipo: "manual", pos: { x: 80, y: 140 } },
+          {
+            id: "agente-executor",
+            tipo: "agente",
+            config: { modelo: "nemotron-3-super-120b", ordem: "Executar instrução" },
+            pos: { x: 380, y: 140 },
+          },
+          { id: "saida", tipo: "saida", pos: { x: 680, y: 140 } },
+        ];
+        arestas = [
+          { de: "gatilho-manual", para: "agente-executor" },
+          { de: "agente-executor", para: "saida" },
+        ];
+      } else if (template === "fanout") {
+        nos = [
+          { id: "gatilho-manual", tipo: "manual", pos: { x: 80, y: 140 } },
+          { id: "equipe-fanout", tipo: "fanout", pos: { x: 380, y: 140 } },
+          { id: "saida", tipo: "saida", pos: { x: 680, y: 140 } },
+        ];
+        arestas = [
+          { de: "gatilho-manual", para: "equipe-fanout" },
+          { de: "equipe-fanout", para: "saida" },
+        ];
+      } else if (template === "review") {
+        nos = [
+          { id: "gatilho-manual", tipo: "manual", pos: { x: 80, y: 140 } },
+          { id: "equipe-review", tipo: "review", pos: { x: 380, y: 140 } },
+          { id: "saida", tipo: "saida", pos: { x: 680, y: 140 } },
+        ];
+        arestas = [
+          { de: "gatilho-manual", para: "equipe-review" },
+          { de: "equipe-review", para: "saida" },
+        ];
+      } else {
+        nos = [
+          { id: "gatilho-manual", tipo: "manual", pos: { x: 80, y: 140 } },
+          { id: "equipe-debate", tipo: "debate", pos: { x: 380, y: 140 } },
+          { id: "saida", tipo: "saida", pos: { x: 680, y: 140 } },
+        ];
+        arestas = [
+          { de: "gatilho-manual", para: "equipe-debate" },
+          { de: "equipe-debate", para: "saida" },
+        ];
+      }
+
+      const novo = await client.flows.criar(
+        {
+          id,
+          nome,
+          descricao,
+          nos: nos as any,
+          arestas: arestas as any,
+          ativo: true,
+        },
+        { workspaceId: wsEfetivo }
+      );
+
+      showToast(`Fluxo "${nome}" criado com sucesso!`, "sucesso");
+      handleAbrirStudio(novo.id);
+    } catch (err) {
+      tratarErro(err, "Falha ao criar novo fluxo");
+    } finally {
+      setSalvandoNovo(false);
     }
-    return gatilhos
-      .map((g) => {
-        if (typeof g === "string") return g;
-        if (g && typeof g === "object") {
-          const tipo = g.tipo || "gatilho";
-          const detalhe = g.detalhe ? ` (${g.detalhe})` : "";
-          return `${tipo}${detalhe}`;
-        }
-        return String(g);
-      })
-      .join(", ");
   };
 
-  return (
-    <div className="flex flex-col h-full w-full p-4 sm:p-6 md:p-8 space-y-6 overflow-y-auto select-none">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
-            <Workflow className="text-emerald-400" size={20} />
-            Orquestrador de Fluxos Declarativos (DAG)
-          </h1>
-          <p className="text-xs text-zinc-400 mt-1">
-            Pipelines autônomos orquestrados no workspace <span className="font-mono text-emerald-400 font-semibold">{workspaceId || "yt-factory-01"}</span>.
-          </p>
+  // ── Importar Arquivo JSON ─────────────────────────────────────────────
+  const handleImportarArquivo = async (conteudoJson: any) => {
+    try {
+      if (!conteudoJson || !conteudoJson.id) {
+        showToast("O arquivo JSON de fluxo precisa conter a propriedade 'id'.", "erro");
+        return;
+      }
+
+      await client.flows.criar(conteudoJson, {
+        workspaceId: wsEfetivo,
+      });
+
+      showToast(`Fluxo "${conteudoJson.nome || conteudoJson.id}" importado com sucesso!`, "sucesso");
+      await carregarFluxos();
+      handleAbrirStudio(conteudoJson.id);
+    } catch (err) {
+      tratarErro(err, "Falha ao importar arquivo JSON de fluxo");
+    }
+  };
+
+  // ── Toggle Ativo/Inativo ──────────────────────────────────────────────
+  const handleToggleAtivo = async (fluxoId: string, novoAtivo: boolean) => {
+    try {
+      await client.flows.atualizar(
+        fluxoId,
+        { ativo: novoAtivo },
+        { workspaceId: wsEfetivo }
+      );
+
+      if (fluxoAtivo && fluxoAtivo.id === fluxoId) {
+        setFluxoAtivo({ ...fluxoAtivo, ativo: novoAtivo });
+      }
+
+      setFluxos((atuais) =>
+        atuais.map((f) => (f.id === fluxoId ? { ...f, ativo: novoAtivo } : f))
+      );
+
+      showToast(`Fluxo "${fluxoId}" ${novoAtivo ? "ativado" : "pausado"}.`, "info");
+    } catch (err) {
+      tratarErro(err, "Falha ao alternar estado do fluxo");
+    }
+  };
+
+  // ── Excluir Fluxo ─────────────────────────────────────────────────────
+  const handleExcluirFluxo = async (fluxoId: string, nome?: string) => {
+    if (!window.confirm(`Deseja realmente remover o fluxo "${nome || fluxoId}"?`)) {
+      return;
+    }
+
+    try {
+      await client.flows.deletar(fluxoId, {
+        workspaceId: wsEfetivo,
+      });
+
+      showToast(`Fluxo "${nome || fluxoId}" excluído com sucesso.`, "sucesso");
+      if (fluxoAtivo && fluxoAtivo.id === fluxoId) {
+        handleVoltarParaLista();
+      } else {
+        await carregarFluxos();
+      }
+    } catch (err) {
+      tratarErro(err, "Falha ao excluir fluxo");
+    }
+  };
+
+  // Exportar JSON do fluxo ativo
+  const handleExportarAtivo = () => {
+    if (!fluxoAtivo) return;
+    const blob = new Blob([JSON.stringify(fluxoAtivo, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${fluxoAtivo.id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Arquivo ${fluxoAtivo.id}.json exportado!`, "sucesso");
+  };
+
+  // ── RENDERIZAÇÃO: Studio Canvas vs Lista de Fluxos ─────────────────────
+  if (fluxoParam && fluxoAtivo) {
+    return (
+      <div className="flex flex-col h-full w-full bg-zinc-950 overflow-hidden relative select-none">
+        {/* Header do Studio */}
+        <WorkflowHeader
+          fluxo={fluxoAtivo}
+          logsCount={logsExecucoes.length}
+          painelLogsAberto={painelLogsAberto}
+          salvando={salvandoGrafo}
+          executando={executandoId === fluxoAtivo.id}
+          onVoltar={handleVoltarParaLista}
+          onAbrirPaleta={() => setPaletaAberta(true)}
+          onToggleLogs={() => setPainelLogsAberto(!painelLogsAberto)}
+          onSalvarGrafo={handleSalvarGrafo}
+          onExecutar={() => setModalExecutarAberto(true)}
+          onToggleAtivo={(ativo) => handleToggleAtivo(fluxoAtivo.id, ativo)}
+          onRenomearFluxo={(novoNome) =>
+            setFluxoAtivo({ ...fluxoAtivo, nome: novoNome })
+          }
+          onExportarJson={handleExportarAtivo}
+          onExcluirFluxo={() => handleExcluirFluxo(fluxoAtivo.id, fluxoAtivo.nome)}
+          onResetLayout={handleAutoLayout}
+        />
+
+        {/* Canvas de Nós com React Flow */}
+        <div className="flex-1 w-full h-full relative overflow-hidden">
+          <GraphCanvas
+            fluxo={fluxoAtivo}
+            noSelecionadoId={noSelecionado?.id || null}
+            onSelecionarNo={setNoSelecionado}
+            onAtualizarGrafo={handleAtualizarGrafo}
+            onAdicionarNodeTipo={handleAdicionarNodeTipo}
+          />
+
+          {/* Paleta Lateral Esquerda (Drawer Retrátil) */}
+          <ComponentPalette
+            aberto={paletaAberta}
+            onClose={() => setPaletaAberta(false)}
+            onAdicionarNode={(tipo) => handleAdicionarNodeTipo(tipo)}
+          />
+
+          {/* Gaveta Lateral Direita de Configuração do Nó (NDV) */}
+          <NodeConfigDrawer
+            no={noSelecionado}
+            fluxo={fluxoAtivo}
+            agentes={agentes}
+            fluxosExistentes={fluxos}
+            onClose={() => setNoSelecionado(null)}
+            onSalvarNo={handleSalvarNoConfig}
+            onExcluirNo={handleExcluirNo}
+          />
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={carregarFluxos}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-xs text-zinc-300 transition-colors cursor-pointer"
-          >
-            <RefreshCw size={13} className={carregando ? "animate-spin" : ""} />
-            <span>Atualizar</span>
-          </button>
-        </div>
+        {/* Painel Inferior de Logs de Execução & I/O */}
+        <ExecutionLogsPanel
+          fluxoId={fluxoAtivo.id}
+          logs={logsExecucoes}
+          aberto={painelLogsAberto}
+          carregando={carregandoLogs}
+          onToggleAberto={() => setPainelLogsAberto(!painelLogsAberto)}
+          onRecarregar={() => carregarLogs(fluxoAtivo.id)}
+        />
+
+        {/* Modal de Disparo com Payload */}
+        <ModalExecutarWorkflow
+          aberto={modalExecutarAberto}
+          fluxo={fluxoAtivo}
+          executando={executandoId === fluxoAtivo.id}
+          onClose={() => setModalExecutarAberto(false)}
+          onConfirmar={async (payload) => {
+            await dispararExecucao(fluxoAtivo.id, payload, fluxoAtivo.nome);
+          }}
+        />
       </div>
+    );
+  }
 
-      {/* Grid de Fluxos */}
-      {carregando ? (
-        <div className="p-12 text-center text-xs text-zinc-500">
-          <RefreshCw size={18} className="animate-spin mx-auto mb-2 text-emerald-400" />
-          <span>Consultando fluxos do workspace...</span>
-        </div>
-      ) : fluxos.length === 0 ? (
-        <div className="p-12 text-center text-xs text-zinc-500 border border-dashed border-zinc-850 rounded-2xl space-y-2">
-          <Workflow size={24} className="mx-auto text-zinc-600" />
-          <p>Nenhum fluxo configurado no workspace ativo.</p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between text-xs text-zinc-400 px-1">
-            <span>Pipelines Registrados ({fluxos.length})</span>
-            <span className="font-mono text-[11px] text-zinc-500">Engine: DAG OpenCorp v0.7</span>
-          </div>
+  // Visão de Lista de Fluxos (sem parâmetro na URL)
+  return (
+    <div className="flex flex-col h-full w-full bg-zinc-950 overflow-hidden">
+      <WorkflowList
+        fluxos={fluxos}
+        carregando={carregandoLista}
+        executandoId={executandoId}
+        onAbrirStudio={handleAbrirStudio}
+        onRecarregar={carregarFluxos}
+        onNovoFluxo={() => setModalNovoAberto(true)}
+        onExecutarFluxo={(id, nome) => dispararExecucao(id, undefined, nome)}
+        onExcluirFluxo={handleExcluirFluxo}
+        onImportarArquivo={handleImportarArquivo}
+        onToggleAtivo={handleToggleAtivo}
+      />
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {fluxos.map((fluxo: any) => {
-              const isEmExecucao = executandoId === fluxo.id;
-              const descricao = typeof fluxo.descricao === "string" ? fluxo.descricao : null;
-              const gatilhoTexto = formatarGatilhos(fluxo.gatilhos);
-              const qtdNos = typeof fluxo.nos === "number" ? fluxo.nos : Array.isArray(fluxo.nos) ? fluxo.nos.length : 0;
-              const qtdArestas = typeof fluxo.arestas === "number" ? fluxo.arestas : Array.isArray(fluxo.arestas) ? fluxo.arestas.length : 0;
-              const ativo = fluxo.ativo !== false;
-
-              return (
-                <div
-                  key={fluxo.id}
-                  className="flex flex-col p-5 rounded-2xl bg-zinc-900/40 border border-zinc-850 hover:border-zinc-700/80 transition-all shadow-sm space-y-4 justify-between"
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-xl bg-emerald-950/60 border border-emerald-800/40 flex items-center justify-center text-emerald-400 shadow-md">
-                          <GitFork size={20} />
-                        </div>
-                        <div className="min-w-0">
-                          <h3 className="text-sm font-semibold text-zinc-100 truncate">
-                            {fluxo.nome || fluxo.id}
-                          </h3>
-                          <span className="text-[10px] font-mono text-zinc-500 truncate block">
-                            {fluxo.id}
-                          </span>
-                        </div>
-                      </div>
-
-                      <span
-                        className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
-                          ativo
-                            ? "bg-emerald-950/40 border-emerald-800/40 text-emerald-300"
-                            : "bg-zinc-800 border-zinc-700 text-zinc-400"
-                        }`}
-                      >
-                        {ativo ? "Ativo" : "Inativo"}
-                      </span>
-                    </div>
-
-                    {descricao && (
-                      <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed">
-                        {descricao}
-                      </p>
-                    )}
-
-                    <div className="flex items-center gap-3 text-[11px] text-zinc-500 font-mono pt-1">
-                      <span className="flex items-center gap-1">
-                        <Layers size={12} className="text-zinc-400" />
-                        <span>{qtdNos} nós</span>
-                      </span>
-                      <span>·</span>
-                      <span className="flex items-center gap-1">
-                        <GitFork size={12} className="text-zinc-400" />
-                        <span>{qtdArestas} arestas</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="pt-3 border-t border-zinc-850/60 flex items-center justify-between text-[11px] text-zinc-400">
-                    <span className="flex items-center gap-1.5 font-mono truncate max-w-[160px] sm:max-w-[180px]" title={gatilhoTexto}>
-                      <Clock size={12} className="text-zinc-500 shrink-0" />
-                      <span className="truncate">{gatilhoTexto}</span>
-                    </span>
-
-                    <button
-                      type="button"
-                      disabled={isEmExecucao}
-                      onClick={() => dispararFluxo(fluxo.id, fluxo.nome)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold transition-all shadow-sm cursor-pointer"
-                    >
-                      <Play size={11} className={isEmExecucao ? "animate-spin" : ""} />
-                      <span>{isEmExecucao ? "Disparando..." : "Executar"}</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Modal de Novo Fluxo */}
+      <ModalNovoWorkflow
+        aberto={modalNovoAberto}
+        salvando={salvandoNovo}
+        onClose={() => setModalNovoAberto(false)}
+        onCriarFluxo={handleCriarFluxo}
+      />
     </div>
   );
 };
