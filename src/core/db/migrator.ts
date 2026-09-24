@@ -483,3 +483,118 @@ export function migrarWorkspaceParaSchemaConsolidado(
     throw err;
   }
 }
+
+// ─── RUNNER TRANSACIONAL DE MIGRAÇÕES (_schema_migrations) ────────────────────
+
+export interface Migration {
+  version: number;       // Ex: 1, 2, 3...
+  name: string;          // Ex: "001_init_core_schema"
+  up: (db: Database.Database) => void;
+}
+
+export interface ResultadoExecucaoMigracoes {
+  aplicadas: number;
+  versoes: number[];
+}
+
+/**
+ * Runner transacional de migrações de schema com tabela de controle _schema_migrations.
+ * Garante atomicidade (rollback automático em caso de erro), idempotência e ordenação.
+ */
+export class SchemaMigrator {
+  /**
+   * Garante a criação da tabela de controle _schema_migrations.
+   */
+  init(db: Database.Database): void {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS _schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      );
+    `);
+  }
+
+  /**
+   * Retorna a maior versão registrada ou 0 se nenhuma migração foi aplicada.
+   */
+  getVersaoAtual(db: Database.Database): number {
+    this.init(db);
+    const row = db
+      .prepare(`SELECT MAX(version) as max_version FROM _schema_migrations`)
+      .get() as { max_version?: number | null } | undefined;
+    return row?.max_version ?? 0;
+  }
+
+  /**
+   * Lista todas as migrações aplicadas no banco em ordem crescente.
+   */
+  listarVersoesAplicadas(
+    db: Database.Database,
+  ): Array<{ version: number; name: string; applied_at: string }> {
+    this.init(db);
+    return db
+      .prepare(`SELECT version, name, applied_at FROM _schema_migrations ORDER BY version ASC`)
+      .all() as Array<{ version: number; name: string; applied_at: string }>;
+  }
+
+  /**
+   * Executa em ordem sequencial todas as migrações com versão superior à atual.
+   * Cada migração é executada atomicamente dentro de uma transação SQLite.
+   * Se a função up() lançar erro, a transação reverte tudo automaticamente e interrompe a execução.
+   *
+   * Idempotência garantida: se todas as migrações já foram aplicadas, retorna { aplicadas: 0, versoes: [] }.
+   */
+  executarMigracoes(
+    db: Database.Database,
+    migracoes: Migration[],
+  ): ResultadoExecucaoMigracoes {
+    this.init(db);
+    const versaoAtual = this.getVersaoAtual(db);
+
+    const ordenadas = [...migracoes].sort((a, b) => a.version - b.version);
+    const pendentes = ordenadas.filter((m) => m.version > versaoAtual);
+
+    if (pendentes.length === 0) {
+      return { aplicadas: 0, versoes: [] };
+    }
+
+    const versoesAplicadas: number[] = [];
+
+    for (const migracao of pendentes) {
+      const transacao = db.transaction(() => {
+        migracao.up(db);
+        db.prepare(
+          `INSERT INTO _schema_migrations (version, name, applied_at) VALUES (?, ?, datetime('now'))`,
+        ).run(migracao.version, migracao.name);
+      });
+
+      try {
+        transacao();
+        versoesAplicadas.push(migracao.version);
+      } catch (err) {
+        throw new Error(
+          `Falha ao aplicar migração ${migracao.version} ("${migracao.name}"): ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
+        );
+      }
+    }
+
+    return {
+      aplicadas: versoesAplicadas.length,
+      versoes: versoesAplicadas,
+    };
+  }
+}
+
+/** Instância singleton do runner de migrações. */
+export const schemaMigrator = new SchemaMigrator();
+
+/** Função utilitária direta para execução de migrações em um banco. */
+export function executarMigracoes(
+  db: Database.Database,
+  migracoes: Migration[],
+): ResultadoExecucaoMigracoes {
+  return schemaMigrator.executarMigracoes(db, migracoes);
+}
+
