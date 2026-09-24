@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import solidPlugin from 'vite-plugin-solid';
+import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { resolve } from 'node:path';
 
@@ -7,7 +7,7 @@ export default defineConfig({
   root: resolve(__dirname, 'src/web'),
   plugins: [
     tailwindcss(),
-    solidPlugin(),
+    react(),
   ],
   resolve: {
     alias: {
@@ -27,11 +27,14 @@ export default defineConfig({
           if (id.includes('node_modules/mermaid') || id.includes('node_modules/@mermaid-js')) {
             return 'vendor-mermaid';
           }
-          if (id.includes('node_modules/lucide-solid')) {
+          if (id.includes('node_modules/lucide-react')) {
             return 'vendor-icons';
           }
-          if (id.includes('node_modules/solid-js') || id.includes('node_modules/@solidjs/router')) {
-            return 'vendor-solid';
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router-dom')) {
+            return 'vendor-react';
+          }
+          if (id.includes('node_modules/@assistant-ui')) {
+            return 'vendor-assistant-ui';
           }
         },
       },

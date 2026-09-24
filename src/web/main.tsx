@@ -1,11 +1,16 @@
-import { render } from "solid-js/web";
-import { App } from "./App";
+import React from "react";
+import { createRoot } from "react-dom/client";
+import { App } from "./App.js";
 import "./css/app.css";
 
-const root = document.getElementById("root");
+const rootElement = document.getElementById("root");
 
-if (root) {
-  render(() => <App />, root);
+if (rootElement) {
+  createRoot(rootElement).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  );
 } else {
   console.error("Elemento #root não encontrado no DOM");
 }

@@ -4,8 +4,7 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "jsx": "preserve",
-    "jsxImportSource": "solid-js",
+    "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -14,12 +13,24 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-    "types": ["vite/client"],
+    "types": ["vite/client", "node"],
     "paths": {
       "@opencorp/sdk": ["./src/sdk/index.ts"],
       "@/*": ["./src/web/*"]
     }
   },
   "include": ["src/web/**/*.ts", "src/web/**/*.tsx", "src/web/**/*.js", "src/web/**/*.jsx"],
-  "exclude": ["src/web/**/*.svelte.ts", "src/web/**/*.svelte"]
+  "exclude": [
+    "src/web/**/*.svelte.ts",
+    "src/web/**/*.svelte",
+    "src/web/views/**/*",
+    "src/web/views/*",
+    "src/web/components/**/*",
+    "src/web/components/*",
+    "src/web/ui/**/*",
+    "src/web/ui/*",
+    "src/web/lib/chat/sessions-store.ts",
+    "src/web/lib/chat/store.tsx",
+    "src/web/lib/chat/stream-handler.ts"
+  ]
 }
