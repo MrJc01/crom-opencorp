@@ -266,7 +266,7 @@ export const HomeView: Component = () => {
         fetchApi<any[]>("/meetings"),
       ]);
 
-      const getVal = <T>(r: PromiseSettledResult<T>, def: T): T => (r.status === "fulfilled" && r.value != null ? r.value : def);
+      const getVal = <T,>(r: PromiseSettledResult<T>, def: T): T => (r.status === "fulfilled" && r.value != null ? r.value : def);
 
       const dTasks = Array.isArray(getVal(tasks, [])) ? getVal(tasks, []) : [];
       const dAgentes = Array.isArray(getVal(ags, [])) ? getVal(ags, []) : [];

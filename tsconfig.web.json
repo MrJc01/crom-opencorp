@@ -15,7 +15,6 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
     "types": ["vite/client"],
-    "baseUrl": ".",
     "paths": {
       "@opencorp/sdk": ["./src/sdk/index.ts"],
       "@/*": ["./src/web/*"]
