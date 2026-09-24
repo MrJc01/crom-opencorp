@@ -246,6 +246,18 @@ async function construirArvore(raiz: string, profundidadeMax: number): Promise<{
   return { arvore, truncado };
 }
 
+function extrairPathWorkspace(ws: { path?: string; caminho?: string } | null | undefined): string {
+  if (!ws) return "";
+  const obj = ws as Record<string, unknown>;
+  if (typeof obj.caminho === "string" && obj.caminho.trim().length > 0) {
+    return obj.caminho.trim();
+  }
+  if (typeof obj.path === "string" && obj.path.trim().length > 0) {
+    return obj.path.trim();
+  }
+  return "";
+}
+
 export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
   const { req, res, url, rota, resolverWs, lerCorpo, enviar, workspaces } = ctx;
 
@@ -256,12 +268,13 @@ export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
   // ── 1. GET /files — lista diretório ou lê arquivo do workspace
   if (rota === "/files" && req.method === "GET") {
     const ws = await resolverWs(url);
+    const wsPath = extrairPathWorkspace(ws);
     const pathParam = url.searchParams.get("path") ?? "";
     try {
       let alvo = "";
       let wsAlvo = ws;
       try {
-        alvo = await resolverArquivoOuSymlink(ws.path, pathParam);
+        alvo = await resolverArquivoOuSymlink(wsPath, pathParam);
         await stat(alvo);
       } catch (e: any) {
         if (pathParam && (e?.code === "ENOENT" || e instanceof WorkspaceError)) {
@@ -300,7 +313,7 @@ export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
         );
         enviar(res, 200, { tipo: "dir", itens: itensComTamanho });
       } else {
-        const resultado = await lerArquivoWorkspace(alvo, wsAlvo.path);
+        const resultado = await lerArquivoWorkspace(alvo, extrairPathWorkspace(wsAlvo));
         const urlRaw = `/files/raw?path=${encodeURIComponent(pathParam)}&workspace=${encodeURIComponent(wsAlvo.id)}`;
         enviar(res, 200, {
           ...resultado,
@@ -324,6 +337,7 @@ export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
   // ── 2. GET/HEAD /files/raw — stream binário direto com suporte a Range
   if (rota === "/files/raw" && (req.method === "GET" || req.method === "HEAD")) {
     const ws = await resolverWs(url);
+    const wsPath = extrairPathWorkspace(ws);
     const pathParam = url.searchParams.get("path") ?? "";
     if (!pathParam) {
       enviar(res, 400, { erro: "parâmetro 'path' é obrigatório" });
@@ -332,16 +346,17 @@ export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
     try {
       let alvo = "";
       try {
-        alvo = await resolverArquivoOuSymlink(ws.path, pathParam);
+        alvo = await resolverArquivoOuSymlink(wsPath, pathParam);
         await stat(alvo);
       } catch (e: any) {
         if (e?.code === "ENOENT" || e instanceof WorkspaceError) {
           let achou = false;
           const todos = await workspaces.listar().catch(() => []);
           for (const outro of todos) {
-            if (outro.id === ws.id || !outro.path) continue;
+            const outroPath = extrairPathWorkspace(outro);
+            if (outro.id === ws.id || !outroPath) continue;
             try {
-              const testAlvo = await resolverArquivoOuSymlink(outro.path, pathParam);
+              const testAlvo = await resolverArquivoOuSymlink(outroPath, pathParam);
               await stat(testAlvo);
               alvo = testAlvo;
               achou = true;
@@ -422,9 +437,10 @@ export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
   // ── 3. GET /files/tree — árvore recursiva do workspace
   if (rota === "/files/tree" && req.method === "GET") {
     const ws = await resolverWs(url);
+    const wsPath = extrairPathWorkspace(ws);
     const profBruta = Number(url.searchParams.get("profundidade"));
     const profundidade = Math.min(6, Math.max(1, Number.isFinite(profBruta) ? Math.floor(profBruta) : 4));
-    const { arvore, truncado } = await construirArvore(ws.path, profundidade);
+    const { arvore, truncado } = await construirArvore(wsPath, profundidade);
     enviar(res, 200, { tipo: "arvore", arvore, truncado });
     return true;
   }
@@ -432,6 +448,7 @@ export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
   // ── 4. PUT /files — salva conteúdo de arquivo EXISTENTE
   if (rota === "/files" && req.method === "PUT") {
     const ws = await resolverWs(url);
+    const wsPath = extrairPathWorkspace(ws);
     const pathParam = url.searchParams.get("path") ?? "";
     let corpo: { conteudo?: unknown };
     try {
@@ -446,9 +463,9 @@ export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
       return true;
     }
     try {
-      const alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+      const alvo = await resolverCaminhoWorkspace(wsPath, pathParam);
       const real = await realpath(alvo).catch(() => null);
-      if (!real || relative(resolve(ws.path), real).startsWith("..")) {
+      if (!real || relative(resolve(wsPath), real).startsWith("..")) {
         enviar(res, 403, { erro: "symlink fora do workspace (bloqueado)" });
         return true;
       }
@@ -474,6 +491,7 @@ export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
   // ── 5. POST /files — cria arquivo ou pasta no workspace
   if (rota === "/files" && req.method === "POST") {
     const ws = await resolverWs(url);
+    const wsPath = extrairPathWorkspace(ws);
     const corpo = (await lerCorpo(req)) as { path?: string; tipo?: "arquivo" | "dir"; conteudo?: string };
     const pathParam = String(corpo.path ?? "").trim();
     if (!pathParam) {
@@ -481,7 +499,7 @@ export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
       return true;
     }
     try {
-      const alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+      const alvo = await resolverCaminhoWorkspace(wsPath, pathParam);
       const tipo = corpo.tipo === "dir" ? "dir" : "arquivo";
       if (tipo === "dir") {
         await mkdir(alvo, { recursive: true });
@@ -503,13 +521,14 @@ export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
   // ── 6. DELETE /files — remove arquivo ou pasta no workspace
   if (rota === "/files" && req.method === "DELETE") {
     const ws = await resolverWs(url);
+    const wsPath = extrairPathWorkspace(ws);
     const pathParam = String(url.searchParams.get("path") ?? "").trim();
     if (!pathParam || pathParam === "." || pathParam === "/") {
       enviar(res, 400, { erro: "caminho inválido para exclusão" });
       return true;
     }
     try {
-      const alvo = await resolverCaminhoWorkspace(ws.path, pathParam);
+      const alvo = await resolverCaminhoWorkspace(wsPath, pathParam);
       const info = await stat(alvo).catch(() => null);
       if (!info) {
         enviar(res, 404, { erro: "arquivo ou pasta não encontrado" });
@@ -534,6 +553,7 @@ export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
   // ── 7. POST /files/rename — renomeia ou move arquivo/pasta
   if (rota === "/files/rename" && req.method === "POST") {
     const ws = await resolverWs(url);
+    const wsPath = extrairPathWorkspace(ws);
     const corpo = (await lerCorpo(req)) as { antigo?: string; novo?: string };
     const antigoParam = String(corpo.antigo ?? "").trim();
     const novoParam = String(corpo.novo ?? "").trim();
@@ -542,8 +562,8 @@ export async function handleFilesRoutes(ctx: RouteContext): Promise<boolean> {
       return true;
     }
     try {
-      const alvoAntigo = await resolverCaminhoWorkspace(ws.path, antigoParam);
-      const alvoNovo = await resolverCaminhoWorkspace(ws.path, novoParam);
+      const alvoAntigo = await resolverCaminhoWorkspace(wsPath, antigoParam);
+      const alvoNovo = await resolverCaminhoWorkspace(wsPath, novoParam);
       await mkdir(dirname(alvoNovo), { recursive: true });
       await rename(alvoAntigo, alvoNovo);
       enviar(res, 200, { ok: true, antigo: antigoParam, novo: novoParam });

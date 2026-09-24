@@ -1,36 +1,27 @@
 import React, { useState, useEffect, useCallback, type FC } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
-import { type WorkspaceResumo, type WorkspaceGitStatus } from "@opencorp/sdk";
+import { type WorkspaceGitStatus } from "@opencorp/sdk";
 import { showToast } from "../../../shared/ui/Toast.js";
 import { FileTree } from "../components/FileTree.js";
-import {
-  FolderTree,
-  GitBranch,
-  Save,
-  CheckCircle2,
-  AlertCircle,
-  FileCode,
-  HardDrive,
-  RefreshCw,
-  X,
-  FileText,
-  Workflow,
-  Sparkles,
-} from "lucide-react";
+import { CodeEditorTabs, type TabArquivo } from "../components/CodeEditorTabs.js";
+import { WorkspaceTerminals } from "../components/WorkspaceTerminals.js";
+import { GitBranch, RefreshCw } from "lucide-react";
 
 export const WorkspaceView: FC = () => {
-  const { client, workspaceId, definirWorkspaceId, tratarErro } = useOpenCorp();
+  const { client, workspaceId, tratarErro } = useOpenCorp();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Abas abertas de arquivos
+  const [tabs, setTabs] = useState<TabArquivo[]>([]);
+  const [tabAtiva, setTabAtiva] = useState<string | null>(null);
+  const [salvando, setSalvando] = useState(false);
+
+  // Status Git
   const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus | null>(null);
   const [carregandoGit, setCarregandoGit] = useState(false);
 
-  // Arquivo Ativo
-  const [arquivoAtivo, setArquivoAtivo] = useState<string | null>(null);
-  const [conteudoOriginal, setConteudoOriginal] = useState("");
-  const [conteudoEditado, setConteudoEditado] = useState("");
-  const [carregandoArquivo, setCarregandoArquivo] = useState(false);
-  const [salvandoArquivo, setSalvandoArquivo] = useState(false);
-
-  // Carregar status Git
+  // Carregar status do Git
   const carregarGit = useCallback(async () => {
     setCarregandoGit(true);
     try {
@@ -47,10 +38,20 @@ export const WorkspaceView: FC = () => {
     void carregarGit();
   }, [carregarGit]);
 
-  // Carregar conteúdo do arquivo
-  const carregarArquivo = useCallback(
+  // Abrir ou focar arquivo
+  const abrirArquivo = useCallback(
     async (caminho: string) => {
-      setCarregandoArquivo(true);
+      // Se a aba já estiver aberta, apenas a foca
+      const tabExistente = tabs.find((t) => t.caminho === caminho);
+      if (tabExistente) {
+        setTabAtiva(caminho);
+        setSearchParams((prev) => {
+          prev.set("file", caminho);
+          return prev;
+        });
+        return;
+      }
+
       try {
         const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:4100";
         const wsParam = workspaceId ? `&workspace=${encodeURIComponent(workspaceId)}` : "";
@@ -66,43 +67,120 @@ export const WorkspaceView: FC = () => {
         }
 
         const data = await resp.json();
+        const nome = caminho.split("/").pop() || caminho;
+        const ext = nome.split(".").pop()?.toLowerCase() || "";
+        const ehVid = ["mp4", "webm", "mkv", "mov"].includes(ext);
+        const ehImg = ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext);
+        const ehAud = ["mp3", "wav", "ogg", "m4a"].includes(ext);
+        const ehMidia = ehVid || ehImg || ehAud;
+        const ehBinario = Boolean(data.binario) || ehMidia;
+
         let texto = "";
-        if (typeof data === "string") {
-          texto = data;
-        } else if (data && typeof data.conteudo === "string") {
-          texto = data.conteudo;
-        } else {
-          texto = JSON.stringify(data, null, 2);
+        if (!ehBinario) {
+          if (typeof data === "string") {
+            texto = data;
+          } else if (data && typeof data.conteudo === "string") {
+            texto = data.conteudo;
+          } else {
+            texto = JSON.stringify(data, null, 2);
+          }
         }
 
-        setArquivoAtivo(caminho);
-        setConteudoOriginal(texto);
-        setConteudoEditado(texto);
+        const urlRaw = data.urlRaw || `${origin}/files/raw?path=${encodeURIComponent(caminho)}${wsParam}`;
+
+        const novaTab: TabArquivo = {
+          caminho,
+          nome,
+          original: texto,
+          editado: texto,
+          modo: ehMidia ? "media" : ext === "md" ? "preview" : "editor",
+          binario: ehBinario,
+          rawUrl: urlRaw,
+          tamanho: data.tamanho,
+          mime: data.mime,
+          tipoMidia: ehVid ? "video" : ehImg ? "imagem" : ehAud ? "audio" : "outro",
+          workspace: data.workspace || workspaceId,
+        };
+
+        setTabs((prev) => [...prev, novaTab]);
+        setTabAtiva(caminho);
+        setSearchParams((prev) => {
+          prev.set("file", caminho);
+          return prev;
+        });
       } catch (err: unknown) {
         tratarErro(err, `Erro ao abrir ${caminho}`);
-      } finally {
-        setCarregandoArquivo(false);
       }
     },
-    [workspaceId, tratarErro],
+    [tabs, workspaceId, setSearchParams, tratarErro],
   );
 
-  // Salvar arquivo editado
-  const salvarArquivo = async () => {
-    if (!arquivoAtivo) return;
-    setSalvandoArquivo(true);
+  // Inicialização pelo parâmetro da URL ?file=
+  useEffect(() => {
+    const fileParam = searchParams.get("file");
+    if (fileParam && !tabs.some((t) => t.caminho === fileParam)) {
+      void abrirArquivo(fileParam);
+    }
+  }, [searchParams, tabs, abrirArquivo]);
+
+  // Fechar aba
+  const fecharTab = (caminho: string) => {
+    const t = tabs.find((x) => x.caminho === caminho);
+    if (t && t.editado !== t.original) {
+      if (!confirm(`O arquivo "${t.nome}" possui alterações não salvas. Fechar mesmo assim?`)) {
+        return;
+      }
+    }
+
+    const idx = tabs.findIndex((x) => x.caminho === caminho);
+    const rest = tabs.filter((x) => x.caminho !== caminho);
+    setTabs(rest);
+
+    if (tabAtiva === caminho) {
+      const proxima = rest[Math.min(idx, rest.length - 1)]?.caminho ?? null;
+      setTabAtiva(proxima);
+      setSearchParams((prev) => {
+        if (proxima) {
+          prev.set("file", proxima);
+        } else {
+          prev.delete("file");
+        }
+        return prev;
+      });
+    }
+  };
+
+  // Atualizar conteúdo digitado
+  const atualizarConteudo = (caminho: string, novoConteudo: string) => {
+    setTabs((prev) =>
+      prev.map((t) => (t.caminho === caminho ? { ...t, editado: novoConteudo } : t)),
+    );
+  };
+
+  // Alternar modo da aba ativa (código, preview, split, media)
+  const mudarModoTab = (caminho: string, modo: "editor" | "preview" | "split" | "media") => {
+    setTabs((prev) =>
+      prev.map((t) => (t.caminho === caminho ? { ...t, modo } : t)),
+    );
+  };
+
+  // Salvar alterações da tab ativa via PUT /files
+  const salvarTab = async (tab: TabArquivo) => {
+    if (tab.binario) return;
+    setSalvando(true);
     try {
       const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:4100";
-      const wsParam = workspaceId ? `&workspace=${encodeURIComponent(workspaceId)}` : "";
+      const wsTab = tab.workspace || workspaceId;
+      const wsParam = wsTab ? `&workspace=${encodeURIComponent(wsTab)}` : "";
       const resp = await fetch(
-        `${origin}/files?path=${encodeURIComponent(arquivoAtivo)}${wsParam}`,
+        `${origin}/files?path=${encodeURIComponent(tab.caminho)}${wsParam}`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            ...(workspaceId ? { "x-opencorp-workspace": workspaceId } : {}),
+            ...(wsTab ? { "x-opencorp-workspace": wsTab } : {}),
           },
-          body: JSON.stringify({ conteudo: conteudoEditado }),
+          body: JSON.stringify({ conteudo: tab.editado }),
         },
       );
 
@@ -110,167 +188,87 @@ export const WorkspaceView: FC = () => {
         throw new Error(`Falha ao salvar (HTTP ${resp.status})`);
       }
 
-      setConteudoOriginal(conteudoEditado);
-      showToast(`Arquivo "${arquivoAtivo.split("/").pop()}" salvo com sucesso!`, "sucesso");
+      setTabs((prev) =>
+        prev.map((item) =>
+          item.caminho === tab.caminho ? { ...item, original: tab.editado } : item,
+        ),
+      );
+
+      showToast(`Arquivo "${tab.nome}" salvo com sucesso!`, "sucesso");
       void carregarGit();
     } catch (err: unknown) {
       tratarErro(err, "Falha ao salvar arquivo");
     } finally {
-      setSalvandoArquivo(false);
+      setSalvando(false);
     }
   };
 
-  // Atalho de teclado Ctrl+S
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && arquivoAtivo) {
-        e.preventDefault();
-        void salvarArquivo();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [arquivoAtivo, conteudoEditado]);
-
-  const temAlteracoes = conteudoEditado !== conteudoOriginal;
-
   return (
     <div className="flex h-full w-full bg-zinc-950 overflow-hidden select-none">
-      {/* Coluna Esquerda: Árvore de Arquivos (Explorer) */}
-      <aside className="w-72 sm:w-80 h-full flex-shrink-0">
+      {/* ─────────────────────────────────────────────────────────────
+          ÁREA 1 (ESQUERDA): ÁRVORE DE ARQUIVOS (EXPLORER COMPLETO)
+         ───────────────────────────────────────────────────────────── */}
+      <aside className="w-64 sm:w-72 h-full flex-shrink-0">
         <FileTree
-          arquivoAtivo={arquivoAtivo}
-          aoSelecionarArquivo={(caminho) => void carregarArquivo(caminho)}
+          arquivoAtivo={tabAtiva}
+          aoSelecionarArquivo={(caminho) => void abrirArquivo(caminho)}
         />
       </aside>
 
-      {/* Coluna Direita: Editor ou Painel de Visão Geral */}
+      {/* ─────────────────────────────────────────────────────────────
+          COLUNA DIREITA (DIVIDIDA EM SUPERIOR E INFERIOR)
+         ───────────────────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col h-full min-w-0 bg-zinc-950 overflow-hidden">
-        {/* Barra Superior do Workspace / Editor */}
-        <header className="h-12 border-b border-zinc-850 px-4 flex items-center justify-between bg-zinc-900/50 shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
-            {arquivoAtivo ? (
-              <div className="flex items-center gap-2 min-w-0 text-xs font-mono text-zinc-300">
-                <FileCode size={14} className="text-emerald-400 shrink-0" />
-                <span className="font-semibold text-zinc-100 truncate">
-                  {arquivoAtivo.split("/").pop()}
-                </span>
-                <span className="text-zinc-600 truncate hidden sm:inline">
-                  ({arquivoAtivo})
-                </span>
-                {temAlteracoes && (
-                  <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" title="Alterações não salvas" />
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
-                <FolderTree size={15} className="text-emerald-400" />
-                <span>IDE Workspace: {workspaceId || "yt-factory-01"}</span>
-              </div>
-            )}
+        {/* Barra de Status do Workspace / Git */}
+        <div className="h-8 border-b border-zinc-850 px-3 flex items-center justify-between bg-zinc-900/40 text-[11px] font-mono text-zinc-400 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-zinc-500">workspace:</span>
+            <span className="text-zinc-200 font-semibold">{workspaceId || "yt-factory-01"}</span>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Badge Git */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-950 border border-zinc-800 text-[11px] font-mono text-zinc-400">
-              <GitBranch size={12} className="text-emerald-400" />
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-[10px]">
+              <GitBranch size={11} className="text-emerald-400" />
               <span>{gitStatus?.branch || "main"}</span>
               {gitStatus?.dirty && (
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Modificações no Git" />
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Modificações Git pendentes" />
               )}
             </div>
 
-            {/* Ações do Arquivo */}
-            {arquivoAtivo && (
-              <>
-                <button
-                  type="button"
-                  onClick={salvarArquivo}
-                  disabled={salvandoArquivo || !temAlteracoes}
-                  className="flex items-center gap-1 px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-medium shadow-xs transition-all cursor-pointer"
-                  title="Salvar alterações (Ctrl+S)"
-                >
-                  <Save size={13} />
-                  <span>{salvandoArquivo ? "Salvando..." : "Salvar"}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setArquivoAtivo(null)}
-                  className="p-1 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
-                  title="Fechar arquivo"
-                >
-                  <X size={15} />
-                </button>
-              </>
-            )}
+            <button
+              type="button"
+              onClick={carregarGit}
+              title="Recarregar status Git"
+              className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
+            >
+              <RefreshCw size={11} className={carregandoGit ? "animate-spin" : ""} />
+            </button>
           </div>
-        </header>
-
-        {/* Área Central: Visualizador/Editor ou Welcome State */}
-        <div className="flex-1 min-h-0 overflow-hidden relative">
-          {carregandoArquivo ? (
-            <div className="flex items-center justify-center h-full text-xs text-zinc-500">
-              <RefreshCw size={16} className="animate-spin mr-2 text-emerald-400" />
-              <span>Carregando arquivo...</span>
-            </div>
-          ) : arquivoAtivo ? (
-            <div className="h-full w-full flex flex-col p-2">
-              <textarea
-                value={conteudoEditado}
-                onChange={(e) => setConteudoEditado(e.target.value)}
-                spellCheck={false}
-                className="flex-1 w-full p-4 bg-zinc-950 font-mono text-xs text-zinc-200 resize-none focus:outline-none border-none leading-relaxed select-text"
-                placeholder="Conteúdo vazio..."
-              />
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full p-8 text-center space-y-4">
-              <div className="h-12 w-12 rounded-2xl bg-emerald-950/60 border border-emerald-800/50 flex items-center justify-center text-emerald-400 shadow-lg">
-                <FileCode size={22} />
-              </div>
-
-              <div className="max-w-md space-y-1">
-                <h3 className="text-sm font-bold text-zinc-200">
-                  Nenhum arquivo aberto
-                </h3>
-                <p className="text-xs text-zinc-400">
-                  Selecione um arquivo na árvore à esquerda para inspecionar, editar e salvar diretamente no workspace.
-                </p>
-              </div>
-
-              {/* Sugestões de Acesso Rápido */}
-              <div className="pt-2 flex flex-wrap justify-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void carregarArquivo(".opencorp/flows/yt-pautador.json")}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-300 font-mono transition-colors cursor-pointer"
-                >
-                  <Workflow size={13} className="text-emerald-400" />
-                  <span>yt-pautador.json</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => void carregarArquivo(".opencorp/flows/yt-boletim-diario.json")}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-300 font-mono transition-colors cursor-pointer"
-                >
-                  <Workflow size={13} className="text-blue-400" />
-                  <span>yt-boletim-diario.json</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => void carregarArquivo(".opencorp/config.json")}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-300 font-mono transition-colors cursor-pointer"
-                >
-                  <FileText size={13} className="text-amber-400" />
-                  <span>config.json</span>
-                </button>
-              </div>
-            </div>
-          )}
         </div>
+
+        {/* ÁREA 2 (DIREITA SUPERIOR): EDITOR MULTI-ABAS / PREVIEW / MEDIA */}
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          <CodeEditorTabs
+            tabs={tabs}
+            tabAtiva={tabAtiva}
+            aoMudarTabAtiva={(caminho) => {
+              setTabAtiva(caminho);
+              setSearchParams((prev) => {
+                prev.set("file", caminho);
+                return prev;
+              });
+            }}
+            aoFecharTab={fecharTab}
+            aoAtualizarConteudo={atualizarConteudo}
+            aoMudarModoTab={mudarModoTab}
+            aoSalvarTab={salvarTab}
+            salvando={salvando}
+            aoAbrirArquivo={(caminho) => void abrirArquivo(caminho)}
+          />
+        </div>
+
+        {/* ÁREA 3 (DIREITA INFERIOR): TERMINAL BASH MULTI-ABAS */}
+        <WorkspaceTerminals altura="12rem" />
       </main>
     </div>
   );
