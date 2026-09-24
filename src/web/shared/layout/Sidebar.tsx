@@ -1,42 +1,74 @@
-import React, { useState, type FC } from "react";
+import React, { useState, useEffect, type FC } from "react";
 import { NavLink } from "react-router-dom";
 import {
-  Bot,
+  LayoutDashboard,
   Kanban,
-  Users,
+  Bot,
   Workflow,
-  MessagesSquare,
+  Users2,
+  FolderGit2,
+  Cpu,
   Layers,
+  Boxes,
+  History,
   Bell,
-  BookOpen,
   Settings,
+  KeyRound,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
   Shield,
   Activity,
 } from "lucide-react";
+import { useOpenCorp } from "../../providers/OpenCorpProvider.js";
 
 interface ItemNav {
   to: string;
   rotulo: string;
   icone: React.ComponentType<{ size?: number; className?: string }>;
-  destaque?: boolean;
+  badge?: string;
+  badgeCor?: string;
 }
 
-const ITENS_NAV: ItemNav[] = [
-  { to: "/secretario", rotulo: "Secretário Executivo", icone: Bot, destaque: true },
-  { to: "/tasks", rotulo: "Kanban Operacional", icone: Kanban },
-  { to: "/agentes", rotulo: "Quadro de Agentes", icone: Users },
-  { to: "/fluxos", rotulo: "Fluxos de Automação", icone: Workflow },
-  { to: "/reunioes", rotulo: "Reuniões & Deliberações", icone: MessagesSquare },
-  { to: "/ativos", rotulo: "Loja de Skills & Ativos", icone: Layers },
-  { to: "/notificacoes", rotulo: "Notificações & Alertas", icone: Bell },
-  { to: "/docs", rotulo: "Documentação do Sistema", icone: BookOpen },
-  { to: "/config", rotulo: "Configurações Gerais", icone: Settings },
+interface GrupoNav {
+  titulo: string;
+  itens: ItemNav[];
+}
+
+const GRUPOS_NAV: GrupoNav[] = [
+  {
+    titulo: "OPERACIONAL",
+    itens: [
+      { to: "/home", rotulo: "Home Dashboard", icone: LayoutDashboard },
+      { to: "/tasks", rotulo: "Tarefas & Kanban", icone: Kanban },
+      { to: "/secretario", rotulo: "Secretário Executivo", icone: Bot, badge: "IA", badgeCor: "bg-emerald-950 border-emerald-800 text-emerald-400" },
+      { to: "/fluxos", rotulo: "Fluxos de Automação", icone: Workflow },
+      { to: "/reunioes", rotulo: "Reuniões & Deliberações", icone: Users2 },
+    ],
+  },
+  {
+    titulo: "DESENVOLVIMENTO",
+    itens: [
+      { to: "/workspace", rotulo: "Workspace IDE", icone: FolderGit2 },
+      { to: "/agentes", rotulo: "Agentes & Teams", icone: Cpu },
+      { to: "/apps", rotulo: "Apps & MCPs", icone: Layers },
+      { to: "/ativos", rotulo: "Ativos & Skills", icone: Boxes },
+    ],
+  },
+  {
+    titulo: "GOVERNANÇA & SRE",
+    itens: [
+      { to: "/historico", rotulo: "Histórico de Auditoria", icone: History },
+      { to: "/notificacoes", rotulo: "Notificações", icone: Bell },
+      { to: "/config", rotulo: "Configurações", icone: Settings },
+      { to: "/secrets", rotulo: "Segredos & Chaves", icone: KeyRound },
+      { to: "/docs", rotulo: "Documentação", icone: BookOpen },
+    ],
+  },
 ];
 
 export const Sidebar: FC = () => {
+  const { workspaceId } = useOpenCorp();
   const [recolhida, setRecolhida] = useState<boolean>(() => {
     return typeof window !== "undefined" && localStorage.getItem("oc_sidebar_collapsed") === "1";
   });
@@ -53,15 +85,15 @@ export const Sidebar: FC = () => {
 
   return (
     <aside
-      className={`flex flex-col h-full bg-zinc-950 border-r border-zinc-850 select-none transition-all duration-200 z-30 ${
-        recolhida ? "w-16" : "w-64"
+      className={`flex flex-col h-full bg-zinc-950 border-r border-zinc-850 select-none transition-all duration-200 z-30 shrink-0 ${
+        recolhida ? "w-16" : "w-60"
       }`}
     >
-      {/* Topo da Sidebar com Logo */}
-      <div className="flex items-center justify-between h-14 px-3.5 border-b border-zinc-850/80">
+      {/* Topo com Logo e Versão */}
+      <div className="flex items-center justify-between h-14 px-3.5 border-b border-zinc-850/80 bg-zinc-950/80">
         {!recolhida ? (
           <div className="flex items-center gap-2.5 overflow-hidden">
-            <div className="h-8 w-8 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-md shadow-emerald-950/60 flex-shrink-0">
+            <div className="h-8 w-8 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-md shadow-emerald-950/60 shrink-0">
               <Shield size={18} />
             </div>
             <div className="flex flex-col min-w-0">
@@ -79,60 +111,87 @@ export const Sidebar: FC = () => {
             <Shield size={18} />
           </div>
         )}
+      </div>
 
+      {/* Navegação por Grupos */}
+      <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-4 scrollbar-thin">
+        {GRUPOS_NAV.map((grupo) => (
+          <div key={grupo.titulo} className="space-y-1">
+            {!recolhida && (
+              <span className="px-3 text-[10px] font-bold text-zinc-400 tracking-wider uppercase block">
+                {grupo.titulo}
+              </span>
+            )}
+
+            <div className="space-y-0.5">
+              {grupo.itens.map((item) => {
+                const Icone = item.icone;
+
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    className={({ isActive }) =>
+                      `flex items-center gap-2.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all group relative ${
+                        isActive
+                          ? "bg-emerald-500/10 text-emerald-400 border-r-2 border-emerald-500 font-semibold"
+                          : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900/60"
+                      } ${recolhida ? "justify-center px-0 py-2" : ""}`
+                    }
+                    title={recolhida ? item.rotulo : undefined}
+                  >
+                    <Icone size={16} className="shrink-0" />
+
+                    {!recolhida && (
+                      <span className="truncate flex-1">{item.rotulo}</span>
+                    )}
+
+                    {!recolhida && item.badge && (
+                      <span
+                        className={`text-[9px] font-mono px-1.5 py-0.2 rounded-full border font-bold ${
+                          item.badgeCor || "bg-zinc-800 border-zinc-700 text-zinc-300"
+                        }`}
+                      >
+                        {item.badge}
+                      </span>
+                    )}
+                  </NavLink>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </nav>
+
+      {/* Footer com Toggle de Recolhimento e Status do Daemon */}
+      <div className="p-2.5 border-t border-zinc-850/80 bg-zinc-950 space-y-2">
         <button
           type="button"
           onClick={alternarRecolhida}
-          className="hidden md:flex h-7 w-7 rounded-lg items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900 transition-colors cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 py-1.5 rounded-xl bg-zinc-900/60 hover:bg-zinc-850 text-zinc-400 hover:text-zinc-200 text-xs transition-colors cursor-pointer border border-zinc-850"
           title={recolhida ? "Expandir menu lateral" : "Recolher menu lateral"}
         >
-          {recolhida ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+          {recolhida ? (
+            <ChevronRight size={15} />
+          ) : (
+            <>
+              <ChevronLeft size={15} />
+              <span>Recolher Menu</span>
+            </>
+          )}
         </button>
-      </div>
 
-      {/* Lista de Navegação Principal */}
-      <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-1">
-        {ITENS_NAV.map((item) => {
-          const Icone = item.icone;
-
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all group ${
-                  isActive
-                    ? "bg-emerald-950/50 text-emerald-300 border border-emerald-800/50 shadow-sm"
-                    : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900/70 border border-transparent"
-                } ${recolhida ? "justify-center px-0" : ""}`
-              }
-              title={recolhida ? item.rotulo : undefined}
-            >
-              <Icone
-                size={16}
-                className={item.destaque ? "text-emerald-400 flex-shrink-0" : "flex-shrink-0"}
-              />
-              {!recolhida && (
-                <span className="truncate flex-1">{item.rotulo}</span>
-              )}
-            </NavLink>
-          );
-        })}
-      </nav>
-
-      {/* Footer com Status do Daemon */}
-      <div className="p-3 border-t border-zinc-850/80 bg-zinc-950">
         {!recolhida ? (
-          <div className="flex items-center justify-between text-[11px] text-zinc-500">
-            <div className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Daemon Ativo</span>
+          <div className="flex items-center justify-between px-2 text-[11px] text-zinc-500 font-mono">
+            <div className="flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>{workspaceId || "daemon"}</span>
             </div>
-            <Activity size={13} className="text-zinc-600" />
+            <Activity size={12} className="text-zinc-600" />
           </div>
         ) : (
-          <div className="flex justify-center" title="Daemon Ativo">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          <div className="flex justify-center" title={`Workspace: ${workspaceId}`}>
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
           </div>
         )}
       </div>

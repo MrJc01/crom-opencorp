@@ -7,6 +7,11 @@ export {
 } from "./components/SecretarioChat.js";
 
 export {
+  SecretarioDock,
+  type SecretarioDockProps,
+} from "./components/SecretarioDock.js";
+
+export {
   useOpenCorpSecretarioRuntime,
   buildAssistantParts,
 } from "./runtime/secretary-runtime-adapter.js";

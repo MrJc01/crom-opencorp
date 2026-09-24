@@ -7,17 +7,31 @@
 @source "../";
 @source "../../../web-dist/index.html";
 
+@layer base {
+  *, ::after, ::before {
+    border-color: rgb(39 39 42 / 0.6); /* zinc-800 suave */
+  }
+}
+
 /* Paleta base corporativa e variáveis CSS */
-:root {
-  --bg: #0a0a0a;
-  --card: #171717;
-  --border: #262626;
-  --text: #e5e5e5;
-  --muted: #a3a3a3;
-  --accent: #3f3f46;
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --err: #f87171;
+:root, .dark {
+  --bg: #09090b;
+  --card: #18181b;
+  --border: #27272a;
+  --text: #f4f4f5;
+  --muted: #a1a1aa;
+  --accent: #10b981;
+  --ok: #10b981;
+  --warn: #f59e0b;
+  --err: #f43f5e;
+
+  /* Assistant-UI tokens dark mode */
+  --aui-background: #09090b;
+  --aui-foreground: #f4f4f5;
+  --aui-muted: #18181b;
+  --aui-muted-foreground: #a1a1aa;
+  --aui-border: #27272a;
+  --aui-card: #09090b;
 }
 
 html, body, #root {

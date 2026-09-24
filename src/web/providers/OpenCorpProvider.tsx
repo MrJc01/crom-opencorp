@@ -2,6 +2,8 @@ import React, {
   createContext,
   useContext,
   useMemo,
+  useState,
+  useCallback,
   type FC,
   type ReactNode,
 } from "react";
@@ -11,6 +13,7 @@ import { showToast } from "../shared/ui/Toast.js";
 export interface OpenCorpContextValue {
   client: OpenCorpClient;
   workspaceId: string;
+  definirWorkspaceId: (id: string) => void;
   tratarErro: (erro: unknown, fallbackTitulo?: string) => void;
 }
 
@@ -24,16 +27,20 @@ export interface OpenCorpProviderProps {
 
 export const OpenCorpProvider: FC<OpenCorpProviderProps> = ({
   token,
-  workspaceId,
+  workspaceId: propWorkspaceId,
   children,
 }) => {
-  const wsAtivo =
-    workspaceId ||
-    (typeof window !== "undefined"
-      ? localStorage.getItem("oc-ws") ||
+  const [wsAtivo, setWsAtivo] = useState<string>(() => {
+    if (propWorkspaceId) return propWorkspaceId;
+    if (typeof window !== "undefined") {
+      return (
+        localStorage.getItem("oc-ws") ||
         localStorage.getItem("opencorp_workspace_id") ||
-        "default"
-      : "default");
+        ""
+      );
+    }
+    return "";
+  });
 
   const authToken =
     token ||
@@ -43,6 +50,20 @@ export const OpenCorpProvider: FC<OpenCorpProviderProps> = ({
         ""
       : "");
 
+  const definirWorkspaceId = useCallback((id: string) => {
+    const limpo = id ? id.trim() : "";
+    setWsAtivo(limpo);
+    if (typeof window !== "undefined") {
+      if (limpo) {
+        localStorage.setItem("oc-ws", limpo);
+        localStorage.setItem("opencorp_workspace_id", limpo);
+      } else {
+        localStorage.removeItem("oc-ws");
+        localStorage.removeItem("opencorp_workspace_id");
+      }
+    }
+  }, []);
+
   const client = useMemo(() => {
     const origin =
       typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:4100";
@@ -50,12 +71,12 @@ export const OpenCorpProvider: FC<OpenCorpProviderProps> = ({
     return new OpenCorpClient({
       baseUrl: origin,
       token: authToken,
-      workspaceId: wsAtivo,
+      workspaceId: wsAtivo || "default",
       timeoutMs: 25_000,
     });
   }, [authToken, wsAtivo]);
 
-  const tratarErro = (erro: unknown, fallbackTitulo = "Erro na Operação") => {
+  const tratarErro = useCallback((erro: unknown, fallbackTitulo = "Erro na Operação") => {
     if (erro instanceof ProblemDetailsError) {
       if (erro.status === 422 && erro.invalidParams && erro.invalidParams.length > 0) {
         const lista = erro.invalidParams
@@ -72,13 +93,14 @@ export const OpenCorpProvider: FC<OpenCorpProviderProps> = ({
     }
     const msg = erro instanceof Error ? erro.message : "Erro inesperado";
     showToast(`${fallbackTitulo}: ${msg}`, "erro");
-  };
+  }, []);
 
   return (
     <OpenCorpContext.Provider
       value={{
         client,
         workspaceId: wsAtivo,
+        definirWorkspaceId,
         tratarErro,
       }}
     >
@@ -96,3 +118,4 @@ export function useOpenCorp(): OpenCorpContextValue {
   }
   return ctx;
 }
+

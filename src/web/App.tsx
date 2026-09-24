@@ -24,10 +24,10 @@ export const App: FC = () => {
       <BrowserRouter>
         <Routes>
           <Route element={<AppLayout />}>
-            {/* Rota Raiz & Chat Principal */}
-            <Route path="/" element={<SecretarioView />} />
-            <Route path="/secretario" element={<SecretarioView />} />
+            {/* Rota Raiz: Home com Onboarding de Workspaces */}
+            <Route path="/" element={<HomeView />} />
             <Route path="/home" element={<HomeView />} />
+            <Route path="/secretario" element={<SecretarioView />} />
 
             {/* Módulos Operacionais Conectados via @opencorp/sdk */}
             <Route path="/tasks" element={<TasksView />} />
@@ -48,7 +48,7 @@ export const App: FC = () => {
             <Route path="/agenda" element={<Navigate to="/fluxos" replace />} />
             <Route path="/hooks" element={<Navigate to="/fluxos" replace />} />
             <Route path="/secrets" element={<Navigate to="/config" replace />} />
-            <Route path="*" element={<Navigate to="/secretario" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
       </BrowserRouter>
