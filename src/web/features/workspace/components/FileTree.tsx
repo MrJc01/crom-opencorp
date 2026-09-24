@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, type FC } from "react";
+import React, { useState, useEffect, useCallback, useMemo, type FC } from "react";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 import {
   Folder,
@@ -58,16 +58,35 @@ export const FileTree: FC<FileTreeProps> = ({
   const { workspaceId } = useOpenCorp();
   const [arvore, setArvore] = useState<NoArvore[]>([]);
   const [carregando, setCarregando] = useState(false);
-  const [expandidos, setExpandidos] = useState<Set<string>>(new Set([".opencorp", ".opencorp/flows"]));
+  const [expandidos, setExpandidos] = useState<Set<string>>(new Set());
   const [filtro, setFiltro] = useState("");
+
+  // Resolução com fallback rigoroso para garantir que o workspace ativo seja sempre enviado
+  const wsEfetivo = useMemo(() => {
+    if (workspaceId && workspaceId.trim().length > 0) {
+      return workspaceId.trim();
+    }
+    if (typeof window !== "undefined") {
+      const salvo =
+        localStorage.getItem("oc-ws") ||
+        localStorage.getItem("opencorp_workspace_id");
+      if (salvo && salvo.trim().length > 0) {
+        return salvo.trim();
+      }
+    }
+    return "yt-factory-01";
+  }, [workspaceId]);
 
   const carregarArvore = useCallback(async () => {
     setCarregando(true);
     try {
       const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:4100";
-      const wsParam = workspaceId ? `&workspace=${encodeURIComponent(workspaceId)}` : "";
+      const wsParam = `&workspace=${encodeURIComponent(wsEfetivo)}`;
       const resp = await fetch(`${origin}/files/tree?profundidade=6${wsParam}`, {
-        headers: workspaceId ? { "x-opencorp-workspace": workspaceId } : {},
+        headers: {
+          "x-opencorp-workspace": wsEfetivo,
+          "x-workspace-id": wsEfetivo,
+        },
       });
       if (resp.ok) {
         const data = (await resp.json()) as { tipo: string; arvore: NoArvore[] };
@@ -81,8 +100,9 @@ export const FileTree: FC<FileTreeProps> = ({
     } finally {
       setCarregando(false);
     }
-  }, [workspaceId]);
+  }, [wsEfetivo]);
 
+  // Recarregar sempre que o wsEfetivo mudar
   useEffect(() => {
     void carregarArvore();
   }, [carregarArvore]);
@@ -99,14 +119,37 @@ export const FileTree: FC<FileTreeProps> = ({
     });
   };
 
-  const renderizarNo = (no: NoArvore, nivel = 0) => {
+  // Ordenação: Pastas primeiro (em ordem alfabética), depois arquivos
+  const arvoreOrdenada = useMemo(() => {
+    const ordenarNos = (itens: NoArvore[]): NoArvore[] => {
+      return [...itens]
+        .sort((a, b) => {
+          if (a.tipo === "dir" && b.tipo !== "dir") return -1;
+          if (a.tipo !== "dir" && b.tipo === "dir") return 1;
+          return a.nome.localeCompare(b.nome);
+        })
+        .map((item) => {
+          if (item.tipo === "dir" && item.filhos && item.filhos.length > 0) {
+            return { ...item, filhos: ordenarNos(item.filhos) };
+          }
+          return item;
+        });
+    };
+    return ordenarNos(arvore);
+  }, [arvore]);
+
+  const renderizarNo = (no: NoArvore, nivel = 0): React.ReactNode => {
     const isDir = no.tipo === "dir";
     const expandido = expandidos.has(no.caminho);
     const selecionado = arquivoAtivo === no.caminho;
 
-    // Filtro simples
-    if (filtro && !isDir && !no.nome.toLowerCase().includes(filtro.toLowerCase())) {
-      return null;
+    // Filtro simples de busca
+    if (filtro.trim().length > 0) {
+      const f = filtro.toLowerCase().trim();
+      const coincideProprio = no.nome.toLowerCase().includes(f);
+      if (!isDir && !coincideProprio) {
+        return null;
+      }
     }
 
     return (
@@ -165,9 +208,14 @@ export const FileTree: FC<FileTreeProps> = ({
     <div className="flex flex-col h-full w-full bg-zinc-950 border-r border-zinc-850 select-none overflow-hidden">
       {/* Topo do Explorer */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-850 bg-zinc-900/40">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-          Explorer / Arquivos
-        </span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+            Explorer
+          </span>
+          <span className="text-[10px] text-zinc-500 font-mono truncate" title={wsEfetivo}>
+            ({wsEfetivo})
+          </span>
+        </div>
 
         <button
           type="button"
@@ -195,12 +243,12 @@ export const FileTree: FC<FileTreeProps> = ({
 
       {/* Árvore de arquivos */}
       <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5 font-mono">
-        {carregando && arvore.length === 0 ? (
-          <div className="p-4 text-center text-xs text-zinc-500">Carregando árvore...</div>
-        ) : arvore.length === 0 ? (
-          <div className="p-4 text-center text-xs text-zinc-500">Nenhum arquivo encontrado.</div>
+        {carregando && arvoreOrdenada.length === 0 ? (
+          <div className="p-4 text-center text-xs text-zinc-500">Carregando árvore de {wsEfetivo}...</div>
+        ) : arvoreOrdenada.length === 0 ? (
+          <div className="p-4 text-center text-xs text-zinc-500">Nenhum arquivo encontrado em {wsEfetivo}.</div>
         ) : (
-          arvore.map((no) => renderizarNo(no, 0))
+          arvoreOrdenada.map((no) => renderizarNo(no, 0))
         )}
       </div>
     </div>

@@ -176,6 +176,10 @@ const ARVORE_IGNORAR_DIRS = new Set([
   ".cache",
   ".pytest_cache",
   "coverage",
+  "execucoes",
+  "opencode-data",
+  "opencode-config",
+  ".turbo",
 ]);
 const ARVORE_CAP_NOS = 15000;
 
@@ -183,7 +187,7 @@ async function construirArvore(raiz: string, profundidadeMax: number): Promise<{
   let total = 0;
   let truncado = false;
   async function listar(dirAbs: string, rel: string, profundidade: number): Promise<NoArvore[]> {
-    if (total >= ARVORE_CAP_NOS) {
+    if (profundidade > 1 && total >= ARVORE_CAP_NOS) {
       truncado = true;
       return [];
     }
@@ -207,7 +211,7 @@ async function construirArvore(raiz: string, profundidadeMax: number): Promise<{
 
     const resultado: NoArvore[] = [];
     for (const e of entradas) {
-      if (total >= ARVORE_CAP_NOS) {
+      if (profundidade > 1 && total >= ARVORE_CAP_NOS) {
         truncado = true;
         break;
       }

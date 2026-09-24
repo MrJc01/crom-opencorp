@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, type FC } from "react";
+import React, { useState, useEffect, useCallback, useMemo, type FC } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 import { type WorkspaceGitStatus } from "@opencorp/sdk";
@@ -20,6 +20,22 @@ export const WorkspaceView: FC = () => {
   // Status Git
   const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus | null>(null);
   const [carregandoGit, setCarregandoGit] = useState(false);
+
+  // Resolução de workspace com fallback
+  const wsEfetivo = useMemo(() => {
+    if (workspaceId && workspaceId.trim().length > 0) {
+      return workspaceId.trim();
+    }
+    if (typeof window !== "undefined") {
+      const salvo =
+        localStorage.getItem("oc-ws") ||
+        localStorage.getItem("opencorp_workspace_id");
+      if (salvo && salvo.trim().length > 0) {
+        return salvo.trim();
+      }
+    }
+    return "yt-factory-01";
+  }, [workspaceId]);
 
   // Carregar status do Git
   const carregarGit = useCallback(async () => {
@@ -54,11 +70,14 @@ export const WorkspaceView: FC = () => {
 
       try {
         const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:4100";
-        const wsParam = workspaceId ? `&workspace=${encodeURIComponent(workspaceId)}` : "";
+        const wsParam = `&workspace=${encodeURIComponent(wsEfetivo)}`;
         const resp = await fetch(
           `${origin}/files?path=${encodeURIComponent(caminho)}${wsParam}`,
           {
-            headers: workspaceId ? { "x-opencorp-workspace": workspaceId } : {},
+            headers: {
+              "x-opencorp-workspace": wsEfetivo,
+              "x-workspace-id": wsEfetivo,
+            },
           },
         );
 
@@ -170,7 +189,7 @@ export const WorkspaceView: FC = () => {
     setSalvando(true);
     try {
       const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:4100";
-      const wsTab = tab.workspace || workspaceId;
+      const wsTab = tab.workspace || wsEfetivo;
       const wsParam = wsTab ? `&workspace=${encodeURIComponent(wsTab)}` : "";
       const resp = await fetch(
         `${origin}/files?path=${encodeURIComponent(tab.caminho)}${wsParam}`,
@@ -178,7 +197,8 @@ export const WorkspaceView: FC = () => {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            ...(wsTab ? { "x-opencorp-workspace": wsTab } : {}),
+            "x-opencorp-workspace": wsTab,
+            "x-workspace-id": wsTab,
           },
           body: JSON.stringify({ conteudo: tab.editado }),
         },
@@ -223,7 +243,7 @@ export const WorkspaceView: FC = () => {
         <div className="h-8 border-b border-zinc-850 px-3 flex items-center justify-between bg-zinc-900/40 text-[11px] font-mono text-zinc-400 shrink-0">
           <div className="flex items-center gap-2">
             <span className="text-zinc-500">workspace:</span>
-            <span className="text-zinc-200 font-semibold">{workspaceId || "yt-factory-01"}</span>
+            <span className="text-zinc-200 font-semibold">{wsEfetivo}</span>
           </div>
 
           <div className="flex items-center gap-3">
