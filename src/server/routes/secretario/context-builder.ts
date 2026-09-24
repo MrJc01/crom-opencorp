@@ -105,6 +105,43 @@ export async function construirContextoWorkspace(ws: { id: string; path: string 
     );
   }
 
+  // 4. Observatório de Sub-Agentes (Últimas execuções e incidentes)
+  try {
+    const { RegistryStore } = await import("../../../core/registry-store.js");
+    const registros = new RegistryStore();
+    const db = registros.corpDb(ws.path);
+    const execs = db.listarExecucoes({ limite: 5 });
+    if (execs.length > 0) {
+      const linhasExecs = execs.map((e) => {
+        const icone = e.status === "concluido" ? "[OK]" : e.status === "falhou" ? "[FALHA]" : "[PENDENTE]";
+        const data = (e.inicio || "").slice(0, 16).replace("T", " ");
+        const erroStr = e.erro ? ` — Erro: ${e.erro.slice(0, 80)}` : "";
+        return `- ${icone} @${e.agente} (${e.id}) em ${data}${erroStr}`;
+      });
+      partes.push(`\nÚltimas Execuções de Sub-Agentes:\n${linhasExecs.join("\n")}`);
+    }
+  } catch {}
+
+  // 5. Estado Operacional das Tarefas (Kanban)
+  try {
+    const { TaskStore } = await import("../../../core/task-store.js");
+    const taskStore = new TaskStore();
+    const tasks = await taskStore.listar(ws.path);
+    if (tasks.length > 0) {
+      const fazendo = tasks.filter((t) => t.coluna === "fazendo" || t.coluna === "em_andamento");
+      const travadas = tasks.filter((t) => t.coluna === "bloqueado");
+      const linhasTasks: string[] = [];
+      linhasTasks.push(`- Total de Tarefas: ${tasks.length} (fazendo: ${fazendo.length}, bloqueadas: ${travadas.length})`);
+      for (const f of fazendo.slice(0, 3)) {
+        linhasTasks.push(`  ↳ [FAZENDO] ${f.id}: "${f.titulo}" (@${f.responsavel || "não atribuído"})`);
+      }
+      for (const b of travadas.slice(0, 3)) {
+        linhasTasks.push(`  ↳ [BLOQUEADA] ${b.id}: "${b.titulo}" (@${b.responsavel || "não atribuído"})`);
+      }
+      partes.push(`\nQuadro Kanban (Tarefas do Workspace):\n${linhasTasks.join("\n")}`);
+    }
+  } catch {}
+
   partes.push("---\n");
   return partes.join("\n");
 }

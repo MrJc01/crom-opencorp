@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { WorkspaceManager } from "../../core/workspace-manager.js";
 import { RegistryStore } from "../../core/registry-store.js";
 import { opencorpHome } from "../../utils/paths.js";
-import { cliFetch } from "../client.js";
+import { getSdkClient } from "../client.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -86,8 +86,9 @@ export function registerSaudeCommand(program: Command): void {
         // 3. Serve (API)
         let serveVivo = false;
         try {
-          const res = await cliFetch("/health", { signal: AbortSignal.timeout(1000) });
-          serveVivo = res.ok;
+          const client = getSdkClient({ homeDir: home });
+          const res = await client.system.getHealth({ signal: AbortSignal.timeout(1000) });
+          serveVivo = Boolean(res?.ok ?? true);
         } catch {}
 
         // 4. Execuções recentes e falhas

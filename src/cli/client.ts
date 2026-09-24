@@ -87,7 +87,7 @@ export function obterConfiguracaoServidor(opcoes?: { homeDir?: string }): Server
     }
   }
 
-  const urlBase = `http://${host}:${porta}`;
+  const urlBase = process.env.OPENCORP_API_URL?.trim() || `http://${host}:${porta}`;
 
   return {
     host,
@@ -152,4 +152,32 @@ export async function cliFetch(
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+// ── SDK Client Singleton (Passo 3 da padronização) ──────────────────
+
+import { OpenCorpClient } from "../sdk/index.js";
+
+let _sdkClient: OpenCorpClient | undefined;
+
+/**
+ * Retorna uma instância singleton do `OpenCorpClient` configurada
+ * a partir da resolução de servidor existente (api.pid, env vars, etc.).
+ *
+ * Substitui progressivamente o `cliFetch` nos comandos da CLI.
+ */
+export function getSdkClient(opcoes?: { homeDir?: string }): OpenCorpClient {
+  if (_sdkClient) return _sdkClient;
+
+  const config = obterConfiguracaoServidor(opcoes);
+  _sdkClient = new OpenCorpClient({
+    baseUrl: config.urlBase,
+    token: config.token,
+  });
+  return _sdkClient;
+}
+
+/** Reseta o singleton (útil para testes). */
+export function resetSdkClient(): void {
+  _sdkClient = undefined;
 }

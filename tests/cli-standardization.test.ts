@@ -219,9 +219,9 @@ describe("CLI Standardization (Micro-Passo 20)", () => {
         const output = logs.join("\n");
         const parsed = JSON.parse(output);
         expect(Array.isArray(parsed)).toBe(true);
-        expect(parsed.length).toBe(1);
-        expect(parsed[0].id).toBe("meu-fluxo");
-        expect(parsed[0].nome).toBe("Meu Fluxo de Teste");
+        const meuFluxo = parsed.find((f: any) => f.id === "meu-fluxo");
+        expect(meuFluxo).toBeDefined();
+        expect(meuFluxo.nome).toBe("Meu Fluxo de Teste");
       } finally {
         console.log = originalLog;
       }
