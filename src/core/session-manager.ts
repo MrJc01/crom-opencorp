@@ -31,7 +31,22 @@ import {
   ehModeloGratuito,
 } from "./model-resolver.js";
 
-export { ehModeloGratuito };
+import {
+  sanitizarTranscript,
+  limparAnsi,
+  extrairDeltaTexto,
+  normalizarQuebrasDeLinha,
+  extrairResumoErro,
+} from "./domain/session/transcript-parser.js";
+
+export {
+  ehModeloGratuito,
+  sanitizarTranscript,
+  limparAnsi,
+  extrairDeltaTexto,
+  normalizarQuebrasDeLinha,
+  extrairResumoErro,
+};
 
 export type StatusExecucao = "executando" | "concluido" | "falhou" | "cancelado" | "hitl_pendente";
 
@@ -1243,15 +1258,7 @@ export class SessionManager {
     }
 
     if (status === "falhou") {
-      let resumoErro = "";
-      const matchErro = /(?:Error|erro|Rate limit|Quota|Exception|status code \d+)[:\s]+([^\n\r]+)/i.exec(textoCaptura);
-      if (matchErro) {
-        resumoErro = matchErro[0].trim();
-      } else {
-        const linhas = textoCaptura.trim().split("\n").filter((l) => l.trim() && !l.startsWith(">") && !l.startsWith("#"));
-        resumoErro = linhas[linhas.length - 1] || `Processo encerrou com exit code ${registro.exit_code}`;
-      }
-      (registro as any).erro = resumoErro;
+      (registro as any).erro = extrairResumoErro(textoCaptura, registro.exit_code);
     }
 
     const custo = budget.estimarCusto(
@@ -2101,7 +2108,7 @@ export class SessionManager {
 
   async transcriptDe(wsPath: string, id: string): Promise<string> {
     const registro = await this.registros.obter(wsPath, "chats", id);
-    return registro.conteudo ?? "";
+    return sanitizarTranscript(registro.conteudo ?? "");
   }
 
   async matar(wsPath: string, id: string): Promise<void> {
@@ -2291,7 +2298,7 @@ export class SessionManager {
         descricao: `transcript da sessão ${registro.id} (${registro.agente} · ${registro.modelo})`,
         criadoPor: registro.agente,
         tags: ["sessao", "transcript"],
-        conteudo: captura,
+        conteudo: sanitizarTranscript(captura),
       });
     }
   }
