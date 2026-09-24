@@ -1,4 +1,4 @@
-import React, { useState, useEffect, type FC } from "react";
+import React, { useState, useEffect, useCallback, type FC } from "react";
 import {
   Bell,
   Check,
@@ -8,78 +8,157 @@ import {
   Info,
   AlertTriangle,
   RefreshCw,
+  ExternalLink,
+  ShieldAlert,
 } from "lucide-react";
 import { showToast } from "../../../shared/ui/Toast.js";
+import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 
-interface NotificacaoItem {
-  id: string;
-  titulo: string;
-  mensagem: string;
-  tipo?: "info" | "aviso" | "erro" | "sucesso";
-  lida: boolean;
-  criadaEm: string;
+export interface AcaoNotificacao {
+  label: string;
+  tipo?: "link" | "api" | "hitl";
+  url?: string;
+  endpoint?: string;
+  metodo?: "GET" | "POST";
+  corpo?: Record<string, unknown>;
 }
 
-const NOTIFICACOES_MOCK: NotificacaoItem[] = [
-  {
-    id: "notif-1",
-    titulo: "Sessão do Secretário Iniciada",
-    mensagem: "O daemon do OpenCorp inicializou o supervisor de agentes com sucesso.",
-    tipo: "sucesso",
-    lida: false,
-    criadaEm: "Há 10 minutos",
-  },
-  {
-    id: "notif-2",
-    titulo: "Checkpoint Git Automático",
-    mensagem: "Commit de segurança gerado para o workspace ativo.",
-    tipo: "info",
-    lida: true,
-    criadaEm: "Há 1 hora",
-  },
-  {
-    id: "notif-3",
-    titulo: "Aviso de Cota de Inferência",
-    mensagem: "Consumo de tokens no OpenRouter atingiu 70% do limite configurado.",
-    tipo: "aviso",
-    lida: false,
-    criadaEm: "Há 2 horas",
-  },
-];
+export interface NotificacaoItem {
+  id: string;
+  titulo: string;
+  corpo?: string;
+  mensagem?: string;
+  tipo?: "resumo" | "aviso" | "erro" | "info" | "sucesso";
+  origem?: string;
+  lida: boolean;
+  criado_em?: string;
+  criadaEm?: string;
+  acoes?: AcaoNotificacao[];
+}
+
+function formatarDataRelativa(dataIso?: string): string {
+  if (!dataIso) return "Recente";
+  try {
+    const d = new Date(dataIso);
+    if (isNaN(d.getTime())) return dataIso;
+    const agora = Date.now();
+    const difSegundos = Math.floor((agora - d.getTime()) / 1000);
+    if (difSegundos < 60) return "Agora mesmo";
+    if (difSegundos < 3600) return `Há ${Math.floor(difSegundos / 60)} min`;
+    if (difSegundos < 86400) return `Há ${Math.floor(difSegundos / 3600)} h`;
+    return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return dataIso;
+  }
+}
 
 export const NotificacoesView: FC = () => {
-  const [notificacoes, setNotificacoes] = useState<NotificacaoItem[]>(NOTIFICACOES_MOCK);
+  const { client, workspaceId, tratarErro } = useOpenCorp();
+  const [notificacoes, setNotificacoes] = useState<NotificacaoItem[]>([]);
+  const [carregando, setCarregando] = useState(false);
   const [filtro, setFiltro] = useState<"todas" | "nao_lidas">("todas");
+  const [executandoAcao, setExecutandoAcao] = useState<string | null>(null);
+
+  const wsEfetivo = workspaceId || undefined;
+
+  const carregarNotificacoes = useCallback(async () => {
+    setCarregando(true);
+    try {
+      const res = await client.http.get<any>("/notifications", {
+        headers: wsEfetivo ? { "x-opencorp-workspace": wsEfetivo } : undefined,
+      });
+
+      if (res && Array.isArray(res.notificacoes)) {
+        setNotificacoes(res.notificacoes);
+      } else if (Array.isArray(res)) {
+        setNotificacoes(res);
+      } else {
+        setNotificacoes([]);
+      }
+    } catch (err: unknown) {
+      tratarErro(err, "Falha ao carregar notificações do servidor");
+    } finally {
+      setCarregando(false);
+    }
+  }, [client, wsEfetivo, tratarErro]);
 
   useEffect(() => {
-    fetch("/notifications")
-      .then((res) => {
-        if (!res.ok) return null;
-        return res.json();
-      })
-      .then((data) => {
-        if (data && Array.isArray(data.notificacoes)) {
-          setNotificacoes(data.notificacoes);
+    void carregarNotificacoes();
+  }, [carregarNotificacoes]);
+
+  const marcarLida = async (id: string) => {
+    try {
+      await client.http.post(
+        `/notifications/${encodeURIComponent(id)}/lida`,
+        {},
+        {
+          headers: wsEfetivo ? { "x-opencorp-workspace": wsEfetivo } : undefined,
         }
-      })
-      .catch(() => {});
-  }, []);
-
-  const marcarLida = (id: string) => {
-    setNotificacoes((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, lida: true } : n)),
-    );
-    showToast("Notificação marcada como lida", "info");
+      );
+      setNotificacoes((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, lida: true } : n))
+      );
+      showToast("Notificação marcada como lida", "info");
+    } catch (err: unknown) {
+      tratarErro(err, "Erro ao marcar notificação como lida");
+    }
   };
 
-  const marcarTodasLidas = () => {
-    setNotificacoes((prev) => prev.map((n) => ({ ...n, lida: true })));
-    showToast("Todas as notificações foram marcadas como lidas", "sucesso");
+  const marcarTodasLidas = async () => {
+    try {
+      await client.http.post(
+        "/notifications/lidas",
+        {},
+        {
+          headers: wsEfetivo ? { "x-opencorp-workspace": wsEfetivo } : undefined,
+        }
+      );
+      setNotificacoes((prev) => prev.map((n) => ({ ...n, lida: true })));
+      showToast("Todas as notificações foram marcadas como lidas", "sucesso");
+    } catch (err: unknown) {
+      tratarErro(err, "Erro ao marcar todas as notificações como lidas");
+    }
   };
 
-  const limparTodas = () => {
-    setNotificacoes([]);
-    showToast("Histórico de notificações limpo", "info");
+  const limparTodas = async () => {
+    if (!window.confirm("Deseja realmente limpar todas as notificações do workspace?")) return;
+    try {
+      await client.http.delete("/notifications", {
+        headers: wsEfetivo ? { "x-opencorp-workspace": wsEfetivo } : undefined,
+      });
+      setNotificacoes([]);
+      showToast("Histórico de notificações limpo com sucesso", "info");
+    } catch (err: unknown) {
+      tratarErro(err, "Erro ao limpar notificações");
+    }
+  };
+
+  const dispararAcao = async (notifId: string, acao: AcaoNotificacao) => {
+    if (acao.url) {
+      window.open(acao.url, "_blank");
+      return;
+    }
+    if (!acao.endpoint) return;
+
+    setExecutandoAcao(`${notifId}:${acao.label}`);
+    try {
+      const metodo = (acao.metodo || "POST").toUpperCase();
+      if (metodo === "POST") {
+        await client.http.post(acao.endpoint, acao.corpo || {}, {
+          headers: wsEfetivo ? { "x-opencorp-workspace": wsEfetivo } : undefined,
+        });
+      } else {
+        await client.http.get(acao.endpoint, {
+          headers: wsEfetivo ? { "x-opencorp-workspace": wsEfetivo } : undefined,
+        });
+      }
+      showToast(`Ação "${acao.label}" executada com sucesso!`, "sucesso");
+      void marcarLida(notifId);
+    } catch (err: unknown) {
+      tratarErro(err, `Falha ao executar ação "${acao.label}"`);
+    } finally {
+      setExecutandoAcao(null);
+    }
   };
 
   const listaFiltrada = notificacoes.filter((n) => {
@@ -104,7 +183,7 @@ export const NotificacoesView: FC = () => {
             )}
           </h1>
           <p className="text-xs text-zinc-400 mt-1">
-            Registro de eventos, avisos de cotas e transições operacionais do sistema.
+            Registro em tempo real de eventos, avisos de cotas e transições operacionais do sistema.
           </p>
         </div>
 
@@ -112,8 +191,20 @@ export const NotificacoesView: FC = () => {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            disabled={carregando}
+            onClick={carregarNotificacoes}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:bg-zinc-850 text-xs text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
+            title="Recarregar notificações"
+          >
+            <RefreshCw size={13} className={carregando ? "animate-spin text-emerald-400" : ""} />
+            <span>Atualizar</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={totalNaoLidas === 0}
             onClick={marcarTodasLidas}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-xs text-zinc-300 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-xs text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
           >
             <CheckCheck size={14} className="text-emerald-400" />
             <span>Marcar Todas como Lidas</span>
@@ -121,8 +212,9 @@ export const NotificacoesView: FC = () => {
 
           <button
             type="button"
+            disabled={notificacoes.length === 0}
             onClick={limparTodas}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-xs text-rose-400 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-xs text-rose-400 transition-colors cursor-pointer disabled:opacity-50"
           >
             <Trash2 size={13} />
             <span>Limpar</span>
@@ -158,7 +250,12 @@ export const NotificacoesView: FC = () => {
       </div>
 
       {/* Lista de Notificações */}
-      {listaFiltrada.length === 0 ? (
+      {carregando && notificacoes.length === 0 ? (
+        <div className="flex flex-col items-center justify-center p-12 text-center text-zinc-500 space-y-2">
+          <RefreshCw size={24} className="animate-spin text-emerald-400 opacity-60" />
+          <p className="text-xs">Carregando notificações do servidor...</p>
+        </div>
+      ) : listaFiltrada.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-12 text-center text-zinc-500 space-y-2">
           <Bell size={32} className="opacity-40" />
           <p className="text-xs">Nenhuma notificação encontrada no momento.</p>
@@ -180,23 +277,57 @@ export const NotificacoesView: FC = () => {
                 ? "text-amber-400 bg-amber-950/50 border-amber-800/40"
                 : "text-emerald-400 bg-emerald-950/50 border-emerald-800/40";
 
+            const textoCorpo = item.corpo || item.mensagem || "";
+            const dataStr = formatarDataRelativa(item.criado_em || item.criadaEm);
+
             return (
               <div
                 key={item.id}
-                className={`flex items-start justify-between gap-4 p-4 rounded-2xl border transition-all ${
+                className={`flex flex-col sm:flex-row sm:items-start justify-between gap-4 p-4 rounded-2xl border transition-all ${
                   item.lida
                     ? "bg-zinc-900/30 border-zinc-850/80 text-zinc-400"
                     : "bg-zinc-900/70 border-zinc-800 text-zinc-100 shadow-sm"
                 }`}
               >
-                <div className="flex items-start gap-3">
+                <div className="flex items-start gap-3 min-w-0">
                   <div className={`h-8 w-8 rounded-xl border flex items-center justify-center flex-shrink-0 mt-0.5 ${corIcone}`}>
                     <Icone size={16} />
                   </div>
-                  <div>
-                    <h3 className="text-xs font-semibold">{item.titulo}</h3>
-                    <p className="text-xs text-zinc-400 mt-0.5 leading-relaxed">{item.mensagem}</p>
-                    <span className="text-[10px] text-zinc-500 mt-1.5 block">{item.criadaEm}</span>
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-xs font-semibold text-zinc-100">{item.titulo}</h3>
+                      {item.origem && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded border bg-zinc-850 text-zinc-400 border-zinc-750">
+                          {item.origem}
+                        </span>
+                      )}
+                    </div>
+                    {textoCorpo && (
+                      <p className="text-xs text-zinc-400 leading-relaxed break-words">{textoCorpo}</p>
+                    )}
+                    <span className="text-[10px] text-zinc-500 block">{dataStr}</span>
+
+                    {/* Ações interativas da notificação */}
+                    {item.acoes && item.acoes.length > 0 && (
+                      <div className="flex items-center gap-2 pt-2 flex-wrap">
+                        {item.acoes.map((acao, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            disabled={executandoAcao === `${item.id}:${acao.label}`}
+                            onClick={() => dispararAcao(item.id, acao)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 border border-zinc-700 transition-colors cursor-pointer font-medium"
+                          >
+                            {acao.tipo === "hitl" ? (
+                              <ShieldAlert size={12} className="text-amber-400" />
+                            ) : (
+                              <ExternalLink size={12} className="text-emerald-400" />
+                            )}
+                            <span>{acao.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -204,7 +335,7 @@ export const NotificacoesView: FC = () => {
                   <button
                     type="button"
                     onClick={() => marcarLida(item.id)}
-                    className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+                    className="self-end sm:self-start p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer shrink-0"
                     title="Marcar como lida"
                   >
                     <Check size={14} />

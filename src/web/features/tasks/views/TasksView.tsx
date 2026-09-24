@@ -105,14 +105,19 @@ export const TasksView: FC = () => {
       if (t) {
         setTaskSelecionada(t);
       } else {
-        void client.tasks.obter(taskIdUrl).then((encontrada) => {
-          if (encontrada) setTaskSelecionada(encontrada);
-        }).catch(() => {});
+        void client.tasks
+          .obter(taskIdUrl)
+          .then((encontrada) => {
+            if (encontrada) setTaskSelecionada(encontrada);
+          })
+          .catch((err) => {
+            tratarErro(err, "Falha ao carregar detalhes da tarefa selecionada");
+          });
       }
     } else {
       setTaskSelecionada(null);
     }
-  }, [taskIdUrl, tasks, client.tasks]);
+  }, [taskIdUrl, tasks, client.tasks, tratarErro]);
 
   const abrirDetalhes = (task: Task) => {
     setTaskSelecionada(task);
@@ -124,19 +129,30 @@ export const TasksView: FC = () => {
     setSearchParams({});
   };
 
-  // Mutações de Tarefas
+  // Mutações de Tarefas com rollback em caso de falha
   const moverTask = async (task: Task, novaColuna: string) => {
+    const colunaAnterior = task.coluna;
+
+    // Atualização otimista
+    setTasks((prev) =>
+      prev.map((t) => (t.id === task.id ? { ...t, coluna: novaColuna } : t)),
+    );
+    if (taskSelecionada?.id === task.id) {
+      setTaskSelecionada((prev) => (prev ? { ...prev, coluna: novaColuna } : null));
+    }
+
     try {
       await client.tasks.mover(task.id, novaColuna);
-      setTasks((prev) =>
-        prev.map((t) => (t.id === task.id ? { ...t, coluna: novaColuna } : t)),
-      );
-      if (taskSelecionada?.id === task.id) {
-        setTaskSelecionada((prev) => (prev ? { ...prev, coluna: novaColuna } : null));
-      }
       showToast(`Tarefa movida para "${novaColuna}"`, "info");
     } catch (err) {
-      tratarErro(err, "Erro ao mover tarefa");
+      // Reversão em caso de erro no backend
+      setTasks((prev) =>
+        prev.map((t) => (t.id === task.id ? { ...t, coluna: colunaAnterior } : t)),
+      );
+      if (taskSelecionada?.id === task.id) {
+        setTaskSelecionada((prev) => (prev ? { ...prev, coluna: colunaAnterior } : null));
+      }
+      tratarErro(err, "Falha ao mover tarefa");
     }
   };
 
@@ -171,24 +187,32 @@ export const TasksView: FC = () => {
 
       // Se estiver em backlog ou bloqueado, move automaticamente para fazendo
       if (task.coluna === "backlog" || task.coluna === "bloqueado") {
-        await client.tasks.mover(task.id, "fazendo").catch(() => {});
-        setTasks((prev) =>
-          prev.map((t) => (t.id === task.id ? { ...t, coluna: "fazendo" } : t)),
-        );
-        if (taskSelecionada?.id === task.id) {
-          setTaskSelecionada((prev) => (prev ? { ...prev, coluna: "fazendo" } : null));
+        try {
+          await client.tasks.mover(task.id, "fazendo");
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, coluna: "fazendo" } : t)),
+          );
+          if (taskSelecionada?.id === task.id) {
+            setTaskSelecionada((prev) => (prev ? { ...prev, coluna: "fazendo" } : null));
+          }
+        } catch (moveErr) {
+          tratarErro(moveErr, "Falha ao atualizar coluna da tarefa para 'fazendo'");
         }
       }
 
       // Registra mensagem informativa no chat da task
-      await client.tasks.adicionarMensagem(task.id, {
-        corpo: `[EXECUÇÃO INICIADA] Disparado agente @${agenteId} para trabalhar nesta tarefa.${
-          execId ? ` (exec ${execId})` : ""
-        }`,
-        autor: "sistema",
-        tipo: "sistema",
-        refs: execId ? [execId] : undefined,
-      }).catch(() => {});
+      try {
+        await client.tasks.adicionarMensagem(task.id, {
+          corpo: `[EXECUÇÃO INICIADA] Disparado agente @${agenteId} para trabalhar nesta tarefa.${
+            execId ? ` (exec ${execId})` : ""
+          }`,
+          autor: "sistema",
+          tipo: "sistema",
+          refs: execId ? [execId] : undefined,
+        });
+      } catch (msgErr) {
+        tratarErro(msgErr, "Falha ao registrar histórico de execução na tarefa");
+      }
 
       showToast(
         `Execução da tarefa iniciada com @${agenteId}!${execId ? ` (exec ${execId})` : ""}`,
@@ -208,11 +232,15 @@ export const TasksView: FC = () => {
   const desbloquearEAprovarTask = async (task: Task) => {
     try {
       await client.tasks.mover(task.id, "fazendo");
-      await client.tasks.adicionarMensagem(task.id, {
-        corpo: "[DESBLOQUEIO / APROVAÇÃO] Tarefa aprovada e desbloqueada pelo operador.",
-        autor: "humano",
-        tipo: "aprovacao",
-      }).catch(() => {});
+      try {
+        await client.tasks.adicionarMensagem(task.id, {
+          corpo: "[DESBLOQUEIO / APROVAÇÃO] Tarefa aprovada e desbloqueada pelo operador.",
+          autor: "humano",
+          tipo: "aprovacao",
+        });
+      } catch (msgErr) {
+        tratarErro(msgErr, "Falha ao registrar aprovação no histórico da tarefa");
+      }
 
       setTasks((prev) =>
         prev.map((t) => (t.id === task.id ? { ...t, coluna: "fazendo", bloqueada: false } : t)),

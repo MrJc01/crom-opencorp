@@ -95,6 +95,33 @@ export const CodeEditorTabs: FC<CodeEditorTabsProps> = ({
     }
   };
 
+  // Salva arquivos abertos recentemente no localStorage
+  useEffect(() => {
+    if (tabAtiva) {
+      try {
+        const raw = localStorage.getItem("oc-recentes-workspace");
+        const salvos = raw ? (JSON.parse(raw) as string[]) : [];
+        const filtrados = [tabAtiva, ...salvos.filter((c) => c !== tabAtiva)].slice(0, 8);
+        localStorage.setItem("oc-recentes-workspace", JSON.stringify(filtrados));
+      } catch {}
+    }
+  }, [tabAtiva]);
+
+  // Lista de arquivos sugeridos (recentes do localStorage ou arquivos canônicos da raiz)
+  const arquivosSugeridos = useMemo(() => {
+    try {
+      const raw = localStorage.getItem("oc-recentes-workspace");
+      if (raw) {
+        const lista = JSON.parse(raw) as string[];
+        if (Array.isArray(lista) && lista.length > 0) {
+          return lista;
+        }
+      }
+    } catch {}
+    // Padrão de descoberta para novos workspaces
+    return ["AGENTS.md", "ARCHITECTURE.md", "README.md", "schema-reference.json", "tarefas_iniciais.json"];
+  }, [tabAtiva, tabs]);
+
   // Se nenhuma tab estiver aberta, exibe a tela de boas-vindas do Workspace
   if (!tabAtual || tabs.length === 0) {
     return (
@@ -112,47 +139,49 @@ export const CodeEditorTabs: FC<CodeEditorTabsProps> = ({
           </p>
         </div>
 
-        {/* Sugestões de Acesso Rápido */}
-        <div className="pt-2 flex flex-wrap justify-center gap-2 max-w-lg">
-          {aoAbrirArquivo && (
-            <>
-              <button
-                type="button"
-                onClick={() => aoAbrirArquivo(".opencorp/flows/yt-pautador.json")}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/50 text-xs text-zinc-300 font-mono transition-colors cursor-pointer"
-              >
-                <Workflow size={13} className="text-emerald-400" />
-                <span>yt-pautador.json</span>
-              </button>
+        {/* Sugestões de Acesso Rápido Dinâmicas */}
+        <div className="pt-2 flex flex-col items-center gap-2 max-w-lg">
+          <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">
+            Arquivos Recentes &amp; Atalhos do Workspace
+          </span>
+          <div className="flex flex-wrap justify-center gap-2">
+            {aoAbrirArquivo &&
+              arquivosSugeridos.map((caminho) => {
+                const nome = caminho.split("/").pop() || caminho;
+                const isFlow = caminho.includes("/flows/") || caminho.endsWith("-flow.json");
+                const isMarkdown = caminho.endsWith(".md");
+                const isJson = caminho.endsWith(".json");
 
-              <button
-                type="button"
-                onClick={() => aoAbrirArquivo(".opencorp/flows/yt-boletim-diario.json")}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/50 text-xs text-zinc-300 font-mono transition-colors cursor-pointer"
-              >
-                <Workflow size={13} className="text-blue-400" />
-                <span>yt-boletim-diario.json</span>
-              </button>
+                const Icone = isFlow
+                  ? Workflow
+                  : isMarkdown
+                  ? FileText
+                  : isJson
+                  ? FileCode
+                  : FileCode;
 
-              <button
-                type="button"
-                onClick={() => aoAbrirArquivo("schema-reference.json")}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/50 text-xs text-zinc-300 font-mono transition-colors cursor-pointer"
-              >
-                <FileCode size={13} className="text-amber-400" />
-                <span>schema-reference.json</span>
-              </button>
+                const corIcone = isFlow
+                  ? "text-emerald-400"
+                  : isMarkdown
+                  ? "text-purple-400"
+                  : isJson
+                  ? "text-amber-400"
+                  : "text-blue-400";
 
-              <button
-                type="button"
-                onClick={() => aoAbrirArquivo("tarefas_iniciais.json")}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/50 text-xs text-zinc-300 font-mono transition-colors cursor-pointer"
-              >
-                <FileText size={13} className="text-purple-400" />
-                <span>tarefas_iniciais.json</span>
-              </button>
-            </>
-          )}
+                return (
+                  <button
+                    key={caminho}
+                    type="button"
+                    onClick={() => aoAbrirArquivo(caminho)}
+                    title={`Abrir ${caminho}`}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/50 text-xs text-zinc-300 font-mono transition-colors cursor-pointer group"
+                  >
+                    <Icone size={13} className={corIcone} />
+                    <span className="group-hover:text-zinc-100">{nome}</span>
+                  </button>
+                );
+              })}
+          </div>
         </div>
       </div>
     );

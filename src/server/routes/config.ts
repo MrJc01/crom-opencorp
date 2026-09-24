@@ -1000,6 +1000,17 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
+    // PUT /settings/apps/:id ou /api/apps/:id ou /apps/:id
+    const mAppPut = /^\/(?:settings\/apps|api\/apps|apps)\/([^/]+)$/.exec(rota);
+    if (mAppPut && (req.method === "PUT" || req.method === "PATCH")) {
+      const ws = await resolverWs(url);
+      const appId = decodeURIComponent(mAppPut[1]!);
+      const corpo = (await lerCorpo(req)) as Record<string, unknown>;
+      const appAtualizado = await apps.atualizarConfig(ws.path, appId, corpo);
+      enviar(res, 200, { ok: true, app: appAtualizado });
+      return true;
+    }
+
     // DELETE /apps/:id ou /api/apps/:id
     const mAppDel = /^(?:\/api)?\/apps\/([^/]+)$/.exec(rota);
     if (mAppDel && req.method === "DELETE") {

@@ -47,10 +47,8 @@ export const AppConfigModal: FC<AppConfigModalProps> = ({
         ativo,
       };
 
-      // Tenta persistir configurações
-      await client.http
-        .put(`/settings/apps/${encodeURIComponent(app.id)}`, atualizado)
-        .catch(() => null);
+      // Persistir configurações no backend
+      await client.http.put(`/settings/apps/${encodeURIComponent(app.id)}`, atualizado);
 
       showToast(`Configurações de "${atualizado.titulo}" salvas com sucesso!`, "sucesso");
       onSalvo(atualizado);

@@ -54,6 +54,9 @@ export interface MiniAppInfo {
   widgets?: number;
   modificadoEm?: string;
   padrao?: "app" | "chat";
+  ativo?: boolean;
+  parametros?: Record<string, any>;
+  env?: Record<string, string>;
 }
 
 export class AppStore {
@@ -134,8 +137,11 @@ export class AppStore {
               icone: meta.icone || "Layout",
               categoria: meta.categoria || "Ferramenta",
               tipo: "miniapp",
-              entryUrl: `/api/apps/${encodeURIComponent(appId)}/view${wsQuery}`,
+              entryUrl: meta.entryUrl || `/api/apps/${encodeURIComponent(appId)}/view${wsQuery}`,
               padrao: meta.padrao === "chat" ? "chat" : "app",
+              ativo: meta.ativo !== false,
+              parametros: meta.parametros,
+              env: meta.env,
             });
           }
         }
@@ -254,6 +260,53 @@ export class AppStore {
       tipo: "miniapp",
       entryUrl: `/api/apps/${encodeURIComponent(id)}/view`,
       padrao: "app",
+      ativo: true,
+    };
+  }
+
+  /**
+   * Atualiza as configurações e metadados de um mini-app (app.json)
+   */
+  async atualizarConfig(
+    wsPath: string,
+    appId: string,
+    dados: Partial<MiniAppInfo> & Record<string, unknown>
+  ): Promise<MiniAppInfo> {
+    const wsAppsDir = this.dirWorkspaceApps(wsPath);
+    const pastaApp = join(wsAppsDir, appId);
+    const metaPath = join(pastaApp, "app.json");
+
+    let meta: Record<string, any> = {};
+    if (existsSync(metaPath)) {
+      try {
+        meta = JSON.parse(readFileSync(metaPath, "utf8"));
+      } catch {}
+    } else {
+      await mkdirRecursive(pastaApp);
+    }
+
+    meta = {
+      ...meta,
+      ...dados,
+      id: appId,
+      atualizadoEm: new Date().toISOString(),
+    };
+
+    await writeFileAtomic(metaPath, `${JSON.stringify(meta, null, 2)}\n`);
+    eventBus.emit("app.salvo", { app: appId });
+
+    return {
+      id: appId,
+      titulo: meta.titulo || appId,
+      descricao: meta.descricao,
+      icone: meta.icone || "Layout",
+      categoria: meta.categoria || "Workspace",
+      tipo: "miniapp",
+      entryUrl: meta.entryUrl || `/api/apps/${encodeURIComponent(appId)}/view`,
+      padrao: meta.padrao === "chat" ? "chat" : "app",
+      ativo: meta.ativo !== false,
+      parametros: meta.parametros,
+      env: meta.env,
     };
   }
 
