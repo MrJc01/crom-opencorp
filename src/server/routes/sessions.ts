@@ -1021,29 +1021,50 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
 
       if (idsParaRemover.length === 0 && Number.isInteger(manter) && manter >= 0) {
         const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}/message`;
-        const resOp = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
-        if (resOp.ok) {
-          const raw = (await resOp.json()) as Array<{
-            info?: { id?: string; role?: string; time?: { completed?: number } };
-            parts?: Array<{ type: string; text?: string; url?: string }>;
-          }>;
-          const filtrados = (Array.isArray(raw) ? raw : [])
-            .map((m) => {
-              const pensamento = (m.parts ?? []).filter((p) => p.type === "reasoning" || p.type === "thinking").map((p) => p.text ?? "").join("\n").trim();
-              return {
-                id: m.info?.id,
-                role: m.info?.role ?? "",
-                content: (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim(),
-                pensamento: pensamento || undefined,
-                imagens: (m.parts ?? []).filter((p) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p) => p.url as string),
-                concluida: m.info?.role === "assistant" ? !!m.info?.time?.completed : true,
-              };
-            })
-            .filter((m) => (m.role === "user" || m.role === "assistant") && (m.content.length > 0 || (m as unknown as { pensamento?: string }).pensamento || (m.imagens && m.imagens.length > 0) || (m.role === "assistant" && m.concluida === false)));
+        let resOp: Response;
+        try {
+          resOp = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
+        } catch {
+          enviar(res, 502, { ok: false, erro: "Sessão não encontrada ou indisponível no upstream" });
+          return true;
+        }
 
-          if (manter < filtrados.length) {
-            idsParaRemover = filtrados.slice(manter).map((m) => m.id).filter(Boolean) as string[];
-          }
+        if (!resOp.ok) {
+          enviar(res, resOp.status === 404 ? 404 : 502, {
+            ok: false,
+            erro: "Sessão não encontrada ou indisponível no upstream",
+          });
+          return true;
+        }
+
+        const raw = (await resOp.json()) as Array<{
+          info?: { id?: string; role?: string; time?: { completed?: number } };
+          parts?: Array<{ type: string; text?: string; url?: string }>;
+        }>;
+        const filtrados = (Array.isArray(raw) ? raw : [])
+          .map((m) => {
+            const pensamento = (m.parts ?? []).filter((p) => p.type === "reasoning" || p.type === "thinking").map((p) => p.text ?? "").join("\n").trim();
+            return {
+              id: m.info?.id,
+              role: m.info?.role ?? "",
+              content: (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim(),
+              pensamento: pensamento || undefined,
+              imagens: (m.parts ?? []).filter((p) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p) => p.url as string),
+              concluida: m.info?.role === "assistant" ? !!m.info?.time?.completed : true,
+            };
+          })
+          .filter((m) => (m.role === "user" || m.role === "assistant") && (m.content.length > 0 || (m as unknown as { pensamento?: string }).pensamento || (m.imagens && m.imagens.length > 0) || (m.role === "assistant" && m.concluida === false)));
+
+        if (manter > filtrados.length) {
+          enviar(res, 400, {
+            ok: false,
+            erro: `manter_ate fora do range: sessão possui ${filtrados.length} mensagens`,
+          });
+          return true;
+        }
+
+        if (manter < filtrados.length) {
+          idsParaRemover = filtrados.slice(manter).map((m) => m.id).filter(Boolean) as string[];
         }
       }
 

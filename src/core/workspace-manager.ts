@@ -567,30 +567,37 @@ export class WorkspaceManager {
     let alterado = false;
 
     // Sementeira de modelos: { padrao, rotacao }
-    if (!configWorkspace.modelos) {
+    // Regra de Ouro 1: globalSettings.modelos tem precedência sobre o esqueleto do template.
+    if (globalSettings.modelos || !configWorkspace.modelos) {
       const padrao =
         globalSettings.modelos?.padrao ||
         globalSettings.default_model ||
+        configWorkspace.modelos?.padrao ||
         "openrouter/google/gemini-2.5-flash";
       const rotacao =
         Array.isArray(globalSettings.modelos?.rotacao) && globalSettings.modelos.rotacao.length > 0
           ? globalSettings.modelos.rotacao
           : Array.isArray(globalSettings.tests?.rotation) && globalSettings.tests.rotation.length > 0
             ? globalSettings.tests.rotation
-            : [
-                padrao,
-                "opencode/nemotron-3-ultra-free",
-                "opencode-go/glm-5.3-flash",
-                "openrouter/qwen/qwen3.8-27b:free",
-              ];
+            : Array.isArray(configWorkspace.modelos?.rotacao) && configWorkspace.modelos.rotacao.length > 0
+              ? configWorkspace.modelos.rotacao
+              : [
+                  padrao,
+                  "openrouter/google/gemini-2.5-flash",
+                  "opencode-go/glm-5.3-flash",
+                  "openrouter/qwen/qwen3.8-27b:free",
+                ];
       configWorkspace.modelos = { padrao, rotacao };
       alterado = true;
     }
 
     // Sementeira de execution_driver
-    if (!configWorkspace.execution_driver) {
-      configWorkspace.execution_driver = globalSettings.execution_driver || "sandbox";
-      alterado = true;
+    if (globalSettings.execution_driver || !configWorkspace.execution_driver) {
+      const novoDriver = globalSettings.execution_driver || configWorkspace.execution_driver || "sandbox";
+      if (configWorkspace.execution_driver !== novoDriver) {
+        configWorkspace.execution_driver = novoDriver;
+        alterado = true;
+      }
     }
 
     // Sementeira de provedores
