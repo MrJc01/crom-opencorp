@@ -2,8 +2,8 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Scheduler, extrairFlowRunDeArgs } from "../src/core/scheduler.js";
-import { FlowStore, flowSchema, type Flow } from "../src/core/flow-store.js";
+import { Scheduler, extrairFlowRunDeArgs } from "../src/core/contexts/scheduling/scheduler.js";
+import { FlowStore, flowSchema, type Flow } from "../src/core/contexts/orchestration/flow-store.js";
 
 const raizes: string[] = [];
 afterAll(async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FUSO_PADRAO, fusoValido, proximoCronTz, SchedulerError } from "../src/core/scheduler.js";
+import { FUSO_PADRAO, fusoValido, proximoCronTz, SchedulerError } from "../src/core/contexts/scheduling/scheduler.js";
 
 describe("scheduler timezone (FUSO_PADRAO + proximoCronTz)", () => {
   it("FUSO_PADRAO é America/Sao_Paulo", () => {

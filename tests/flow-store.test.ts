@@ -2,9 +2,9 @@ import { afterAll, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FlowStore } from "../src/core/flow-store.js";
-import { FlowError } from "../src/core/errors.js";
-import type { OpcoesRun, ResultadoRun } from "../src/core/session-manager.js";
+import { FlowStore } from "../src/core/contexts/orchestration/flow-store.js";
+import { FlowError } from "../src/core/shared/errors.js";
+import type { OpcoesRun, ResultadoRun } from "../src/core/contexts/execution/session-manager.js";
 
 const raizes: string[] = [];
 
@@ -15,7 +15,7 @@ afterAll(async () => {
 async function wsNovo(): Promise<{ home: string; ws: string }> {
   const home = await mkdtemp(join(tmpdir(), "opencorp-flow-"));
   raizes.push(home);
-  const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+  const { WorkspaceManager } = await import("../src/core/contexts/workspace/workspace-manager.js");
   const ws = await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-flow");
   return { home, ws: ws.path };
 }
@@ -180,7 +180,7 @@ describe("FlowStore — nodes de gestão (task_create, registro, decisao)", () =
     const r = await store.executar(ws, "fila", { entrada: "revisão de custos" });
     expect(r.contextoFinal).toContain("tsk-");
     expect(r.contextoFinal).toContain("Tratar: revisão de custos");
-    const { TaskStore } = await import("../src/core/task-store.js");
+    const { TaskStore } = await import("../src/core/contexts/storage/task-store.js");
     const tasks = await new TaskStore().listar(ws);
     expect(tasks).toHaveLength(1);
     expect(tasks[0]!.titulo).toBe("Tratar: revisão de custos");

@@ -17,8 +17,8 @@
  */
 import type { Command } from "commander";
 import { opencorpHome } from "../../utils/paths.js";
-import { SecretsStore, type SecretOrigem } from "../../core/secrets-store.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { SecretsStore, type SecretOrigem } from "../../core/contexts/storage/secrets-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 
 function escopoValido(escopo: string | undefined): SecretOrigem | undefined {
   if (!escopo) return undefined;

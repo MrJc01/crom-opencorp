@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, copyFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
-import { envOpencodeIsolado } from "../../opencode-server.js";
+import { envOpencodeIsolado } from "../../contexts/execution/opencode-server.js";
 import {
   safeExecFile as execFileAsync,
   type EngineDriver,

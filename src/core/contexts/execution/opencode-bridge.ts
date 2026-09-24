@@ -3,8 +3,8 @@ import { join, basename } from "node:path";
 import Database from "better-sqlite3";
 import type { Agente } from "../../../schemas/agent.js";
 import { writeFileAtomic } from "../../../utils/fs-safe.js";
-import { montarSecaoSkills, SkillStore } from "../../skill-store.js";
-import { PromptStore } from "../../prompt-store.js";
+import { montarSecaoSkills, SkillStore } from "../agents/skill-store.js";
+import { PromptStore } from "../agents/prompt-store.js";
 
 const TOOLS_OPENCODE = [
   "bash",

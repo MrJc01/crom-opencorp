@@ -107,7 +107,7 @@ export async function construirContextoWorkspace(ws: { id: string; path: string 
 
   // 4. Observatório de Sub-Agentes (Últimas execuções e incidentes)
   try {
-    const { RegistryStore } = await import("../../../core/registry-store.js");
+    const { RegistryStore } = await import("../../../core/contexts/storage/registry-store.js");
     const registros = new RegistryStore();
     const db = registros.corpDb(ws.path);
     const execs = db.listarExecucoes({ limite: 5 });
@@ -124,7 +124,7 @@ export async function construirContextoWorkspace(ws: { id: string; path: string 
 
   // 5. Estado Operacional das Tarefas (Kanban)
   try {
-    const { TaskStore } = await import("../../../core/task-store.js");
+    const { TaskStore } = await import("../../../core/contexts/storage/task-store.js");
     const taskStore = new TaskStore();
     const tasks = await taskStore.listar(ws.path);
     if (tasks.length > 0) {

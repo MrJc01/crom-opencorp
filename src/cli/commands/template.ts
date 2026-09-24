@@ -1,6 +1,6 @@
 import type { Command } from "commander";
-import { TemplateStore } from "../../core/template-store.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { TemplateStore } from "../../core/contexts/platform/template-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

@@ -3,8 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdirRecursive } from "../src/utils/fs-safe.js";
-import { TeamStore, validarPadrao } from "../src/core/team-store.js";
-import { TeamError } from "../src/core/errors.js";
+import { TeamStore, validarPadrao } from "../src/core/contexts/meetings/team-store.js";
+import { TeamError } from "../src/core/shared/errors.js";
 
 const raizes: string[] = [];
 
@@ -19,7 +19,7 @@ let store: TeamStore;
 beforeEach(async () => {
   const home = await mkdtemp(join(tmpdir(), "opencorp-team-"));
   raizes.push(home);
-  const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+  const { WorkspaceManager } = await import("../src/core/contexts/workspace/workspace-manager.js");
   const ws = await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-team");
   wsPath = ws.path;
   relogio = Date.now();
@@ -155,7 +155,7 @@ describe("TeamStore — CRUD e listagem", () => {
 
   it("emite team.salvo e team.excluido no eventBus", async () => {
     const eventos: string[] = [];
-    const { eventBus } = await import("../src/core/event-bus.js");
+    const { eventBus } = await import("../src/core/shared/event-bus.js");
     const off = eventBus.on((ev) => eventos.push(ev.tipo));
 
     await store.criar(wsPath, {

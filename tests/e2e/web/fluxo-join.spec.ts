@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { chmod, mkdir, rm, writeFile, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { logado, api } from "../helpers.js";
-import { SessionManager } from "../../../src/core/session-manager.js";
+import { SessionManager } from "../../../src/core/contexts/execution/session-manager.js";
 
 // F10-T01 — Join/barreira de múltiplas entradas. Fluxo manual → fanout (2 ramos
 // agente) → nó final com 2 entradas. Sem `join`, o nó final executa UMA vez com

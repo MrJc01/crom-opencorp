@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { SessionManager } from "../../core/session-manager.js";
+import { SessionManager } from "../../core/contexts/execution/session-manager.js";
 import { parseGatilho } from "../../schemas/gatilho.js";
 
 function reportar(erro: unknown): void {

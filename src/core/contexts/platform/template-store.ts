@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { TemplateError } from "../../errors.js";
+import { TemplateError } from "../../shared/errors.js";
 import { writeFileAtomic } from "../../../utils/fs-safe.js";
 import { validarIdAgente } from "../../../schemas/agent.js";
 import { opencorpHome, projectRoot } from "../../../utils/paths.js";

@@ -2,10 +2,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { avaliar, casaPadrao } from "../src/core/security-guard.js";
+import { avaliar, casaPadrao } from "../src/core/contexts/platform/security-guard.js";
 import { parseSecurityPolicyTexto } from "../src/schemas/security-policy.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { SecretsStore } from "../src/core/secrets-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { SecretsStore } from "../src/core/contexts/storage/secrets-store.js";
 
 const raizes: string[] = [];
 

@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { FlowStore, type SessaoFlow } from "../src/core/flow-store.js";
-import { type OpcoesRun, type ResultadoRun } from "../src/core/session-manager.js";
-import { TaskStore } from "../src/core/task-store.js";
-import { RegistryStore } from "../src/core/registry-store.js";
+import { FlowStore, type SessaoFlow } from "../src/core/contexts/orchestration/flow-store.js";
+import { type OpcoesRun, type ResultadoRun } from "../src/core/contexts/execution/session-manager.js";
+import { TaskStore } from "../src/core/contexts/storage/task-store.js";
+import { RegistryStore } from "../src/core/contexts/storage/registry-store.js";
 
 describe("Bateria Completa de Execução de Fluxos — Todas as Formas de Uso", () => {
   let wsDir: string;

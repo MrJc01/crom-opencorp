@@ -3,9 +3,9 @@ import { mkdtemp, rm, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createApiServer, type ApiServerOptions, type SessaoApi } from "../src/server/index.js";
-import { ToolRegistry } from "../src/core/tool-registry.js";
-import { eventBus } from "../src/core/event-bus.js";
-import { CAP_NOTIFICACOES } from "../src/core/notification-store.js";
+import { ToolRegistry } from "../src/core/contexts/agents/tool-registry.js";
+import { eventBus } from "../src/core/shared/event-bus.js";
+import { CAP_NOTIFICACOES } from "../src/core/contexts/platform/notification-store.js";
 
 const raizes: string[] = [];
 

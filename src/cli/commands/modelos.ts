@@ -6,7 +6,7 @@ import os from "node:os";
 import {
   filtrarModelosQualificados,
   type QualidadeModelo,
-} from "../../core/model-resolver.js";
+} from "../../core/contexts/agents/model-resolver.js";
 
 function colorize(text: string, color: "green" | "red" | "yellow" | "cyan" | "magenta" | "gray" | "bold"): string {
   const codes: Record<string, string> = {

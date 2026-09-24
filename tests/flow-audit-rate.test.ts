@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "node:http";
 import { createApiServer } from "../src/server/index.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { FlowStore } from "../src/core/flow-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { FlowStore } from "../src/core/contexts/orchestration/flow-store.js";
 
 describe("Produção & Marketplace — API Endpoints (Audit, Rate Limit, Components)", () => {
   let homeDir: string;

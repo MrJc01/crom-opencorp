@@ -1,7 +1,7 @@
 import { mkdirRecursive, writeFileAtomic } from "../../utils/fs-safe.js";
 import { opencorpHome } from "../../utils/paths.js";
 import { tokenAleatorio } from "../../server/index.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 import type { Command } from "commander";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";

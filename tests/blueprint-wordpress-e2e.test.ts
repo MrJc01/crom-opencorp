@@ -3,9 +3,9 @@ import { createServer, type Server } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { TaskStore } from "../src/core/task-store.js";
-import { SecretsStore } from "../src/core/secrets-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { TaskStore } from "../src/core/contexts/storage/task-store.js";
+import { SecretsStore } from "../src/core/contexts/storage/secrets-store.js";
 
 interface PostWp {
   id: number;

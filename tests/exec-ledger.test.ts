@@ -4,9 +4,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { CorpDb } from "../src/core/corp-db.js";
-import { SessionManager } from "../src/core/session-manager.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { CorpDb } from "../src/core/contexts/storage/corp-db.js";
+import { SessionManager } from "../src/core/contexts/execution/session-manager.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 import { parseGatilho } from "../src/schemas/gatilho.js";
 
 const { execaMock } = vi.hoisted(() => ({ execaMock: vi.fn() }));

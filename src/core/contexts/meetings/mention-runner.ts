@@ -1,5 +1,5 @@
-import { TaskStore } from "../../task-store.js";
-import { eventBus } from "../../event-bus.js";
+import { TaskStore } from "../storage/task-store.js";
+import { eventBus } from "../../shared/event-bus.js";
 import type { Gatilho } from "../../../schemas/gatilho.js";
 import { opencorpHome } from "../../../utils/paths.js";
 import { basename } from "node:path";
@@ -38,7 +38,7 @@ export function instalarMencoes(opcoes: OpcoesMencoes = {}): () => void {
       // sobrevive à morte do processo que recebeu a menção (anti-stale).
       // O filho registra a exec, posta no chat da task e processa as suas
       // próprias menções — cada elo da cadeia é autônomo.
-      const { spawnOpencorpDetached } = await import("../../spawn-detached.js");
+      const { spawnOpencorpDetached } = await import("../execution/spawn-detached.js");
       const wsId = basename(wsPath);
       const extras = gatilho ? ["--gatilho", `${gatilho.tipo}:${gatilho.origem}`] : [];
       const r = spawnOpencorpDetached(

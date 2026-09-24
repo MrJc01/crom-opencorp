@@ -8,9 +8,9 @@ import { randomBytes, createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic, mkdirRecursive } from "../../../utils/fs-safe.js";
-import { HookError } from "../../errors.js";
-import { TaskStore } from "../../task-store.js";
-import { eventBus } from "../../event-bus.js";
+import { HookError } from "../../shared/errors.js";
+import { TaskStore } from "../storage/task-store.js";
+import { eventBus } from "../../shared/event-bus.js";
 import type { Gatilho } from "../../../schemas/gatilho.js";
 
 export type AlvoHook =
@@ -311,7 +311,7 @@ export class HookStore {
       return { exec_id: r.id, resultado: r.captura?.trim() ?? "" };
     }
     if (alvo.tipo === "pre_publish") {
-      const { validarPrePublicacao } = await import("../../pre-publish.js");
+      const { validarPrePublicacao } = await import("../platform/pre-publish.js");
       const validacao = await validarPrePublicacao(wsPath, {
         titulo: payload.corpo.titulo ? String(payload.corpo.titulo) : undefined,
         slug: payload.corpo.slug ? String(payload.corpo.slug) : undefined,
@@ -370,7 +370,7 @@ export class HookStore {
 
     // Trava de Aprovação Humana Obrigatória (HITL)
     if (hook.exige_aprovacao) {
-      const { ApprovalsStore } = await import("../../approvals-store.js");
+      const { ApprovalsStore } = await import("../platform/approvals-store.js");
       const approvals = new ApprovalsStore();
 
       let ordemDescricao = "";

@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { Command } from "commander";
-import { AgentStore } from "../../core/agent-store.js";
-import { RegistryStore } from "../../core/registry-store.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { AgentStore } from "../../core/contexts/agents/agent-store.js";
+import { RegistryStore } from "../../core/contexts/storage/registry-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

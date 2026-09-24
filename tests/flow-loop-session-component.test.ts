@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { FlowStore, type SessaoFlow } from "../src/core/flow-store.js";
-import { type OpcoesRun, type ResultadoRun } from "../src/core/session-manager.js";
+import { FlowStore, type SessaoFlow } from "../src/core/contexts/orchestration/flow-store.js";
+import { type OpcoesRun, type ResultadoRun } from "../src/core/contexts/execution/session-manager.js";
 
 describe("FlowStore — Loops HLE, Sessões Persistentes e Componentes Modulares", () => {
   let wsDir: string;

@@ -5,14 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import Database from "better-sqlite3";
-import { ApprovalError } from "../src/core/errors.js";
-import { ApprovalsStore } from "../src/core/approvals-store.js";
-import { BudgetManager } from "../src/core/budget-manager.js";
-import { avaliar, casaPadrao } from "../src/core/security-guard.js";
-import { SessionError } from "../src/core/errors.js";
-import { SessionManager } from "../src/core/session-manager.js";
-import { SettingsStore } from "../src/core/settings-store.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { ApprovalError } from "../src/core/shared/errors.js";
+import { ApprovalsStore } from "../src/core/contexts/platform/approvals-store.js";
+import { BudgetManager } from "../src/core/contexts/platform/budget-manager.js";
+import { avaliar, casaPadrao } from "../src/core/contexts/platform/security-guard.js";
+import { SessionError } from "../src/core/shared/errors.js";
+import { SessionManager } from "../src/core/contexts/execution/session-manager.js";
+import { SettingsStore } from "../src/core/contexts/workspace/settings-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 import { parseSecurityPolicyTexto } from "../src/schemas/security-policy.js";
 
 const { execaMock } = vi.hoisted(() => ({ execaMock: vi.fn() }));
@@ -213,7 +213,7 @@ describe("BudgetManager", () => {
     const home = await tmpDir("opencorp-bud2-");
     const manager = new WorkspaceManager({ homeDir: home, cwd: home });
     const ws = await manager.criar("corp-bud2");
-    const { SettingsStore } = await import("../src/core/settings-store.js");
+    const { SettingsStore } = await import("../src/core/contexts/workspace/settings-store.js");
     await new SettingsStore({ homeDir: home, cwd: home }).set("budget.per_agent_usd", "1", {
       scope: "workspace",
       workspaceDir: ws.path,

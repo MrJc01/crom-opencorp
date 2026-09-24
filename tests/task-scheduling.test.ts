@@ -2,10 +2,10 @@ import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseQuandoDataUnica, parseAgendaTask, Scheduler } from "../src/core/scheduler.js";
+import { parseQuandoDataUnica, parseAgendaTask, Scheduler } from "../src/core/contexts/scheduling/scheduler.js";
 import { createApiServer, type ApiServerOptions, type SessaoApi } from "../src/server/index.js";
-import { TaskStore } from "../src/core/task-store.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { TaskStore } from "../src/core/contexts/storage/task-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 
 const raizes: string[] = [];
 

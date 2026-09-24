@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { TeamError } from "../../errors.js";
-import { eventBus } from "../../event-bus.js";
+import { TeamError } from "../../shared/errors.js";
+import { eventBus } from "../../shared/event-bus.js";
 import { writeFileAtomic, mkdirRecursive } from "../../../utils/fs-safe.js";
 
 export const passoSchema = z.object({

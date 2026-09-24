@@ -3,7 +3,7 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createApiServer, type ApiServerOptions } from "../src/server/index.js";
-import { OpencodeServerManager } from "../src/core/opencode-server.js";
+import { OpencodeServerManager } from "../src/core/contexts/execution/opencode-server.js";
 
 const raizes: string[] = [];
 

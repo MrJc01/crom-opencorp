@@ -1,9 +1,9 @@
 import { existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { BudgetError } from "../../errors.js";
-import { RegistryStore } from "../../registry-store.js";
-import { SettingsStore } from "../../settings-store.js";
+import { BudgetError } from "../../shared/errors.js";
+import { RegistryStore } from "../storage/registry-store.js";
+import { SettingsStore } from "../workspace/settings-store.js";
 import { writeFileAtomic } from "../../../utils/fs-safe.js";
 
 export interface EstadoBudget {

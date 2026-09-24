@@ -1,7 +1,7 @@
 import type { Command } from "commander";
-import { BudgetManager } from "../../core/budget-manager.js";
-import { SettingsStore } from "../../core/settings-store.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { BudgetManager } from "../../core/contexts/platform/budget-manager.js";
+import { SettingsStore } from "../../core/contexts/workspace/settings-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm, readFile, writeFile, mkdir, stat, unlink, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { OpencodeServerManager, SecretarioError } from "../src/core/opencode-server.js";
+import { OpencodeServerManager, SecretarioError } from "../src/core/contexts/execution/opencode-server.js";
 
 const raizes: string[] = [];
 

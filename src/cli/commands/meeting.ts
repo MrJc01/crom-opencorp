@@ -1,8 +1,8 @@
 import type { Command } from "commander";
-import { MeetingError } from "../../core/errors.js";
-import { MeetingManager, gerarIdReuniao } from "../../core/meeting-manager.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
-import { spawnOpencorpDetached } from "../../core/spawn-detached.js";
+import { MeetingError } from "../../core/shared/errors.js";
+import { MeetingManager, gerarIdReuniao } from "../../core/contexts/meetings/meeting-manager.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+import { spawnOpencorpDetached } from "../../core/contexts/execution/spawn-detached.js";
 import { opencorpHome } from "../../utils/paths.js";
 
 function reportar(erro: unknown): void {

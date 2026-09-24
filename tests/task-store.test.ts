@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TaskError, TaskStore } from "../src/core/task-store.js";
+import { TaskError, TaskStore } from "../src/core/contexts/storage/task-store.js";
 
 const raizes: string[] = [];
 
@@ -17,7 +17,7 @@ let store: TaskStore;
 beforeEach(async () => {
   const home = await mkdtemp(join(tmpdir(), "opencorp-task-"));
   raizes.push(home);
-  const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+  const { WorkspaceManager } = await import("../src/core/contexts/workspace/workspace-manager.js");
   const ws = await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-task");
   wsPath = ws.path;
   relogio = Date.now();
@@ -81,7 +81,7 @@ describe("TaskStore — mover/atribuir/labels", () => {
   it("mover para feito emite task.concluida", async () => {
     const t = await store.criar(wsPath, { titulo: "Concluir" });
     const eventos: string[] = [];
-    const off = (await import("../src/core/event-bus.js")).eventBus.on((ev) => eventos.push(ev.tipo));
+    const off = (await import("../src/core/shared/event-bus.js")).eventBus.on((ev) => eventos.push(ev.tipo));
     try {
       await store.mover(wsPath, t.id, "feito");
     } finally {

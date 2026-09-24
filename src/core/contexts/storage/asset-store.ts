@@ -5,8 +5,8 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import Database from "better-sqlite3";
 import { z } from "zod";
-import { OpencorpError } from "../../errors.js";
-import { FlowStore } from "../../flow-store.js";
+import { OpencorpError } from "../../shared/errors.js";
+import { FlowStore } from "../orchestration/flow-store.js";
 import { writeFileAtomic } from "../../../utils/fs-safe.js";
 import { opencorpHome } from "../../../utils/paths.js";
 

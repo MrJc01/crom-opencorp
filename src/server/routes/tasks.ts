@@ -3,10 +3,10 @@
  */
 
 import { taskCreateSchema } from "../../schemas/task.js";
-import { parseAgendaTask } from "../../core/scheduler.js";
-import { SessionManager } from "../../core/session-manager.js";
+import { parseAgendaTask } from "../../core/contexts/scheduling/scheduler.js";
+import { SessionManager } from "../../core/contexts/execution/session-manager.js";
 import { opencorpHome } from "../../utils/paths.js";
-import type { Task } from "../../core/task-store.js";
+import type { Task } from "../../core/contexts/storage/task-store.js";
 import type { RouteContext } from "./types.js";
 
 export async function handleTaskRoutes(ctx: RouteContext): Promise<boolean> {

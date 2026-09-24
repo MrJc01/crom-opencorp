@@ -5,12 +5,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { SessionManager } from "../src/core/session-manager.js";
-import { Supervisor } from "../src/core/supervisor.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { RegistryStore, type MetaRegistro } from "../src/core/registry-store.js";
-import { SettingsStore } from "../src/core/settings-store.js";
-import type { OpcoesRun, ResultadoRun } from "../src/core/session-manager.js";
+import { SessionManager } from "../src/core/contexts/execution/session-manager.js";
+import { Supervisor } from "../src/core/contexts/platform/supervisor.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { RegistryStore, type MetaRegistro } from "../src/core/contexts/storage/registry-store.js";
+import { SettingsStore } from "../src/core/contexts/workspace/settings-store.js";
+import type { OpcoesRun, ResultadoRun } from "../src/core/contexts/execution/session-manager.js";
 
 const { execaMock } = vi.hoisted(() => ({ execaMock: vi.fn() }));
 vi.mock("execa", () => ({ execa: execaMock }));

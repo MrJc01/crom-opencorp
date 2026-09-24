@@ -8,8 +8,8 @@ import { parseSecurityPolicyTexto } from "../../../schemas/security-policy.js";
 import { mkdirRecursive, writeFileAtomic } from "../../../utils/fs-safe.js";
 import { expandTilde } from "../../../utils/paths.js";
 import { AppStore } from "./app-store.js";
-import { TeamStore } from "../../team-store.js";
-import { FlowStore } from "../../flow-store.js";
+import { TeamStore } from "../meetings/team-store.js";
+import { FlowStore } from "../orchestration/flow-store.js";
 
 export const MIN_NODE_MAJOR = 22;
 export const DEFAULT_WORKSPACES_ROOT = "~/.opencorp/workspaces";

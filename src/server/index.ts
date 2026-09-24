@@ -7,26 +7,26 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { createRequire } from "node:module";
-import { WorkspaceManager } from "../core/workspace-manager.js";
+import { WorkspaceManager } from "../core/contexts/workspace/workspace-manager.js";
 import { opencorpHome } from "../utils/paths.js";
-import { AgentStore } from "../core/agent-store.js";
-import { TemplateStore } from "../core/template-store.js";
-import { SessionManager, type OpcoesRun, type ResultadoRun } from "../core/session-manager.js";
-import { RegistryStore } from "../core/registry-store.js";
-import { ApprovalsStore } from "../core/approvals-store.js";
-import { SettingsError, SettingsStore } from "../core/settings-store.js";
-import { FlowStore, type SessaoFlow } from "../core/flow-store.js";
+import { AgentStore } from "../core/contexts/agents/agent-store.js";
+import { TemplateStore } from "../core/contexts/platform/template-store.js";
+import { SessionManager, type OpcoesRun, type ResultadoRun } from "../core/contexts/execution/session-manager.js";
+import { RegistryStore } from "../core/contexts/storage/registry-store.js";
+import { ApprovalsStore } from "../core/contexts/platform/approvals-store.js";
+import { SettingsError, SettingsStore } from "../core/contexts/workspace/settings-store.js";
+import { FlowStore, type SessaoFlow } from "../core/contexts/orchestration/flow-store.js";
 
-import { MeetingManager } from "../core/meeting-manager.js";
-import { TaskStore } from "../core/task-store.js";
-import { PromptStore } from "../core/prompt-store.js";
-import { Scheduler } from "../core/scheduler.js";
-import { HookStore } from "../core/hook-store.js";
-import { NotificationStore } from "../core/notification-store.js";
-import { AppStore } from "../core/app-store.js";
-import { TeamStore } from "../core/team-store.js";
-import { OrquestradorDeTeams } from "../core/team-orchestrator.js";
-import { instalarMencoes } from "../core/mention-runner.js";
+import { MeetingManager } from "../core/contexts/meetings/meeting-manager.js";
+import { TaskStore } from "../core/contexts/storage/task-store.js";
+import { PromptStore } from "../core/contexts/agents/prompt-store.js";
+import { Scheduler } from "../core/contexts/scheduling/scheduler.js";
+import { HookStore } from "../core/contexts/scheduling/hook-store.js";
+import { NotificationStore } from "../core/contexts/platform/notification-store.js";
+import { AppStore } from "../core/contexts/platform/app-store.js";
+import { TeamStore } from "../core/contexts/meetings/team-store.js";
+import { OrquestradorDeTeams } from "../core/contexts/meetings/team-orchestrator.js";
+import { instalarMencoes } from "../core/contexts/meetings/mention-runner.js";
 import {
   TaskError,
   SchedulerError,
@@ -40,9 +40,9 @@ import {
   WorkspaceError,
   FlowError,
   ComponentError,
-} from "../core/errors.js";
-import { OpencodeServerManager, SecretarioError } from "../core/opencode-server.js";
-import { SecretsStore } from "../core/secrets-store.js";
+} from "../core/shared/errors.js";
+import { OpencodeServerManager, SecretarioError } from "../core/contexts/execution/opencode-server.js";
+import { SecretsStore } from "../core/contexts/storage/secrets-store.js";
 import { EngineAccountStore } from "../core/engines/index.js";
 import { processarCors, verificarAutenticacao, type OpcoesCors } from "./middleware/index.js";
 import { criarHandlerEstatico, servirEstatico } from "./static.js";

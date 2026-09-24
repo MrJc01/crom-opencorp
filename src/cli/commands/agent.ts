@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import type { Command } from "commander";
-import { AgentError } from "../../core/errors.js";
-import { SessionManager, tetoRunPadraoMs } from "../../core/session-manager.js";
-import { AgentStore } from "../../core/agent-store.js";
-import { SubcorpStore } from "../../core/subcorp-store.js";
-import { BudgetManager } from "../../core/budget-manager.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { AgentError } from "../../core/shared/errors.js";
+import { SessionManager, tetoRunPadraoMs } from "../../core/contexts/execution/session-manager.js";
+import { AgentStore } from "../../core/contexts/agents/agent-store.js";
+import { SubcorpStore } from "../../core/contexts/workspace/subcorp-store.js";
+import { BudgetManager } from "../../core/contexts/platform/budget-manager.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 import { parseGatilho } from "../../schemas/gatilho.js";
 import { opencorpHome } from "../../utils/paths.js";
 

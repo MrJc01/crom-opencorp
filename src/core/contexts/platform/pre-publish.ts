@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { eventBus } from "../../event-bus.js";
+import { eventBus } from "../../shared/event-bus.js";
 
 export interface PrePublishValidacao {
   valido: boolean;

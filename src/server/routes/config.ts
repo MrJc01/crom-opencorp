@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { opencorpHome } from "../../utils/paths.js";
 import { writeFileAtomic, mkdirRecursive } from "../../utils/fs-safe.js";
-import { dirOpencodeHome, dirOpencodeData } from "../../core/opencode-server.js";
+import { dirOpencodeHome, dirOpencodeData } from "../../core/contexts/execution/opencode-server.js";
 import {
   engineRegistry,
   getEngineAuthInstructions,
@@ -13,8 +13,8 @@ import {
   EngineAccountStore,
   WebLoginOrchestrator,
 } from "../../core/engines/index.js";
-import { listarProvedoresStatus, testarModeloDirect, completarChatDirect } from "../../core/llm-client.js";
-import type { SecretOrigem } from "../../core/secrets-store.js";
+import { listarProvedoresStatus, testarModeloDirect, completarChatDirect } from "../../core/contexts/execution/llm-client.js";
+import type { SecretOrigem } from "../../core/contexts/storage/secrets-store.js";
 import type { RouteContext } from "./types.js";
 
 export async function detectarOpencodeInfo(homeDir: string) {

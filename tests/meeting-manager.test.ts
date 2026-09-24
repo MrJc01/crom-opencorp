@@ -3,15 +3,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RegistryStore } from "../src/core/registry-store.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { SettingsStore } from "../src/core/settings-store.js";
+import { RegistryStore } from "../src/core/contexts/storage/registry-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { SettingsStore } from "../src/core/contexts/workspace/settings-store.js";
 import {
   MeetingManager,
   parseDecisaoModerador,
   type SessaoLike,
-} from "../src/core/meeting-manager.js";
-import type { OpcoesRun, ResultadoRun } from "../src/core/session-manager.js";
+} from "../src/core/contexts/meetings/meeting-manager.js";
+import type { OpcoesRun, ResultadoRun } from "../src/core/contexts/execution/session-manager.js";
 
 const raizes: string[] = [];
 
@@ -188,7 +188,7 @@ describe("MeetingManager — encerramentos", () => {
         .mockResolvedValueOnce({ ok: true })
         .mockResolvedValue({ ok: false, motivo: "orçamento estourou" }),
       registrarConsumo: vi.fn(),
-    } as unknown as import("../src/core/budget-manager.js").BudgetManager;
+    } as unknown as import("../src/core/contexts/platform/budget-manager.js").BudgetManager;
     const mm = new MeetingManager({ homeDir: home, cwd: home, sessoes: sessao, budget: budgetFalso });
     const sala = await mm.iniciar({
       pauta: "pauta orçamento",

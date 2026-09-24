@@ -5,8 +5,8 @@ import {
   ContainerDriver,
   resolverDriverExecucao,
   escolherPreferenciaDriver,
-} from "../src/core/execution-driver.js";
-import type { OpcoesPreparacaoDriver } from "../src/core/execution-driver.js";
+} from "../src/core/contexts/execution/execution-driver.js";
+import type { OpcoesPreparacaoDriver } from "../src/core/contexts/execution/execution-driver.js";
 
 describe("ExecutionDriver", () => {
   const mockOpts: OpcoesPreparacaoDriver = {
@@ -167,7 +167,7 @@ describe("ExecutionDriver", () => {
     });
 
     it("dirsDoBinario resolve nome via PATH e symlink (dir do link + alvo)", async () => {
-      const { dirsDoBinario } = await import("../src/core/execution-driver.js");
+      const { dirsDoBinario } = await import("../src/core/contexts/execution/execution-driver.js");
       expect(dirsDoBinario("/home/j/.opencorp/bin/opencode")).toContain("/home/j/.opencorp/bin");
       const viaPath = dirsDoBinario("node");
       expect(viaPath.length).toBeGreaterThan(0);

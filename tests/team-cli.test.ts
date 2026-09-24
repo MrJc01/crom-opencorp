@@ -34,7 +34,7 @@ beforeAll(async () => {
   home = await mkdtemp(join(tmpdir(), "opencorp-team-cli-"));
   raizes.push(home);
   bin = join(process.cwd(), "bin", "opencorp.mjs");
-  const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+  const { WorkspaceManager } = await import("../src/core/contexts/workspace/workspace-manager.js");
   const ws = await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-team-cli");
   wsId = ws.id;
 });

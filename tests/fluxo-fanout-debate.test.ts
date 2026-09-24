@@ -2,8 +2,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FlowStore } from "../src/core/flow-store.js";
-import type { OpcoesRun, ResultadoRun } from "../src/core/session-manager.js";
+import { FlowStore } from "../src/core/contexts/orchestration/flow-store.js";
+import type { OpcoesRun, ResultadoRun } from "../src/core/contexts/execution/session-manager.js";
 
 // F9-T01/F9-T02 — execução end-to-end dos nós fundidos fanout/review/debate no
 // flow-store + paridade com o team-orchestrator legado ({{anterior}}/{{ajustes}},
@@ -18,7 +18,7 @@ afterAll(async () => {
 async function wsNovo(): Promise<{ home: string; ws: string }> {
   const home = await mkdtemp(join(tmpdir(), "opencorp-fanout-"));
   raizes.push(home);
-  const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+  const { WorkspaceManager } = await import("../src/core/contexts/workspace/workspace-manager.js");
   const ws = await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-fanout");
   return { home, ws: ws.path };
 }

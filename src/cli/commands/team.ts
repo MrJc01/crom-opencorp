@@ -1,7 +1,7 @@
 import type { Command } from "commander";
-import { TeamStore, type TeamSpec, type Passo } from "../../core/team-store.js";
-import { OrquestradorDeTeams } from "../../core/team-orchestrator.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { TeamStore, type TeamSpec, type Passo } from "../../core/contexts/meetings/team-store.js";
+import { OrquestradorDeTeams } from "../../core/contexts/meetings/team-orchestrator.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

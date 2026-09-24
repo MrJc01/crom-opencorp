@@ -3,13 +3,13 @@ import { createServer, type Server } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 import {
   obterListaRotacaoCompleta,
   proximoModeloRotacao,
   ehModeloGratuito,
-} from "../src/core/session-manager.js";
-import { AgentStore } from "../src/core/agent-store.js";
+} from "../src/core/contexts/execution/session-manager.js";
+import { AgentStore } from "../src/core/contexts/agents/agent-store.js";
 
 const raizes: string[] = [];
 let mockServer: Server;

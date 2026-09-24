@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CorpDb, type LinhaAcaoAgente } from "../src/core/corp-db.js";
+import { CorpDb, type LinhaAcaoAgente } from "../src/core/contexts/storage/corp-db.js";
 import {
   sanitizarSegredos,
   truncarComHash,
@@ -10,9 +10,9 @@ import {
   gerarSpanId,
   TelemetryCollector,
   type TraceContext,
-} from "../src/core/telemetry-collector.js";
-import type { PassoChat } from "../src/core/opencode-server.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+} from "../src/core/contexts/platform/telemetry-collector.js";
+import type { PassoChat } from "../src/core/contexts/execution/opencode-server.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 import { createApiServer } from "../src/server/index.js";
 
 const raizes: string[] = [];

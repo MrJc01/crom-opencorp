@@ -3,10 +3,10 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Command } from "commander";
-import { ToolRegistry, type ManifestFerramenta } from "../../core/tool-registry.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { ToolRegistry, type ManifestFerramenta } from "../../core/contexts/agents/tool-registry.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 import { opencorpHome } from "../../utils/paths.js";
-import { ToolError } from "../../core/errors.js";
+import { ToolError } from "../../core/shared/errors.js";
 
 function paraToolMcp(f: ManifestFerramenta): Record<string, unknown> {
   return {

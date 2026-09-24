@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Command } from "commander";
-import { Supervisor, spawnDaemon, estaRodando, lerPidfile, gravarPidfile, removerPidfile, pidPath, pidVivo } from "../../core/supervisor.js";
-import { RegistryStore } from "../../core/registry-store.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { Supervisor, spawnDaemon, estaRodando, lerPidfile, gravarPidfile, removerPidfile, pidPath, pidVivo } from "../../core/contexts/platform/supervisor.js";
+import { RegistryStore } from "../../core/contexts/storage/registry-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {
@@ -101,7 +101,7 @@ export function registerSupervisorCommand(program: Command): void {
             return;
           }
         } else {
-          const { SettingsStore } = await import("../../core/settings-store.js");
+          const { SettingsStore } = await import("../../core/contexts/workspace/settings-store.js");
           intervalo = Number(
             (await new SettingsStore().get("supervisor.interval_minutes", { workspaceDir: ws.path })).valor,
           );

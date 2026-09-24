@@ -3,8 +3,8 @@ import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execa } from "execa";
-import { WorkspaceGit } from "../src/core/workspace-git.js";
-import { processarComandoGitSecretario } from "../src/core/secretario-git-slash.js";
+import { WorkspaceGit } from "../src/core/contexts/workspace/workspace-git.js";
+import { processarComandoGitSecretario } from "../src/core/contexts/workspace/secretario-git-slash.js";
 
 describe("Secretário — Comandos Git Slash", () => {
   let tempDir: string;

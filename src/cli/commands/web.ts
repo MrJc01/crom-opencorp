@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import type { Command } from "commander";
 import { createApiServer } from "../../server/index.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 import { tokenAleatorio } from "../../server/index.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";

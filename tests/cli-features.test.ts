@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import { gerarRelatorio } from "../src/cli/commands/relatorio.js";
-import { TaskStore } from "../src/core/task-store.js";
-import { AgentStore } from "../src/core/agent-store.js";
+import { TaskStore } from "../src/core/contexts/storage/task-store.js";
+import { AgentStore } from "../src/core/contexts/agents/agent-store.js";
 
 describe("CLI Features (CLI-06 e CLI-07)", () => {
   let tempWs: string;

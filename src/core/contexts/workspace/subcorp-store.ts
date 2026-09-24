@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { SubcorpError } from "../../errors.js";
-import { CATEGORIAS_PADRAO } from "../../registry-store.js";
+import { SubcorpError } from "../../shared/errors.js";
+import { CATEGORIAS_PADRAO } from "../storage/registry-store.js";
 import { writeFileAtomic } from "../../../utils/fs-safe.js";
 import { validarIdAgente } from "../../../schemas/agent.js";
 import { opencorpHome, projectRoot } from "../../../utils/paths.js";

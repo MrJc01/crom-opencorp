@@ -3,8 +3,8 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Command } from "commander";
-import { FlowStore } from "../../core/flow-store.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { FlowStore } from "../../core/contexts/orchestration/flow-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 import { parseGatilho } from "../../schemas/gatilho.js";
 import { obterConfiguracaoServidor } from "../client.js";
 
@@ -313,8 +313,8 @@ function wsDe(opts: { workspace?: string }): string | undefined {
     .action((opts: { workspace?: string }) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(opts));
-        const { TeamStore } = await import("../../core/team-store.js");
-        const { migrarTeamsParaFlows } = await import("../../core/flow-migrate.js");
+        const { TeamStore } = await import("../../core/contexts/meetings/team-store.js");
+        const { migrarTeamsParaFlows } = await import("../../core/contexts/orchestration/flow-migrate.js");
         const res = await migrarTeamsParaFlows(ws.path, new TeamStore(), store);
         if (!res.criados.length && !res.pulados.length) {
           console.log("nenhum team legado para migrar neste workspace");

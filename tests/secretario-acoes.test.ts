@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extrairAcoesMensagens, type MensagemOc } from "../src/core/opencode-server.js";
+import { extrairAcoesMensagens, type MensagemOc } from "../src/core/contexts/execution/opencode-server.js";
 
 /** Extrai tool calls das mensagens assistant NOVAS (após baseline) — mantém contagem,
  *  nome da tool, status e resumo do primeiro campo string do input. */

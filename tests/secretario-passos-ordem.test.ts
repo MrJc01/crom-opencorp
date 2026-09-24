@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extrairPassosMensagens, type MensagemOc } from "../src/core/opencode-server.js";
+import { extrairPassosMensagens, type MensagemOc } from "../src/core/contexts/execution/opencode-server.js";
 import { renderMarkdown } from "../src/web/md.js";
 
 describe("Secretário — Ordem Cronológica e Separação de Passos (Pensamento -> Tool -> Pensamento -> Texto)", () => {

@@ -7,7 +7,7 @@ import {
   SettingsStore,
   formatarValor,
   parseValor,
-} from "../src/core/settings-store.js";
+} from "../src/core/contexts/workspace/settings-store.js";
 
 const raizes: string[] = [];
 

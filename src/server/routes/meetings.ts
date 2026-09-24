@@ -2,8 +2,8 @@
  * Rotas de Reuniões e Salas Multi-Agente — Extração Modular (MICRO-PASSO 10)
  */
 
-import { gerarIdReuniao } from "../../core/meeting-manager.js";
-import { MeetingError, RegistryError } from "../../core/errors.js";
+import { gerarIdReuniao } from "../../core/contexts/meetings/meeting-manager.js";
+import { MeetingError, RegistryError } from "../../core/shared/errors.js";
 import type { RouteContext } from "./types.js";
 
 export async function handleMeetingRoutes(ctx: RouteContext): Promise<boolean> {

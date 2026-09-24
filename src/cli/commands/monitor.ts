@@ -1,11 +1,11 @@
 import type { Command } from "commander";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
-import { TaskStore } from "../../core/task-store.js";
-import { SessionManager } from "../../core/session-manager.js";
-import { ApprovalsStore } from "../../core/approvals-store.js";
-import { BudgetManager } from "../../core/budget-manager.js";
-import { RegistryStore } from "../../core/registry-store.js";
-import { Scheduler } from "../../core/scheduler.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+import { TaskStore } from "../../core/contexts/storage/task-store.js";
+import { SessionManager } from "../../core/contexts/execution/session-manager.js";
+import { ApprovalsStore } from "../../core/contexts/platform/approvals-store.js";
+import { BudgetManager } from "../../core/contexts/platform/budget-manager.js";
+import { RegistryStore } from "../../core/contexts/storage/registry-store.js";
+import { Scheduler } from "../../core/contexts/scheduling/scheduler.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

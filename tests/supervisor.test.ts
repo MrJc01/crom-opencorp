@@ -4,9 +4,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { RegistryStore } from "../src/core/registry-store.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { SettingsStore } from "../src/core/settings-store.js";
+import { RegistryStore } from "../src/core/contexts/storage/registry-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { SettingsStore } from "../src/core/contexts/workspace/settings-store.js";
 import {
   Supervisor,
   estaRodando,
@@ -14,8 +14,8 @@ import {
   lerPidfile,
   removerPidfile,
   type PidInfo,
-} from "../src/core/supervisor.js";
-import type { OpcoesRun, ResultadoRun } from "../src/core/session-manager.js";
+} from "../src/core/contexts/platform/supervisor.js";
+import type { OpcoesRun, ResultadoRun } from "../src/core/contexts/execution/session-manager.js";
 
 const raizes: string[] = [];
 
@@ -203,7 +203,7 @@ describe("Supervisor — tick (a) falhas → ordem cega", () => {
 
   it("(b) approval jovem é contada mas não gera ordem; antiga gera", async () => {
     const { home, wsPath } = await ambiente();
-    const approvals = new (await import("../src/core/approvals-store.js")).ApprovalsStore();
+    const approvals = new (await import("../src/core/contexts/platform/approvals-store.js")).ApprovalsStore();
     await approvals.criar(wsPath, {
       ordem: "execute: git push origin main",
       agente: "executor-padrao",
@@ -234,7 +234,7 @@ describe("Supervisor — tick (a) falhas → ordem cega", () => {
 
   it("(c) budget >80% é detectado e apenas registrado (sem ordem)", async () => {
     const { home, wsPath, store } = await ambiente();
-    const { BudgetManager } = await import("../src/core/budget-manager.js");
+    const { BudgetManager } = await import("../src/core/contexts/platform/budget-manager.js");
     await store.set("budget.per_agent_usd", "0.5", { scope: "workspace", workspaceDir: wsPath });
     const budget = new BudgetManager({ homeDir: home, cwd: home });
     await budget.registrarConsumo(wsPath, "executor-padrao", 0.45, { modelo: "opencode/hy3-free", duracao_ms: 1 });

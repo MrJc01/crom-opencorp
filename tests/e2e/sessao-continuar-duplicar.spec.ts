@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { chmod, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { logado, api } from "./helpers.js";
-import { SessionManager } from "../../src/core/session-manager.js";
+import { SessionManager } from "../../src/core/contexts/execution/session-manager.js";
 
 // F1-T02 — continuar/duplicar no SessionManager (CLI-level via API:
 // fixtures via HTTP, execução via SessionManager, verificação via HTTP).

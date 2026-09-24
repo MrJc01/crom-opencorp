@@ -183,7 +183,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
       }
 
       // 3. Verifica disponibilidade real do driver
-      const { resolverDriverExecucao } = await import("../../core/execution-driver.js");
+      const { resolverDriverExecucao } = await import("../../core/contexts/execution/execution-driver.js");
       const driver = await resolverDriverExecucao(driverTipo);
 
       enviar(res, 200, {
@@ -257,7 +257,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
     const ws = await resolverWs(url);
     const limite = Number(url.searchParams.get("limite") || "30");
     const arquivo = url.searchParams.get("arquivo") || undefined;
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const commits = await wsGit.listarHistorico(ws.path, limite, arquivo);
     enviar(res, 200, { ok: true, workspace: ws.id, arquivo, commits });
@@ -267,7 +267,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
     const ws = await resolverWs(url);
     const hash = url.searchParams.get("hash") || undefined;
     const arquivo = url.searchParams.get("arquivo") || undefined;
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const diff = await wsGit.obterDiff(ws.path, hash, arquivo);
     enviar(res, 200, { ok: true, workspace: ws.id, hash, arquivo, diff });
@@ -275,7 +275,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
   }
   if (rota === "/workspaces/git/status" && req.method === "GET") {
     const ws = await resolverWs(url);
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const status = await wsGit.obterStatusArquivos(ws.path);
     enviar(res, 200, { ok: true, workspace: ws.id, ...status });
@@ -288,7 +288,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
       enviar(res, 400, { ok: false, erro: "campo 'arquivo' é obrigatório" });
       return true;
     }
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const resultado = await wsGit.restaurarArquivo(ws.path, corpo.arquivo, corpo.commit);
     enviar(res, resultado.sucesso ? 200 : 400, resultado);
@@ -296,7 +296,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
   }
   if (rota === "/workspaces/git/branches" && req.method === "GET") {
     const ws = await resolverWs(url);
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const info = await wsGit.listarBranches(ws.path);
     enviar(res, 200, { ok: true, workspace: ws.id, ...info });
@@ -309,7 +309,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
       enviar(res, 400, { ok: false, erro: "campo 'nome' é obrigatório" });
       return true;
     }
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const resultado = await wsGit.criarOuAlternarBranch(ws.path, corpo.nome, corpo.criarNova);
     enviar(res, resultado.sucesso ? 200 : 400, resultado);
@@ -317,7 +317,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
   }
   if (rota === "/workspaces/git/init" && req.method === "POST") {
     const ws = await resolverWs(url);
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const resultado = await wsGit.inicializar(ws.path);
     enviar(res, 200, { ok: resultado.inicializado, ...resultado });
@@ -330,7 +330,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
       enviar(res, 400, { ok: false, erro: "campo 'alvo' é obrigatório (hash, tag ou execId)" });
       return true;
     }
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const resultado = await wsGit.reverter(ws.path, corpo.alvo);
     enviar(res, resultado.sucesso ? 200 : 400, resultado);
@@ -338,7 +338,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
   }
   if (rota === "/workspaces/git/checkpoints" && req.method === "GET") {
     const ws = await resolverWs(url);
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const checkpoints = await wsGit.listarCheckpoints(ws.path);
     enviar(res, 200, { ok: true, workspace: ws.id, checkpoints });
@@ -352,7 +352,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
       enviar(res, 400, { ok: false, erro: "campo 'tarefa' é obrigatório" });
       return true;
     }
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const resultado = await wsGit.criarBranchTarefa(ws.path, id);
     enviar(res, resultado.sucesso ? 200 : 400, { ok: resultado.sucesso, ...resultado });
@@ -360,7 +360,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
   }
   if (rota === "/workspaces/git/worktrees" && req.method === "GET") {
     const ws = await resolverWs(url);
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const worktrees = await wsGit.listarWorktrees(ws.path);
     enviar(res, 200, { ok: true, workspace: ws.id, worktrees });
@@ -373,7 +373,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
       enviar(res, 400, { ok: false, erro: "campo 'branch' é obrigatório" });
       return true;
     }
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const resultado = await wsGit.criarWorktree(ws.path, corpo.branch, corpo.caminho);
     enviar(res, resultado.sucesso ? 200 : 400, { ok: resultado.sucesso, ...resultado });
@@ -387,7 +387,7 @@ export async function handleWorkspaceRoutes(ctx: RouteContext): Promise<boolean>
       enviar(res, 400, { ok: false, erro: "campo 'caminho' é obrigatório" });
       return true;
     }
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     const resultado = await wsGit.removerWorktree(ws.path, caminho);
     enviar(res, resultado.sucesso ? 200 : 400, { ok: resultado.sucesso, ...resultado });

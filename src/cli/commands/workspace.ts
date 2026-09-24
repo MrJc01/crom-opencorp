@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
-import { WorkspaceError, WorkspaceManager } from "../../core/workspace-manager.js";
-import { formatarValor } from "../../core/settings-store.js";
+import { WorkspaceError, WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+import { formatarValor } from "../../core/contexts/workspace/settings-store.js";
 
 async function comErros(fn: () => Promise<void>): Promise<void> {
   try {
@@ -169,7 +169,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .action((id: string | undefined, opts: { workspace?: string }) =>
       comErros(async () => {
         const alvo = await manager.resolver(id ?? opts.workspace);
-        const { FlowStore } = await import("../../core/flow-store.js");
+        const { FlowStore } = await import("../../core/contexts/orchestration/flow-store.js");
         const flowStore = new FlowStore();
         const lista = await flowStore.listar(alvo.path);
         let pausados = 0;
@@ -193,7 +193,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .action((id: string | undefined, opts: { workspace?: string }) =>
       comErros(async () => {
         const alvo = await manager.resolver(id ?? opts.workspace);
-        const { FlowStore } = await import("../../core/flow-store.js");
+        const { FlowStore } = await import("../../core/contexts/orchestration/flow-store.js");
         const flowStore = new FlowStore();
         const lista = await flowStore.listar(alvo.path);
         let ativados = 0;
@@ -217,7 +217,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .action((id?: string) =>
       comErros(async () => {
         const alvo = await manager.resolver(id);
-        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
         const wsGit = new WorkspaceGit();
         const res = await wsGit.inicializar(alvo.path);
         console.log(`[${alvo.id}] ${res.mensagem}${res.hash ? ` (${res.hash.slice(0, 7)})` : ""}`);
@@ -232,7 +232,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .action((id: string | undefined, opts: { limite?: string; file?: string }) =>
       comErros(async () => {
         const alvo = await manager.resolver(id);
-        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
         const wsGit = new WorkspaceGit();
         const commits = await wsGit.listarHistorico(alvo.path, Number(opts.limite || "20"), opts.file);
         if (commits.length === 0) {
@@ -256,7 +256,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .action((hash: string | undefined, opts: { workspace?: string; file?: string }) =>
       comErros(async () => {
         const alvo = await manager.resolver(opts.workspace);
-        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
         const wsGit = new WorkspaceGit();
         const diff = await wsGit.obterDiff(alvo.path, hash, opts.file);
         if (!diff.trim()) {
@@ -273,7 +273,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .action((id?: string) =>
       comErros(async () => {
         const alvo = await manager.resolver(id);
-        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
         const wsGit = new WorkspaceGit();
         const status = await wsGit.obterStatusArquivos(alvo.path);
         console.log(`\n=== Status Git: Workspace "${alvo.id}" (branch: \x1b[32m${status.branch}\x1b[0m) ===`);
@@ -305,7 +305,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .action((arquivo: string, opts: { workspace?: string; from?: string }) =>
       comErros(async () => {
         const alvo = await manager.resolver(opts.workspace);
-        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
         const wsGit = new WorkspaceGit();
         const res = await wsGit.restaurarArquivo(alvo.path, arquivo, opts.from);
         if (res.sucesso) {
@@ -325,7 +325,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .action((nome: string | undefined, opts: { workspace?: string; create?: boolean }) =>
       comErros(async () => {
         const alvo = await manager.resolver(opts.workspace);
-        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
         const wsGit = new WorkspaceGit();
         if (!nome) {
           const info = await wsGit.listarBranches(alvo.path);
@@ -353,7 +353,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .action((id?: string) =>
       comErros(async () => {
         const alvo = await manager.resolver(id);
-        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
         const wsGit = new WorkspaceGit();
         const cps = await wsGit.listarCheckpoints(alvo.path);
         if (cps.length === 0) { console.log(`[${alvo.id}] nenhum checkpoint registrado`); return; }
@@ -370,7 +370,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .action((tarefa: string, opts: { workspace?: string }) =>
       comErros(async () => {
         const alvo = await manager.resolver(opts.workspace);
-        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
         const wsGit = new WorkspaceGit();
         const res = await wsGit.criarBranchTarefa(alvo.path, tarefa);
         if (res.sucesso) console.log(`ok: ${res.mensagem}`);
@@ -388,7 +388,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .action((branch: string | undefined, opts: { workspace?: string; list?: boolean; remove?: string; path?: string }) =>
       comErros(async () => {
         const alvo = await manager.resolver(opts.workspace);
-        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
         const wsGit = new WorkspaceGit();
         if (opts.remove) {
           const res = await wsGit.removerWorktree(alvo.path, opts.remove);
@@ -420,7 +420,7 @@ export function registerWorkspaceCommands(program: Command): void {
           console.log("Operação cancelada.");
           return;
         }
-        const { WorkspaceGit } = await import("../../core/workspace-git.js");
+        const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
         const wsGit = new WorkspaceGit();
         const res = await wsGit.reverter(alvo.path, alvoRef);
         if (res.sucesso) {

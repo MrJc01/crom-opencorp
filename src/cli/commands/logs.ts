@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import { openSync, readSync, statSync } from "node:fs";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
-import { eventLogger, type LogEntry } from "../../core/event-logger.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+import { eventLogger, type LogEntry } from "../../core/contexts/storage/event-logger.js";
 
 function corNivel(nivel: string): string {
   switch (nivel) {

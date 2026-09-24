@@ -1,6 +1,6 @@
 import type { Command } from "commander";
-import { SubcorpStore } from "../../core/subcorp-store.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { SubcorpStore } from "../../core/contexts/workspace/subcorp-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

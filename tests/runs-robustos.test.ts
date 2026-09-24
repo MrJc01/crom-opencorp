@@ -5,21 +5,21 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { Scheduler } from "../src/core/scheduler.js";
+import { Scheduler } from "../src/core/contexts/scheduling/scheduler.js";
 import {
   SessionManager,
   WatchdogRun,
   proximoModeloRotacao,
   tetoRunPadraoMs,
-} from "../src/core/session-manager.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { RegistryStore } from "../src/core/registry-store.js";
-import { CorpDb } from "../src/core/corp-db.js";
+} from "../src/core/contexts/execution/session-manager.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { RegistryStore } from "../src/core/contexts/storage/registry-store.js";
+import { CorpDb } from "../src/core/contexts/storage/corp-db.js";
 import { formatarDataExecucao, dataDeExecucao } from "../src/cli/commands/monitor.js";
 
 const { execaMock } = vi.hoisted(() => ({ execaMock: vi.fn() }));
 vi.mock("execa", () => ({ execa: execaMock }));
-vi.mock("../src/core/execution-driver.js", () => ({
+vi.mock("../src/core/contexts/execution/execution-driver.js", () => ({
   resolverDriverExecucao: async () => ({
     tipo: "host",
     disponivel: async () => true,

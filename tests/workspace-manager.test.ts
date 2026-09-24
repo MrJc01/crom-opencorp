@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { opencorpHome } from "../src/utils/paths.js";
-import { WorkspaceError, WorkspaceManager } from "../src/core/workspace-manager.js";
+import { WorkspaceError, WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 
 const raizes: string[] = [];
 
@@ -99,7 +99,7 @@ describe("WorkspaceManager — criar", () => {
   it("respeita paths.workspaces_root do settings", async () => {
     const home = await tmpDir();
     const raiz = join(home, "corps-custom");
-    const { SettingsStore } = await import("../src/core/settings-store.js");
+    const { SettingsStore } = await import("../src/core/contexts/workspace/settings-store.js");
     const store = new SettingsStore({ homeDir: home, cwd: home });
     await store.set("paths.workspaces_root", raiz);
     const m = managerEm(home);

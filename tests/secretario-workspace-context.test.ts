@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { construirContextoWorkspace } from "../src/server/routes/secretario/context-builder.js";
-import { limparPrefixoWorkspace } from "../src/core/opencode-server.js";
+import { limparPrefixoWorkspace } from "../src/core/contexts/execution/opencode-server.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 

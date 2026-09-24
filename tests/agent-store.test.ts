@@ -3,9 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { AgentError, } from "../src/core/errors.js";
-import { AgentStore } from "../src/core/agent-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { AgentError, } from "../src/core/shared/errors.js";
+import { AgentStore } from "../src/core/contexts/agents/agent-store.js";
 import { AgentSchemaError } from "../src/schemas/agent.js";
 
 const raizes: string[] = [];

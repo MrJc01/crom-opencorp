@@ -2,9 +2,9 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TaskStore } from "../src/core/task-store.js";
-import { instalarMencoes, pendentesMencoes } from "../src/core/mention-runner.js";
-import { eventBus } from "../src/core/event-bus.js";
+import { TaskStore } from "../src/core/contexts/storage/task-store.js";
+import { instalarMencoes, pendentesMencoes } from "../src/core/contexts/meetings/mention-runner.js";
+import { eventBus } from "../src/core/shared/event-bus.js";
 
 const raizes: string[] = [];
 
@@ -29,7 +29,7 @@ const fakeExecutor = {
 beforeEach(async () => {
   const home = await mkdtemp(join(tmpdir(), "opencorp-mention-"));
   raizes.push(home);
-  const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+  const { WorkspaceManager } = await import("../src/core/contexts/workspace/workspace-manager.js");
   const ws = await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-mention");
   wsPath = ws.path;
   relogio = Date.now();

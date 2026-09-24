@@ -4,8 +4,8 @@
  */
 
 import type { RouteContext } from "./types.js";
-import type { AlvoHook, Hook, PayloadHook } from "../../core/hook-store.js";
-import { eventBus } from "../../core/event-bus.js";
+import type { AlvoHook, Hook, PayloadHook } from "../../core/contexts/scheduling/hook-store.js";
+import { eventBus } from "../../core/shared/event-bus.js";
 import { extrairTokenBearer, compararTokensSeguro } from "../middleware/index.js";
 
 class WebhookRateLimiter {

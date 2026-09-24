@@ -101,7 +101,7 @@ describe("Rotas Modulares de Flows e Sessões (Micro-Passo 11)", () => {
     wsPath = (wsRes.json as { caminho: string }).caminho;
 
     // Pré-popula registros usando CorpDb (que delega ao OpencorpDb consolidado)
-    const { CorpDb } = await import("../src/core/corp-db.js");
+    const { CorpDb } = await import("../src/core/contexts/storage/corp-db.js");
     const corp = new CorpDb(CorpDb.caminho(wsPath));
     corp.upsertSessao({
       id: "sessao-mock-1",

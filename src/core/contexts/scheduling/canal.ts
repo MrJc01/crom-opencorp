@@ -1,4 +1,4 @@
-import { CanalError } from "../../errors.js";
+import { CanalError } from "../../shared/errors.js";
 
 export { CanalError };
 

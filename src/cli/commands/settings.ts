@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { Command } from "commander";
 import { opencorpHome } from "../../utils/paths.js";
-import { SettingsError, SettingsStore, formatarValor, type Scope } from "../../core/settings-store.js";
+import { SettingsError, SettingsStore, formatarValor, type Scope } from "../../core/contexts/workspace/settings-store.js";
 import { settingsSchema } from "../../schemas/settings.js";
 import { writeFileAtomic } from "../../utils/fs-safe.js";
 import { abrirPainelSettings } from "./settings-tui.js";

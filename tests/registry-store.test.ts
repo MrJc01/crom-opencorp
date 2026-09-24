@@ -3,9 +3,9 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdtemp, rm, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RegistryError } from "../src/core/errors.js";
-import { RegistryStore } from "../src/core/registry-store.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { RegistryError } from "../src/core/shared/errors.js";
+import { RegistryStore } from "../src/core/contexts/storage/registry-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 
 const raizes: string[] = [];
 

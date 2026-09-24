@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { SessionManager } from "../src/core/session-manager.js";
+import { SessionManager } from "../src/core/contexts/execution/session-manager.js";
 import { harnessRegistry } from "../src/core/harness/index.js";
 
 describe("Agente — Rotação Própria e Harness", () => {

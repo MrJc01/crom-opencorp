@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseYamlSimples } from "../../../schemas/agent.js";
-import { AgentError } from "../../errors.js";
+import { AgentError } from "../../shared/errors.js";
 
 export const NOME_SKILL_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 

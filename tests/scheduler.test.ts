@@ -2,8 +2,8 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SchedulerError, Scheduler, proximoCron, validarCron } from "../src/core/scheduler.js";
-import type { Job } from "../src/core/scheduler.js";
+import { SchedulerError, Scheduler, proximoCron, validarCron } from "../src/core/contexts/scheduling/scheduler.js";
+import type { Job } from "../src/core/contexts/scheduling/scheduler.js";
 
 const raizes: string[] = [];
 

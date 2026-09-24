@@ -7,21 +7,21 @@ import { freemem } from "node:os";
 import { execa } from "execa";
 import { tokenBucketGlobal } from "../../engines/token-bucket-limiter.js";
 import type { Agente } from "../../../schemas/agent.js";
-import { AgentStore } from "../../agent-store.js";
-import { SessionError } from "../../errors.js";
+import { AgentStore } from "../agents/agent-store.js";
+import { SessionError } from "../../shared/errors.js";
 import { OpenCodeBridge } from "./opencode-bridge.js";
-import { RegistryStore, type MetaRegistro } from "../../registry-store.js";
-import { eventBus } from "../../event-bus.js";
-import { WorkspaceManager } from "../../workspace-manager.js";
-import { ApprovalsStore } from "../../approvals-store.js";
-import { BudgetManager } from "../../budget-manager.js";
-import { avaliar, casaPadrao } from "../../security-guard.js";
+import { RegistryStore, type MetaRegistro } from "../storage/registry-store.js";
+import { eventBus } from "../../shared/event-bus.js";
+import { WorkspaceManager } from "../workspace/workspace-manager.js";
+import { ApprovalsStore } from "../platform/approvals-store.js";
+import { BudgetManager } from "../platform/budget-manager.js";
+import { avaliar, casaPadrao } from "../platform/security-guard.js";
 import { parseSecurityPolicyTexto } from "../../../schemas/security-policy.js";
 import { gatilhoSchema, type Gatilho } from "../../../schemas/gatilho.js";
 import { mkdirRecursive } from "../../../utils/fs-safe.js";
 import { opencorpHome, resolvePath } from "../../../utils/paths.js";
 import { envOpencodeIsolado } from "./opencode-server.js";
-import { SettingsStore } from "../../settings-store.js";
+import { SettingsStore } from "../workspace/settings-store.js";
 import { engineRegistry } from "../../engines/index.js";
 import { CapabilitiesPara } from "../../engines/capabilities.js";
 import { EngineAccountStore } from "../../engines/engine-account-store.js";
@@ -29,7 +29,7 @@ import {
   resolverCadeiaModelosAgente,
   proximoModeloDaCadeia,
   ehModeloGratuito,
-} from "../../model-resolver.js";
+} from "../agents/model-resolver.js";
 
 import {
   sanitizarTranscript,
@@ -795,7 +795,7 @@ export class SessionManager {
         });
         // Notificação + evento para o Secretário/Notificações aparecerem imediatamente
         try {
-          const { NotificationStore } = await import("../../notification-store.js");
+          const { NotificationStore } = await import("../platform/notification-store.js");
           const notifs = new NotificationStore();
           await notifs.adicionar(ws.path, {
             titulo: `Permissão necessária: ${ag.frontmatter.id}`,
@@ -1024,7 +1024,7 @@ export class SessionManager {
     }
 
     try {
-      const { WorkspaceGit } = await import("../../workspace-git.js");
+      const { WorkspaceGit } = await import("../workspace/workspace-git.js");
       const wsGit = new WorkspaceGit();
       if (wsGit.temGit(ws.path)) {
         void wsGit.criarCheckpoint(ws.path, id);
@@ -1042,8 +1042,8 @@ export class SessionManager {
       let envEfetivo = execEnv;
 
       try {
-        const { resolverDriverExecucao } = await import("../../execution-driver.js");
-        const modDriver = (await import("../../execution-driver.js")) as {
+        const { resolverDriverExecucao } = await import("./execution-driver.js");
+        const modDriver = (await import("./execution-driver.js")) as {
           escolherPreferenciaDriver?: (agente?: string, workspace?: string, global?: string) => string;
         };
         const escolher = modDriver.escolherPreferenciaDriver ?? ((_ag?: string, w?: string, g = "sandbox") => w || g);
@@ -2252,7 +2252,7 @@ export class SessionManager {
 
     // Auto-commit Git no workspace se houver arquivos alterados
     try {
-      const { WorkspaceGit } = await import("../../workspace-git.js");
+      const { WorkspaceGit } = await import("../workspace/workspace-git.js");
       const wsGit = new WorkspaceGit();
       if (wsGit.temGit(ws.path)) {
         void wsGit.autoCommit(ws.path, registro.agente, registro.ordem || "", registro.id);
@@ -2264,7 +2264,7 @@ export class SessionManager {
     // Notificação automática de falha de execução/modelo
     if (status === "falhou") {
       try {
-        const { NotificationStore } = await import("../../notification-store.js");
+        const { NotificationStore } = await import("../platform/notification-store.js");
         const notifs = new NotificationStore();
         const motivo = erroDesc || `Processo encerrou com falha (exit ${exitCode})`;
         await notifs.adicionar(ws.path, {

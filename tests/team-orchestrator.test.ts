@@ -2,9 +2,9 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TeamStore } from "../src/core/team-store.js";
-import { TaskStore } from "../src/core/task-store.js";
-import { OrquestradorDeTeams, ExecutoresOrquestrador } from "../src/core/team-orchestrator.js";
+import { TeamStore } from "../src/core/contexts/meetings/team-store.js";
+import { TaskStore } from "../src/core/contexts/storage/task-store.js";
+import { OrquestradorDeTeams, ExecutoresOrquestrador } from "../src/core/contexts/meetings/team-orchestrator.js";
 
 const raizes: string[] = [];
 
@@ -33,7 +33,7 @@ function criarExecutorFake(respostas: Record<string, () => string | Promise<stri
 beforeEach(async () => {
   const home = await mkdtemp(join(tmpdir(), "opencorp-team-"));
   raizes.push(home);
-  const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+  const { WorkspaceManager } = await import("../src/core/contexts/workspace/workspace-manager.js");
   const ws = await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-teams");
   wsPath = ws.path;
   relogio = Date.now();

@@ -11,7 +11,7 @@ import {
   fundirAuth,
   PROVEEDOR_RE,
   type EntradaAuth,
-} from "../../../core/opencode-server.js";
+} from "../../../core/contexts/execution/opencode-server.js";
 import type { RouteContext } from "../types.js";
 
 export async function handleKeysRoutes(ctx: RouteContext): Promise<boolean> {

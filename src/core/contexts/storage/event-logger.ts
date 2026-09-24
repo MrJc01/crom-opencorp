@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { eventBus, type EventoBus } from "../../event-bus.js";
+import { eventBus, type EventoBus } from "../../shared/event-bus.js";
 import { opencorpHome } from "../../../utils/paths.js";
 
 export type NivelLog = "info" | "aviso" | "erro";

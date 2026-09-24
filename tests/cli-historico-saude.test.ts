@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CorpDb } from "../src/core/corp-db.js";
+import { CorpDb } from "../src/core/contexts/storage/corp-db.js";
 
 describe("CLI de Histórico e Saúde — Integridade de Dados", () => {
   let tempWs: string;

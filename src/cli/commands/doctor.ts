@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { Command } from "commander";
-import { runDoctor, type CheckStatus } from "../../core/doctor.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { runDoctor, type CheckStatus } from "../../core/contexts/platform/doctor.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 import { opencorpHome } from "../../utils/paths.js";
 
 const ICONES: Record<CheckStatus, string> = {

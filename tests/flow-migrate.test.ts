@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TeamStore } from "../src/core/team-store.js";
-import { FlowStore } from "../src/core/flow-store.js";
-import { migrarTeamsParaFlows, specTeamParaFlow } from "../src/core/flow-migrate.js";
+import { TeamStore } from "../src/core/contexts/meetings/team-store.js";
+import { FlowStore } from "../src/core/contexts/orchestration/flow-store.js";
+import { migrarTeamsParaFlows, specTeamParaFlow } from "../src/core/contexts/orchestration/flow-migrate.js";
 
 let home: string;
 

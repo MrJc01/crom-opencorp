@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { opencorpHome } from "../../../utils/paths.js";
-import type { OpcoesRun } from "../../../core/session-manager.js";
+import type { OpcoesRun } from "../../../core/contexts/execution/session-manager.js";
 import type { RouteContext } from "../types.js";
 
 export function textoAjudaSlash(): string {
@@ -136,7 +136,7 @@ export async function processarSlash(
   }
 
   if (token === "/doctor") {
-    const { runDoctor } = await import("../../../core/doctor.js");
+    const { runDoctor } = await import("../../../core/contexts/platform/doctor.js");
     const r = await runDoctor({ homeDir: home, workspacePath: ws.path });
     const linhas = r.checks.map((c) => `- [${c.status === "ok" ? "OK" : c.status.toUpperCase()}] ${c.label}${c.detail ? ` — ${c.detail}` : ""}`);
     return {

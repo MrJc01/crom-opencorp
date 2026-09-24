@@ -7,12 +7,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { eventBus, type EventoBus } from "../../core/event-bus.js";
+import { eventBus, type EventoBus } from "../../core/shared/event-bus.js";
 import { opencorpHome } from "../../utils/paths.js";
 import { engineRegistry, EngineAccountStore } from "../../core/engines/index.js";
-import { SessionManager } from "../../core/session-manager.js";
-import { RegistryStore, type MetaRegistro } from "../../core/registry-store.js";
-import { registrarBuiltins } from "../../core/builtin-components.js";
+import { SessionManager } from "../../core/contexts/execution/session-manager.js";
+import { RegistryStore, type MetaRegistro } from "../../core/contexts/storage/registry-store.js";
+import { registrarBuiltins } from "../../core/contexts/orchestration/builtin-components.js";
 import { COMANDOS_AGENDA } from "./scheduler.js";
 import type { RouteContext } from "./types.js";
 
@@ -364,7 +364,7 @@ export async function handleSystemRoutes(ctx: RouteContext): Promise<boolean> {
   // ── 5. GET /doctor e POST /doctor/fix ──
   if (rota === "/doctor" && req.method === "GET") {
     const ws = await resolverWs(url);
-    const { runDoctor } = await import("../../core/doctor.js");
+    const { runDoctor } = await import("../../core/contexts/platform/doctor.js");
     const resultado = await runDoctor({ homeDir: home, workspacePath: ws.path });
     enviar(res, 200, resultado);
     return true;
@@ -372,7 +372,7 @@ export async function handleSystemRoutes(ctx: RouteContext): Promise<boolean> {
 
   if (rota === "/doctor/fix" && req.method === "POST") {
     const ws = await resolverWs(url);
-    const { runDoctor } = await import("../../core/doctor.js");
+    const { runDoctor } = await import("../../core/contexts/platform/doctor.js");
     const resultado = await runDoctor({ homeDir: home, workspacePath: ws.path });
     enviar(res, 200, { ok: resultado.ok, remediado: true, checks: resultado.checks });
     return true;
@@ -460,7 +460,7 @@ export async function handleSystemRoutes(ctx: RouteContext): Promise<boolean> {
   // ── 8. /budget/status e /budget/set ──
   if (rota === "/budget/status" && req.method === "GET") {
     const ws = await resolverWs(url);
-    const { BudgetManager } = await import("../../core/budget-manager.js");
+    const { BudgetManager } = await import("../../core/contexts/platform/budget-manager.js");
     const bm = new BudgetManager({ homeDir: home });
     const estado = await bm.carregar(ws.path);
     enviar(res, 200, { estado, limites: await bm.limites(ws.path) });
@@ -477,7 +477,7 @@ export async function handleSystemRoutes(ctx: RouteContext): Promise<boolean> {
         await settings.set("budget.per_agent_usd", String(corpo.per_agent_usd), { workspaceDir: ws.path, scope: "workspace" });
       }
     }
-    const { BudgetManager } = await import("../../core/budget-manager.js");
+    const { BudgetManager } = await import("../../core/contexts/platform/budget-manager.js");
     const bm = new BudgetManager({ homeDir: home });
     enviar(res, 200, { ok: true, estado: await bm.carregar(ws.path) });
     return true;
@@ -546,7 +546,7 @@ export async function handleSystemRoutes(ctx: RouteContext): Promise<boolean> {
 
   // ── 11. /components (marketplace) ──
   if (rota === "/components" || rota.startsWith("/components/")) {
-    const { ComponentStore } = await import("../../core/component-store.js");
+    const { ComponentStore } = await import("../../core/contexts/orchestration/component-store.js");
     const components = new ComponentStore({ homeDir: home });
 
     if (rota === "/components" && req.method === "GET") {
@@ -826,7 +826,7 @@ export async function handleSystemRoutes(ctx: RouteContext): Promise<boolean> {
 }
 
 export function iniciarPollExecucoes(
-  workspaces: import("../../core/workspace-manager.js").WorkspaceManager,
+  workspaces: import("../../core/contexts/workspace/workspace-manager.js").WorkspaceManager,
   registros: RegistryStore,
   intervaloMs = 2000,
 ): NodeJS.Timeout {

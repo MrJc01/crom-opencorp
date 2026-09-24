@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OpenCodeBridge } from "../src/core/opencode-bridge.js";
+import { OpenCodeBridge } from "../src/core/contexts/execution/opencode-bridge.js";
 import type { Agente } from "../src/schemas/agent.js";
 import { readFile } from "node:fs/promises";
 

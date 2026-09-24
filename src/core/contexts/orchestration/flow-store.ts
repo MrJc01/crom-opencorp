@@ -1,13 +1,13 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { FlowError } from "../../errors.js";
-import { RegistryStore, type MetaRegistro } from "../../registry-store.js";
-import { eventBus } from "../../event-bus.js";
-import { SessionManager, type OpcoesRun, type ResultadoRun } from "../../session-manager.js";
+import { FlowError } from "../../shared/errors.js";
+import { RegistryStore, type MetaRegistro } from "../storage/registry-store.js";
+import { eventBus } from "../../shared/event-bus.js";
+import { SessionManager, type OpcoesRun, type ResultadoRun } from "../execution/session-manager.js";
 import { mkdirRecursive, writeFileAtomic } from "../../../utils/fs-safe.js";
 import { opencorpHome } from "../../../utils/paths.js";
-import { PromptStore } from "../../prompt-store.js";
+import { PromptStore } from "../agents/prompt-store.js";
 import { grauEntradaJoin } from "../../domain/flow/dag.js";
 
 
@@ -1449,7 +1449,7 @@ export class FlowStore {
           continue;
         } else if (no.tipo === "task_create") {
           const config = no.config as { titulo: string; descricao?: string; prioridade?: string; responsavel?: string; coluna?: string };
-          const { TaskStore } = await import("../../task-store.js");
+          const { TaskStore } = await import("../storage/task-store.js");
           const board = new TaskStore({ agora: this.agora });
           const prioridade = (config.prioridade === "alta" || config.prioridade === "baixa" ? config.prioridade : "media") as "alta" | "media" | "baixa";
           const tituloInterpolado = stripAnsi(config.titulo.replaceAll("{{entrada}}", contexto));
@@ -1679,7 +1679,7 @@ ${rotulos.map((r) => `- ${r}`).join("\n")}`;
             : "editor,critico-site";
 
           try {
-            const { MeetingManager } = await import("../../meeting-manager.js");
+            const { MeetingManager } = await import("../meetings/meeting-manager.js");
             const mm = new MeetingManager({ homeDir: this.homeDir, sessoes: this.sessoes as never });
             const salaId = `reu-${flowId}-${no.id}-${Date.now().toString(36)}`;
             const sala = await mm.iniciar({

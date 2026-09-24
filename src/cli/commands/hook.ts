@@ -1,6 +1,6 @@
 import type { Command } from "commander";
-import { HookStore, TriggersStore, type AlvoHook } from "../../core/hook-store.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { HookStore, TriggersStore, type AlvoHook } from "../../core/contexts/scheduling/hook-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 import { opencorpHome } from "../../utils/paths.js";
 
 function reportar(erro: unknown): void {
@@ -184,7 +184,7 @@ export function registerHookCommands(program: Command): void {
     }) =>
       comErros(async () => {
         const ws = await manager.resolver(wsDe(opts));
-        const { validarPrePublicacao } = await import("../../core/pre-publish.js");
+        const { validarPrePublicacao } = await import("../../core/contexts/platform/pre-publish.js");
         let texto = opts.conteudo || "";
         if (opts.arquivo && !texto) {
           const { readFileSync } = await import("node:fs");

@@ -8,7 +8,7 @@ import {
   fusoValido,
   FUSO_PADRAO,
 } from "../../../src/core/domain/scheduling/cron-evaluator.js";
-import { SchedulerError } from "../../../src/core/errors.js";
+import { SchedulerError } from "../../../src/core/shared/errors.js";
 
 describe("cron-evaluator — Domínio Puro de Agendamento", () => {
   describe("1. Validação de Sintaxe Cron (5 campos)", () => {

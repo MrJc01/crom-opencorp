@@ -1,7 +1,7 @@
 import { TeamStore, type TeamSpec, type Passo } from "./team-store.js";
-import { TaskStore } from "../../task-store.js";
+import { TaskStore } from "../storage/task-store.js";
 import type { Gatilho } from "../../../schemas/gatilho.js";
-import { TeamError } from "../../errors.js";
+import { TeamError } from "../../shared/errors.js";
 
 export interface ExecutoresOrquestrador {
   rodar(agente: string, ordem: string, wsPath: string, gatilho?: Gatilho): Promise<{ id: string; captura: string }>;
@@ -53,7 +53,7 @@ export class OrquestradorDeTeams {
 
   private async getExecutor(): Promise<ExecutoresOrquestrador> {
     if (this.executores) return this.executores;
-    const { SessionManager } = await import("../../session-manager.js");
+    const { SessionManager } = await import("../execution/session-manager.js");
     return {
       rodar: async (agente: string, ordem: string, wsPath: string, gatilho?: Gatilho) => {
         const r = await new SessionManager({ cwd: wsPath }).rodar({ agente, ordem, workspaceDir: wsPath, gatilho });

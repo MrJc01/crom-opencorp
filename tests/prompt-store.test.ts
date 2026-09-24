@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { PromptStore, interpolarPrompt, type Prompt } from "../src/core/prompt-store.js";
-import { AgentError } from "../src/core/errors.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { PromptStore, interpolarPrompt, type Prompt } from "../src/core/contexts/agents/prompt-store.js";
+import { AgentError } from "../src/core/shared/errors.js";
 
 const raizes: string[] = [];
 

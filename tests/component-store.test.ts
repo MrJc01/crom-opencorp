@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ComponentStore } from "../src/core/component-store.js";
-import { registrarBuiltins, BUILTIN_COMPONENTS } from "../src/core/builtin-components.js";
-import { FlowStore } from "../src/core/flow-store.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { ComponentStore } from "../src/core/contexts/orchestration/component-store.js";
+import { registrarBuiltins, BUILTIN_COMPONENTS } from "../src/core/contexts/orchestration/builtin-components.js";
+import { FlowStore } from "../src/core/contexts/orchestration/flow-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 
 describe("ComponentStore — Marketplace de Componentes", () => {
   let homeDir: string;

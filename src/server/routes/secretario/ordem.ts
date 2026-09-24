@@ -1,4 +1,4 @@
-import type { OpcoesRun } from "../../../core/session-manager.js";
+import type { OpcoesRun } from "../../../core/contexts/execution/session-manager.js";
 import type { RouteContext } from "../types.js";
 
 export async function handleOrdemRoutes(ctx: RouteContext): Promise<boolean> {
@@ -13,7 +13,7 @@ export async function handleOrdemRoutes(ctx: RouteContext): Promise<boolean> {
       enviar(res, 400, { erro: "comando git obrigatório" });
       return true;
     }
-    const { processarComandoGitSecretario } = await import("../../../core/secretario-git-slash.js");
+    const { processarComandoGitSecretario } = await import("../../../core/contexts/workspace/secretario-git-slash.js");
     const resultado = await processarComandoGitSecretario(cmd, ws.path, ws.id);
     enviar(res, 200, { ok: true, ...resultado });
     return true;

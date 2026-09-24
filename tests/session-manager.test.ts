@@ -4,13 +4,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { SessionError } from "../src/core/errors.js";
-import { SessionManager } from "../src/core/session-manager.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { SessionError } from "../src/core/shared/errors.js";
+import { SessionManager } from "../src/core/contexts/execution/session-manager.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 
 const { execaMock } = vi.hoisted(() => ({ execaMock: vi.fn() }));
 vi.mock("execa", () => ({ execa: execaMock }));
-vi.mock("../src/core/execution-driver.js", () => ({
+vi.mock("../src/core/contexts/execution/execution-driver.js", () => ({
   resolverDriverExecucao: async () => ({
     tipo: "host",
     disponivel: async () => true,

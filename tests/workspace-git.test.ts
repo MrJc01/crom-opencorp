@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { WorkspaceGit, GITIGNORE_PADRAO_WORKSPACE } from "../src/core/workspace-git.js";
+import { WorkspaceGit, GITIGNORE_PADRAO_WORKSPACE } from "../src/core/contexts/workspace/workspace-git.js";
 
 describe("WorkspaceGit", () => {
   let tmpWs: string;

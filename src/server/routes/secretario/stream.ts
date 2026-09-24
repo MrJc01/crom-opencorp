@@ -1,15 +1,15 @@
 import type { ServerResponse } from "node:http";
 import { opencorpHome } from "../../../utils/paths.js";
-import { eventBus } from "../../../core/event-bus.js";
+import { eventBus } from "../../../core/shared/event-bus.js";
 import {
   limparPrefixoWorkspace,
   extrairPassosMensagens,
   extrairAcoesMensagens,
   SecretarioError,
   type MensagemOc,
-} from "../../../core/opencode-server.js";
+} from "../../../core/contexts/execution/opencode-server.js";
 import { EngineAccountStore } from "../../../core/engines/index.js";
-import { TelemetryCollector, gerarTraceId, type TraceContext } from "../../../core/telemetry-collector.js";
+import { TelemetryCollector, gerarTraceId, type TraceContext } from "../../../core/contexts/platform/telemetry-collector.js";
 import {
   sleep,
   parsearModelo,
@@ -169,7 +169,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
           // FAST-PATH: Comandos Git Slash
           if (/^(\/git|\/restore|\/descartar|\/status-git|\/rollback)/i.test(mensagemBruta)) {
             const ws = await resolverWs(url);
-            const { processarComandoGitSecretario } = await import("../../../core/secretario-git-slash.js");
+            const { processarComandoGitSecretario } = await import("../../../core/contexts/workspace/secretario-git-slash.js");
             const resultadoGit = await processarComandoGitSecretario(mensagemBruta, ws.path, ws.id);
             if (resultadoGit.tratado) {
               if (!res.headersSent && !res.writableEnded) {

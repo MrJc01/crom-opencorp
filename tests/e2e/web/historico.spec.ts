@@ -3,7 +3,7 @@ import { chmod, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { logado, seederEmpresaBasica, api, esperarElementoTexto } from "../helpers.js";
 import { ConsoleWatcher } from "./pom/base.js";
-import { SessionManager } from "../../../src/core/session-manager.js";
+import { SessionManager } from "../../../src/core/contexts/execution/session-manager.js";
 
 const HDR = { authorization: "Bearer test-e2e", "content-type": "application/json" };
 

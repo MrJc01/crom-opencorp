@@ -3,8 +3,8 @@ import {
   HostDriver,
   SandboxDriver,
   ContainerDriver,
-} from "../src/core/execution-driver.js";
-import type { OpcoesPreparacaoDriver } from "../src/core/execution-driver.js";
+} from "../src/core/contexts/execution/execution-driver.js";
+import type { OpcoesPreparacaoDriver } from "../src/core/contexts/execution/execution-driver.js";
 
 /**
  * Testes focados exclusivamente na validação e aplicação de limites de recursos

@@ -6,7 +6,7 @@ import {
   type Canal,
   type MensagemCanal,
   type Poster,
-} from "../src/core/canal.js";
+} from "../src/core/contexts/scheduling/canal.js";
 
 function canalFake(id: string, tipo: Canal["tipo"]): Canal {
   const enviadas: MensagemCanal[] = [];

@@ -3,7 +3,7 @@ import { existsSync, lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { gerarAgenteOpencode, OpenCodeBridge } from "../src/core/opencode-bridge.js";
+import { gerarAgenteOpencode, OpenCodeBridge } from "../src/core/contexts/execution/opencode-bridge.js";
 import { parseAgenteMd } from "../src/schemas/agent.js";
 
 const EXEMPLO_EXECUTOR = `---

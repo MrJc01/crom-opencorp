@@ -4,15 +4,15 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { SubcorpError } from "../src/core/errors.js";
-import { SubcorpStore } from "../src/core/subcorp-store.js";
-import { SessionManager } from "../src/core/session-manager.js";
-import { TemplateStore } from "../src/core/template-store.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { SubcorpError } from "../src/core/shared/errors.js";
+import { SubcorpStore } from "../src/core/contexts/workspace/subcorp-store.js";
+import { SessionManager } from "../src/core/contexts/execution/session-manager.js";
+import { TemplateStore } from "../src/core/contexts/platform/template-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 
 const { execaMock } = vi.hoisted(() => ({ execaMock: vi.fn() }));
 vi.mock("execa", () => ({ execa: execaMock }));
-vi.mock("../src/core/execution-driver.js", () => ({
+vi.mock("../src/core/contexts/execution/execution-driver.js", () => ({
   resolverDriverExecucao: async () => ({
     tipo: "host",
     disponivel: async () => true,
@@ -166,7 +166,7 @@ Você é o auditor.
     const ws = await manager.criar("corp-corp", { template: imp.id });
     expect(existsSync(join(ws.path, ".opencorp", "agents", "auditor.md"))).toBe(true);
     expect(existsSync(join(ws.path, ".opencorp", "registries", "notas", "base", "journal.jsonl"))).toBe(true);
-    const { RegistryStore } = await import("../src/core/registry-store.js");
+    const { RegistryStore } = await import("../src/core/contexts/storage/registry-store.js");
     const registros = new RegistryStore();
     const r = await registros.obter(ws.path, "notas", "base");
     expect(r.meta.descricao).toBe("doc base");

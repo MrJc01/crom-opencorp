@@ -2,9 +2,9 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Scheduler, SchedulerError } from "../src/core/scheduler.js";
-import { CorpDb } from "../src/core/corp-db.js";
-import { RegistryStore } from "../src/core/registry-store.js";
+import { Scheduler, SchedulerError } from "../src/core/contexts/scheduling/scheduler.js";
+import { CorpDb } from "../src/core/contexts/storage/corp-db.js";
+import { RegistryStore } from "../src/core/contexts/storage/registry-store.js";
 
 const raizes: string[] = [];
 

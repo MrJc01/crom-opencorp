@@ -1,8 +1,8 @@
 import type { Command } from "commander";
-import { TaskStore, type Task } from "../../core/task-store.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
-import { SessionManager } from "../../core/session-manager.js";
-import { Scheduler, parseAgendaTask } from "../../core/scheduler.js";
+import { TaskStore, type Task } from "../../core/contexts/storage/task-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+import { SessionManager } from "../../core/contexts/execution/session-manager.js";
+import { Scheduler, parseAgendaTask } from "../../core/contexts/scheduling/scheduler.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

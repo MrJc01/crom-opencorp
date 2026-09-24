@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 import { createApiServer, type ApiServerOptions } from "../src/server/index.js";
 import type { Server } from "node:http";
 

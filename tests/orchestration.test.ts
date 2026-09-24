@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
-import { validarPrePublicacao } from "../src/core/pre-publish.js";
-import { RegistryStore } from "../src/core/registry-store.js";
-import { eventBus } from "../src/core/event-bus.js";
+import { validarPrePublicacao } from "../src/core/contexts/platform/pre-publish.js";
+import { RegistryStore } from "../src/core/contexts/storage/registry-store.js";
+import { eventBus } from "../src/core/shared/event-bus.js";
 
 describe("Orquestração e Governança Editorial (ORC-01 e ORC-02)", () => {
   let tempWs: string;

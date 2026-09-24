@@ -2,7 +2,7 @@
  * Rotas de Notificações — Extração Modular (MICRO-PASSO 9)
  */
 
-import type { TipoNotificacao } from "../../core/notification-store.js";
+import type { TipoNotificacao } from "../../core/contexts/platform/notification-store.js";
 import type { RouteContext } from "./types.js";
 
 export async function handleNotificationRoutes(ctx: RouteContext): Promise<boolean> {

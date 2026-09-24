@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import { SettingsError, SettingsStore, formatarValor, parseValor } from "../../core/settings-store.js";
+import { SettingsError, SettingsStore, formatarValor, parseValor } from "../../core/contexts/workspace/settings-store.js";
 
 interface Secao {
   id: string;

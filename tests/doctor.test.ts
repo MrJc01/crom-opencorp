@@ -19,7 +19,7 @@ import {
   hooksDir,
   appsDir,
   teamsDir,
-} from "../src/core/doctor.js";
+} from "../src/core/contexts/platform/doctor.js";
 import { mkdirSync } from "node:fs";
 
 const raizes: string[] = [];
@@ -483,7 +483,7 @@ describe("checkLedger (PLANO-UNIFICACAO)", () => {
   });
 
   it("ledger vazio → ok; execução órfã >24h → warn com item; execução recente executando → ok", async () => {
-    const { CorpDb } = await import("../src/core/corp-db.js");
+    const { CorpDb } = await import("../src/core/contexts/storage/corp-db.js");
     const ws = await tmpDir();
     mkdirSync(join(ws, ".opencorp"), { recursive: true });
     const db = new CorpDb(join(ws, ".opencorp", "corp.db"));
@@ -517,8 +517,8 @@ describe("checkLedger (PLANO-UNIFICACAO)", () => {
 
 describe("checkFlows + checkFlowsAgendados (integridade agenda↔fluxo)", () => {
   it("checkFlows: sem dir → info; flow válido → ok; inválido → fail", async () => {
-    const { checkFlows } = await import("../src/core/doctor.js");
-    const { FlowStore } = await import("../src/core/flow-store.js");
+    const { checkFlows } = await import("../src/core/contexts/platform/doctor.js");
+    const { FlowStore } = await import("../src/core/contexts/orchestration/flow-store.js");
     const vazio = await tmpDir();
     expect((await checkFlows(vazio)).status).toBe("info");
 
@@ -541,10 +541,10 @@ describe("checkFlows + checkFlowsAgendados (integridade agenda↔fluxo)", () => 
   });
 
   it("checkFlowsAgendados: job para flow fantasma → fail; destino existe → ok", async () => {
-    const { checkFlowsAgendados } = await import("../src/core/doctor.js");
+    const { checkFlowsAgendados } = await import("../src/core/contexts/platform/doctor.js");
     const { mkdirSync, writeFileSync } = await import("node:fs");
     const Database = (await import("better-sqlite3")).default;
-    const { FlowStore } = await import("../src/core/flow-store.js");
+    const { FlowStore } = await import("../src/core/contexts/orchestration/flow-store.js");
 
     const home = await tmpDir();
     mkdirSync(join(home, ".opencorp", "workspaces", "ws1", ".opencorp", "flows"), { recursive: true });

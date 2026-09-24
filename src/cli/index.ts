@@ -44,8 +44,8 @@ import { registerTokensCommand } from "./commands/tokens.js";
 import { registerMotoresCommand } from "./commands/motores.js";
 import { registerModelosCommand } from "./commands/modelos.js";
 import { notImplementedAction } from "./placeholder.js";
-import { instalarTriggers, pendentesTriggers } from "../core/trigger-runner.js";
-import { instalarMencoes, pendentesMencoes } from "../core/mention-runner.js";
+import { instalarTriggers, pendentesTriggers } from "../core/contexts/scheduling/trigger-runner.js";
+import { instalarMencoes, pendentesMencoes } from "../core/contexts/meetings/mention-runner.js";
 
 export { obterConfiguracaoServidor, cliFetch, CliHttpError, type ServerConfig, type ClientOptions } from "./client.js";
 

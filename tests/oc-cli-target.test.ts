@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 import { isModoOc, buildProgram } from "../src/cli/index.js";
 
 describe("CLI 'oc' vs 'opencorp' & Target Resolution", () => {

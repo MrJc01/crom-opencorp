@@ -1,6 +1,6 @@
 import type { Command } from "commander";
-import { AppStore } from "../../core/app-store.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { AppStore } from "../../core/contexts/platform/app-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

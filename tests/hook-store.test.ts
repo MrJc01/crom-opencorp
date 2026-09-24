@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { HookError, HookStore, substituirTemplate, TriggersStore } from "../src/core/hook-store.js";
+import { HookError, HookStore, substituirTemplate, TriggersStore } from "../src/core/contexts/scheduling/hook-store.js";
 
 const raizes: string[] = [];
 
@@ -18,7 +18,7 @@ let store: HookStore;
 beforeEach(async () => {
   const home = await mkdtemp(join(tmpdir(), "opencorp-hook-"));
   raizes.push(home);
-  const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+  const { WorkspaceManager } = await import("../src/core/contexts/workspace/workspace-manager.js");
   const ws = await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-hook");
   wsPath = ws.path;
   store = new HookStore();
@@ -115,7 +115,7 @@ describe("HookStore — execução", () => {
     });
     const r = await store.executar(wsPath, h, { corpo: { repo: "web-api" }, query: {} });
     expect(r.exec_id).toMatch(/^tsk-/);
-    const { TaskStore } = await import("../src/core/task-store.js");
+    const { TaskStore } = await import("../src/core/contexts/storage/task-store.js");
     const tasks = await new TaskStore().listar(wsPath);
     expect(tasks.map((t) => t.titulo)).toContain("Falha no deploy de web-api");
   });
@@ -156,7 +156,7 @@ describe("HookStore — execução", () => {
   });
 
   it("task_run executa task existente passando instrução e contexto de gatilho", async () => {
-    const { TaskStore } = await import("../src/core/task-store.js");
+    const { TaskStore } = await import("../src/core/contexts/storage/task-store.js");
     const taskStore = new TaskStore();
     const task = await taskStore.criar(wsPath, {
       titulo: "Limpeza de banco",
@@ -213,7 +213,7 @@ describe("HookStore — execução", () => {
     expect(rodouAgente).toBe(false);
     expect(r.resultado).toContain("aprovação humana");
 
-    const { ApprovalsStore } = await import("../src/core/approvals-store.js");
+    const { ApprovalsStore } = await import("../src/core/contexts/platform/approvals-store.js");
     const approvals = new ApprovalsStore();
     const pendentes = await approvals.pendentes(wsPath);
     expect(pendentes.length).toBeGreaterThan(0);

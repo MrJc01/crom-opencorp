@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import { createHmac } from "node:crypto";
 import { createApiServer } from "../src/server/index.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { HookStore } from "../src/core/hook-store.js";
-import { ApprovalsStore } from "../src/core/approvals-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { HookStore } from "../src/core/contexts/scheduling/hook-store.js";
+import { ApprovalsStore } from "../src/core/contexts/platform/approvals-store.js";
 
 describe("Webhooks API — Integração HTTP Completa", () => {
   let homeDir: string;

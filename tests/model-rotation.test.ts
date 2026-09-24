@@ -9,7 +9,7 @@ import {
   ehModeloGratuito,
   obterListaRotacaoCompleta,
   SessionManager,
-} from "../src/core/session-manager.js";
+} from "../src/core/contexts/execution/session-manager.js";
 
 describe("Rotação de Modelos e Detecção de Erros de API (TEST-04)", () => {
   it("detecta erro HTTP 429 e rate limit", () => {

@@ -9,7 +9,7 @@
  * - Projeção exata em fusos horários IANA (com respeito a horários de verão/DST).
  */
 
-import { SchedulerError } from "../../errors.js";
+import { SchedulerError } from "../../shared/errors.js";
 
 /** Erro especializado para falhas de sintaxe ou avaliação de cron. */
 export class CronExpressionError extends SchedulerError {

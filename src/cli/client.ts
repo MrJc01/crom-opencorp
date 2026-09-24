@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { opencorpHome } from "../utils/paths.js";
-import { OpencorpError } from "../core/errors.js";
+import { OpencorpError } from "../core/shared/errors.js";
 
 export class CliHttpError extends OpencorpError {
   constructor(mensagem: string, opts: { exitCode?: number } = {}) {

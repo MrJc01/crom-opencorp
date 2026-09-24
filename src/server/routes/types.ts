@@ -2,28 +2,28 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ZodType } from "zod";
 import type { ProblemDetails } from "../http/problem-details.js";
 import type { ResultadoValidacao } from "../http/validator.js";
-import type { TaskStore } from "../../core/task-store.js";
-import type { NotificationStore } from "../../core/notification-store.js";
-import type { Scheduler } from "../../core/scheduler.js";
-import type { RegistryStore } from "../../core/registry-store.js";
-import type { MeetingManager } from "../../core/meeting-manager.js";
-import type { WorkspaceManager } from "../../core/workspace-manager.js";
-import type { TemplateStore } from "../../core/template-store.js";
+import type { TaskStore } from "../../core/contexts/storage/task-store.js";
+import type { NotificationStore } from "../../core/contexts/platform/notification-store.js";
+import type { Scheduler } from "../../core/contexts/scheduling/scheduler.js";
+import type { RegistryStore } from "../../core/contexts/storage/registry-store.js";
+import type { MeetingManager } from "../../core/contexts/meetings/meeting-manager.js";
+import type { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+import type { TemplateStore } from "../../core/contexts/platform/template-store.js";
 import type { SessaoApi } from "../index.js";
 
-import type { FlowStore } from "../../core/flow-store.js";
-import type { AgentStore } from "../../core/agent-store.js";
-import type { TeamStore } from "../../core/team-store.js";
-import type { OpencodeServerManager } from "../../core/opencode-server.js";
-import type { HookStore } from "../../core/hook-store.js";
-import type { SettingsStore } from "../../core/settings-store.js";
-import type { SkillStore } from "../../core/skill-store.js";
-import type { SecretsStore } from "../../core/secrets-store.js";
-import type { AppStore } from "../../core/app-store.js";
+import type { FlowStore } from "../../core/contexts/orchestration/flow-store.js";
+import type { AgentStore } from "../../core/contexts/agents/agent-store.js";
+import type { TeamStore } from "../../core/contexts/meetings/team-store.js";
+import type { OpencodeServerManager } from "../../core/contexts/execution/opencode-server.js";
+import type { HookStore } from "../../core/contexts/scheduling/hook-store.js";
+import type { SettingsStore } from "../../core/contexts/workspace/settings-store.js";
+import type { SkillStore } from "../../core/contexts/agents/skill-store.js";
+import type { SecretsStore } from "../../core/contexts/storage/secrets-store.js";
+import type { AppStore } from "../../core/contexts/platform/app-store.js";
 import type { EngineAccountStore } from "../../core/engines/index.js";
 
-import type { PromptStore } from "../../core/prompt-store.js";
-import type { ApprovalsStore } from "../../core/approvals-store.js";
+import type { PromptStore } from "../../core/contexts/agents/prompt-store.js";
+import type { ApprovalsStore } from "../../core/contexts/platform/approvals-store.js";
 
 export interface WebhookLimiterLike {
   check: (ip: string) => { ok: boolean; retryAfter?: number };
@@ -66,7 +66,7 @@ export interface RouteContext {
   gerarIdExec?: () => string;
   serverPort?: number;
   version?: string;
-  orquestrador?: import("../../core/team-orchestrator.js").OrquestradorDeTeams;
+  orquestrador?: import("../../core/contexts/meetings/team-orchestrator.js").OrquestradorDeTeams;
 
   // ── RFC 7807 (Passo 2 da padronização) ─────────────────────────────
   /** Envia uma resposta RFC 7807 `application/problem+json`. */

@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import http from "node:http";
 import { obterConfiguracaoServidor, cliFetch, CliHttpError } from "../src/cli/client.js";
 import { buildProgram } from "../src/cli/index.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { FlowStore } from "../src/core/flow-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { FlowStore } from "../src/core/contexts/orchestration/flow-store.js";
 
 describe("CLI Standardization (Micro-Passo 20)", () => {
   let tempHome: string;

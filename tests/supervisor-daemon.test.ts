@@ -20,7 +20,7 @@ afterAll(async () => {
 
 describe("spawnDaemon (start daemonizado)", () => {
   it("spawn com detached:true, stdio ignorado/para log, unref e retorna o pid", async () => {
-    const { spawnDaemon } = await import("../src/core/supervisor.js");
+    const { spawnDaemon } = await import("../src/core/contexts/platform/supervisor.js");
     const logPath = join(tmpdir(), "opencorp-daemon-", "supervisor-daemon.log");
     raizes.push(join(tmpdir(), "opencorp-daemon-"));
     const pid = await spawnDaemon(

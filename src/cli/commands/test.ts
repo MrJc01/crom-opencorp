@@ -4,7 +4,7 @@ import { glob, mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, basename } from "node:path";
 import type { Command } from "commander";
-import { SettingsStore } from "../../core/settings-store.js";
+import { SettingsStore } from "../../core/contexts/workspace/settings-store.js";
 import { opencorpHome, resolvePath } from "../../utils/paths.js";
 import { writeFileAtomic } from "../../utils/fs-safe.js";
 import { appendEvent, type EventoTeste } from "../../utils/event-log.js";

@@ -86,7 +86,7 @@ describe("garantirMcpToken / gravarMcpToken", () => {
 
 describe("mcp serve via CLI — fail-closed", () => {
   async function criarWorkspace(): Promise<void> {
-    const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+    const { WorkspaceManager } = await import("../src/core/contexts/workspace/workspace-manager.js");
     await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-mcp");
   }
 

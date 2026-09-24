@@ -3,9 +3,9 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApiServer, type SessaoApi } from "../src/server/index.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { RegistryStore } from "../src/core/registry-store.js";
-import type { OpcoesRun, ResultadoRun } from "../src/core/session-manager.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { RegistryStore } from "../src/core/contexts/storage/registry-store.js";
+import type { OpcoesRun, ResultadoRun } from "../src/core/contexts/execution/session-manager.js";
 
 describe("Execuções — Retry / Reenviar (Clone com mesmos parâmetros)", () => {
   let homeDir: string;

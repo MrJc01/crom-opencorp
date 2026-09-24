@@ -1,10 +1,10 @@
 import { join } from "node:path";
-import { eventBus } from "../../core/event-bus.js";
+import { eventBus } from "../../core/shared/event-bus.js";
 import {
   PADRAO_ERRO_MODELO,
   PADRAO_ERRO_CREDITOS,
   type OpcoesRun,
-} from "../../core/session-manager.js";
+} from "../../core/contexts/execution/session-manager.js";
 import {
   SecretarioError,
   extrairPassosMensagens,
@@ -13,9 +13,9 @@ import {
   type MensagemOc,
   type ParteOc,
   type PassoChat,
-} from "../../core/opencode-server.js";
+} from "../../core/contexts/execution/opencode-server.js";
 import { opencorpHome } from "../../utils/paths.js";
-import type { MetaRegistro } from "../../core/registry-store.js";
+import type { MetaRegistro } from "../../core/contexts/storage/registry-store.js";
 import type { RouteContext } from "./types.js";
 import { streamsSecretarioAtivos } from "./secretario/stream.js";
 
@@ -339,7 +339,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
       }
     }
 
-    const { WorkspaceGit } = await import("../../core/workspace-git.js");
+    const { WorkspaceGit } = await import("../../core/contexts/workspace/workspace-git.js");
     const wsGit = new WorkspaceGit();
     if (!wsGit.temGit(wsEfetivo.path)) {
       enviar(res, 200, { ok: true, temGit: false, diff: "", arquivos: [] });

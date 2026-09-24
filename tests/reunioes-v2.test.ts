@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createApiServer, type ApiServerOptions, type SessaoApi } from "../src/server/index.js";
-import type { OpcoesRun, ResultadoRun } from "../src/core/session-manager.js";
+import type { OpcoesRun, ResultadoRun } from "../src/core/contexts/execution/session-manager.js";
 
 const raizes: string[] = [];
 

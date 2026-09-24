@@ -3,11 +3,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { SessionManager } from "../src/core/session-manager.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { SessionManager } from "../src/core/contexts/execution/session-manager.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 import { TokenBucketLimiter } from "../src/core/engines/token-bucket-limiter.js";
-import { FlowStore, executarComConcorrencia } from "../src/core/flow-store.js";
-import { Scheduler } from "../src/core/scheduler.js";
+import { FlowStore, executarComConcorrencia } from "../src/core/contexts/orchestration/flow-store.js";
+import { Scheduler } from "../src/core/contexts/scheduling/scheduler.js";
 
 const { execaMock } = vi.hoisted(() => ({ execaMock: vi.fn() }));
 vi.mock("execa", () => ({ execa: execaMock }));

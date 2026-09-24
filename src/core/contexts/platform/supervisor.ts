@@ -2,12 +2,12 @@ import { existsSync, openSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
-import { SessionManager } from "../../session-manager.js";
+import { SessionManager } from "../execution/session-manager.js";
 import { ApprovalsStore } from "./approvals-store.js";
 import { BudgetManager } from "./budget-manager.js";
-import { TaskStore } from "../../task-store.js";
-import { RegistryStore, type MetaRegistro } from "../../registry-store.js";
-import { SettingsStore } from "../../settings-store.js";
+import { TaskStore } from "../storage/task-store.js";
+import { RegistryStore, type MetaRegistro } from "../storage/registry-store.js";
+import { SettingsStore } from "../workspace/settings-store.js";
 import { opencorpHome } from "../../../utils/paths.js";
 import { mkdirRecursive, writeFileAtomic } from "../../../utils/fs-safe.js";
 

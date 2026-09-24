@@ -3,9 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { SkillStore, montarSecaoSkills, parseSkillMd, type Skill } from "../src/core/skill-store.js";
-import { AgentError } from "../src/core/errors.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { SkillStore, montarSecaoSkills, parseSkillMd, type Skill } from "../src/core/contexts/agents/skill-store.js";
+import { AgentError } from "../src/core/shared/errors.js";
 
 const raizes: string[] = [];
 

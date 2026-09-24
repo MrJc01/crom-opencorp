@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { WatchdogRun, obterListaRotacaoCompleta } from "../src/core/session-manager.js";
+import { WatchdogRun, obterListaRotacaoCompleta } from "../src/core/contexts/execution/session-manager.js";
 
 describe("WatchdogRun - Inatividade e Timeout", () => {
   it("dispara por inatividade se não receber nenhuma atividade em inatividadeMs", async () => {

@@ -4,11 +4,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { dirsDoBinario, SandboxDriver } from "../src/core/execution-driver.js";
-import { SessionManager, type OpcoesRun, type ResultadoRun } from "../src/core/session-manager.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { dirsDoBinario, SandboxDriver } from "../src/core/contexts/execution/execution-driver.js";
+import { SessionManager, type OpcoesRun, type ResultadoRun } from "../src/core/contexts/execution/session-manager.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 import { EngineAccountStore } from "../src/core/engines/engine-account-store.js";
-import { FlowStore } from "../src/core/flow-store.js";
+import { FlowStore } from "../src/core/contexts/orchestration/flow-store.js";
 
 const { execaMock } = vi.hoisted(() => ({ execaMock: vi.fn() }));
 vi.mock("execa", () => ({ execa: execaMock }));

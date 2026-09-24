@@ -7,8 +7,8 @@
  */
 
 import { join } from "node:path";
-import { TaskError } from "../../errors.js";
-import { eventBus } from "../../event-bus.js";
+import { TaskError } from "../../shared/errors.js";
+import { eventBus } from "../../shared/event-bus.js";
 import {
   OpencorpDb,
   type TaskComRelacoes,
@@ -17,7 +17,7 @@ import {
 import type { MessageRow, PrioridadeTask } from "../../db/schema.js";
 import { getDatabaseConnection, fecharConexao } from "../../db/connection.js";
 
-export { TaskError } from "../../errors.js";
+export { TaskError } from "../../shared/errors.js";
 
 export interface Task {
   id: string;

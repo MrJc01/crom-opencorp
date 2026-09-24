@@ -2,11 +2,11 @@ import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { mkdirRecursive } from "../../../utils/fs-safe.js";
-import { ToolError } from "../../errors.js";
-import { eventBus } from "../../event-bus.js";
+import { ToolError } from "../../shared/errors.js";
+import { eventBus } from "../../shared/event-bus.js";
 import { opencorpHome } from "../../../utils/paths.js";
 import { writeFileAtomic } from "../../../utils/fs-safe.js";
-import { NotificationStore, type TipoNotificacao } from "../../notification-store.js";
+import { NotificationStore, type TipoNotificacao } from "../platform/notification-store.js";
 
 export interface ManifestFerramenta {
   id: string;
@@ -224,7 +224,7 @@ export class ToolRegistry {
   }
 
   private async executarInterna(f: ManifestFerramenta, input: Record<string, unknown>, wsPath: string): Promise<string> {
-    const { TaskStore } = await import("../../task-store.js");
+    const { TaskStore } = await import("../storage/task-store.js");
     const tasks = new TaskStore();
     switch ((f.handler as { tipo: "interno"; id: string }).id) {
       case "task.list":
@@ -249,7 +249,7 @@ export class ToolRegistry {
         if (!/^select\s/i.test(sql) || /;/.test(sql)) {
           throw new ToolError("query.sql aceita apenas um SELECT único (sem ;)");
         }
-        const { CorpDb } = await import("../../corp-db.js");
+        const { CorpDb } = await import("../storage/corp-db.js");
         const db = new CorpDb(join(wsPath, ".opencorp", "corp.db"));
         try {
           const linhas = db["db"].prepare(sql).all();

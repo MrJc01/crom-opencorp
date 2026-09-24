@@ -8,9 +8,9 @@ import {
   type Agente,
   type AgenteArquivo,
 } from "../../../schemas/agent.js";
-import { AgentError } from "../../errors.js";
-import { OpenCodeBridge } from "../../opencode-bridge.js";
-import { RegistryStore } from "../../registry-store.js";
+import { AgentError } from "../../shared/errors.js";
+import { OpenCodeBridge } from "../execution/opencode-bridge.js";
+import { RegistryStore } from "../storage/registry-store.js";
 import { SkillStore } from "./skill-store.js";
 import { unlink } from "node:fs/promises";
 import { writeFileAtomic } from "../../../utils/fs-safe.js";

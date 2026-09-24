@@ -4,9 +4,9 @@
  * ou sequência de nós agente). Teams permanecem no disco como legado read-only.
  */
 
-import type { TeamStore, TeamSpec } from "../../team-store.js";
+import type { TeamStore, TeamSpec } from "../meetings/team-store.js";
 import type { FlowStore, Flow } from "./flow-store.js";
-import { FlowError } from "../../errors.js";
+import { FlowError } from "../../shared/errors.js";
 
 export interface ResultadoMigracao {
   criados: string[];

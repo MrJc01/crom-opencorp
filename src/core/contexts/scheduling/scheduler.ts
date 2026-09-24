@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { SchedulerError } from "../../errors.js";
-import { SettingsStore } from "../../settings-store.js";
+import { SchedulerError } from "../../shared/errors.js";
+import { SettingsStore } from "../workspace/settings-store.js";
 import { opencorpHome } from "../../../utils/paths.js";
 import { getDatabaseConnection, fecharConexao } from "../../db/connection.js";
 
@@ -251,7 +251,7 @@ export class Scheduler {
   // ── Workspaces Efetivos ─────────────────────────────────────────────
 
   private async listarWorkspacesEfetivos(): Promise<Array<{ id: string; path: string }>> {
-    const { WorkspaceManager } = await import("../../workspace-manager.js");
+    const { WorkspaceManager } = await import("../workspace/workspace-manager.js");
     const { join } = await import("node:path");
     const { existsSync, readdirSync } = await import("node:fs");
 
@@ -309,7 +309,7 @@ export class Scheduler {
         : FUSO_PADRAO;
       if (workspaceId) {
         try {
-          const { WorkspaceManager } = await import("../../workspace-manager.js");
+          const { WorkspaceManager } = await import("../workspace/workspace-manager.js");
           const wm = new WorkspaceManager({ homeDir: this.homeDir });
           const ws = await wm.resolver(workspaceId);
           const rw = await store.resolve({ workspaceDir: ws.path });
@@ -366,7 +366,7 @@ export class Scheduler {
     const agora = this.agora();
     const resultado: FlowScheduleInfo[] = [];
     try {
-      const { FlowStore } = await import("../../flow-store.js");
+      const { FlowStore } = await import("../orchestration/flow-store.js");
       const flows = new FlowStore({ homeDir: this.homeDir });
       const workspaces = await this.listarWorkspacesEfetivos();
 
@@ -409,7 +409,7 @@ export class Scheduler {
   async listar(somenteAtivos = false): Promise<Job[]> {
     const resultado: Job[] = [];
     const workspaces = await this.listarWorkspacesEfetivos();
-    const { FlowStore } = await import("../../flow-store.js");
+    const { FlowStore } = await import("../orchestration/flow-store.js");
     const flowStore = new FlowStore({ homeDir: this.homeDir });
 
     for (const ws of workspaces) {
@@ -499,7 +499,7 @@ export class Scheduler {
     }
 
     const ws = await this.resolverWorkspacePath(opts.workspace);
-    const { FlowStore } = await import("../../flow-store.js");
+    const { FlowStore } = await import("../orchestration/flow-store.js");
     const flowStore = new FlowStore({ homeDir: this.homeDir });
     const jobId = `sch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const fuso = await this.fusoDoWorkspace(ws.id);
@@ -571,7 +571,7 @@ export class Scheduler {
   }
 
   async obter(id: string): Promise<Job> {
-    const { FlowStore } = await import("../../flow-store.js");
+    const { FlowStore } = await import("../orchestration/flow-store.js");
     const flowStore = new FlowStore({ homeDir: this.homeDir });
     const workspaces = await this.listarWorkspacesEfetivos();
 
@@ -611,7 +611,7 @@ export class Scheduler {
 
   async pausar(id: string): Promise<Job> {
     const job = await this.obter(id);
-    const { FlowStore } = await import("../../flow-store.js");
+    const { FlowStore } = await import("../orchestration/flow-store.js");
     const flowStore = new FlowStore({ homeDir: this.homeDir });
     const ws = await this.resolverWorkspacePath(job.workspace);
 
@@ -630,7 +630,7 @@ export class Scheduler {
 
   async retomar(id: string): Promise<Job> {
     const job = await this.obter(id);
-    const { FlowStore } = await import("../../flow-store.js");
+    const { FlowStore } = await import("../orchestration/flow-store.js");
     const flowStore = new FlowStore({ homeDir: this.homeDir });
     const ws = await this.resolverWorkspacePath(job.workspace);
 
@@ -656,7 +656,7 @@ export class Scheduler {
 
   async excluir(id: string): Promise<{ ok: boolean; id: string }> {
     const job = await this.obter(id);
-    const { FlowStore } = await import("../../flow-store.js");
+    const { FlowStore } = await import("../orchestration/flow-store.js");
     const flowStore = new FlowStore({ homeDir: this.homeDir });
     const ws = await this.resolverWorkspacePath(job.workspace);
     await flowStore.deletar(ws.path, id).catch(() => {});
@@ -716,7 +716,7 @@ export class Scheduler {
     }
     try {
       const [{ SessionManager }] = await Promise.all([
-        import("../../session-manager.js"),
+        import("../execution/session-manager.js"),
       ]);
       const sessoes = new SessionManager({ homeDir: this.homeDir });
       const workspaces = await this.listarWorkspacesEfetivos();
@@ -744,7 +744,7 @@ export class Scheduler {
     const pulados: string[] = [];
 
     try {
-      const { FlowStore } = await import("../../flow-store.js");
+      const { FlowStore } = await import("../orchestration/flow-store.js");
       const flowStore = new FlowStore({ homeDir: this.homeDir });
       const workspaces = await this.listarWorkspacesEfetivos();
 

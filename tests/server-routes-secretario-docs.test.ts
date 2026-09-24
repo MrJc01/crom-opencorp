@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
 import { createApiServer } from "../src/server/index.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 
 const raizes: string[] = [];
 

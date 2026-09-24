@@ -1,8 +1,8 @@
 import type { Command } from "commander";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
-import { RegistryStore } from "../../core/registry-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+import { RegistryStore } from "../../core/contexts/storage/registry-store.js";
 import { opencorpHome } from "../../utils/paths.js";
 import { getSdkClient } from "../client.js";
 

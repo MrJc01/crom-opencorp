@@ -1,8 +1,8 @@
 import type { Command } from "commander";
-import { ApprovalsStore } from "../../core/approvals-store.js";
-import { SessionManager } from "../../core/session-manager.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
-import { RegistryStore } from "../../core/registry-store.js";
+import { ApprovalsStore } from "../../core/contexts/platform/approvals-store.js";
+import { SessionManager } from "../../core/contexts/execution/session-manager.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+import { RegistryStore } from "../../core/contexts/storage/registry-store.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

@@ -3,8 +3,8 @@ import type { Command } from "commander";
 import {
   Scheduler,
   validarCron,
-} from "../../core/scheduler.js";
-import { spawnDaemon, pidVivo } from "../../core/supervisor.js";
+} from "../../core/contexts/scheduling/scheduler.js";
+import { spawnDaemon, pidVivo } from "../../core/contexts/platform/supervisor.js";
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { opencorpHome } from "../../utils/paths.js";

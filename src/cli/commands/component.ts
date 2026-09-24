@@ -1,9 +1,9 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Command } from "commander";
-import { ComponentStore } from "../../core/component-store.js";
-import { registrarBuiltins } from "../../core/builtin-components.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { ComponentStore } from "../../core/contexts/orchestration/component-store.js";
+import { registrarBuiltins } from "../../core/contexts/orchestration/builtin-components.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

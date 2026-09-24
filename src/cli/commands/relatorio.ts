@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import Database from "better-sqlite3";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 
 interface ExecucaoRegistro {
   id: string;

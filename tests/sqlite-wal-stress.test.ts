@@ -3,9 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { CorpDb } from "../src/core/corp-db.js";
-import { TaskStore } from "../src/core/task-store.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { CorpDb } from "../src/core/contexts/storage/corp-db.js";
+import { TaskStore } from "../src/core/contexts/storage/task-store.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 
 const raizes: string[] = [];
 

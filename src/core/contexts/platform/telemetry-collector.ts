@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
-import { CorpDb, type LinhaAcaoAgente } from "../../corp-db.js";
-import type { PassoChat } from "../../opencode-server.js";
-import { eventBus } from "../../event-bus.js";
+import { CorpDb, type LinhaAcaoAgente } from "../storage/corp-db.js";
+import type { PassoChat } from "../execution/opencode-server.js";
+import { eventBus } from "../../shared/event-bus.js";
 
 // ─── Constantes de configuração ──────────────────────────────────
 

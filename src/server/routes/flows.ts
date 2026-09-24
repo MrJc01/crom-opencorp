@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { eventBus } from "../../core/event-bus.js";
-import { migrarTeamsParaFlows } from "../../core/flow-migrate.js";
-import type { Flow } from "../../core/flow-store.js";
+import { eventBus } from "../../core/shared/event-bus.js";
+import { migrarTeamsParaFlows } from "../../core/contexts/orchestration/flow-migrate.js";
+import type { Flow } from "../../core/contexts/orchestration/flow-store.js";
 import type { RouteContext } from "./types.js";
 
 /** Rate limiter in-memory por IP para endpoints webhook fallback */

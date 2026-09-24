@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ToolError, ToolRegistry, validarContraSchema } from "../src/core/tool-registry.js";
+import { ToolError, ToolRegistry, validarContraSchema } from "../src/core/contexts/agents/tool-registry.js";
 
 const raizes: string[] = [];
 
@@ -18,7 +18,7 @@ let registry: ToolRegistry;
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "opencorp-tool-"));
   raizes.push(home);
-  const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+  const { WorkspaceManager } = await import("../src/core/contexts/workspace/workspace-manager.js");
   const ws = await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-tool");
   wsPath = ws.path;
   registry = new ToolRegistry({ homeDir: home });

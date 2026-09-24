@@ -1,8 +1,8 @@
 import type { Command } from "commander";
-import { SessionManager } from "../../core/session-manager.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
-import { RegistryStore } from "../../core/registry-store.js";
-import type { LinhaAcaoAgente } from "../../core/corp-db.js";
+import { SessionManager } from "../../core/contexts/execution/session-manager.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+import { RegistryStore } from "../../core/contexts/storage/registry-store.js";
+import type { LinhaAcaoAgente } from "../../core/contexts/storage/corp-db.js";
 
 const c = {
   reset: "\x1b[0m",

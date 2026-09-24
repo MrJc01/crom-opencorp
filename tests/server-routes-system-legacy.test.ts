@@ -3,8 +3,8 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createApiServer } from "../src/server/index.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { eventBus } from "../src/core/event-bus.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { eventBus } from "../src/core/shared/event-bus.js";
 
 const raizes: string[] = [];
 

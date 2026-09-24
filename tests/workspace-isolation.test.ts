@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { envOpencodeIsolado } from "../src/core/opencode-server.js";
+import { envOpencodeIsolado } from "../src/core/contexts/execution/opencode-server.js";
 
 describe("Isolamento de Workspace e Variáveis de Ambiente", () => {
   let tempHome: string;

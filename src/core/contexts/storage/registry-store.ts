@@ -1,10 +1,10 @@
 import { existsSync, readdirSync } from "node:fs";
 import { appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { RegistryError } from "../../errors.js";
+import { RegistryError } from "../../shared/errors.js";
 import { CorpDb } from "./corp-db.js";
 import { mkdirRecursive, writeFileAtomic } from "../../../utils/fs-safe.js";
-import { eventBus } from "../../event-bus.js";
+import { eventBus } from "../../shared/event-bus.js";
 
 export const CATEGORIAS_PADRAO = [
   "chats",

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { ComponentError } from "../../errors.js";
+import { ComponentError } from "../../shared/errors.js";
 import { mkdirRecursive, writeFileAtomic } from "../../../utils/fs-safe.js";
 import { opencorpHome } from "../../../utils/paths.js";
 

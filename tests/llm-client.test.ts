@@ -7,7 +7,7 @@ import {
   listarProvedoresStatus,
   completarChatDirect,
   testarModeloDirect,
-} from "../src/core/llm-client.js";
+} from "../src/core/contexts/execution/llm-client.js";
 
 describe("DirectLLMClient (Core)", () => {
   let tempHome: string;

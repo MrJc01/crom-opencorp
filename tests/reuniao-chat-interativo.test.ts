@@ -3,7 +3,7 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createApiServer } from "../src/server/index.js";
-import { MeetingManager } from "../src/core/meeting-manager.js";
+import { MeetingManager } from "../src/core/contexts/meetings/meeting-manager.js";
 
 const raizes: string[] = [];
 

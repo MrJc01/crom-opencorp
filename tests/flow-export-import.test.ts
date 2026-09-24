@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FlowStore, type Flow } from "../src/core/flow-store.js";
-import { FlowError } from "../src/core/errors.js";
+import { FlowStore, type Flow } from "../src/core/contexts/orchestration/flow-store.js";
+import { FlowError } from "../src/core/shared/errors.js";
 
 let home: string;
 let wsPath: string;

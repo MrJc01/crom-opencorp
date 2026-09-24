@@ -6,7 +6,7 @@
 import { stat, lstat, readlink, readdir, readFile, realpath, open, mkdir, rename, rm, unlink } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { join, resolve, relative, isAbsolute, dirname } from "node:path";
-import { WorkspaceError } from "../../core/errors.js";
+import { WorkspaceError } from "../../core/shared/errors.js";
 import { writeFileAtomic } from "../../utils/fs-safe.js";
 import type { RouteContext } from "./types.js";
 

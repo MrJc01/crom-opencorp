@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { SessionManager } from "../../src/core/session-manager.js";
+import { SessionManager } from "../../src/core/contexts/execution/session-manager.js";
 
 // F6-T02 — Prova de isolamento entre workspaces.
 //

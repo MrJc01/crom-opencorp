@@ -13,8 +13,8 @@ import {
   classificarQualidadeModelo,
   filtrarModelosQualificados,
   ModelResolverError,
-} from "../src/core/model-resolver.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+} from "../src/core/contexts/agents/model-resolver.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 
 describe("Módulo Central de Resolução de Modelos e Isolamento de Workspace (4 Camadas)", () => {
   let tempDir: string;

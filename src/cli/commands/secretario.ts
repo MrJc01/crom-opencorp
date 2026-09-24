@@ -1,6 +1,6 @@
 import type { Command } from "commander";
-import { SessionManager } from "../../core/session-manager.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { SessionManager } from "../../core/contexts/execution/session-manager.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 import { getSdkClient } from "../client.js";
 import { ProblemDetailsError } from "../../sdk/index.js";
 import { limparTagsPensamento } from "../ui/stream-renderer.js";

@@ -2,7 +2,7 @@ import {
   limparPrefixoWorkspace,
   SecretarioError,
   type MensagemOc,
-} from "../../../core/opencode-server.js";
+} from "../../../core/contexts/execution/opencode-server.js";
 import {
   sleep,
   parsearModelo,
@@ -43,7 +43,7 @@ export async function handleConversaRoutes(ctx: RouteContext): Promise<boolean> 
       // Fast-path: git slash
       if (/^(\/git|\/restore|\/descartar|\/status-git|\/rollback)/i.test(mensagemBruta)) {
         const ws = await resolverWs(url);
-        const { processarComandoGitSecretario } = await import("../../../core/secretario-git-slash.js");
+        const { processarComandoGitSecretario } = await import("../../../core/contexts/workspace/secretario-git-slash.js");
         const resultadoGit = await processarComandoGitSecretario(mensagemBruta, ws.path, ws.id);
         if (resultadoGit.tratado) {
           enviar(res, 200, {

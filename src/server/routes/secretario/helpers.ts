@@ -1,11 +1,11 @@
 import { resolve, relative, isAbsolute } from "node:path";
-import { WorkspaceError } from "../../../core/errors.js";
+import { WorkspaceError } from "../../../core/shared/errors.js";
 import {
   SecretarioError,
   extrairPassosMensagens,
   type MensagemOc,
-} from "../../../core/opencode-server.js";
-import { resolverCadeiaModelosAgente } from "../../../core/model-resolver.js";
+} from "../../../core/contexts/execution/opencode-server.js";
+import { resolverCadeiaModelosAgente } from "../../../core/contexts/agents/model-resolver.js";
 import type { RouteContext } from "../types.js";
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { Command } from "commander";
-import { WorkspaceError, WorkspaceManager } from "../../core/workspace-manager.js";
-import { envOpencodeIsolado } from "../../core/opencode-server.js";
+import { WorkspaceError, WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+import { envOpencodeIsolado } from "../../core/contexts/execution/opencode-server.js";
 import { opencorpHome } from "../../utils/paths.js";
 
 /**

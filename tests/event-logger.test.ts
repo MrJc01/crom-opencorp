@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { eventLogger, EventLogger } from "../src/core/event-logger.js";
-import { eventBus } from "../src/core/event-bus.js";
+import { eventLogger, EventLogger } from "../src/core/contexts/storage/event-logger.js";
+import { eventBus } from "../src/core/shared/event-bus.js";
 
 describe("EventLogger e Logs Contínuos (LOG-01)", () => {
   let tempWs: string;

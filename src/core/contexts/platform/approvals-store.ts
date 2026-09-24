@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { ApprovalError } from "../../errors.js";
+import { ApprovalError } from "../../shared/errors.js";
 import { writeFileAtomic } from "../../../utils/fs-safe.js";
 import { readFile } from "node:fs/promises";
 

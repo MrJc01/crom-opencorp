@@ -2,8 +2,8 @@ import { test, expect } from "@playwright/test";
 import { chmod, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { logado, api } from "../helpers.js";
-import { SessionManager } from "../../../src/core/session-manager.js";
-import { RegistryStore } from "../../../src/core/registry-store.js";
+import { SessionManager } from "../../../src/core/contexts/execution/session-manager.js";
+import { RegistryStore } from "../../../src/core/contexts/storage/registry-store.js";
 
 // F1-T03 — seletor de sessão no nó agente (session_mode/session_from) e
 // validação topológica de `session_from` (ancestral). Roda contra o servidor de

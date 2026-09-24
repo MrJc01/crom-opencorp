@@ -9,8 +9,8 @@
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { mkdirRecursive, writeFileAtomic } from "../../../utils/fs-safe.js";
-import { NotificationError } from "../../errors.js";
-import { eventBus } from "../../event-bus.js";
+import { NotificationError } from "../../shared/errors.js";
+import { eventBus } from "../../shared/event-bus.js";
 import { OpencorpDb } from "../../db/opencorp-db.js";
 import type { NotificationRow } from "../../db/schema.js";
 

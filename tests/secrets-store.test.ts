@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SecretsStore } from "../src/core/secrets-store.js";
+import { SecretsStore } from "../src/core/contexts/storage/secrets-store.js";
 
 describe("SecretsStore - Isolamento por Workspace", () => {
   let tempHome: string;

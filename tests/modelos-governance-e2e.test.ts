@@ -3,13 +3,13 @@ import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
 import {
   extrairParametrosB,
   classificarQualidadeModelo,
   filtrarModelosQualificados,
   resolverCadeiaModelosAgente,
-} from "../src/core/model-resolver.js";
+} from "../src/core/contexts/agents/model-resolver.js";
 
 const raizes: string[] = [];
 

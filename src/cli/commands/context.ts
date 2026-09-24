@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Command } from "commander";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 import { writeFileAtomic } from "../../utils/fs-safe.js";
 import { projectRoot } from "../../utils/paths.js";
 

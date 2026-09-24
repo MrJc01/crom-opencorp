@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { Command } from "commander";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
-import { PromptStore } from "../../core/prompt-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+import { PromptStore } from "../../core/contexts/agents/prompt-store.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

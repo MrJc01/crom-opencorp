@@ -1,6 +1,6 @@
 import type { Command } from "commander";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
-import { SkillStore } from "../../core/skill-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+import { SkillStore } from "../../core/contexts/agents/skill-store.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

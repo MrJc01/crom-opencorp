@@ -2,11 +2,11 @@ import { afterAll, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FlowStore } from "../src/core/flow-store.js";
-import { SessionManager } from "../src/core/session-manager.js";
-import { WorkspaceManager } from "../src/core/workspace-manager.js";
-import { RegistryStore } from "../src/core/registry-store.js";
-import { argsComGatilhoCron } from "../src/core/scheduler.js";
+import { FlowStore } from "../src/core/contexts/orchestration/flow-store.js";
+import { SessionManager } from "../src/core/contexts/execution/session-manager.js";
+import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
+import { RegistryStore } from "../src/core/contexts/storage/registry-store.js";
+import { argsComGatilhoCron } from "../src/core/contexts/scheduling/scheduler.js";
 
 const raizes: string[] = [];
 afterAll(async () => {
@@ -144,7 +144,7 @@ describe("zombie-reaper não toca fluxos em andamento (B: sem falso falhou)", ()
 
 describe("saída nunca polui o ledger (regressão execucoes/resultado)", () => {
   it("validarTexto rejeita saida na categoria execucoes", async () => {
-    const { FlowStore } = await import("../src/core/flow-store.js");
+    const { FlowStore } = await import("../src/core/contexts/orchestration/flow-store.js");
     const store = new FlowStore();
     expect(() =>
       store.validarTexto(
@@ -167,13 +167,13 @@ describe("saída nunca polui o ledger (regressão execucoes/resultado)", () => {
       const { mkdtemp } = await import("node:fs/promises");
       const { tmpdir } = await import("node:os");
       const { join } = await import("node:path");
-      const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+      const { WorkspaceManager } = await import("../src/core/contexts/workspace/workspace-manager.js");
       const home = await mkdtemp(join(tmpdir(), "opencorp-noses-"));
       const ws = await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-noses");
       return { wsPath: ws.path, home };
     })();
-    const { RegistryStore } = await import("../src/core/registry-store.js");
-    const { SessionManager } = await import("../src/core/session-manager.js");
+    const { RegistryStore } = await import("../src/core/contexts/storage/registry-store.js");
+    const { SessionManager } = await import("../src/core/contexts/execution/session-manager.js");
     const registros = new RegistryStore();
     await registros.criar(wsPath, {
       categoria: "execucoes",

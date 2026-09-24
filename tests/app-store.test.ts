@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AppError, AppStore } from "../src/core/app-store.js";
+import { AppError, AppStore } from "../src/core/contexts/platform/app-store.js";
 
 const raizes: string[] = [];
 
@@ -16,7 +16,7 @@ let store: AppStore;
 beforeEach(async () => {
   const home = await mkdtemp(join(tmpdir(), "opencorp-app-"));
   raizes.push(home);
-  const { WorkspaceManager } = await import("../src/core/workspace-manager.js");
+  const { WorkspaceManager } = await import("../src/core/contexts/workspace/workspace-manager.js");
   const ws = await new WorkspaceManager({ homeDir: home, cwd: home }).criar("corp-app");
   wsPath = ws.path;
   store = new AppStore();

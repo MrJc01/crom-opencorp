@@ -1,6 +1,6 @@
 import type { Command } from "commander";
-import { AssetStore, KINDS_ASSET, type KindAsset } from "../../core/asset-store.js";
-import { WorkspaceManager } from "../../core/workspace-manager.js";
+import { AssetStore, KINDS_ASSET, type KindAsset } from "../../core/contexts/storage/asset-store.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 
 function reportar(erro: unknown): void {
   if (erro instanceof Error) {

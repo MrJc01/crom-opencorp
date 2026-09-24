@@ -1,11 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { eventBus } from "../../core/event-bus.js";
-import { completarChatDirect } from "../../core/llm-client.js";
+import { eventBus } from "../../core/shared/event-bus.js";
+import { completarChatDirect } from "../../core/contexts/execution/llm-client.js";
 import { opencorpHome } from "../../utils/paths.js";
-import { SkillStore } from "../../core/skill-store.js";
-import type { OpcoesRun } from "../../core/session-manager.js";
+import { SkillStore } from "../../core/contexts/agents/skill-store.js";
+import type { OpcoesRun } from "../../core/contexts/execution/session-manager.js";
 import type { RouteContext } from "./types.js";
 
 /** Onde um agente é citado: specs de teams (.opencorp/teams/*.json), grafos de flows

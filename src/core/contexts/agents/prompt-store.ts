@@ -2,8 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { opencorpHome } from "../../../utils/paths.js";
 import { writeFileAtomic } from "../../../utils/fs-safe.js";
-import { SettingsStore } from "../../settings-store.js";
-import { AgentError } from "../../errors.js";
+import { SettingsStore } from "../workspace/settings-store.js";
+import { AgentError } from "../../shared/errors.js";
 
 /**
  * F3-T02 / Fase 4 — prompts.json central.

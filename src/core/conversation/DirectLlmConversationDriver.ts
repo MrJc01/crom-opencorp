@@ -5,7 +5,7 @@ import {
   type ConversaSyncResult,
   type StreamEvent,
 } from "./types.js";
-import { completarChatDirect, type MensagemChat } from "../llm-client.js";
+import { completarChatDirect, type MensagemChat } from "../contexts/execution/llm-client.js";
 
 export interface DirectLlmDriverOptions {
   homeDir?: string;
