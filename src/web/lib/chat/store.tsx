@@ -13,6 +13,8 @@ import type { Anexo } from "../../components/chat/PromptInput";
 import type { SessaoResumo } from "../../components/chat/HistoricoModal";
 import { showToast } from "../../ui/Toast";
 import { fetchApi, wsAtivo, headers } from "../context";
+import { ProblemDetailsError } from "@opencorp/sdk";
+import { executarSecretarioStream } from "./secretary-stream";
 import {
   SUGESTOES_RAPIDAS,
   MODELOS_SUGERIDOS,
@@ -1346,234 +1348,214 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
         }
       } catch {}
 
-      const resp = await fetch(urlStream, {
-        method: "POST",
+      await executarSecretarioStream({
+        url: urlStream,
         headers: headers(),
-        body: JSON.stringify(corpoEnvio),
+        body: corpoEnvio,
         signal: abortController.signal,
-      });
-
-      if (!resp.ok) {
-        if (resp.status === 409) {
-          const detalhe = await resp.json().catch(() => null);
-          // Sessão ocupada por outro stream — desfaz o otimismo e avisa
-          setMensagens((prev) => prev.slice(0, lenAntesOtimista));
-          setInputValor(texto);
-          if (imgs.length > 0) setAnexos(anexos());
-          if (!opts?.silencioso) {
-            showToast((detalhe as any)?.erro || "Sessão ocupada em outra execução — tente de novo em instantes", "aviso");
-          }
-          if (timerInterval) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-          }
-          setStreamingAtivo(false);
-          setCarregando(false);
-          const sidRec = sessaoAtivaId();
-          if (sidRec) {
-            void fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(sidRec)}/mensagens`)
-              .then((msgs) => {
-                if (Array.isArray(msgs) && msgs.length > 0) {
-                  setMensagens((prev) => reconciliarMensagens(prev, msgs));
-                }
-              })
-              .catch(() => null);
-          }
-          return false;
-        }
-        throw new Error(`HTTP ${resp.status}`);
-      }
-
-      const reader = resp.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) throw new Error("Stream indisponível");
-
-      let buffer = "";
-      let currentEvent = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const linhas = buffer.split("\n");
-        buffer = linhas.pop() ?? "";
-
-        for (const linha of linhas) {
-          const trimmed = linha.trim();
-
-          if (trimmed.startsWith("event: ")) {
-            currentEvent = trimmed.slice(7).trim();
-            continue;
-          }
-
-          if (!trimmed.startsWith("data: ")) {
-            if (trimmed === "") currentEvent = "";
-            continue;
-          }
-
-          const jsonStr = trimmed.slice(6).trim();
-          if (jsonStr === "[DONE]") continue;
-
-          try {
-            const payload = JSON.parse(jsonStr);
-            const evtType = currentEvent || payload.tipo || "";
-
-            if (evtType === "inicio" && payload.sessao_id) {
-              setEmNovaConversa(false);
-              setSessaoAtivaId(payload.sessao_id);
-              try { syncChannel?.postMessage({ tipo: "mensagem_enviada", sessao_id: payload.sessao_id }); } catch {}
-            }
-
+        callbacks: {
+          onSessaoId: (sidInicio) => {
+            setEmNovaConversa(false);
+            setSessaoAtivaId(sidInicio);
+            try { syncChannel?.postMessage({ tipo: "mensagem_enviada", sessao_id: sidInicio }); } catch {}
+          },
+          onGitState: (git) => {
             setMensagens((prev) => {
               const ultIdx = prev.length - 1;
               if (ultIdx < 0) return prev;
               const assistente = { ...prev[ultIdx] };
-
-              if (payload.gitStatus) {
-                assistente.gitStatus = payload.gitStatus;
-              }
-              if (payload.gitDiff) {
-                assistente.gitDiff = payload.gitDiff;
-              }
-
-              if (evtType === "status" || evtType === "fallback_modelo") {
-                if (payload.aviso) {
-                  const rotacoes = [...(assistente.rotacoes || [])];
-                  const jaExiste = rotacoes.some((r) => r.aviso === payload.aviso);
-                  if (!jaExiste) {
-                    rotacoes.push({
-                      tipo: evtType,
-                      modelo: payload.modelo,
-                      aviso: payload.aviso,
-                      erro: Boolean(payload.erro || payload.aviso.includes("falhou") || payload.aviso.includes("⚠️") || payload.aviso.includes("erro")),
-                      timestamp: Date.now(),
-                    });
-                    assistente.rotacoes = rotacoes;
-                  }
-                }
-                if (payload.modelo) {
-                  assistente.modelo = payload.modelo;
-                }
-              } else if (evtType === "passos" && Array.isArray(payload.passos)) {
-                assistente.passos = payload.passos;
-
-                const textoPassos = payload.passos
-                  .filter((p: any) => p.tipo === "texto")
-                  .map((p: any) => p.texto || "")
-                  .join("\n\n");
-                if (textoPassos) {
-                  assistente.content = textoPassos;
-                }
-              } else if (evtType === "delta") {
-                let deltaTxt = payload.delta || payload.texto || "";
-                if (deltaTxt.includes("<think>") || deltaTxt.includes("</think>")) {
-                  const thinkMatch = /<think>([\s\S]*?)(?:<\/think>|$)/i.exec(deltaTxt);
-                  if (thinkMatch) {
-                    const pTxt = thinkMatch[1] ?? "";
-                    assistente.pensamento = (assistente.pensamento || "") + pTxt;
-                    deltaTxt = deltaTxt.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "");
-                  }
-                }
-                if (deltaTxt) {
-                  assistente.content += deltaTxt;
-                  const passos = [...(assistente.passos || [])];
-                  const ultP = passos[passos.length - 1];
-                  if (ultP && ultP.tipo === "texto") {
-                    if (!ultP.texto?.endsWith(deltaTxt)) {
-                      ultP.texto = (ultP.texto || "") + deltaTxt;
-                    }
-                  } else {
-                    passos.push({ tipo: "texto", texto: deltaTxt });
-                  }
-                  assistente.passos = passos;
-                }
-              } else if (evtType === "pensamento") {
-                const deltaTxt = payload.delta || payload.pensamento || payload.texto || "";
-                if (deltaTxt) {
-                  assistente.pensamento = (assistente.pensamento || "") + deltaTxt;
-                  const passos = [...(assistente.passos || [])];
-                  const ultP = passos[passos.length - 1];
-                  if (ultP && ultP.tipo === "pensamento") {
-                    if (!ultP.texto?.endsWith(deltaTxt)) {
-                      ultP.texto = (ultP.texto || "") + deltaTxt;
-                    }
-                  } else {
-                    passos.push({ tipo: "pensamento", texto: deltaTxt });
-                  }
-                  assistente.passos = passos;
-                }
-              } else if (evtType === "acao") {
-                const passos = [...(assistente.passos || [])];
-                if (Array.isArray(payload.itens) && payload.itens.length > 0) {
-                  for (const item of payload.itens) {
-                    passos.push({
-                      tipo: "acao",
-                      ferramenta: item.ferramenta || item.tool || "ferramenta",
-                      resumo: item.resumo || item.summary || "executando...",
-                      sucesso: item.sucesso !== false,
-                    });
-                  }
-                } else if (payload.ferramenta) {
-                  passos.push({
-                    tipo: "acao",
-                    ferramenta: payload.ferramenta,
-                    resumo: payload.resumo || "executando...",
-                    sucesso: payload.sucesso !== false,
-                  });
-                }
-                assistente.passos = passos;
-              } else if (evtType === "hitl") {
-                assistente.hitl = payload.hitl || payload;
-              } else if (evtType === "fim") {
-                assistente.concluida = true;
-                if (payload.modelo) {
-                  assistente.modelo = payload.modelo;
-                }
-                if (payload.resposta && !assistente.content) {
-                  assistente.content = payload.resposta;
-                }
-                if (payload.gitStatus) {
-                  assistente.gitStatus = payload.gitStatus;
-                }
-                if (payload.gitDiff) {
-                  assistente.gitDiff = payload.gitDiff;
-                }
-              } else if (evtType === "erro") {
-                assistente.concluida = true;
-                const msgErro = payload.erro || payload.mensagem || "Erro desconhecido";
+              if (git.gitStatus) assistente.gitStatus = git.gitStatus;
+              if (git.gitDiff) assistente.gitDiff = git.gitDiff;
+              return [...prev.slice(0, ultIdx), assistente];
+            });
+            scrollFim(false);
+          },
+          onStatus: (_status, evt) => {
+            if (!evt) return;
+            setMensagens((prev) => {
+              const ultIdx = prev.length - 1;
+              if (ultIdx < 0) return prev;
+              const assistente = { ...prev[ultIdx] };
+              if (evt.aviso) {
                 const rotacoes = [...(assistente.rotacoes || [])];
-                const jaExiste = rotacoes.some((r) => r.aviso?.includes(msgErro));
+                const jaExiste = rotacoes.some((r) => r.aviso === evt.aviso);
                 if (!jaExiste) {
                   rotacoes.push({
-                    tipo: "erro",
-                    aviso: `⚠️ Erro: ${msgErro}`,
-                    erro: true,
+                    tipo: evt.tipo,
+                    modelo: evt.modelo,
+                    aviso: evt.aviso,
+                    erro: Boolean(evt.erro),
                     timestamp: Date.now(),
                   });
                   assistente.rotacoes = rotacoes;
                 }
-                assistente.content = assistente.content
-                  ? `${assistente.content}\n\n> **Erro no Secretário**: ${msgErro}`
-                  : `> **Erro no Secretário**: ${msgErro}`;
               }
-
+              if (evt.modelo) {
+                assistente.modelo = evt.modelo;
+              }
               return [...prev.slice(0, ultIdx), assistente];
             });
-
             scrollFim(false);
-          } catch {}
-
-          currentEvent = "";
-        }
-      }
+          },
+          onPasso: (passos) => {
+            setMensagens((prev) => {
+              const ultIdx = prev.length - 1;
+              if (ultIdx < 0) return prev;
+              const assistente = { ...prev[ultIdx] };
+              assistente.passos = passos;
+              const textoPassos = passos
+                .filter((p: any) => p.tipo === "texto")
+                .map((p: any) => p.texto || "")
+                .join("\n\n");
+              if (textoPassos) {
+                assistente.content = textoPassos;
+              }
+              return [...prev.slice(0, ultIdx), assistente];
+            });
+            scrollFim(false);
+          },
+          onDelta: (deltaTxt) => {
+            setMensagens((prev) => {
+              const ultIdx = prev.length - 1;
+              if (ultIdx < 0) return prev;
+              const assistente = { ...prev[ultIdx] };
+              assistente.content += deltaTxt;
+              const passos = [...(assistente.passos || [])];
+              const ultP = passos[passos.length - 1];
+              if (ultP && ultP.tipo === "texto") {
+                if (!ultP.texto?.endsWith(deltaTxt)) {
+                  ultP.texto = (ultP.texto || "") + deltaTxt;
+                }
+              } else {
+                passos.push({ tipo: "texto", texto: deltaTxt });
+              }
+              assistente.passos = passos;
+              return [...prev.slice(0, ultIdx), assistente];
+            });
+            scrollFim(false);
+          },
+          onPensamento: (deltaTxt) => {
+            setMensagens((prev) => {
+              const ultIdx = prev.length - 1;
+              if (ultIdx < 0) return prev;
+              const assistente = { ...prev[ultIdx] };
+              assistente.pensamento = (assistente.pensamento || "") + deltaTxt;
+              const passos = [...(assistente.passos || [])];
+              const ultP = passos[passos.length - 1];
+              if (ultP && ultP.tipo === "pensamento") {
+                if (!ultP.texto?.endsWith(deltaTxt)) {
+                  ultP.texto = (ultP.texto || "") + deltaTxt;
+                }
+              } else {
+                passos.push({ tipo: "pensamento", texto: deltaTxt });
+              }
+              assistente.passos = passos;
+              return [...prev.slice(0, ultIdx), assistente];
+            });
+            scrollFim(false);
+          },
+          onAcao: (itens) => {
+            setMensagens((prev) => {
+              const ultIdx = prev.length - 1;
+              if (ultIdx < 0) return prev;
+              const assistente = { ...prev[ultIdx] };
+              const passos = [...(assistente.passos || [])];
+              for (const item of itens) {
+                passos.push({
+                  tipo: "acao",
+                  ferramenta: item.ferramenta,
+                  resumo: item.resumo,
+                  sucesso: item.sucesso,
+                });
+              }
+              assistente.passos = passos;
+              return [...prev.slice(0, ultIdx), assistente];
+            });
+            scrollFim(false);
+          },
+          onHitl: (hitl) => {
+            setMensagens((prev) => {
+              const ultIdx = prev.length - 1;
+              if (ultIdx < 0) return prev;
+              const assistente = { ...prev[ultIdx] };
+              assistente.hitl = hitl;
+              return [...prev.slice(0, ultIdx), assistente];
+            });
+            scrollFim(false);
+          },
+          onFim: (dados) => {
+            setMensagens((prev) => {
+              const ultIdx = prev.length - 1;
+              if (ultIdx < 0) return prev;
+              const assistente = { ...prev[ultIdx], concluida: true };
+              if (dados?.modelo) assistente.modelo = dados.modelo;
+              if (dados?.resposta && !assistente.content) assistente.content = dados.resposta;
+              if (dados?.gitStatus) assistente.gitStatus = dados.gitStatus;
+              if (dados?.gitDiff) assistente.gitDiff = dados.gitDiff;
+              return [...prev.slice(0, ultIdx), assistente];
+            });
+            scrollFim(false);
+          },
+          onError: (erro) => {
+            setMensagens((prev) => {
+              const ultIdx = prev.length - 1;
+              if (ultIdx < 0) return prev;
+              const assistente = { ...prev[ultIdx], concluida: true };
+              const msgErro = erro.message || "Erro desconhecido";
+              const rotacoes = [...(assistente.rotacoes || [])];
+              const jaExiste = rotacoes.some((r) => r.aviso?.includes(msgErro));
+              if (!jaExiste) {
+                rotacoes.push({
+                  tipo: "erro",
+                  aviso: `⚠️ Erro: ${msgErro}`,
+                  erro: true,
+                  timestamp: Date.now(),
+                });
+                assistente.rotacoes = rotacoes;
+              }
+              assistente.content = assistente.content
+                ? `${assistente.content}\n\n> **Erro no Secretário**: ${msgErro}`
+                : `> **Erro no Secretário**: ${msgErro}`;
+              return [...prev.slice(0, ultIdx), assistente];
+            });
+            scrollFim(false);
+          },
+        },
+      });
     } catch (err: any) {
+      if (err instanceof ProblemDetailsError && err.status === 409) {
+        // Sessão ocupada por outro stream — desfaz o otimismo e avisa
+        setMensagens((prev) => prev.slice(0, lenAntesOtimista));
+        setInputValor(texto);
+        if (imgs.length > 0) setAnexos(anexos());
+        if (!opts?.silencioso) {
+          showToast(err.detail || err.title || "Sessão ocupada em outra execução — tente de novo em instantes", "aviso");
+        }
+        if (timerInterval) {
+          clearInterval(timerInterval);
+          timerInterval = null;
+        }
+        setStreamingAtivo(false);
+        setCarregando(false);
+        const sidRec = sessaoAtivaId();
+        if (sidRec) {
+          void fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(sidRec)}/mensagens`)
+            .then((msgs) => {
+              if (Array.isArray(msgs) && msgs.length > 0) {
+                setMensagens((prev) => reconciliarMensagens(prev, msgs));
+              }
+            })
+            .catch(() => null);
+        }
+        return false;
+      }
       if (err.name !== "AbortError") {
-        showToast("Erro na comunicação com o modelo: " + err.message, "erro");
+        const msg = err instanceof ProblemDetailsError ? (err.detail || err.title) : err.message;
+        showToast("Erro na comunicação com o modelo: " + msg, "erro");
         setMensagens((prev) => {
           const ultIdx = prev.length - 1;
           if (ultIdx < 0) return prev;
-          const assistente = { ...prev[ultIdx], concluida: true, content: prev[ultIdx].content || `(erro: ${err.message})` };
+          const assistente = { ...prev[ultIdx], concluida: true, content: prev[ultIdx].content || `(erro: ${msg})` };
           return [...prev.slice(0, ultIdx), assistente];
         });
       }
