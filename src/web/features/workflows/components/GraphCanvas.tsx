@@ -92,7 +92,7 @@ const GraphCanvasInner: FC<GraphCanvasProps> = ({
 
   // Converte nós OpenCorp para ReactFlow Nodes
   const initialNodes: Node[] = useMemo(() => {
-    const rawNos = fluxo.nos || [];
+    const rawNos = Array.isArray(fluxo.nos) ? fluxo.nos : [];
     return rawNos.map((no, idx) => {
       const rfType = resolverTipoReactFlow(no.tipo);
       const posX = no.pos?.x ?? (idx % 4) * 280 + 80;
@@ -110,7 +110,7 @@ const GraphCanvasInner: FC<GraphCanvasProps> = ({
 
   // Converte arestas OpenCorp para ReactFlow Edges
   const initialEdges: Edge[] = useMemo(() => {
-    const rawArestas = fluxo.arestas || [];
+    const rawArestas = Array.isArray(fluxo.arestas) ? fluxo.arestas : [];
     return rawArestas.map((a, idx) => {
       const isEntao = a.saida === "entao" || a.condicao === "entao";
       const isSenao = a.saida === "senao" || a.condicao === "senao";
@@ -164,7 +164,9 @@ const GraphCanvasInner: FC<GraphCanvasProps> = ({
   // Notifica o pai quando os nós são arrastados/movidos
   const handleNodeDragStop = useCallback(
     (_: any, node: Node) => {
-      const novosNos = (fluxo.nos || []).map((no) => {
+      const nosList = Array.isArray(fluxo.nos) ? fluxo.nos : [];
+      const arestasList = Array.isArray(fluxo.arestas) ? fluxo.arestas : [];
+      const novosNos = nosList.map((no) => {
         if (no.id === node.id) {
           return {
             ...no,
@@ -176,7 +178,7 @@ const GraphCanvasInner: FC<GraphCanvasProps> = ({
         }
         return no;
       });
-      onAtualizarGrafo(novosNos, fluxo.arestas || []);
+      onAtualizarGrafo(novosNos, arestasList);
     },
     [fluxo.nos, fluxo.arestas, onAtualizarGrafo]
   );
@@ -186,6 +188,9 @@ const GraphCanvasInner: FC<GraphCanvasProps> = ({
     (params: Connection) => {
       if (!params.source || !params.target) return;
       if (params.source === params.target) return;
+
+      const nosList = Array.isArray(fluxo.nos) ? fluxo.nos : [];
+      const arestasList = Array.isArray(fluxo.arestas) ? fluxo.arestas : [];
 
       const novaAresta = {
         de: params.source,
@@ -200,12 +205,12 @@ const GraphCanvasInner: FC<GraphCanvasProps> = ({
       };
 
       // Evita duplicatas
-      const jaExiste = (fluxo.arestas || []).some(
+      const jaExiste = arestasList.some(
         (a) => a.de === novaAresta.de && a.para === novaAresta.para && a.saida === novaAresta.saida
       );
       if (!jaExiste) {
-        const novasArestas = [...(fluxo.arestas || []), novaAresta];
-        onAtualizarGrafo(fluxo.nos || [], novasArestas);
+        const novasArestas = [...arestasList, novaAresta];
+        onAtualizarGrafo(nosList, novasArestas);
       }
     },
     [fluxo.nos, fluxo.arestas, onAtualizarGrafo]
@@ -239,7 +244,8 @@ const GraphCanvasInner: FC<GraphCanvasProps> = ({
   // Clique em um nó
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      const achado = (fluxo.nos || []).find((n) => n.id === node.id) || null;
+      const nosList = Array.isArray(fluxo.nos) ? fluxo.nos : [];
+      const achado = nosList.find((n) => n.id === node.id) || null;
       onSelecionarNo(achado);
     },
     [fluxo.nos, onSelecionarNo]
