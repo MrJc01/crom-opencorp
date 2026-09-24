@@ -1,196 +1,440 @@
-import React, { useState, useEffect, useCallback, type FC } from "react";
+import React, { useState, useEffect, useCallback, useMemo, type FC } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
-import { type SessaoResumo } from "@opencorp/sdk";
+import { showToast } from "../../../shared/ui/Toast.js";
+import type { ItemHistorico, AcaoAgente, ResumoTelemetria, ArquivoDiff } from "../types.js";
 import {
-  History,
-  MessageSquare,
-  Clock,
-  ChevronRight,
-  RefreshCw,
-  Search,
-  Bot,
-  User,
-} from "lucide-react";
+  HistoryMetricsHeader,
+  HistoryFilterBar,
+  HistoryTable,
+  HistoryInspectionDrawer,
+} from "../components/index.js";
 
 export const HistoricoView: FC = () => {
-  const { client, tratarErro } = useOpenCorp();
-  const [sessoes, setSessoes] = useState<SessaoResumo[]>([]);
-  const [carregando, setCarregando] = useState(true);
-  const [busca, setBusca] = useState("");
-  const [sessaoAtivaId, setSessaoAtivaId] = useState<string | null>(null);
-  const [mensagensSessao, setMensagensSessao] = useState<any[]>([]);
-  const [carregandoMensagens, setCarregandoMensagens] = useState(false);
+  const { client, workspaceId, tratarErro } = useOpenCorp();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const carregarSessoes = useCallback(async () => {
-    setCarregando(true);
-    try {
-      const res = await client.secretary.getSessoes();
-      const lista = Array.isArray(res) ? res : (res as any)?.sessoes || [];
-      setSessoes(lista);
-      if (lista.length > 0 && !sessaoAtivaId) {
-        setSessaoAtivaId(lista[0].id);
-      }
-    } catch (err) {
-      tratarErro(err, "Falha ao consultar histórico de sessões");
-    } finally {
-      setCarregando(false);
+  const runParam = searchParams.get("run");
+  const tipoParam = searchParams.get("tipo") || "todos";
+  const statusParam = searchParams.get("status") || "todos";
+  const agenteParam = searchParams.get("agente") || "todos";
+
+  const wsEfetivo = useMemo(() => {
+    if (workspaceId) return workspaceId;
+    if (typeof window !== "undefined") {
+      const salvo = localStorage.getItem("opencorp_workspace_id");
+      if (salvo) return salvo;
     }
-  }, [client, sessaoAtivaId, tratarErro]);
+    return "yt-factory-01";
+  }, [workspaceId]);
+
+  // Estados de Dados Principais
+  const [itens, setItens] = useState<ItemHistorico[]>([]);
+  const [resumoTelemetria, setResumoTelemetria] = useState<ResumoTelemetria | null>(null);
+  const [carregando, setCarregando] = useState(true);
+
+  // Filtros
+  const [tipoFiltro, setTipoFiltro] = useState<string>(tipoParam);
+  const [statusFiltro, setStatusFiltro] = useState<string>(statusParam);
+  const [agenteFiltro, setAgenteFiltro] = useState<string>(agenteParam);
+  const [busca, setBusca] = useState("");
+  const [tempoReal, setTempoReal] = useState(false);
+
+  // Estado do Item Selecionado e Detalhes da Gaveta Forense
+  const [itemSelecionado, setItemSelecionado] = useState<ItemHistorico | null>(null);
+  const [logRun, setLogRun] = useState<string>("");
+  const [acoesRun, setAcoesRun] = useState<AcaoAgente[]>([]);
+  const [diffRun, setDiffRun] = useState<string>("");
+  const [arquivosDiff, setArquivosDiff] = useState<ArquivoDiff[]>([]);
+  const [commitHashDiff, setCommitHashDiff] = useState<string | null>(null);
+
+  const [carregandoDetalhes, setCarregandoDetalhes] = useState(false);
+  const [carregandoAcoes, setCarregandoAcoes] = useState(false);
+  const [carregandoDiff, setCarregandoDiff] = useState(false);
+
+  // ── Carregar Lista de Histórico Unificado ──────────────────────────────
+  const carregarHistorico = useCallback(async (silencioso = false) => {
+    if (!silencioso) setCarregando(true);
+    try {
+      const queryParams = new URLSearchParams();
+      queryParams.set("limite", "300");
+      if (tipoFiltro !== "todos") queryParams.set("tipo", tipoFiltro);
+      if (agenteFiltro !== "todos") queryParams.set("agente", agenteFiltro);
+      if (busca.trim()) queryParams.set("busca", busca.trim());
+
+      const res = await client.http.get<ItemHistorico[]>(
+        `/historico?${queryParams.toString()}`,
+        {
+          headers: { "x-opencorp-workspace": wsEfetivo },
+        }
+      );
+      setItens(Array.isArray(res) ? res : []);
+    } catch (err) {
+      if (!silencioso) {
+        tratarErro(err, "Falha ao carregar histórico unificado");
+      }
+    } finally {
+      if (!silencioso) setCarregando(false);
+    }
+  }, [client, wsEfetivo, tipoFiltro, agenteFiltro, busca, tratarErro]);
+
+  // ── Carregar Resumo de Telemetria e Finanças ───────────────────────────
+  const carregarResumoTelemetria = useCallback(async () => {
+    try {
+      const res = await client.http.get<ResumoTelemetria>("/telemetria/resumo", {
+        headers: { "x-opencorp-workspace": wsEfetivo },
+      });
+      setResumoTelemetria(res || null);
+    } catch {
+      setResumoTelemetria(null);
+    }
+  }, [client, wsEfetivo]);
 
   useEffect(() => {
-    void carregarSessoes();
-  }, [carregarSessoes]);
+    void carregarHistorico();
+    void carregarResumoTelemetria();
+  }, [carregarHistorico, carregarResumoTelemetria]);
 
-  const carregarHistoricoSessao = useCallback(
-    async (id: string) => {
-      setSessaoAtivaId(id);
-      setCarregandoMensagens(true);
+  // Polling em tempo real a cada 5 segundos se ativado
+  useEffect(() => {
+    if (!tempoReal) return;
+    const timer = setInterval(() => {
+      void carregarHistorico(true);
+      void carregarResumoTelemetria();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [tempoReal, carregarHistorico, carregarResumoTelemetria]);
+
+  // ── Lista de Agentes Disponíveis para Filtro ───────────────────────────
+  const agentesDisponiveis = useMemo(() => {
+    const set = new Set<string>();
+    itens.forEach((it) => {
+      if (it.agente) set.add(it.agente.replace(/^@/, ""));
+    });
+    return Array.from(set).sort();
+  }, [itens]);
+
+  // ── Filtros Locais (Status e Busca rápida) ─────────────────────────────
+  const itensFiltrados = useMemo(() => {
+    return itens.filter((it) => {
+      // Filtro de status
+      if (statusFiltro !== "todos") {
+        const s = (it.status || "").toLowerCase();
+        if (statusFiltro === "sucesso" && !(s === "sucesso" || s === "concluido" || s === "ok")) {
+          return false;
+        }
+        if (statusFiltro === "falhou" && !(s === "falhou" || s === "erro")) {
+          return false;
+        }
+        if (statusFiltro === "executando" && s !== "executando") {
+          return false;
+        }
+        if (statusFiltro === "cancelado" && !(s === "cancelado" || s === "abortado")) {
+          return false;
+        }
+      }
+
+      // Filtro de busca
+      if (busca.trim()) {
+        const q = busca.toLowerCase().trim();
+        const matchId = it.id.toLowerCase().includes(q);
+        const matchOrdem = it.ordem?.toLowerCase().includes(q);
+        const matchTitulo = it.titulo?.toLowerCase().includes(q);
+        const matchAgente = it.agente?.toLowerCase().includes(q);
+        if (!matchId && !matchOrdem && !matchTitulo && !matchAgente) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [itens, statusFiltro, busca]);
+
+  // ── Inspecionar Execução / Item (Gaveta Forense) ───────────────────────
+  const abrirInspecao = useCallback(
+    async (execId: string) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("run", execId);
+        return next;
+      });
+
+      // Busca o item no array local ou carrega da API
+      let itemBase = itens.find((it) => it.id === execId) || null;
+      if (!itemBase) {
+        itemBase = { id: execId, tipo: "execucao" };
+      }
+      setItemSelecionado(itemBase);
+
+      // Carregar Detalhes e Log
+      setCarregandoDetalhes(true);
       try {
-        const hist = await client.secretary.getHistorico(id);
-        setMensagensSessao(hist?.messages || []);
-      } catch (err) {
-        tratarErro(err, "Falha ao carregar mensagens da sessão");
+        const [detalhes, rawSessionLog] = await Promise.all([
+          client.http.get<any>(`/execucoes/${encodeURIComponent(execId)}`, {
+            headers: { "x-opencorp-workspace": wsEfetivo },
+          }).catch(() => null),
+          client.http.get<{ id: string; log: string } | string>(
+            `/sessions/${encodeURIComponent(execId)}/log`,
+            {
+              headers: { "x-opencorp-workspace": wsEfetivo },
+            }
+          ).catch(async () => {
+            return client.http.get<{ id: string; log: string } | string>(
+              `/sessoes/${encodeURIComponent(execId)}/log`,
+              {
+                headers: { "x-opencorp-workspace": wsEfetivo },
+              }
+            ).catch(() => "");
+          }),
+        ]);
+
+        let logTexto = "";
+        if (rawSessionLog && typeof rawSessionLog === "object" && "log" in rawSessionLog) {
+          logTexto = rawSessionLog.log || "";
+        } else if (typeof rawSessionLog === "string") {
+          logTexto = rawSessionLog;
+        }
+
+        // Fallback 1: tentar /registries/execucoes/:id
+        if (!logTexto.trim()) {
+          try {
+            const reg = await client.http.get<{ conteudo?: string; meta?: { extras?: any } }>(
+              `/registries/execucoes/${encodeURIComponent(execId)}`,
+              { headers: { "x-opencorp-workspace": wsEfetivo } }
+            );
+            if (reg?.conteudo && reg.conteudo.trim()) {
+              logTexto = reg.conteudo;
+            } else if (typeof reg?.meta?.extras?.contexto_final === "string") {
+              logTexto = reg.meta.extras.contexto_final;
+            }
+            if (reg?.meta?.extras?.nos && Array.isArray(reg.meta.extras.nos)) {
+              itemBase = { ...itemBase, nos: reg.meta.extras.nos };
+            }
+          } catch {}
+        }
+
+        // Fallback 2: se for fluxo, carregar nós e contexto
+        const flowId = detalhes?.flow || itemBase?.flow;
+        if (flowId) {
+          try {
+            const execs = await client.http.get<Array<{ execId: string; status: string; nos: any[]; contextoFinal: string; entrada?: string }>>(
+              `/flows/${encodeURIComponent(flowId)}/execucoes`,
+              { headers: { "x-opencorp-workspace": wsEfetivo } }
+            );
+            const atual = (execs || []).find((e) => e.execId === execId) || (execs || [])[0];
+            if (atual) {
+              if (atual.nos) itemBase = { ...itemBase, nos: atual.nos };
+              if (atual.contextoFinal) {
+                itemBase = { ...itemBase, contexto_final: atual.contextoFinal };
+                if (!logTexto.trim()) logTexto = atual.contextoFinal;
+              }
+              if (atual.entrada) itemBase = { ...itemBase, entrada: atual.entrada };
+            }
+          } catch {}
+        }
+
+        if (detalhes) {
+          setItemSelecionado((prev) => ({
+            ...(prev || itemBase!),
+            ...detalhes,
+            ...(itemBase?.nos ? { nos: itemBase.nos } : {}),
+            ...(itemBase?.contexto_final ? { contexto_final: itemBase.contexto_final } : {}),
+            ...(itemBase?.entrada ? { entrada: itemBase.entrada } : {}),
+          }));
+        } else {
+          setItemSelecionado((prev) => ({
+            ...(prev || itemBase!),
+          }));
+        }
+        setLogRun(logTexto);
+      } catch {
+        setLogRun("");
       } finally {
-        setCarregandoMensagens(false);
+        setCarregandoDetalhes(false);
+      }
+
+      // Carregar Spans de Telemetria
+      setCarregandoAcoes(true);
+      try {
+        const spans = await client.http.get<AcaoAgente[]>(
+          `/acoes/${encodeURIComponent(execId)}`,
+          {
+            headers: { "x-opencorp-workspace": wsEfetivo },
+          }
+        ).catch(() => []);
+        setAcoesRun(Array.isArray(spans) ? spans : []);
+      } catch {
+        setAcoesRun([]);
+      } finally {
+        setCarregandoAcoes(false);
+      }
+
+      // Carregar Git Diff
+      setCarregandoDiff(true);
+      try {
+        const resDiff = await client.http.get<{
+          ok?: boolean;
+          diff?: string;
+          arquivos?: ArquivoDiff[];
+          commitHash?: string;
+        }>(`/execucoes/${encodeURIComponent(execId)}/diff`, {
+          headers: { "x-opencorp-workspace": wsEfetivo },
+        }).catch(() => null);
+
+        setDiffRun(resDiff?.diff || "");
+        setArquivosDiff(resDiff?.arquivos || []);
+        setCommitHashDiff(resDiff?.commitHash || null);
+      } catch {
+        setDiffRun("");
+        setArquivosDiff([]);
+        setCommitHashDiff(null);
+      } finally {
+        setCarregandoDiff(false);
       }
     },
-    [client, tratarErro],
+    [client, wsEfetivo, itens, setSearchParams]
   );
 
+  // Sincroniza deep-link ?run=<id>
   useEffect(() => {
-    if (sessaoAtivaId) {
-      void carregarHistoricoSessao(sessaoAtivaId);
+    if (runParam) {
+      if (!itemSelecionado || itemSelecionado.id !== runParam) {
+        void abrirInspecao(runParam);
+      }
+    } else {
+      if (itemSelecionado) {
+        setItemSelecionado(null);
+        setLogRun("");
+        setAcoesRun([]);
+        setDiffRun("");
+        setArquivosDiff([]);
+      }
     }
-  }, [sessaoAtivaId, carregarHistoricoSessao]);
+  }, [runParam, itemSelecionado, abrirInspecao]);
 
-  const sessoesFiltradas = sessoes.filter(
-    (s) =>
-      s.id.toLowerCase().includes(busca.toLowerCase()) ||
-      (s.title && s.title.toLowerCase().includes(busca.toLowerCase())),
-  );
+  const fecharInspecao = () => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("run");
+      return next;
+    });
+    setItemSelecionado(null);
+  };
+
+  // ── Controles Operacionais Ativos ─────────────────────────────────────
+  // Encerrar / Stop
+  const handleAbortar = async (execId: string) => {
+    try {
+      await client.http.post(`/execucoes/${encodeURIComponent(execId)}/cancelar`, {}, {
+        headers: { "x-opencorp-workspace": wsEfetivo },
+      });
+      showToast(`Execução "${execId}" abortada com sucesso.`, "info");
+      void abrirInspecao(execId);
+      void carregarHistorico(true);
+    } catch (err) {
+      tratarErro(err, "Falha ao abortar execução");
+    }
+  };
+
+  // Reenviar / Rerun
+  const handleRerun = async (execId: string) => {
+    try {
+      const res = await client.http.post<any>(`/execucoes/${encodeURIComponent(execId)}/retry`, {}, {
+        headers: { "x-opencorp-workspace": wsEfetivo },
+      });
+      const novoId = res?.id || res?.exec_id;
+      showToast(`Execução reenviada com sucesso! ${novoId ? `Novo ID: ${novoId}` : ""}`, "sucesso");
+      if (novoId) {
+        void abrirInspecao(novoId);
+      }
+      void carregarHistorico(true);
+    } catch (err) {
+      tratarErro(err, "Falha ao re-executar");
+    }
+  };
+
+  // Retomar / Resume (para fluxos DAG)
+  const handleResume = async (flowId: string) => {
+    try {
+      await client.http.post(`/flows/${encodeURIComponent(flowId)}/resume`, {}, {
+        headers: { "x-opencorp-workspace": wsEfetivo },
+      });
+      showToast(`Fluxo "${flowId}" retomado a partir do nó que falhou.`, "sucesso");
+      void carregarHistorico(true);
+    } catch (err) {
+      tratarErro(err, "Falha ao retomar fluxo");
+    }
+  };
+
+  // Restaurar Arquivo do Git Diff (Rollback)
+  const handleRestaurarArquivo = async (caminho: string) => {
+    try {
+      await client.http.post("/workspaces/git/restore", { arquivo: caminho }, {
+        headers: { "x-opencorp-workspace": wsEfetivo },
+      });
+      showToast(`Arquivo "${caminho}" revertido com sucesso via git checkout!`, "sucesso");
+      if (itemSelecionado) {
+        void abrirInspecao(itemSelecionado.id);
+      }
+    } catch (err) {
+      tratarErro(err, `Falha ao reverter arquivo "${caminho}"`);
+    }
+  };
 
   return (
-    <div className="flex flex-col lg:flex-row h-full w-full bg-zinc-950 overflow-hidden select-text">
-      {/* Coluna Lateral: Lista de Sessões */}
-      <aside className="w-full lg:w-80 border-b lg:border-b-0 lg:border-r border-zinc-850 p-4 space-y-4 flex-shrink-0 bg-zinc-950/80 flex flex-col h-full overflow-hidden">
-        <div>
-          <h2 className="text-xs font-bold text-zinc-100 flex items-center gap-1.5 uppercase tracking-wider">
-            <History size={14} className="text-emerald-400" />
-            Histórico Forense de Sessões
-          </h2>
-          <p className="text-[11px] text-zinc-500 mt-0.5">Sessões de conversa e auditoria</p>
-        </div>
+    <div className="flex flex-col h-full w-full bg-zinc-950 p-4 sm:p-6 md:p-8 space-y-4 overflow-hidden relative select-none">
+      {/* Topo: Cards de Métricas e Telemetria */}
+      <HistoryMetricsHeader
+        resumo={resumoTelemetria}
+        totalItens={itens.length}
+      />
 
-        <div className="relative">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-          <input
-            type="text"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            placeholder="Buscar por ID ou título..."
-            className="w-full pl-8 pr-2.5 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
-          />
-        </div>
+      {/* Barra de Filtros Multidimensional */}
+      <HistoryFilterBar
+        tipoFiltro={tipoFiltro}
+        setTipoFiltro={setTipoFiltro}
+        statusFiltro={statusFiltro}
+        setStatusFiltro={setStatusFiltro}
+        agenteFiltro={agenteFiltro}
+        setAgenteFiltro={setAgenteFiltro}
+        busca={busca}
+        setBusca={setBusca}
+        tempoReal={tempoReal}
+        setTempoReal={setTempoReal}
+        carregando={carregando}
+        agentesDisponiveis={agentesDisponiveis}
+        onRecarregar={() => {
+          void carregarHistorico();
+          void carregarResumoTelemetria();
+        }}
+      />
 
-        <div className="flex-1 overflow-y-auto space-y-1 pr-1">
-          {carregando ? (
-            <div className="p-4 text-center text-xs text-zinc-500">Carregando...</div>
-          ) : sessoesFiltradas.length === 0 ? (
-            <div className="p-6 text-center text-xs text-zinc-600">Nenhuma sessão registrada.</div>
-          ) : (
-            sessoesFiltradas.map((s) => {
-              const ativa = s.id === sessaoAtivaId;
+      {/* Tabela Unificada das 5 Entidades */}
+      <HistoryTable
+        itens={itensFiltrados}
+        itemSelecionadoId={itemSelecionado?.id || null}
+        onSelecionarItem={(it) => void abrirInspecao(it.id)}
+        carregando={carregando}
+      />
 
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => carregarHistoricoSessao(s.id)}
-                  className={`w-full flex flex-col p-2.5 rounded-xl text-left text-xs transition-colors cursor-pointer space-y-1 ${
-                    ativa
-                      ? "bg-emerald-950/40 text-emerald-200 border border-emerald-800/40"
-                      : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
-                  }`}
-                >
-                  <div className="flex items-center justify-between w-full">
-                    <span className="font-semibold truncate">{s.title || "Sessão do Secretário"}</span>
-                    <ChevronRight size={13} className="opacity-40" />
-                  </div>
-                  <span className="text-[10px] font-mono text-zinc-500 truncate block">ID: {s.id}</span>
-                </button>
-              );
-            })
-          )}
-        </div>
-      </aside>
-
-      {/* Conteúdo Principal: Mensagens da Sessão Inspecionada */}
-      <section className="flex-1 flex flex-col h-full overflow-hidden p-6 lg:p-8 space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-zinc-850">
-          <div>
-            <h1 className="text-lg font-bold text-zinc-100">
-              {sessaoAtivaId ? `Sessão: ${sessaoAtivaId}` : "Selecione uma sessão"}
-            </h1>
-            <span className="text-xs text-zinc-400">
-              {mensagensSessao.length} turnos registrados nesta execução
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={carregarSessoes}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-xs text-zinc-300 transition-colors cursor-pointer"
-          >
-            <RefreshCw size={13} className={carregando ? "animate-spin" : ""} />
-            <span>Atualizar</span>
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-          {carregandoMensagens ? (
-            <div className="p-12 text-center text-xs text-zinc-500">
-              Carregando mensagens da sessão...
-            </div>
-          ) : mensagensSessao.length === 0 ? (
-            <div className="p-12 text-center text-xs text-zinc-600">
-              Nenhuma mensagem encontrada nesta sessão.
-            </div>
-          ) : (
-            mensagensSessao.map((msg, idx) => {
-              const isUser = msg.role === "user";
-
-              return (
-                <div
-                  key={idx}
-                  className={`flex ${isUser ? "justify-end" : "justify-start"} my-2`}
-                >
-                  <div className={`flex items-start gap-3 max-w-[85%] ${isUser ? "flex-row-reverse" : "flex-row"}`}>
-                    <div
-                      className={`h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0 text-white ${
-                        isUser ? "bg-zinc-800 text-zinc-300" : "bg-emerald-600"
-                      }`}
-                    >
-                      {isUser ? <User size={14} /> : <Bot size={14} />}
-                    </div>
-
-                    <div
-                      className={`p-3.5 rounded-2xl text-xs leading-relaxed whitespace-pre-wrap ${
-                        isUser
-                          ? "bg-emerald-950/40 border border-emerald-800/40 text-emerald-100"
-                          : "bg-zinc-900/60 border border-zinc-850 text-zinc-200"
-                      }`}
-                    >
-                      {typeof msg.content === "string"
-                        ? msg.content
-                        : JSON.stringify(msg.content, null, 2)}
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </section>
+      {/* Gaveta Lateral Forense com as 6 Abas Analíticas */}
+      <HistoryInspectionDrawer
+        item={itemSelecionado}
+        log={logRun}
+        acoes={acoesRun}
+        diff={diffRun}
+        arquivosDiff={arquivosDiff}
+        commitHashDiff={commitHashDiff}
+        carregandoDetalhes={carregandoDetalhes}
+        carregandoAcoes={carregandoAcoes}
+        carregandoDiff={carregandoDiff}
+        onClose={fecharInspecao}
+        onAbortar={handleAbortar}
+        onRerun={handleRerun}
+        onResume={handleResume}
+        onRestaurarArquivo={handleRestaurarArquivo}
+        onSelecionarSubExecucao={(execFilhaId) => void abrirInspecao(execFilhaId)}
+      />
     </div>
   );
 };
