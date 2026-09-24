@@ -8,6 +8,7 @@ import { SessionManager, type OpcoesRun, type ResultadoRun } from "./session-man
 import { mkdirRecursive, writeFileAtomic } from "../utils/fs-safe.js";
 import { opencorpHome } from "../utils/paths.js";
 import { PromptStore } from "./prompt-store.js";
+import { grauEntradaJoin } from "./domain/flow/dag.js";
 
 
 
@@ -1934,68 +1935,10 @@ function porId(flow: Flow, id: string): NoFlow | undefined {
   return flow.nos.find((n) => n.id === id);
 }
 
-/**
- * Grau de entrada "para frente" de cada nó (F10-T01) — número de arestas
- * (explícitas + implícitas de condicao/decisao/loop) que chegam ao nó vindas de
- * um nó que NÃO é alcançável a partir dele. Back-edges (ciclos de loop) são
- * excluídas do grau: o nó de loop e o seu corpo re-executam a cada volta e não
- * são pontos de junção — só entram na barreira arestas de ramos paralelos.
- */
-function grauEntradaJoin(flow: Flow): Map<string, number> {
-  const ids = flow.nos.map((n) => n.id);
-  const porId = new Map(flow.nos.map((n) => [n.id, n]));
-  const adj = new Map<string, string[]>();
-  const rev = new Map<string, string[]>();
-  for (const id of ids) {
-    adj.set(id, []);
-    rev.set(id, []);
-  }
-  const ligar = (de: string, para: string): void => {
-    if (porId.has(de) && porId.has(para) && de !== para) {
-      adj.get(de)!.push(para);
-      rev.get(para)!.push(de);
-    }
-  };
-  for (const a of flow.arestas) ligar(a.de, a.para);
-  for (const no of flow.nos) {
-    const c = (no.config ?? {}) as Record<string, unknown>;
-    if (no.tipo === "condicao") {
-      if (typeof c.entao === "string") ligar(no.id, c.entao);
-      if (typeof c.senao === "string") ligar(no.id, c.senao);
-    } else if (no.tipo === "decisao") {
-      for (const o of (c.opcoes as { proximo: string }[] | undefined) ?? []) {
-        if (typeof o.proximo === "string") ligar(no.id, o.proximo);
-      }
-    } else if (no.tipo === "loop") {
-      if (typeof c.retornar_para === "string") ligar(no.id, c.retornar_para);
-      if (typeof c.saida_final === "string") ligar(no.id, c.saida_final);
-    }
-  }
-  const alcanca = (origem: string): Set<string> => {
-    const vis = new Set<string>();
-    const pilha = [origem];
-    while (pilha.length > 0) {
-      const atual = pilha.pop()!;
-      for (const prox of adj.get(atual) ?? []) {
-        if (!vis.has(prox)) {
-          vis.add(prox);
-          pilha.push(prox);
-        }
-      }
-    }
-    return vis;
-  };
-  const graus = new Map<string, number>();
-  for (const id of ids) {
-    const desc = alcanca(id);
-    let grau = 0;
-    for (const p of rev.get(id) ?? []) {
-      if (!desc.has(p)) grau += 1;
-    }
-    graus.set(id, grau);
-  }
-  return graus;
-}
+// grauEntradaJoin: delegado ao módulo de domínio puro (src/core/domain/flow/dag.ts)
+// Extração realizada no Passo 1 da padronização DDD do OpenCorp.
+// @see docs/PADRONIZACAO_ARQUITETURAL_OPENCORP.md
+
 
 /** Remove códigos ANSI/escape de terminal (transcripts de exec chegam coloridos) */
 function stripAnsi(texto: string): string {
