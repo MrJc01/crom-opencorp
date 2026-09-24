@@ -19,18 +19,5 @@
       "@/*": ["./src/web/*"]
     }
   },
-  "include": ["src/web/**/*.ts", "src/web/**/*.tsx", "src/web/**/*.js", "src/web/**/*.jsx"],
-  "exclude": [
-    "src/web/**/*.svelte.ts",
-    "src/web/**/*.svelte",
-    "src/web/views/**/*",
-    "src/web/views/*",
-    "src/web/components/**/*",
-    "src/web/components/*",
-    "src/web/ui/**/*",
-    "src/web/ui/*",
-    "src/web/lib/chat/sessions-store.ts",
-    "src/web/lib/chat/store.tsx",
-    "src/web/lib/chat/stream-handler.ts"
-  ]
+  "include": ["src/web/**/*.ts", "src/web/**/*.tsx", "src/web/**/*.js", "src/web/**/*.jsx"]
 }
