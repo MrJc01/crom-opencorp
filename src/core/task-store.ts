@@ -6,6 +6,7 @@
  * na tabela universal `messages`.
  */
 
+import { join } from "node:path";
 import { TaskError } from "./errors.js";
 import { eventBus } from "./event-bus.js";
 import {
@@ -14,6 +15,7 @@ import {
   type UpdateTaskInput,
 } from "./db/opencorp-db.js";
 import type { MessageRow, PrioridadeTask } from "./db/schema.js";
+import { getDatabaseConnection, fecharConexao } from "./db/connection.js";
 
 export { TaskError } from "./errors.js";
 
@@ -535,7 +537,16 @@ export class TaskStore {
     return false;
   }
 
+  /**
+   * Obtém a conexão SQLite subjacente via Connection Factory padronizada.
+   */
+  db(wsPath: string) {
+    const caminho = join(wsPath, ".opencorp", "opencorp.db");
+    return getDatabaseConnection(caminho);
+  }
+
   fechar(wsPath: string): void {
     OpencorpDb.fecharInstancia(wsPath);
+    fecharConexao(join(wsPath, ".opencorp", "opencorp.db"));
   }
 }

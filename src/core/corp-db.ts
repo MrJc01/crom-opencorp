@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, symlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { OpencorpDb } from "./db/opencorp-db.js";
 import { inicializarBancoConsolidado } from "./db/schema.js";
+import { getDatabaseConnection, fecharConexao } from "./db/connection.js";
 
 export interface LinhaRegistro {
   id: string;
@@ -147,10 +148,12 @@ export class CorpDb {
   private readonly db: Database.Database;
   private readonly wsId: string;
   private readonly wsPath: string;
+  private readonly dbPath: string;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
     const dbPathResolvido = resolve(dbPath);
+    this.dbPath = dbPathResolvido;
     if (dirname(dbPathResolvido).endsWith(".opencorp")) {
       const wsPath = dirname(dirname(dbPathResolvido));
       this.wsPath = wsPath;
@@ -169,9 +172,7 @@ export class CorpDb {
       // Isolamento para diretórios temporários arbitrários em testes unitários
       this.wsPath = dirname(dbPath);
       this.wsId = "custom";
-      this.db = new Database(dbPath);
-      this.db.pragma("journal_mode = WAL");
-      this.db.pragma("busy_timeout = 5000");
+      this.db = getDatabaseConnection(this.dbPath);
       inicializarBancoConsolidado(this.db);
     }
   }
@@ -686,9 +687,7 @@ export class CorpDb {
 
   fechar(): void {
     if (!this.opencorp) {
-      try {
-        this.db.close();
-      } catch {}
+      fecharConexao(this.dbPath);
     }
   }
 }
