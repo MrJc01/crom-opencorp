@@ -40,11 +40,11 @@ const AGENT_OPTIONS = [
 
 const PRESET_MODELS = [
   "openrouter/google/gemini-2.5-flash",
-  "opencode/nemotron-3-ultra-free",
+  "meta-llama/llama-3.3-70b-instruct:free",
   "anthropic/claude-3-7-sonnet",
-  "deepseek/deepseek-r1",
+  "deepseek/deepseek-r1:free",
   "openai/gpt-4o-mini",
-  "openrouter/liquid/lfm-2.5-2.6b:free",
+  "google/gemini-2.0-flash-exp:free",
 ];
 
 export const SecretarioConfigDrawer: Component<ConfigDrawerProps> = (props) => {

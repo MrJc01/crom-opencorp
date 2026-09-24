@@ -52,14 +52,15 @@ export function normalizarModelo(modelo: string): string {
     m === "openrouter/nvidia/nemotron-3.5-lightning:free" ||
     m === "nvidia/nemotron-3.5-lightning:free"
   ) {
-    return "openrouter/openrouter/free";
+    return "meta-llama/llama-3.3-70b-instruct:free";
   }
 
   if (
     m === "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free" ||
-    m === "nvidia/nemotron-3-ultra-550b-a55b:free"
+    m === "nvidia/nemotron-3-ultra-550b-a55b:free" ||
+    m === "opencode/nemotron-3-ultra-free"
   ) {
-    return "opencode/nemotron-3-ultra-free";
+    return "deepseek/deepseek-r1:free";
   }
 
   if (m === "openrouter/z-ai/glm-5.2:free") {

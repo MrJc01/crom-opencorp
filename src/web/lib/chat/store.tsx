@@ -190,13 +190,12 @@ export const AGENTES_PADRAO_SECRETARIO: AgenteOpcao[] = [
   {
     id: "secretario-exec",
     role: "Secretário Executivo (Orquestrador com ferramentas)",
-    model: "opencode/nemotron-3-ultra-free",
+    model: "meta-llama/llama-3.3-70b-instruct:free",
     harness: "opencode",
     rotation: [
-      "opencode/nemotron-3-ultra-free",
+      "meta-llama/llama-3.3-70b-instruct:free",
       "openrouter/google/gemini-2.5-flash",
-      "openrouter/liquid/lfm-2.5-2.6b:free",
-      "openrouter/openrouter/free",
+      "deepseek/deepseek-r1:free",
     ],
   },
   {
@@ -206,9 +205,8 @@ export const AGENTES_PADRAO_SECRETARIO: AgenteOpcao[] = [
     harness: "direct_llm",
     rotation: [
       "openrouter/google/gemini-2.5-flash",
-      "opencode/nemotron-3-ultra-free",
-      "openrouter/liquid/lfm-2.5-2.6b:free",
-      "openrouter/openrouter/free",
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "deepseek/deepseek-r1:free",
     ],
   },
   {
@@ -218,7 +216,7 @@ export const AGENTES_PADRAO_SECRETARIO: AgenteOpcao[] = [
     harness: "direct_llm",
     rotation: [
       "openrouter/google/gemini-2.5-flash",
-      "opencode/nemotron-3-ultra-free",
+      "meta-llama/llama-3.3-70b-instruct:free",
     ],
   },
   {
@@ -228,7 +226,7 @@ export const AGENTES_PADRAO_SECRETARIO: AgenteOpcao[] = [
     harness: "direct_llm",
     rotation: [
       "openrouter/google/gemini-2.5-flash",
-      "opencode/nemotron-3-ultra-free",
+      "meta-llama/llama-3.3-70b-instruct:free",
     ],
   },
   {
@@ -238,7 +236,7 @@ export const AGENTES_PADRAO_SECRETARIO: AgenteOpcao[] = [
     harness: "opencode",
     rotation: [
       "anthropic/claude-3-7-sonnet",
-      "opencode/nemotron-3-ultra-free",
+      "meta-llama/llama-3.3-70b-instruct:free",
     ],
   },
 ];
@@ -410,9 +408,8 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
       ? cacheWsModelos!.rotation
       : [
           modeloPadraoWs,
-          "opencode/nemotron-3-ultra-free",
-          "openrouter/liquid/lfm-2.5-2.6b:free",
-          "openrouter/openrouter/free",
+          "meta-llama/llama-3.3-70b-instruct:free",
+          "deepseek/deepseek-r1:free",
         ];
 
     const modeloBase = enc?.model || modeloAtivoChat() || overrideModelo() || modeloPadraoWs;
@@ -471,9 +468,8 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
       ? cacheWsModelos!.rotation
       : [
           modeloPadraoWs,
-          "opencode/nemotron-3-ultra-free",
-          "openrouter/liquid/lfm-2.5-2.6b:free",
-          "openrouter/openrouter/free",
+          "meta-llama/llama-3.3-70b-instruct:free",
+          "deepseek/deepseek-r1:free",
         ];
 
     if (enc) {

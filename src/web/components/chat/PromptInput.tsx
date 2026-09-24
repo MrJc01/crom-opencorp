@@ -86,9 +86,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
   const MODEL_OPTIONS = [
     { id: "openrouter/google/gemini-2.5-flash", name: "gemini-2.5-flash", desc: "Google · Ultra rápido" },
-    { id: "opencode/nemotron-3-ultra-free", name: "nemotron-3-ultra-free", desc: "OpenCode · Custo zero nativo" },
+    { id: "meta-llama/llama-3.3-70b-instruct:free", name: "llama-3.3-70b", desc: "Meta · 70B Custo zero nativo" },
     { id: "anthropic/claude-3-7-sonnet", name: "claude-3-7-sonnet", desc: "Anthropic · Code & Architecture" },
-    { id: "deepseek/deepseek-r1", name: "deepseek-r1", desc: "DeepSeek · Raciocínio matemático" },
+    { id: "deepseek/deepseek-r1:free", name: "deepseek-r1", desc: "DeepSeek · Raciocínio matemático" },
     { id: "openai/gpt-4o-mini", name: "gpt-4o-mini", desc: "OpenAI · Equilibrado e rápido" },
   ];
 

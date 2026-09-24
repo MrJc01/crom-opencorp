@@ -221,7 +221,7 @@ export const SecretarioView: Component = () => {
               <input
                 type="text"
                 class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500/80"
-                placeholder="ex.: openrouter/google/gemini-2.5-flash ou opencode/nemotron-3-ultra-free"
+                placeholder="ex.: openrouter/google/gemini-2.5-flash ou meta-llama/llama-3.3-70b-instruct:free"
                 value={chat.modeloConfig()}
                 onInput={(e) => chat.setModeloConfig(e.currentTarget.value)}
               />
@@ -262,7 +262,7 @@ export const SecretarioView: Component = () => {
               <textarea
                 rows={4}
                 class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500/80 scrollbar-thin resize-none leading-relaxed"
-                placeholder={"openrouter/google/gemini-2.5-flash\nopencode/nemotron-3-ultra-free\nopenrouter/openrouter/free"}
+                placeholder={"openrouter/google/gemini-2.5-flash\nmeta-llama/llama-3.3-70b-instruct:free\ndeepseek/deepseek-r1:free"}
                 value={chat.rotacaoConfig()}
                 onInput={(e) => chat.setRotacaoConfig(e.currentTarget.value)}
               />
@@ -276,7 +276,7 @@ export const SecretarioView: Component = () => {
                   Informe 1 modelo por linha (ou separados por vírgula) na ordem de prioridade. Em caso de esgotamento de cota ou erro, o motor rotaciona automaticamente.
                 </p>
                 <p class="text-[10px] text-zinc-500 font-mono">
-                  Ex.: <span class="text-emerald-400/90">openrouter/google/gemini-2.5-flash</span>, <span class="text-emerald-400/90">opencode/nemotron-3-ultra-free</span>
+                  Ex.: <span class="text-emerald-400/90">openrouter/google/gemini-2.5-flash</span>, <span class="text-emerald-400/90">meta-llama/llama-3.3-70b-instruct:free</span>
                 </p>
               </div>
             </div>

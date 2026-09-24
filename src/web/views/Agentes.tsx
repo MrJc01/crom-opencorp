@@ -78,8 +78,8 @@ export interface TeamSpec {
 
 export const MODELOS_DISPONIVEIS = [
   { id: "openrouter/google/gemini-3.8-flash", label: "Google Gemini 3.8 Flash (BYOK Custo $0) — Recomendado" },
-  { id: "openrouter/nvidia/nemotron-3.5-lightning:free", label: "NVIDIA Nemotron 3.5 Lightning (Gratuito / Rápido)" },
-  { id: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free", label: "NVIDIA Nemotron 3 Ultra 550B (Gratuito / Robusto)" },
+  { id: "meta-llama/llama-3.3-70b-instruct:free", label: "Meta Llama 3.3 70B Instruct (Gratuito / Robusto)" },
+  { id: "deepseek/deepseek-r1:free", label: "DeepSeek R1 (Gratuito / Raciocínio)" },
   { id: "openrouter/minimax/minimax-m3:free", label: "MiniMax M3 (Gratuito)" },
   { id: "openrouter/google/gemini-2.5-flash", label: "Google Gemini 2.5 Flash" },
   { id: "openrouter/anthropic/claude-3.5-haiku", label: "Anthropic Claude 3.5 Haiku" },
@@ -107,7 +107,7 @@ export const AgentesView: Component = () => {
   const [carregando, setCarregando] = createSignal(false);
 
   // Modelos Globais e Acesso do Workspace
-  const [modeloPadraoGlobal, setModeloPadraoGlobal] = createSignal("openrouter/nvidia/nemotron-3.5-lightning:free");
+  const [modeloPadraoGlobal, setModeloPadraoGlobal] = createSignal("meta-llama/llama-3.3-70b-instruct:free");
   const [globalFullAccess, setGlobalFullAccess] = createSignal(false);
 
   // Modal de Execução de Agente ou Grupo
