@@ -3,11 +3,12 @@ import { useSearchParams } from "react-router-dom";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 import { type WorkspaceGitStatus } from "@opencorp/sdk";
 import { showToast } from "../../../shared/ui/Toast.js";
-import { FileTree } from "../components/FileTree.js";
+import { FileTree, type NoArvore } from "../components/FileTree.js";
 import { CodeEditorTabs, type TabArquivo } from "../components/CodeEditorTabs.js";
 import { WorkspaceTerminals } from "../components/WorkspaceTerminals.js";
 import { GitVersionPanel } from "../components/GitVersionPanel.js";
-import { GitBranch, RefreshCw, AlertTriangle, Folder } from "lucide-react";
+import { QuickFileSearchModal } from "../components/QuickFileSearchModal.js";
+import { GitBranch, RefreshCw, AlertTriangle, Folder, Search } from "lucide-react";
 
 export const WorkspaceView: FC = () => {
   const { client, workspaceId, tratarErro } = useOpenCorp();
@@ -16,6 +17,10 @@ export const WorkspaceView: FC = () => {
   // Abas da Sidebar (Arquivos vs Git & Versões)
   const [sidebarTab, setSidebarTab] = useState<"arquivos" | "git">("arquivos");
   const [arquivosPendentesCount, setArquivosPendentesCount] = useState<number>(0);
+
+  // Busca rápida (Ctrl+P) e Árvore de arquivos
+  const [buscaAberta, setBuscaAberta] = useState(false);
+  const [arvore, setArvore] = useState<NoArvore[]>([]);
 
   // Abas abertas de arquivos
   const [tabs, setTabs] = useState<TabArquivo[]>([]);
@@ -70,6 +75,76 @@ export const WorkspaceView: FC = () => {
   useEffect(() => {
     void carregarGit();
   }, [carregarGit]);
+
+  // Carregamento da árvore de arquivos conectando à API real do OpenCorp
+  const carregarArvore = useCallback(async () => {
+    if (!wsEfetivo) {
+      setArvore([]);
+      return;
+    }
+    try {
+      const origin =
+        typeof window !== "undefined"
+          ? window.location.origin
+          : "http://127.0.0.1:4100";
+      const wsParam = `&workspace=${encodeURIComponent(wsEfetivo)}`;
+      const resp = await fetch(
+        `${origin}/files/tree?profundidade=6${wsParam}`,
+        {
+          headers: {
+            "x-opencorp-workspace": wsEfetivo,
+            "x-workspace-id": wsEfetivo,
+          },
+        }
+      );
+      if (resp.ok) {
+        const data = (await resp.json()) as { tipo: string; arvore: NoArvore[] };
+        const lista = Array.isArray(data.arvore) ? data.arvore : [];
+        setArvore(lista);
+      }
+    } catch {
+      // Falha não-fatal caso o workspace esteja inicializando
+    }
+  }, [wsEfetivo]);
+
+  useEffect(() => {
+    void carregarArvore();
+  }, [carregarArvore]);
+
+  // Extração recursiva de caminhos de arquivos para busca rápida (Ctrl+P) e arquivos disponíveis
+  const todosArquivos = useMemo(() => {
+    const list: string[] = [];
+    const rec = (nos: NoArvore[]) => {
+      for (const n of nos) {
+        if (n.tipo === "arquivo") {
+          list.push(n.caminho);
+        }
+        if (n.filhos && n.filhos.length > 0) {
+          rec(n.filhos);
+        }
+      }
+    };
+    rec(arvore);
+    return list;
+  }, [arvore]);
+
+  // Listener global de teclado (Ctrl+P / Cmd+P para busca, Escape para fechar)
+  useEffect(() => {
+    const onKeyDownGlobal = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        setBuscaAberta((prev) => !prev);
+      } else if (e.key === "Escape") {
+        if (buscaAberta) {
+          e.preventDefault();
+          setBuscaAberta(false);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDownGlobal);
+    return () => window.removeEventListener("keydown", onKeyDownGlobal);
+  }, [buscaAberta]);
 
   // Abrir ou focar arquivo
   const abrirArquivo = useCallback(
@@ -404,6 +479,7 @@ export const WorkspaceView: FC = () => {
               aoExcluirArquivo={tratarExcluirArquivo}
               aoDescartarArquivo={tratarDescartarArquivo}
               aoAbrirGit={() => setSidebarTab("git")}
+              aoCarregarArvore={setArvore}
             />
           ) : (
             <GitVersionPanel
@@ -441,6 +517,16 @@ export const WorkspaceView: FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setBuscaAberta(true)}
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[10px] text-zinc-300 hover:text-zinc-100 transition-colors cursor-pointer"
+              title="Buscar arquivos no workspace (Ctrl+P)"
+            >
+              <Search size={11} className="text-zinc-400" />
+              <span>Buscar (Ctrl+P)</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setSidebarTab("git")}
@@ -490,12 +576,21 @@ export const WorkspaceView: FC = () => {
             aoSalvarTab={salvarTab}
             salvando={salvando}
             aoAbrirArquivo={(caminho) => void abrirArquivo(caminho)}
+            arquivosDisponiveis={todosArquivos}
           />
         </div>
 
         {/* ÁREA 3 (DIREITA INFERIOR): TERMINAL BASH MULTI-ABAS */}
         <WorkspaceTerminals altura="12rem" />
       </main>
+
+      {/* Modal de Busca Rápida de Arquivos (Ctrl+P) */}
+      <QuickFileSearchModal
+        aberto={buscaAberta}
+        aoFechar={() => setBuscaAberta(false)}
+        arquivos={todosArquivos}
+        aoSelecionarArquivo={(caminho) => void abrirArquivo(caminho)}
+      />
     </div>
   );
 };

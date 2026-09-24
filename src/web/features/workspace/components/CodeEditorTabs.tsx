@@ -42,6 +42,7 @@ export interface CodeEditorTabsProps {
   aoSalvarTab: (tab: TabArquivo) => Promise<void>;
   salvando: boolean;
   aoAbrirArquivo?: (caminho: string) => void;
+  arquivosDisponiveis?: string[];
 }
 
 function formatarBytes(bytes?: number): string {
@@ -71,6 +72,7 @@ export const CodeEditorTabs: FC<CodeEditorTabsProps> = ({
   aoSalvarTab,
   salvando,
   aoAbrirArquivo,
+  arquivosDisponiveis,
 }) => {
   const tabAtual = useMemo(() => tabs.find((t) => t.caminho === tabAtiva) ?? null, [tabs, tabAtiva]);
 
@@ -107,20 +109,33 @@ export const CodeEditorTabs: FC<CodeEditorTabsProps> = ({
     }
   }, [tabAtiva]);
 
-  // Lista de arquivos sugeridos (recentes do localStorage ou arquivos canônicos da raiz)
+  // Lista de arquivos sugeridos (recentes do localStorage filtrados ou arquivos reais disponíveis na árvore)
   const arquivosSugeridos = useMemo(() => {
     try {
       const raw = localStorage.getItem("oc-recentes-workspace");
       if (raw) {
         const lista = JSON.parse(raw) as string[];
         if (Array.isArray(lista) && lista.length > 0) {
-          return lista;
+          // Se tivermos arquivosDisponiveis, garante que os arquivos recentes ainda existem no workspace
+          if (arquivosDisponiveis && arquivosDisponiveis.length > 0) {
+            const validos = lista.filter((c) => arquivosDisponiveis.includes(c));
+            if (validos.length > 0) {
+              return validos.slice(0, 8);
+            }
+          } else {
+            return lista.slice(0, 8);
+          }
         }
       }
     } catch {}
-    // Padrão de descoberta para novos workspaces
-    return ["AGENTS.md", "ARCHITECTURE.md", "README.md", "schema-reference.json", "tarefas_iniciais.json"];
-  }, [tabAtiva, tabs]);
+
+    // Sem recentes salvos, utiliza os primeiros arquivos disponíveis reais do workspace
+    if (arquivosDisponiveis && arquivosDisponiveis.length > 0) {
+      return arquivosDisponiveis.slice(0, 8);
+    }
+
+    return [];
+  }, [tabAtiva, tabs, arquivosDisponiveis]);
 
   // Se nenhuma tab estiver aberta, exibe a tela de boas-vindas do Workspace
   if (!tabAtual || tabs.length === 0) {
@@ -139,50 +154,61 @@ export const CodeEditorTabs: FC<CodeEditorTabsProps> = ({
           </p>
         </div>
 
-        {/* Sugestões de Acesso Rápido Dinâmicas */}
-        <div className="pt-2 flex flex-col items-center gap-2 max-w-lg">
-          <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">
-            Arquivos Recentes &amp; Atalhos do Workspace
-          </span>
-          <div className="flex flex-wrap justify-center gap-2">
-            {aoAbrirArquivo &&
-              arquivosSugeridos.map((caminho) => {
-                const nome = caminho.split("/").pop() || caminho;
-                const isFlow = caminho.includes("/flows/") || caminho.endsWith("-flow.json");
-                const isMarkdown = caminho.endsWith(".md");
-                const isJson = caminho.endsWith(".json");
+        {/* Sugestões de Acesso Rápido Dinâmicas ou Empty State */}
+        {arquivosSugeridos.length > 0 ? (
+          <div className="pt-2 flex flex-col items-center gap-2 max-w-lg">
+            <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">
+              Arquivos Recentes &amp; Atalhos do Workspace
+            </span>
+            <div className="flex flex-wrap justify-center gap-2">
+              {aoAbrirArquivo &&
+                arquivosSugeridos.map((caminho) => {
+                  const nome = caminho.split("/").pop() || caminho;
+                  const isFlow = caminho.includes("/flows/") || caminho.endsWith("-flow.json");
+                  const isMarkdown = caminho.endsWith(".md");
+                  const isJson = caminho.endsWith(".json");
 
-                const Icone = isFlow
-                  ? Workflow
-                  : isMarkdown
-                  ? FileText
-                  : isJson
-                  ? FileCode
-                  : FileCode;
+                  const Icone = isFlow
+                    ? Workflow
+                    : isMarkdown
+                    ? FileText
+                    : isJson
+                    ? FileCode
+                    : FileCode;
 
-                const corIcone = isFlow
-                  ? "text-emerald-400"
-                  : isMarkdown
-                  ? "text-purple-400"
-                  : isJson
-                  ? "text-amber-400"
-                  : "text-blue-400";
+                  const corIcone = isFlow
+                    ? "text-emerald-400"
+                    : isMarkdown
+                    ? "text-purple-400"
+                    : isJson
+                    ? "text-amber-400"
+                    : "text-blue-400";
 
-                return (
-                  <button
-                    key={caminho}
-                    type="button"
-                    onClick={() => aoAbrirArquivo(caminho)}
-                    title={`Abrir ${caminho}`}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/50 text-xs text-zinc-300 font-mono transition-colors cursor-pointer group"
-                  >
-                    <Icone size={13} className={corIcone} />
-                    <span className="group-hover:text-zinc-100">{nome}</span>
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={caminho}
+                      type="button"
+                      onClick={() => aoAbrirArquivo(caminho)}
+                      title={`Abrir ${caminho}`}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/50 text-xs text-zinc-300 font-mono transition-colors cursor-pointer group"
+                    >
+                      <Icone size={13} className={corIcone} />
+                      <span className="group-hover:text-zinc-100">{nome}</span>
+                    </button>
+                  );
+                })}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="pt-2 flex flex-col items-center gap-1.5 max-w-sm text-center">
+            <span className="text-xs text-zinc-500">
+              Nenhum arquivo recente ou disponível no workspace.
+            </span>
+            <p className="text-[11px] text-zinc-600">
+              Crie um novo arquivo ou pasta utilizando os botões de ação na árvore de arquivos à esquerda.
+            </p>
+          </div>
+        )}
       </div>
     );
   }

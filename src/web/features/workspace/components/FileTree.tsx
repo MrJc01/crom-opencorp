@@ -47,6 +47,7 @@ export interface FileTreeProps {
   aoExcluirArquivo?: (caminho: string) => void;
   aoDescartarArquivo?: (caminho: string) => void;
   aoAbrirGit?: () => void;
+  aoCarregarArvore?: (arvore: NoArvore[]) => void;
 }
 
 interface MenuContextoState {
@@ -104,6 +105,7 @@ export const FileTree: FC<FileTreeProps> = ({
   aoExcluirArquivo,
   aoDescartarArquivo,
   aoAbrirGit,
+  aoCarregarArvore,
 }) => {
   const { workspaceId: ctxWorkspaceId } = useOpenCorp();
   const [arvore, setArvore] = useState<NoArvore[]>([]);
@@ -184,6 +186,7 @@ export const FileTree: FC<FileTreeProps> = ({
         const lista = Array.isArray(data.arvore) ? data.arvore : [];
         setArvore(lista);
         setErroCarregamento(null);
+        aoCarregarArvore?.(lista);
       } else {
         const errJson = (await resp.json().catch(() => null)) as {
           erro?: string;
@@ -198,6 +201,7 @@ export const FileTree: FC<FileTreeProps> = ({
         setErroCarregamento(msg);
         showToast(msg, "erro");
         setArvore([]);
+        aoCarregarArvore?.([]);
       }
     } catch (err: unknown) {
       const msg =
@@ -207,10 +211,11 @@ export const FileTree: FC<FileTreeProps> = ({
       setErroCarregamento(msg);
       showToast(msg, "erro");
       setArvore([]);
+      aoCarregarArvore?.([]);
     } finally {
       setCarregando(false);
     }
-  }, [wsEfetivo]);
+  }, [wsEfetivo, aoCarregarArvore]);
 
   useEffect(() => {
     void carregarArvore();
