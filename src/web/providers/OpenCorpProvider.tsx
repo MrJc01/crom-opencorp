@@ -33,13 +33,15 @@ export const OpenCorpProvider: FC<OpenCorpProviderProps> = ({
   const [wsAtivo, setWsAtivo] = useState<string>(() => {
     if (propWorkspaceId) return propWorkspaceId;
     if (typeof window !== "undefined") {
-      return (
+      const salvo =
         localStorage.getItem("oc-ws") ||
-        localStorage.getItem("opencorp_workspace_id") ||
-        ""
-      );
+        localStorage.getItem("opencorp_workspace_id");
+      if (salvo && salvo.trim().length > 0) {
+        return salvo.trim();
+      }
+      return "yt-factory-01";
     }
-    return "";
+    return "yt-factory-01";
   });
 
   const authToken =

@@ -2,264 +2,276 @@ import React, { useState, useEffect, useCallback, type FC } from "react";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 import { type WorkspaceResumo, type WorkspaceGitStatus } from "@opencorp/sdk";
 import { showToast } from "../../../shared/ui/Toast.js";
+import { FileTree } from "../components/FileTree.js";
 import {
   FolderTree,
   GitBranch,
-  FolderPlus,
+  Save,
   CheckCircle2,
   AlertCircle,
   FileCode,
   HardDrive,
   RefreshCw,
   X,
+  FileText,
+  Workflow,
+  Sparkles,
 } from "lucide-react";
 
 export const WorkspaceView: FC = () => {
-  const { client, workspaceId, tratarErro } = useOpenCorp();
-  const [workspaces, setWorkspaces] = useState<WorkspaceResumo[]>([]);
+  const { client, workspaceId, definirWorkspaceId, tratarErro } = useOpenCorp();
   const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus | null>(null);
-  const [carregando, setCarregando] = useState(true);
-  const [modalNovoWs, setModalNovoWs] = useState(false);
-  const [novoId, setNovoId] = useState("");
-  const [novoNome, setNovoNome] = useState("");
+  const [carregandoGit, setCarregandoGit] = useState(false);
 
-  const carregarDados = useCallback(async () => {
-    setCarregando(true);
+  // Arquivo Ativo
+  const [arquivoAtivo, setArquivoAtivo] = useState<string | null>(null);
+  const [conteudoOriginal, setConteudoOriginal] = useState("");
+  const [conteudoEditado, setConteudoEditado] = useState("");
+  const [carregandoArquivo, setCarregandoArquivo] = useState(false);
+  const [salvandoArquivo, setSalvandoArquivo] = useState(false);
+
+  // Carregar status Git
+  const carregarGit = useCallback(async () => {
+    setCarregandoGit(true);
     try {
-      const [wsList, git] = await Promise.all([
-        client.workspaces.listar(),
-        client.workspaces.gitStatus().catch(() => null),
-      ]);
-      setWorkspaces(wsList || []);
+      const git = await client.workspaces.gitStatus().catch(() => null);
       setGitStatus(git);
-    } catch (err) {
-      tratarErro(err, "Falha ao consultar dados do workspace");
+    } catch {
+      // Silencioso se git não estiver inicializado
     } finally {
-      setCarregando(false);
+      setCarregandoGit(false);
     }
-  }, [client, tratarErro]);
+  }, [client]);
 
   useEffect(() => {
-    void carregarDados();
-  }, [carregarDados]);
+    void carregarGit();
+  }, [carregarGit]);
 
-  const criarWorkspace = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!novoId.trim()) return;
+  // Carregar conteúdo do arquivo
+  const carregarArquivo = useCallback(
+    async (caminho: string) => {
+      setCarregandoArquivo(true);
+      try {
+        const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:4100";
+        const wsParam = workspaceId ? `&workspace=${encodeURIComponent(workspaceId)}` : "";
+        const resp = await fetch(
+          `${origin}/files?path=${encodeURIComponent(caminho)}${wsParam}`,
+          {
+            headers: workspaceId ? { "x-opencorp-workspace": workspaceId } : {},
+          },
+        );
 
+        if (!resp.ok) {
+          throw new Error(`Falha ao ler arquivo (HTTP ${resp.status})`);
+        }
+
+        const data = await resp.json();
+        let texto = "";
+        if (typeof data === "string") {
+          texto = data;
+        } else if (data && typeof data.conteudo === "string") {
+          texto = data.conteudo;
+        } else {
+          texto = JSON.stringify(data, null, 2);
+        }
+
+        setArquivoAtivo(caminho);
+        setConteudoOriginal(texto);
+        setConteudoEditado(texto);
+      } catch (err: unknown) {
+        tratarErro(err, `Erro ao abrir ${caminho}`);
+      } finally {
+        setCarregandoArquivo(false);
+      }
+    },
+    [workspaceId, tratarErro],
+  );
+
+  // Salvar arquivo editado
+  const salvarArquivo = async () => {
+    if (!arquivoAtivo) return;
+    setSalvandoArquivo(true);
     try {
-      const criado = await client.workspaces.criar({
-        id: novoId.trim(),
-      });
-      setWorkspaces((prev) => [...prev, criado]);
-      showToast(`Workspace "${criado.id}" criado com sucesso`, "sucesso");
-      setNovoId("");
-      setNovoNome("");
-      setModalNovoWs(false);
-    } catch (err) {
-      tratarErro(err, "Falha ao criar workspace");
+      const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:4100";
+      const wsParam = workspaceId ? `&workspace=${encodeURIComponent(workspaceId)}` : "";
+      const resp = await fetch(
+        `${origin}/files?path=${encodeURIComponent(arquivoAtivo)}${wsParam}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            ...(workspaceId ? { "x-opencorp-workspace": workspaceId } : {}),
+          },
+          body: JSON.stringify({ conteudo: conteudoEditado }),
+        },
+      );
+
+      if (!resp.ok) {
+        throw new Error(`Falha ao salvar (HTTP ${resp.status})`);
+      }
+
+      setConteudoOriginal(conteudoEditado);
+      showToast(`Arquivo "${arquivoAtivo.split("/").pop()}" salvo com sucesso!`, "sucesso");
+      void carregarGit();
+    } catch (err: unknown) {
+      tratarErro(err, "Falha ao salvar arquivo");
+    } finally {
+      setSalvandoArquivo(false);
     }
   };
 
+  // Atalho de teclado Ctrl+S
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && arquivoAtivo) {
+        e.preventDefault();
+        void salvarArquivo();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [arquivoAtivo, conteudoEditado]);
+
+  const temAlteracoes = conteudoEditado !== conteudoOriginal;
+
   return (
-    <div className="flex flex-col h-full w-full p-6 md:p-8 space-y-6 overflow-y-auto">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
-            <FolderTree className="text-emerald-400" size={20} />
-            Gestão de Workspaces & Governança Git
-          </h1>
-          <p className="text-xs text-zinc-400 mt-1">
-            Ambientes isolados de execução, checkpoints e integridade de versionamento.
-          </p>
-        </div>
+    <div className="flex h-full w-full bg-zinc-950 overflow-hidden select-none">
+      {/* Coluna Esquerda: Árvore de Arquivos (Explorer) */}
+      <aside className="w-72 sm:w-80 h-full flex-shrink-0">
+        <FileTree
+          arquivoAtivo={arquivoAtivo}
+          aoSelecionarArquivo={(caminho) => void carregarArquivo(caminho)}
+        />
+      </aside>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={carregarDados}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-xs text-zinc-300 transition-colors cursor-pointer"
-          >
-            <RefreshCw size={13} className={carregando ? "animate-spin" : ""} />
-            <span>Atualizar</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setModalNovoWs(true)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-all cursor-pointer"
-          >
-            <FolderPlus size={14} />
-            <span>Novo Workspace</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Painel Git do Workspace Ativo */}
-      <div className="p-5 rounded-2xl bg-zinc-900/50 border border-zinc-850 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="h-9 w-9 rounded-xl bg-emerald-950/60 border border-emerald-800/40 flex items-center justify-center text-emerald-400">
-              <GitBranch size={18} />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-zinc-100">Status do Repositório Git</h3>
-              <span className="text-[11px] font-mono text-zinc-500">
-                Workspace Ativo: {workspaceId}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1 text-[11px] font-mono px-2.5 py-1 rounded-lg bg-zinc-950 border border-zinc-800 text-emerald-300">
-              <GitBranch size={12} />
-              {gitStatus?.branch || "main"}
-            </span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-          <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-850 space-y-1">
-            <span className="text-zinc-500 text-[10px] uppercase font-mono block">Status da Árvore</span>
-            <span className="text-zinc-200 font-semibold flex items-center gap-1.5">
-              <CheckCircle2 size={13} className="text-emerald-400" />
-              {!gitStatus?.dirty ? "Working Tree Limpa" : "Modificações Pendentes"}
-            </span>
-          </div>
-
-          <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-850 space-y-1">
-            <span className="text-zinc-500 text-[10px] uppercase font-mono block">Branch / Head</span>
-            <span className="text-zinc-200 font-mono text-xs truncate block">
-              {gitStatus?.branch || "main"}
-            </span>
-          </div>
-
-          <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-850 space-y-1">
-            <span className="text-zinc-500 text-[10px] uppercase font-mono block">Arquivos Alterados</span>
-            <span className="text-zinc-200 font-semibold">
-              {gitStatus?.files?.length ?? 0} arquivos
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Grid de Workspaces Disponíveis */}
-      <div>
-        <h2 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3">
-          Workspaces Registrados ({workspaces.length})
-        </h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {workspaces.map((ws) => {
-            const ativo = ws.id === workspaceId;
-
-            return (
-              <div
-                key={ws.id}
-                className={`p-4 rounded-2xl border transition-all space-y-3 ${
-                  ativo
-                    ? "bg-emerald-950/30 border-emerald-700/60 shadow-md"
-                    : "bg-zinc-900/40 border-zinc-850 hover:border-zinc-700"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <HardDrive size={16} className={ativo ? "text-emerald-400" : "text-zinc-500"} />
-                    <h3 className="text-xs font-bold text-zinc-100">{(ws as Record<string, any>).name || ws.id}</h3>
-                  </div>
-
-                  {ativo && (
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-800 text-emerald-400">
-                      Atual
-                    </span>
-                  )}
-                </div>
-
-                <div className="text-[11px] font-mono text-zinc-500 truncate">
-                  ID: {ws.id}
-                </div>
-
-                {!ativo && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      localStorage.setItem("oc-ws", ws.id);
-                      window.location.reload();
-                    }}
-                    className="w-full py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition-colors cursor-pointer"
-                  >
-                    Alternar para este Workspace
-                  </button>
+      {/* Coluna Direita: Editor ou Painel de Visão Geral */}
+      <main className="flex-1 flex flex-col h-full min-w-0 bg-zinc-950 overflow-hidden">
+        {/* Barra Superior do Workspace / Editor */}
+        <header className="h-12 border-b border-zinc-850 px-4 flex items-center justify-between bg-zinc-900/50 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            {arquivoAtivo ? (
+              <div className="flex items-center gap-2 min-w-0 text-xs font-mono text-zinc-300">
+                <FileCode size={14} className="text-emerald-400 shrink-0" />
+                <span className="font-semibold text-zinc-100 truncate">
+                  {arquivoAtivo.split("/").pop()}
+                </span>
+                <span className="text-zinc-600 truncate hidden sm:inline">
+                  ({arquivoAtivo})
+                </span>
+                {temAlteracoes && (
+                  <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" title="Alterações não salvas" />
                 )}
               </div>
-            );
-          })}
-        </div>
-      </div>
+            ) : (
+              <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
+                <FolderTree size={15} className="text-emerald-400" />
+                <span>IDE Workspace: {workspaceId || "yt-factory-01"}</span>
+              </div>
+            )}
+          </div>
 
-      {/* Modal de Criação */}
-      {modalNovoWs && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
-              <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
-                <FolderPlus size={16} className="text-emerald-400" />
-                Criar Novo Workspace
-              </h3>
-              <button
-                type="button"
-                onClick={() => setModalNovoWs(false)}
-                className="text-zinc-500 hover:text-zinc-300 cursor-pointer"
-              >
-                <X size={16} />
-              </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Badge Git */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-950 border border-zinc-800 text-[11px] font-mono text-zinc-400">
+              <GitBranch size={12} className="text-emerald-400" />
+              <span>{gitStatus?.branch || "main"}</span>
+              {gitStatus?.dirty && (
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Modificações no Git" />
+              )}
             </div>
 
-            <form onSubmit={criarWorkspace} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block text-zinc-300 font-medium mb-1">Identificador (slug) *</label>
-                <input
-                  type="text"
-                  required
-                  value={novoId}
-                  onChange={(e) => setNovoId(e.target.value)}
-                  placeholder="ex: app-financeiro"
-                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-zinc-300 font-medium mb-1">Nome de Exibição *</label>
-                <input
-                  type="text"
-                  required
-                  value={novoNome}
-                  onChange={(e) => setNovoNome(e.target.value)}
-                  placeholder="ex: Módulo Financeiro"
-                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+            {/* Ações do Arquivo */}
+            {arquivoAtivo && (
+              <>
                 <button
                   type="button"
-                  onClick={() => setModalNovoWs(false)}
-                  className="px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                  onClick={salvarArquivo}
+                  disabled={salvandoArquivo || !temAlteracoes}
+                  className="flex items-center gap-1 px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-medium shadow-xs transition-all cursor-pointer"
+                  title="Salvar alterações (Ctrl+S)"
                 >
-                  Cancelar
+                  <Save size={13} />
+                  <span>{salvandoArquivo ? "Salvando..." : "Salvar"}</span>
                 </button>
+
                 <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md"
+                  type="button"
+                  onClick={() => setArquivoAtivo(null)}
+                  className="p-1 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
+                  title="Fechar arquivo"
                 >
-                  Criar
+                  <X size={15} />
+                </button>
+              </>
+            )}
+          </div>
+        </header>
+
+        {/* Área Central: Visualizador/Editor ou Welcome State */}
+        <div className="flex-1 min-h-0 overflow-hidden relative">
+          {carregandoArquivo ? (
+            <div className="flex items-center justify-center h-full text-xs text-zinc-500">
+              <RefreshCw size={16} className="animate-spin mr-2 text-emerald-400" />
+              <span>Carregando arquivo...</span>
+            </div>
+          ) : arquivoAtivo ? (
+            <div className="h-full w-full flex flex-col p-2">
+              <textarea
+                value={conteudoEditado}
+                onChange={(e) => setConteudoEditado(e.target.value)}
+                spellCheck={false}
+                className="flex-1 w-full p-4 bg-zinc-950 font-mono text-xs text-zinc-200 resize-none focus:outline-none border-none leading-relaxed select-text"
+                placeholder="Conteúdo vazio..."
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center space-y-4">
+              <div className="h-12 w-12 rounded-2xl bg-emerald-950/60 border border-emerald-800/50 flex items-center justify-center text-emerald-400 shadow-lg">
+                <FileCode size={22} />
+              </div>
+
+              <div className="max-w-md space-y-1">
+                <h3 className="text-sm font-bold text-zinc-200">
+                  Nenhum arquivo aberto
+                </h3>
+                <p className="text-xs text-zinc-400">
+                  Selecione um arquivo na árvore à esquerda para inspecionar, editar e salvar diretamente no workspace.
+                </p>
+              </div>
+
+              {/* Sugestões de Acesso Rápido */}
+              <div className="pt-2 flex flex-wrap justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void carregarArquivo(".opencorp/flows/yt-pautador.json")}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-300 font-mono transition-colors cursor-pointer"
+                >
+                  <Workflow size={13} className="text-emerald-400" />
+                  <span>yt-pautador.json</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void carregarArquivo(".opencorp/flows/yt-boletim-diario.json")}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-300 font-mono transition-colors cursor-pointer"
+                >
+                  <Workflow size={13} className="text-blue-400" />
+                  <span>yt-boletim-diario.json</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void carregarArquivo(".opencorp/config.json")}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-300 font-mono transition-colors cursor-pointer"
+                >
+                  <FileText size={13} className="text-amber-400" />
+                  <span>config.json</span>
                 </button>
               </div>
-            </form>
-          </div>
+            </div>
+          )}
         </div>
-      )}
+      </main>
     </div>
   );
 };

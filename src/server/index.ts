@@ -224,8 +224,10 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   const opencodeServer = opcoes.opencodeServer ?? new OpencodeServerManager({ homeDir: opcoes.homeDir });
   const handlerEstatico = criarHandlerEstatico();
 
-  async function resolverWs(url: URL): Promise<{ id: string; path: string }> {
-    const id = url.searchParams.get("workspace") ?? opcoes.workspace ?? undefined;
+  async function resolverWs(url: URL, req?: IncomingMessage): Promise<{ id: string; path: string }> {
+    const headerWs = req?.headers["x-opencorp-workspace"] || req?.headers["x-workspace-id"];
+    const idHeader = typeof headerWs === "string" ? headerWs.trim() : Array.isArray(headerWs) ? headerWs[0]?.trim() : undefined;
+    const id = url.searchParams.get("workspace") ?? (idHeader && idHeader.length > 0 ? idHeader : undefined) ?? opcoes.workspace ?? undefined;
     return workspaces.resolver(id) as unknown as { id: string; path: string };
   }
 
@@ -255,7 +257,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           res,
           url,
           rota,
-          resolverWs,
+          resolverWs: (u: URL) => resolverWs(u, req),
           lerCorpo,
           enviar,
           tasks,

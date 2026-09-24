@@ -107,7 +107,12 @@ export class HttpClient {
     opts?: RequestOptions,
   ): Promise<T> {
     const qs = construirQueryString(opts?.query);
-    const url = `${this.baseUrl}${path.startsWith("/") ? "" : "/"}${path}${qs}`;
+    let finalPath = `${path.startsWith("/") ? "" : "/"}${path}${qs}`;
+    if (this.workspaceId && !finalPath.includes("workspace=") && !finalPath.startsWith("/workspaces")) {
+      const sep = finalPath.includes("?") ? "&" : "?";
+      finalPath = `${finalPath}${sep}workspace=${encodeURIComponent(this.workspaceId)}`;
+    }
+    const url = `${this.baseUrl}${finalPath}`;
 
     // Headers
     const headers: Record<string, string> = {

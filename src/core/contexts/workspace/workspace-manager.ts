@@ -184,7 +184,11 @@ export class WorkspaceManager {
     }
 
     if (idAlvo !== undefined && idAlvo.length > 0) {
-      registro = estado.workspaces.find((w) => w.id === idAlvo);
+      registro =
+        estado.workspaces.find((w) => w.id === idAlvo) ||
+        estado.workspaces.find((w) => w.id.toLowerCase() === idAlvo.toLowerCase()) ||
+        estado.workspaces.find((w) => w.id.toLowerCase().startsWith(idAlvo.toLowerCase())) ||
+        estado.workspaces.find((w) => w.id.toLowerCase().includes(idAlvo.toLowerCase()));
       if (!registro) {
         throw new WorkspaceError(
           `workspace "${idAlvo}" não encontrado — veja "oc -t <id> status" ou "opencorp workspace list"`,
