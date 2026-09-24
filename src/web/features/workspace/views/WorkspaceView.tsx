@@ -6,11 +6,16 @@ import { showToast } from "../../../shared/ui/Toast.js";
 import { FileTree } from "../components/FileTree.js";
 import { CodeEditorTabs, type TabArquivo } from "../components/CodeEditorTabs.js";
 import { WorkspaceTerminals } from "../components/WorkspaceTerminals.js";
-import { GitBranch, RefreshCw, AlertTriangle } from "lucide-react";
+import { GitVersionPanel } from "../components/GitVersionPanel.js";
+import { GitBranch, RefreshCw, AlertTriangle, Folder } from "lucide-react";
 
 export const WorkspaceView: FC = () => {
   const { client, workspaceId, tratarErro } = useOpenCorp();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Abas da Sidebar (Arquivos vs Git & Versões)
+  const [sidebarTab, setSidebarTab] = useState<"arquivos" | "git">("arquivos");
+  const [arquivosPendentesCount, setArquivosPendentesCount] = useState<number>(0);
 
   // Abas abertas de arquivos
   const [tabs, setTabs] = useState<TabArquivo[]>([]);
@@ -51,6 +56,9 @@ export const WorkspaceView: FC = () => {
     try {
       const git = await client.workspaces.gitStatus().catch(() => null);
       setGitStatus(git);
+      if (git && Array.isArray(git.untracked)) {
+        // Atualiza contagem se disponível
+      }
     } catch {
       // Falha não-fatal caso o Git não esteja inicializado no workspace
       setGitStatus(null);
@@ -347,17 +355,71 @@ export const WorkspaceView: FC = () => {
   return (
     <div className="flex h-full w-full bg-zinc-950 overflow-hidden select-none">
       {/* ─────────────────────────────────────────────────────────────
-          ÁREA 1 (ESQUERDA): ÁRVORE DE ARQUIVOS (EXPLORER COM CRUD)
+          ÁREA 1 (ESQUERDA): BARRA LATERAL (ARQUIVOS / GIT & VERSÕES)
          ───────────────────────────────────────────────────────────── */}
-      <aside className="w-64 sm:w-72 h-full flex-shrink-0">
-        <FileTree
-          arquivoAtivo={tabAtiva}
-          workspaceId={wsEfetivo}
-          aoSelecionarArquivo={(caminho) => void abrirArquivo(caminho)}
-          aoRenomearArquivo={tratarRenomearArquivo}
-          aoExcluirArquivo={tratarExcluirArquivo}
-          aoDescartarArquivo={tratarDescartarArquivo}
-        />
+      <aside className="w-64 sm:w-72 h-full flex flex-col flex-shrink-0 bg-zinc-950 border-r border-zinc-850 overflow-hidden">
+        {/* Seletor Superior de Abas da Sidebar: Arquivos vs Git */}
+        <div className="h-9 border-b border-zinc-850 px-2 flex items-center justify-between bg-zinc-900/60 shrink-0">
+          <div className="flex items-center gap-1 bg-zinc-950 p-0.5 rounded-lg border border-zinc-800/80 w-full text-xs">
+            <button
+              type="button"
+              onClick={() => setSidebarTab("arquivos")}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                sidebarTab === "arquivos"
+                  ? "bg-zinc-800 text-zinc-100 font-semibold shadow-xs"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <Folder size={12} className={sidebarTab === "arquivos" ? "text-amber-400" : "text-zinc-500"} />
+              <span>Arquivos</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSidebarTab("git")}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                sidebarTab === "git"
+                  ? "bg-zinc-800 text-zinc-100 font-semibold shadow-xs"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <GitBranch size={12} className={sidebarTab === "git" ? "text-purple-400" : "text-zinc-500"} />
+              <span>Git &amp; Versões</span>
+              {arquivosPendentesCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {arquivosPendentesCount}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Conteúdo da Sidebar Conforme a Aba */}
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          {sidebarTab === "arquivos" ? (
+            <FileTree
+              arquivoAtivo={tabAtiva}
+              workspaceId={wsEfetivo}
+              aoSelecionarArquivo={(caminho) => void abrirArquivo(caminho)}
+              aoRenomearArquivo={tratarRenomearArquivo}
+              aoExcluirArquivo={tratarExcluirArquivo}
+              aoDescartarArquivo={tratarDescartarArquivo}
+              aoAbrirGit={() => setSidebarTab("git")}
+            />
+          ) : (
+            <GitVersionPanel
+              workspaceId={wsEfetivo}
+              aoAbrirArquivo={(caminho) => void abrirArquivo(caminho)}
+              aoDescartarArquivo={tratarDescartarArquivo}
+              aoReverterWorkspace={() => {
+                if (tabAtiva) void abrirArquivo(tabAtiva);
+                void carregarGit();
+              }}
+              onStatusChange={(st) => {
+                setArquivosPendentesCount(st?.arquivos.length || 0);
+              }}
+            />
+          )}
+        </div>
       </aside>
 
       {/* ─────────────────────────────────────────────────────────────
@@ -379,7 +441,12 @@ export const WorkspaceView: FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-[10px]">
+            <button
+              type="button"
+              onClick={() => setSidebarTab("git")}
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[10px] transition-colors cursor-pointer"
+              title="Abrir painel Git & Versões"
+            >
               <GitBranch size={11} className="text-emerald-400" />
               <span>{gitStatus?.branch || "main"}</span>
               {gitStatus?.dirty && (
@@ -388,7 +455,7 @@ export const WorkspaceView: FC = () => {
                   title="Modificações Git pendentes"
                 />
               )}
-            </div>
+            </button>
 
             <button
               type="button"

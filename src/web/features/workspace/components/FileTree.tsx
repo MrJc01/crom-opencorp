@@ -27,6 +27,7 @@ import {
   RotateCcw,
   X,
   AlertTriangle,
+  GitBranch,
 } from "lucide-react";
 import { showToast } from "../../../shared/ui/Toast.js";
 
@@ -45,6 +46,7 @@ export interface FileTreeProps {
   aoRenomearArquivo?: (antigo: string, novo: string) => void;
   aoExcluirArquivo?: (caminho: string) => void;
   aoDescartarArquivo?: (caminho: string) => void;
+  aoAbrirGit?: () => void;
 }
 
 interface MenuContextoState {
@@ -101,6 +103,7 @@ export const FileTree: FC<FileTreeProps> = ({
   aoRenomearArquivo,
   aoExcluirArquivo,
   aoDescartarArquivo,
+  aoAbrirGit,
 }) => {
   const { workspaceId: ctxWorkspaceId } = useOpenCorp();
   const [arvore, setArvore] = useState<NoArvore[]>([]);
@@ -695,6 +698,17 @@ export const FileTree: FC<FileTreeProps> = ({
           >
             <FolderPlus size={13} />
           </button>
+          {aoAbrirGit && (
+            <button
+              type="button"
+              onClick={aoAbrirGit}
+              title="Abrir Git & Versões (Commits e Diffs)"
+              disabled={!wsEfetivo}
+              className="p-1 rounded text-zinc-400 hover:text-purple-400 hover:bg-zinc-800 disabled:opacity-30 transition-colors cursor-pointer"
+            >
+              <GitBranch size={13} />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void carregarArvore()}
