@@ -46,6 +46,8 @@ import { SecretsStore } from "../core/secrets-store.js";
 import { EngineAccountStore } from "../core/engines/index.js";
 import { processarCors, verificarAutenticacao, type OpcoesCors } from "./middleware/index.js";
 import { criarHandlerEstatico, servirEstatico } from "./static.js";
+import { enviarProblema } from "./http/problem-details.js";
+import { validarCorpo as _validarCorpo } from "./http/validator.js";
 import {
   handleSystemRoutes,
   handleTaskRoutes,
@@ -279,6 +281,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           homeDir: opcoes.homeDir,
           version,
           orquestrador,
+          enviarProblema,
+          validarCorpo: (req, schema, instance) => _validarCorpo(lerCorpo, req, schema, instance),
         };
 
         if (await handleSystemRoutes(routeCtx)) return;

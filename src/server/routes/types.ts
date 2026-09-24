@@ -1,4 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { ZodType } from "zod";
+import type { ProblemDetails } from "../http/problem-details.js";
+import type { ResultadoValidacao } from "../http/validator.js";
 import type { TaskStore } from "../../core/task-store.js";
 import type { NotificationStore } from "../../core/notification-store.js";
 import type { Scheduler } from "../../core/scheduler.js";
@@ -64,6 +67,12 @@ export interface RouteContext {
   serverPort?: number;
   version?: string;
   orquestrador?: import("../../core/team-orchestrator.js").OrquestradorDeTeams;
+
+  // ── RFC 7807 (Passo 2 da padronização) ─────────────────────────────
+  /** Envia uma resposta RFC 7807 `application/problem+json`. */
+  enviarProblema?: (res: ServerResponse, problema: ProblemDetails) => void;
+  /** Lê, parseia e valida o corpo da requisição contra um schema Zod. */
+  validarCorpo?: <T>(req: IncomingMessage, schema: ZodType<T>, instance?: string) => Promise<ResultadoValidacao<T>>;
 }
 
 
