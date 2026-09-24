@@ -75,17 +75,31 @@ export const TeamManageModal: FC<TeamManageModalProps> = ({
       setTurnos(teamParaEditar.turnos || 3);
       setMaxMsgs(teamParaEditar.max_mensagens_auto_h || 30);
 
-      if (teamParaEditar.passos && teamParaEditar.passos.length > 0) {
-        setPassosPipeline(teamParaEditar.passos);
+      let rawPassos = teamParaEditar.passos;
+      if (typeof rawPassos === "string") {
+        try { rawPassos = JSON.parse(rawPassos); } catch { rawPassos = []; }
+      }
+      if (Array.isArray(rawPassos) && rawPassos.length > 0) {
+        setPassosPipeline(rawPassos);
       }
       if (teamParaEditar.executor) setExecutorReview(teamParaEditar.executor);
       if (teamParaEditar.revisor) setRevisorReview(teamParaEditar.revisor);
-      if (teamParaEditar.paralelos && teamParaEditar.paralelos.length > 0) {
-        setParalelosFanout(teamParaEditar.paralelos);
+
+      let rawParalelos = teamParaEditar.paralelos;
+      if (typeof rawParalelos === "string") {
+        try { rawParalelos = JSON.parse(rawParalelos); } catch { rawParalelos = []; }
+      }
+      if (Array.isArray(rawParalelos) && rawParalelos.length > 0) {
+        setParalelosFanout(rawParalelos);
       }
       if (teamParaEditar.sintese) setSinteseFanout(teamParaEditar.sintese);
-      if (teamParaEditar.proponentes && teamParaEditar.proponentes.length > 0) {
-        setProponentesDebate(teamParaEditar.proponentes);
+
+      let rawProponentes = teamParaEditar.proponentes;
+      if (typeof rawProponentes === "string") {
+        try { rawProponentes = JSON.parse(rawProponentes); } catch { rawProponentes = []; }
+      }
+      if (Array.isArray(rawProponentes) && rawProponentes.length > 0) {
+        setProponentesDebate(rawProponentes);
       }
       if (teamParaEditar.moderador?.agente) setModeradorDebate(teamParaEditar.moderador.agente);
     } else {

@@ -1,216 +1,243 @@
-import React, { useState, useEffect, useCallback, type FC } from "react";
-import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
-import { showToast } from "../../../shared/ui/Toast.js";
+import React, { useState, useEffect, useCallback, useMemo, type FC } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Settings,
   Cpu,
   Key,
+  Shield,
+  CircleCheck,
+  Bot,
   Activity,
-  ShieldCheck,
-  CheckCircle2,
-  RefreshCw,
-  Server,
-  Zap,
+  Layers,
+  Coins,
+  Clock,
+  Folder,
+  Users,
+  Wrench,
+  Stethoscope,
+  Terminal,
+  Sliders,
 } from "lucide-react";
+import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
+import { showToast } from "../../../shared/ui/Toast.js";
+import type { TabConfigId, EntradaSettingsRow } from "../types.js";
+import {
+  ScopeSelector,
+  TabEngines,
+  TabModels,
+  TabSecrets,
+  TabSecurityBudget,
+  TabDoctor,
+  TabRunner,
+  TabSkillsTools,
+  TabGeneral,
+} from "../components/index.js";
+
+export const ABAS_CONFIG: Array<{ id: TabConfigId; label: string; icon: any }> = [
+  { id: "motores", label: "Motores & Provedores", icon: Bot },
+  { id: "limites", label: "Limites dos Motores", icon: Activity },
+  { id: "modelos", label: "Modelos", icon: Cpu },
+  { id: "orcamento", label: "Orçamento", icon: Coins },
+  { id: "seguranca", label: "Segurança", icon: Shield },
+  { id: "scheduler", label: "Scheduler", icon: Clock },
+  { id: "workspace", label: "Workspace", icon: Folder },
+  { id: "testes", label: "Testes", icon: CircleCheck },
+  { id: "reunioes", label: "Reuniões", icon: Users },
+  { id: "chaves", label: "Chaves de API & Secrets", icon: Key },
+  { id: "ferramentas", label: "Ferramentas", icon: Wrench },
+  { id: "geral", label: "Geral", icon: Settings },
+  { id: "doctor", label: "Doctor SRE", icon: Stethoscope },
+  { id: "runner", label: "Runner Daemon", icon: Terminal },
+];
 
 export const ConfigView: FC = () => {
-  const { client, tratarErro } = useOpenCorp();
-  const [abaAtiva, setAbaAtiva] = useState<"motores" | "saude" | "governanca">("motores");
-  const [saudeStatus, setSaudeStatus] = useState<Record<string, unknown> | null>(null);
-  const [carregando, setCarregando] = useState(false);
+  const { client, workspaceId, tratarErro } = useOpenCorp();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  // Form states simulados de credenciais
-  const [openRouterKey, setOpenRouterKey] = useState("");
-  const [geminiKey, setGeminiKey] = useState("");
+  const tabParam = (searchParams.get("tab") as TabConfigId) || "motores";
+  const [abaAtiva, setAbaAtivaState] = useState<TabConfigId>(tabParam);
 
-  const carregarDiagnostico = useCallback(async () => {
-    setCarregando(true);
-    try {
-      const res = await client.system.getHealth();
-      setSaudeStatus(res);
-    } catch (err) {
-      tratarErro(err, "Falha ao consultar saúde do sistema");
-    } finally {
-      setCarregando(false);
+  // Escopo de Configuração: Global vs Workspace
+  const [escopoConfig, setEscopoConfig] = useState<"global" | "workspace">("global");
+  const [todasEntradas, setTodasEntradas] = useState<EntradaSettingsRow[]>([]);
+  const [salvando, setSalvando] = useState(false);
+
+  // Workspace efetivo
+  const wsEfetivo = useMemo(() => {
+    if (workspaceId && workspaceId.trim().length > 0) return workspaceId.trim();
+    if (typeof window !== "undefined") {
+      const salvo =
+        localStorage.getItem("oc-ws") ||
+        localStorage.getItem("opencorp_workspace_id");
+      if (salvo && salvo.trim().length > 0) return salvo.trim();
     }
-  }, [client, tratarErro]);
+    return "yt-factory-01";
+  }, [workspaceId]);
+
+  // Sincroniza tab com searchParams
+  const setAbaAtiva = useCallback(
+    (tab: TabConfigId) => {
+      setAbaAtivaState(tab);
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("tab", tab);
+        return next;
+      });
+    },
+    [setSearchParams]
+  );
 
   useEffect(() => {
-    if (abaAtiva === "saude") {
-      void carregarDiagnostico();
+    if (searchParams.get("tab") && searchParams.get("tab") !== abaAtiva) {
+      setAbaAtivaState(searchParams.get("tab") as TabConfigId);
     }
-  }, [abaAtiva, carregarDiagnostico]);
+  }, [searchParams, abaAtiva]);
 
-  const salvarChaves = (e: React.FormEvent) => {
-    e.preventDefault();
-    showToast("Configurações salvas e aplicadas com sucesso", "sucesso");
+  // Carrega configurações gerais do escopo ativo
+  const carregarSettings = useCallback(async () => {
+    try {
+      const data = await client.http.get<any>(`/settings?escopo=${escopoConfig}`, {
+        headers: { "x-opencorp-workspace": wsEfetivo },
+      });
+      if (Array.isArray(data)) {
+        setTodasEntradas(data);
+      } else if (data && Array.isArray(data.dados)) {
+        setTodasEntradas(data.dados);
+      }
+    } catch (err: unknown) {
+      // Silencioso se settings iniciais vazios
+    }
+  }, [client, escopoConfig, wsEfetivo]);
+
+  // Salva chave com persistência no backend via PUT /settings
+  const salvarChaveConfig = async (chave: string, valor: unknown) => {
+    setSalvando(true);
+    try {
+      const vFinal: string =
+        typeof valor === "object" && valor !== null
+          ? JSON.stringify(valor)
+          : String(valor);
+
+      await client.http.put(
+        "/settings",
+        {
+          chave,
+          valor: vFinal,
+          scope: escopoConfig,
+        },
+        {
+          headers: { "x-opencorp-workspace": wsEfetivo },
+        }
+      );
+
+      showToast(`Configuração "${chave}" salva!`, "sucesso");
+      await carregarSettings();
+    } catch (err: unknown) {
+      tratarErro(err, `Erro ao salvar configuração "${chave}"`);
+    } finally {
+      setSalvando(false);
+    }
   };
 
+  useEffect(() => {
+    void carregarSettings();
+  }, [carregarSettings]);
+
   return (
-    <div className="flex flex-col h-full w-full p-6 md:p-8 space-y-6 overflow-y-auto">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
-          <Settings className="text-emerald-400" size={20} />
-          Painel de Configurações & Governança
-        </h1>
-        <p className="text-xs text-zinc-400 mt-1">
-          Parâmetros de inferência, chaves dos motores e diagnóstico dos daemons OpenCorp.
-        </p>
+    <div className="flex flex-col h-full p-4 sm:p-6 md:p-8 space-y-5 overflow-y-auto overflow-x-hidden scrollbar-thin select-text">
+      {/* CABEÇALHO DA CENTRAL & SELETOR DE ESCOPO */}
+      <div className="pb-3 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-lg sm:text-xl font-bold text-zinc-100 tracking-tight flex items-center gap-2">
+            <Settings className="text-orange-500" size={20} />
+            <span>Configurações &amp; Governança do Sistema</span>
+          </h1>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            Governança de parâmetros xB, motores de agentes autônomos, inferência direta e catálogo de inteligência.
+          </p>
+        </div>
+
+        {/* SELETOR DE ESCOPO DUAL */}
+        <ScopeSelector
+          escopo={escopoConfig}
+          onMudarEscopo={(novo) => {
+            setEscopoConfig(novo);
+          }}
+          workspaceId={wsEfetivo}
+        />
       </div>
 
-      {/* Abas */}
-      <div className="flex items-center gap-2 border-b border-zinc-850 pb-3">
-        <button
-          type="button"
-          onClick={() => setAbaAtiva("motores")}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
-            abaAtiva === "motores"
-              ? "bg-zinc-800 text-zinc-100 font-semibold shadow-sm"
-              : "text-zinc-400 hover:text-zinc-200"
-          }`}
-        >
-          <Cpu size={14} className="text-purple-400" />
-          <span>Motores & Chaves</span>
-        </button>
+      {/* BARRA DE NAVEGAÇÃO DAS 14 ABAS */}
+      <div className="flex items-center gap-1.5 border-b border-zinc-850 pb-2.5 shrink-0 overflow-x-auto scrollbar-none sm:flex-wrap">
+        {ABAS_CONFIG.map((aba) => {
+          const Icon = aba.icon;
+          const ativa = abaAtiva === aba.id;
 
-        <button
-          type="button"
-          onClick={() => setAbaAtiva("governanca")}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
-            abaAtiva === "governanca"
-              ? "bg-zinc-800 text-zinc-100 font-semibold shadow-sm"
-              : "text-zinc-400 hover:text-zinc-200"
-          }`}
-        >
-          <ShieldCheck size={14} className="text-emerald-400" />
-          <span>Governança xB</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setAbaAtiva("saude")}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
-            abaAtiva === "saude"
-              ? "bg-zinc-800 text-zinc-100 font-semibold shadow-sm"
-              : "text-zinc-400 hover:text-zinc-200"
-          }`}
-        >
-          <Activity size={14} className="text-blue-400" />
-          <span>Diagnóstico & Saúde</span>
-        </button>
-      </div>
-
-      {/* Conteúdo das Abas */}
-      {abaAtiva === "motores" && (
-        <form onSubmit={salvarChaves} className="max-w-2xl space-y-4">
-          <div className="p-5 rounded-2xl bg-zinc-900/50 border border-zinc-850 space-y-4">
-            <h3 className="text-xs font-bold text-zinc-200 flex items-center gap-2">
-              <Key size={14} className="text-emerald-400" />
-              Chaves de API dos Motores de IA
-            </h3>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-zinc-400 font-medium mb-1">
-                  OpenRouter API Key (Padrão de Rota Global)
-                </label>
-                <input
-                  type="password"
-                  value={openRouterKey}
-                  onChange={(e) => setOpenRouterKey(e.target.value)}
-                  placeholder="sk-or-v1-..."
-                  className="w-full px-3.5 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-100 font-mono focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-zinc-400 font-medium mb-1">
-                  Google Gemini API Key
-                </label>
-                <input
-                  type="password"
-                  value={geminiKey}
-                  onChange={(e) => setGeminiKey(e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="w-full px-3.5 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-100 font-mono focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-end">
+          return (
             <button
-              type="submit"
-              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-all cursor-pointer"
+              key={aba.id}
+              type="button"
+              onClick={() => setAbaAtiva(aba.id)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shrink-0 whitespace-nowrap ${
+                ativa
+                  ? "text-orange-400 bg-zinc-850 border border-zinc-700 shadow-sm"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850/60"
+              }`}
             >
-              Salvar Alterações
+              <Icon size={14} className={ativa ? "text-orange-400" : "text-zinc-500"} />
+              <span>{aba.label}</span>
             </button>
-          </div>
-        </form>
-      )}
+          );
+        })}
+      </div>
 
-      {abaAtiva === "governanca" && (
-        <div className="max-w-3xl space-y-4">
-          <div className="p-5 rounded-2xl bg-zinc-900/50 border border-zinc-850 space-y-3">
-            <h3 className="text-xs font-bold text-zinc-100 flex items-center gap-2">
-              <ShieldCheck size={16} className="text-emerald-400" />
-              Diretrizes de Dimensionamento xB (AGENTS.md)
-            </h3>
-            <p className="text-xs text-zinc-400 leading-relaxed">
-              O OpenCorp aplica estritamente a segregação de modelos para balancear custo e precisão cognitiva:
-            </p>
+      {/* CONTEÚDO DAS ABAS MODULARES */}
+      <div className="w-full max-w-6xl space-y-6 flex-1 min-h-0">
+        {(abaAtiva === "motores" || abaAtiva === "limites") && (
+          <TabEngines
+            abaAtiva={abaAtiva}
+            escopoConfig={escopoConfig}
+            wsAtivo={wsEfetivo}
+            onGoToKeysTab={() => setAbaAtiva("chaves")}
+          />
+        )}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
-              <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1 text-xs">
-                <span className="font-semibold text-emerald-400 block">&lt; 14B</span>
-                <span className="text-zinc-200 font-medium block">Mini-Agentes</span>
-                <span className="text-[11px] text-zinc-500">Validações determinísticas, checagem e formatação simples.</span>
-              </div>
+        {abaAtiva === "modelos" && (
+          <TabModels
+            todasEntradas={todasEntradas}
+            onSalvarChave={salvarChaveConfig}
+            salvando={salvando}
+          />
+        )}
 
-              <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1 text-xs">
-                <span className="font-semibold text-blue-400 block">14B a 35B</span>
-                <span className="text-zinc-200 font-medium block">Redatores</span>
-                <span className="text-[11px] text-zinc-500">Geração de roteiros, resumos analíticos e títulos.</span>
-              </div>
+        {(abaAtiva === "orcamento" || abaAtiva === "seguranca") && (
+          <TabSecurityBudget
+            abaAtiva={abaAtiva}
+            todasEntradas={todasEntradas}
+            onSalvarChave={salvarChaveConfig}
+            salvando={salvando}
+          />
+        )}
 
-              <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1 text-xs">
-                <span className="font-semibold text-purple-400 block">&gt; 70B & Flagship</span>
-                <span className="text-zinc-200 font-medium block">Secretário Executivo</span>
-                <span className="text-[11px] text-zinc-500">Orquestração, Chain of Thought, diagnóstico e curadoria.</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        {abaAtiva === "chaves" && (
+          <TabSecrets escopoConfig={escopoConfig} />
+        )}
 
-      {abaAtiva === "saude" && (
-        <div className="max-w-2xl space-y-4">
-          <div className="p-5 rounded-2xl bg-zinc-900/50 border border-zinc-850 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Server size={16} className="text-blue-400" />
-                <h3 className="text-xs font-bold text-zinc-200">Diagnóstico do Servidor</h3>
-              </div>
+        {abaAtiva === "ferramentas" && <TabSkillsTools />}
 
-              <button
-                type="button"
-                onClick={carregarDiagnostico}
-                className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
-              >
-                <RefreshCw size={12} className={carregando ? "animate-spin" : ""} />
-                <span>Atualizar</span>
-              </button>
-            </div>
+        {["scheduler", "workspace", "testes", "reunioes", "geral"].includes(abaAtiva) && (
+          <TabGeneral
+            abaAtiva={abaAtiva}
+            todasEntradas={todasEntradas}
+            onSalvarChave={salvarChaveConfig}
+            salvando={salvando}
+          />
+        )}
 
-            <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 font-mono text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">
-              {saudeStatus
-                ? JSON.stringify(saudeStatus, null, 2)
-                : "Consultando endpoint /health..."}
-            </div>
-          </div>
-        </div>
-      )}
+        {abaAtiva === "doctor" && <TabDoctor />}
+
+        {abaAtiva === "runner" && <TabRunner />}
+      </div>
     </div>
   );
 };

@@ -61,16 +61,45 @@ export const TeamCard: FC<TeamCardProps> = ({
   // Lista os agentes participantes para exibição
   const obterAgentesParticipantes = (): string[] => {
     const list: string[] = [];
-    if (team.padrao === "pipeline" && team.passos) {
-      team.passos.forEach((p) => p.agente && list.push(p.agente));
+    let passos = team.passos;
+    if (typeof passos === "string") {
+      try {
+        passos = JSON.parse(passos);
+      } catch {
+        passos = [];
+      }
+    }
+    let paralelos = team.paralelos;
+    if (typeof paralelos === "string") {
+      try {
+        paralelos = JSON.parse(paralelos);
+      } catch {
+        paralelos = [];
+      }
+    }
+    let proponentes = team.proponentes;
+    if (typeof proponentes === "string") {
+      try {
+        proponentes = JSON.parse(proponentes);
+      } catch {
+        proponentes = [];
+      }
+    }
+
+    if (team.padrao === "pipeline" && Array.isArray(passos)) {
+      passos.forEach((p: any) => p?.agente && list.push(p.agente));
     } else if (team.padrao === "fanout") {
-      team.paralelos?.forEach((p) => p.agente && list.push(p.agente));
+      if (Array.isArray(paralelos)) {
+        paralelos.forEach((p: any) => p?.agente && list.push(p.agente));
+      }
       if (team.sintese?.agente) list.push(team.sintese.agente);
     } else if (team.padrao === "review") {
       if (team.executor?.agente) list.push(team.executor.agente);
       if (team.revisor?.agente) list.push(team.revisor.agente);
     } else if (team.padrao === "debate") {
-      team.proponentes?.forEach((p) => p.agente && list.push(p.agente));
+      if (Array.isArray(proponentes)) {
+        proponentes.forEach((p: any) => p?.agente && list.push(p.agente));
+      }
       if (team.moderador?.agente) list.push(team.moderador.agente);
     }
     return [...new Set(list)];
