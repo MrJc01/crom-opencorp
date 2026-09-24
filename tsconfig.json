@@ -17,5 +17,5 @@
     "types": ["node"]
   },
   "include": ["src"],
-  "exclude": ["src/web"]
+  "exclude": ["src/web", "legacy_snapshot/**"]
 }
