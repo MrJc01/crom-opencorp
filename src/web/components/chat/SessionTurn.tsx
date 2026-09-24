@@ -557,6 +557,8 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
       ref={turnRef}
       data-role={m().role}
       class={`group relative flex flex-col py-2 px-3 transition-colors ${
+        m().id?.startsWith("temp-") ? "chat-bubble-enter" : ""
+      } ${
         m().role === "user"
           ? "oc-user bg-zinc-800/90 border border-zinc-700/60 rounded-2xl rounded-tr-xs ml-auto max-w-[85%] px-4 py-2.5 text-zinc-100 shadow-md"
           : "oc-assistant bg-transparent mr-auto max-w-full w-full"
@@ -843,6 +845,31 @@ export const SessionTurn: Component<SessionTurnProps> = (props) => {
               </>
             )}
           </For>
+
+          {/* Conteúdo complementar se houver passos e texto global que não foi duplicado */}
+          <Show when={m().content && !m().passos!.some((p) => p.tipo === "texto" && p.texto && m().content?.includes(p.texto))}>
+            <div
+              class="text-sm text-zinc-100 leading-relaxed font-sans break-words select-text my-1 pt-1"
+              innerHTML={renderMarkdown(m().content)}
+            />
+          </Show>
+
+          {/* Banner informativo se houver muitos passos executados sem texto conclusivo */}
+          <Show when={m().role === "assistant" && m().passos && m().passos!.length >= 4 && !m().passos!.some((p) => p.tipo === "texto" && p.texto?.trim()) && !m().content}>
+            <div class="my-2 p-2.5 rounded-xl bg-zinc-900/60 border border-zinc-800 text-xs text-zinc-400 flex items-center justify-between gap-2">
+              <span class="flex items-center gap-1.5">
+                <span>⚡</span>
+                <span>Investigação com {m().passos!.length} passos e ferramentas realizada.</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => props.onSelecionarOpcao?.("Sintetize a conclusão final da análise anterior por favor.")}
+                class="px-2.5 py-1 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-700/60 text-emerald-300 text-[11px] font-medium transition-colors cursor-pointer"
+              >
+                Gerar síntese final
+              </button>
+            </div>
+          </Show>
         </div>
       </Show>
 

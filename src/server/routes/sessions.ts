@@ -129,7 +129,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
           const log = await sessoes.logDe(outro.path, id);
           enviar(res, 200, { id, log });
           return true;
-        } catch {}
+        } catch { }
       }
       try {
         const reg = await registros.obter(ws.path, "execucoes", id);
@@ -137,7 +137,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
           enviar(res, 200, { id, log: reg.conteudo });
           return true;
         }
-      } catch {}
+      } catch { }
       for (const outro of todosWs) {
         try {
           const reg = await registros.obter(outro.path, "execucoes", id);
@@ -145,7 +145,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
             enviar(res, 200, { id, log: reg.conteudo });
             return true;
           }
-        } catch {}
+        } catch { }
       }
       enviar(res, 200, { id, log: "(Nenhuma saída de log capturada para esta execução)" });
       return true;
@@ -165,11 +165,11 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
         const porta = await getPortaOpencode();
         await fetch(`http://127.0.0.1:${porta}/session/${encodeURIComponent(id)}/abort`, { method: "POST" });
         cancelado = true;
-      } catch {}
+      } catch { }
     } else {
       try {
         cancelado = (await sessoes.cancelar?.(ws.path, id)) ?? false;
-      } catch {}
+      } catch { }
 
       const todosWs = await workspaces.listar();
       for (const outro of todosWs) {
@@ -182,7 +182,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
             }
             break;
           }
-        } catch {}
+        } catch { }
       }
     }
 
@@ -214,11 +214,11 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
 
     try {
       registros.corpDb(wsAlvo).atualizarStatusExecucao(id, "cancelado");
-    } catch {}
+    } catch { }
     if (wsAlvo !== ws.path) {
       try {
         registros.corpDb(ws.path).atualizarStatusExecucao(id, "cancelado");
-      } catch {}
+      } catch { }
     }
 
     eventBus.emit("execucao.cancelada", { id });
@@ -244,7 +244,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
           meta = await registros.lerMeta(outro.path, "execucoes", idOriginal);
           wsEfetivo = { id: outro.id, path: outro.path };
           break;
-        } catch {}
+        } catch { }
       }
     }
 
@@ -263,7 +263,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
       let logOriginal = "";
       try {
         logOriginal = await sessoes.logDe(wsEfetivo.path, idOriginal);
-      } catch {}
+      } catch { }
       const erroOriginal = String(extras.erro ?? "");
       const erroCreditos = PADRAO_ERRO_CREDITOS.test(erroOriginal) || PADRAO_ERRO_CREDITOS.test(logOriginal);
       if (PADRAO_ERRO_MODELO.test(erroOriginal) || PADRAO_ERRO_MODELO.test(logOriginal) || extras.status === "falhou") {
@@ -287,7 +287,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
           enviar(res, 409, { erro: `Agente '${agenteOriginal}' está desativado — ative no painel de agentes` });
           return true;
         }
-      } catch {}
+      } catch { }
     }
 
     const novoExecId = ctx.gerarIdExec ? ctx.gerarIdExec() : fallbackGerarIdExec();
@@ -335,7 +335,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
           await registros.lerMeta(outro.path, "execucoes", idExec);
           wsEfetivo = { id: outro.id, path: outro.path };
           break;
-        } catch {}
+        } catch { }
       }
     }
 
@@ -548,7 +548,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
       if (resStatus && resStatus.ok) {
         try {
           statusMap = (await resStatus.json()) as Record<string, { type?: string }>;
-        } catch {}
+        } catch { }
       }
       try {
         const itens = (data as Array<Record<string, unknown>>) ?? [];
@@ -585,7 +585,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
                 for (const p of primOutro) sessoesOutrosWs.add(p.sessao_id);
               }
             }
-          } catch {}
+          } catch { }
 
           const primeiraPorSessao = new Map<string, string>();
           for (const p of primeiras) {
@@ -627,7 +627,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
           .map((s) => s.id)
           .filter((id): id is string => !!id);
         for (const id of recentes) void syncSessaoNoCorp(porta, id);
-      } catch {}
+      } catch { }
       enviar(res, 200, data);
     } catch {
       try {
@@ -691,7 +691,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
           if (statusMap[sessionId]?.type === "retry") {
             sessaoRetryInfo = statusMap[sessionId] ?? null;
           }
-        } catch {}
+        } catch { }
       }
       const rawMsgs = ((await resOpencode.json()) as MensagemOc[]) ?? [];
       const mensagens: Array<{
@@ -771,7 +771,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
           const sessaoZumbi = isSessaoBusy && !temStreamAtivo && criadoEmMs > 0 && (agora - criadoEmMs > 45_000);
           if (sessaoZumbi) {
             isSessaoBusy = false;
-            void fetch(`http://127.0.0.1:${porta}/session/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }).catch(() => {});
+            void fetch(`http://127.0.0.1:${porta}/session/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }).catch(() => { });
           }
 
           const expirou = (!isSessaoBusy || sessaoZumbi) && !m.info?.time?.completed && criadoEmMs > 0 && (agora - criadoEmMs > 45_000);
@@ -988,52 +988,70 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
     try {
       const porta = await getPortaOpencode();
       const sessionId = decodeURIComponent(mTruncar[1]!);
-      const corpo = (await lerCorpo(req)) as { manter_ate?: unknown };
+      const corpo = (await lerCorpo(req)) as { manter_ate?: unknown; mensagem_id?: string };
+      const mensagemIdAlvo = typeof corpo.mensagem_id === "string" ? corpo.mensagem_id.trim() : null;
       const manter = typeof corpo.manter_ate === "number" ? Math.floor(Number(corpo.manter_ate)) : -1;
-      if (!Number.isInteger(manter) || manter < 0) {
-        enviar(res, 400, { erro: "manter_ate deve ser número inteiro >=0" });
+
+      if (!mensagemIdAlvo && (!Number.isInteger(manter) || manter < 0)) {
+        enviar(res, 400, { erro: "mensagem_id ou manter_ate (número inteiro >=0) obrigatório" });
         return true;
       }
-      const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}/message`;
-      const resOp = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
-      if (!resOp.ok) {
-        enviar(res, resOp.status === 404 ? 404 : 502, { erro: resOp.status === 404 ? "sessão não encontrada" : `opencode respondeu ${resOp.status}` });
-        return true;
+
+      const dirHome = homeDir ?? opencorpHome();
+      const dataHome = dirOpencodeData(dirHome);
+      const dbPath = join(dataHome, "opencode", "opencode.db");
+
+      let idsParaRemover: string[] = [];
+
+      if (mensagemIdAlvo) {
+        try {
+          const mod = await import("better-sqlite3");
+          const BetterSqlite3 = (mod as unknown as { default: unknown }).default ?? mod;
+          // @ts-ignore
+          const db = new (BetterSqlite3 as unknown as new (path: string) => any)(dbPath);
+          const todas = db.prepare("SELECT id, time_created FROM message WHERE session_id = ? ORDER BY time_created ASC").all(sessionId) as Array<{ id: string; time_created: number }>;
+          db.close();
+
+          const idxAlvo = todas.findIndex((m) => m.id === mensagemIdAlvo);
+          if (idxAlvo >= 0) {
+            idsParaRemover = todas.slice(idxAlvo).map((m) => m.id);
+          }
+        } catch { }
       }
-      const raw = (await resOp.json()) as Array<{
-        info?: { id?: string; role?: string; time?: { completed?: number } };
-        parts?: Array<{ type: string; text?: string; url?: string }>;
-      }>;
-      const filtrados = (Array.isArray(raw) ? raw : [])
-        .map((m) => {
-          const pensamento = (m.parts ?? []).filter((p) => p.type === "reasoning" || p.type === "thinking").map((p) => p.text ?? "").join("\n").trim();
-          return {
-            id: m.info?.id,
-            role: m.info?.role ?? "",
-            content: (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim(),
-            pensamento: pensamento || undefined,
-            imagens: (m.parts ?? []).filter((p) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p) => p.url as string),
-            concluida: m.info?.role === "assistant" ? !!m.info?.time?.completed : true,
-          };
-        })
-        .filter((m) => (m.role === "user" || m.role === "assistant") && (m.content.length > 0 || (m as unknown as { pensamento?: string }).pensamento || (m.imagens && m.imagens.length > 0) || (m.role === "assistant" && m.concluida === false)));
-      if (manter > filtrados.length) {
-        enviar(res, 400, { erro: `manter_ate ${manter} fora do range (total ${filtrados.length})` });
-        return true;
+
+      if (idsParaRemover.length === 0 && Number.isInteger(manter) && manter >= 0) {
+        const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}/message`;
+        const resOp = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
+        if (resOp.ok) {
+          const raw = (await resOp.json()) as Array<{
+            info?: { id?: string; role?: string; time?: { completed?: number } };
+            parts?: Array<{ type: string; text?: string; url?: string }>;
+          }>;
+          const filtrados = (Array.isArray(raw) ? raw : [])
+            .map((m) => {
+              const pensamento = (m.parts ?? []).filter((p) => p.type === "reasoning" || p.type === "thinking").map((p) => p.text ?? "").join("\n").trim();
+              return {
+                id: m.info?.id,
+                role: m.info?.role ?? "",
+                content: (m.parts ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n").trim(),
+                pensamento: pensamento || undefined,
+                imagens: (m.parts ?? []).filter((p) => p.type === "file" && typeof p.url === "string" && p.url.startsWith("data:image/")).map((p) => p.url as string),
+                concluida: m.info?.role === "assistant" ? !!m.info?.time?.completed : true,
+              };
+            })
+            .filter((m) => (m.role === "user" || m.role === "assistant") && (m.content.length > 0 || (m as unknown as { pensamento?: string }).pensamento || (m.imagens && m.imagens.length > 0) || (m.role === "assistant" && m.concluida === false)));
+
+          if (manter < filtrados.length) {
+            idsParaRemover = filtrados.slice(manter).map((m) => m.id).filter(Boolean) as string[];
+          }
+        }
       }
-      if (manter === filtrados.length) {
-        enviar(res, 200, { ok: true, removidos: 0 });
-        return true;
-      }
-      const paraRemover = filtrados.slice(manter);
-      const idsParaRemover = paraRemover.map((m) => m.id).filter(Boolean) as string[];
+
       if (!idsParaRemover.length) {
         enviar(res, 200, { ok: true, removidos: 0 });
         return true;
       }
-      const dirHome = homeDir ?? opencorpHome();
-      const dataHome = dirOpencodeData(dirHome);
-      const dbPath = join(dataHome, "opencode", "opencode.db");
+
       let removidos = 0;
       let dbErro: Error | null = null;
       try {
@@ -1068,7 +1086,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
             removidos = typeof j.removidos === "number" ? j.removidos : idsParaRemover.length;
             dbErro = null;
           }
-        } catch {}
+        } catch { }
       }
       if (dbErro && removidos === 0) {
         enviar(res, 500, { erro: `falha ao truncar no DB: ${dbErro.message}` });

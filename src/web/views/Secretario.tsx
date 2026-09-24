@@ -35,26 +35,16 @@ export const SecretarioView: Component = () => {
       })
       .catch(() => {});
 
-    // Verifica mudanças a cada 3.5 segundos se a aba estiver visível e não houver stream ativo
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") {
-        void chat.sincronizarSessaoAtiva();
-      }
-    }, 3500);
-
-    // Quando o usuário volta à aba do navegador ou ganha foco, sincroniza imediatamente
+    // Sincronização inteligente apenas quando o usuário retorna à aba após deixá-la em segundo plano
     const aoMudarVisibilidade = () => {
       if (document.visibilityState === "visible") {
-        void chat.sincronizarSessaoAtiva({ forcar: true });
+        void chat.sincronizarSessaoAtiva({ silencioso: true });
       }
     };
     document.addEventListener("visibilitychange", aoMudarVisibilidade);
-    window.addEventListener("focus", aoMudarVisibilidade);
 
     onCleanup(() => {
-      clearInterval(timer);
       document.removeEventListener("visibilitychange", aoMudarVisibilidade);
-      window.removeEventListener("focus", aoMudarVisibilidade);
     });
   });
 

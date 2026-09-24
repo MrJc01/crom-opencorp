@@ -24,27 +24,65 @@ export { SUGESTOES_RAPIDAS, MODELOS_SUGERIDOS, MODELOS_PRESETS_POPULARES, inferi
 
 function reconciliarMensagens(antigas: ChatMensagem[], novas: ChatMensagem[]): ChatMensagem[] {
   if (!antigas || antigas.length === 0) return novas;
-  if (!novas || novas.length === 0) return [];
-  const resultado: ChatMensagem[] = [];
+  if (!novas || novas.length === 0) return antigas;
+
+  // Se 'novas' é uma fatia parcial (ex: últimos 2 turnos), preserva o histórico anterior
+  let offset = -1;
+  const primeiraNova = novas[0];
+  if (primeiraNova?.id) {
+    offset = antigas.findIndex((a) => a.id === primeiraNova.id);
+  }
+
+  // Se não encontrou pelo ID exato da primeira nova, tenta casar por offset relativo
+  if (offset === -1 && antigas.length >= novas.length) {
+    offset = antigas.length - novas.length;
+  } else if (offset === -1) {
+    offset = 0;
+  }
+
+  const cabeca = antigas.slice(0, offset);
+  const caudaAntiga = antigas.slice(offset);
+
+  let caudaModificada = false;
+  const caudaReconciliada: ChatMensagem[] = [];
+
   for (let i = 0; i < novas.length; i++) {
     const n = novas[i];
-    const a = antigas[i];
-    if (
-      a &&
-      a.role === n.role &&
-      a.content === n.content &&
-      a.pensamento === n.pensamento &&
-      a.concluida === n.concluida &&
-      a.hitl?.id === n.hitl?.id &&
-      (a.passos?.length ?? 0) === (n.passos?.length ?? 0) &&
-      (a.acoes?.length ?? 0) === (n.acoes?.length ?? 0)
-    ) {
-      resultado.push(a);
+    const correspondente = caudaAntiga[i];
+
+    if (correspondente) {
+      const mudou =
+        correspondente.id !== n.id ||
+        correspondente.role !== n.role ||
+        correspondente.content !== n.content ||
+        correspondente.pensamento !== n.pensamento ||
+        correspondente.concluida !== n.concluida ||
+        correspondente.hitl?.id !== n.hitl?.id ||
+        (correspondente.passos?.length ?? 0) !== (n.passos?.length ?? 0) ||
+        (correspondente.acoes?.length ?? 0) !== (n.acoes?.length ?? 0);
+
+      if (!mudou) {
+        caudaReconciliada.push(correspondente);
+      } else {
+        caudaModificada = true;
+        caudaReconciliada.push({
+          ...correspondente,
+          ...n,
+          id: n.id || correspondente.id,
+        });
+      }
     } else {
-      resultado.push(n);
+      caudaModificada = true;
+      caudaReconciliada.push(n);
     }
   }
-  return resultado;
+
+  // Se a cauda não teve alterações estruturais e tem o mesmo tamanho, preserva a referência exata
+  if (!caudaModificada && caudaReconciliada.length === caudaAntiga.length) {
+    return antigas;
+  }
+
+  return [...cabeca, ...caudaReconciliada];
 }
 
 export interface AgenteOpcao {
@@ -936,52 +974,55 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
 
       if (lista.length === 0) return false;
 
-      const ult = lista[lista.length - 1];
-      const hashAtual = `${lista.length}:${ult?.role}:${ult?.content?.length || 0}:${ult?.pensamento?.length || 0}:${ult?.acoes?.length || 0}:${ult?.concluida}`;
-
+      const ultServidor = lista[lista.length - 1];
       const msgsLocais = mensagens();
       const ultLocal = msgsLocais[msgsLocais.length - 1];
-      const hashLocal = `${msgsLocais.length}:${ultLocal?.role}:${ultLocal?.content?.length || 0}:${ultLocal?.pensamento?.length || 0}:${ultLocal?.acoes?.length || 0}:${ultLocal?.concluida}`;
 
-      const mudou = hashAtual !== hashLocal || hashAtual !== ultimoHashSincronizado || opts?.forcar;
+      // Compara a última mensagem para saber se há mudança real antes de alterar o estado
+      const ehMesmaMsg = ultServidor && ultLocal && (
+        ultServidor.id === ultLocal.id ||
+        (ultLocal.id?.startsWith("temp-") && ultServidor.role === ultLocal.role)
+      );
 
-      if (mudou) {
-        ultimoHashSincronizado = hashAtual;
+      const semMudanca = ehMesmaMsg &&
+        ultServidor.content === ultLocal.content &&
+        ultServidor.pensamento === ultLocal.pensamento &&
+        ultServidor.concluida === ultLocal.concluida &&
+        (ultServidor.passos?.length ?? 0) === (ultLocal.passos?.length ?? 0) &&
+        (ultServidor.acoes?.length ?? 0) === (ultLocal.acoes?.length ?? 0);
 
-        // Se o usuário já rolou e carregou mensagens anteriores, mesclamos apenas o final
-        if (msgsLocais.length > lista.length && temMaisMensagensAnteriores()) {
-          const offset = msgsLocais.length - lista.length;
-          const anteriores = msgsLocais.slice(0, offset);
-          setMensagens([...anteriores, ...reconciliarMensagens(msgsLocais.slice(offset), lista)]);
-        } else {
-          setMensagens((prev) => reconciliarMensagens(prev, lista));
-        }
-
-        if (paginacao) {
-          setTotalMensagensServidor(paginacao.total_mensagens);
-          setTemMaisMensagensAnteriores(paginacao.tem_mais);
-        }
-
-        // Se no servidor a mensagem do assistente já concluiu e o chat ainda estava com loading, desativa
-        if (ult?.role === "assistant" && ult?.concluida === true) {
-          if (carregando()) {
-            setCarregando(false);
-          }
-          if (timerInterval) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-          }
-        }
-
-        // Se no servidor a mensagem está em execução e o frontend não estava com streaming ou monitoramento ativo
-        if (ult?.role === "assistant" && ult?.concluida === false && !streamingAtivo() && !monitorTimeout) {
-          setCarregando(true);
-          retomarMonitoramento(sid);
-        }
-
-        return true;
+      if (semMudanca && !opts?.forcar) {
+        return false;
       }
-      return false;
+
+      const reconciliadas = reconciliarMensagens(msgsLocais, lista);
+      if (reconciliadas !== msgsLocais) {
+        setMensagens(reconciliadas);
+      }
+
+      if (paginacao) {
+        setTotalMensagensServidor(paginacao.total_mensagens);
+        setTemMaisMensagensAnteriores(paginacao.tem_mais);
+      }
+
+      // Se no servidor a mensagem do assistente já concluiu e o chat ainda estava com loading, desativa
+      if (ultServidor?.role === "assistant" && ultServidor?.concluida === true) {
+        if (carregando()) {
+          setCarregando(false);
+        }
+        if (timerInterval) {
+          clearInterval(timerInterval);
+          timerInterval = null;
+        }
+      }
+
+      // Se no servidor a mensagem está em execução e o frontend não estava com streaming ou monitoramento ativo
+      if (ultServidor?.role === "assistant" && ultServidor?.concluida === false && !streamingAtivo() && !monitorTimeout) {
+        setCarregando(true);
+        retomarMonitoramento(sid);
+      }
+
+      return true;
     } catch {
       return false;
     } finally {
@@ -1095,9 +1136,12 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
   };
 
   const focarTextarea = (superficie: SuperficieChat, texto: string) => {
-    const el = textareaDe(superficie);
+    const el = textareaDe(superficie) || (typeof document !== "undefined" ? (document.querySelector("textarea") as HTMLTextAreaElement | null) : null);
     if (!el) return;
     el.value = texto;
+    try {
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    } catch {}
     el.focus();
     try {
       el.setSelectionRange(texto.length, texto.length);
@@ -1129,7 +1173,7 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
       try {
         await fetchApi(`/secretario/sessoes/${encodeURIComponent(sid)}/truncar`, {
           method: "POST",
-          body: JSON.stringify({ manter_ate: indiceGlobal }),
+          body: JSON.stringify({ mensagem_id: m.id, manter_ate: indiceGlobal }),
         });
       } catch (err: any) {
         showToast("Falha ao truncar no servidor: " + err.message, "aviso");
@@ -1240,13 +1284,16 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
 
     const sid = sessaoAtivaId();
 
+    const tsAgora = Date.now();
     const msgUsuario: ChatMensagem = {
+      id: `temp-user-${tsAgora}`,
       role: "user",
       content: texto,
       imagens: imgs.length > 0 ? imgs : undefined,
     };
 
     const msgAssistente: ChatMensagem = {
+      id: `temp-asst-${tsAgora + 1}`,
       role: "assistant",
       content: "",
       pensamento: "",
@@ -1537,39 +1584,28 @@ export const ChatStoreProvider: Component<{ children: JSX.Element }> = (props) =
     } finally {
       setStreamingAtivo(false);
       abortController = null;
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+      setCarregando(false);
       void carregarSessoes();
       const sidFinal = sessaoAtivaId();
       if (sidFinal) {
         try { syncChannel?.postMessage({ tipo: "mensagem_concluida", sessao_id: sidFinal }); } catch {}
-        void fetchApi<ChatMensagem[]>(`/secretario/sessoes/${encodeURIComponent(sidFinal)}/mensagens`)
-          .then((msgsFinais) => {
+        // Sincronização leve de IDs em segundo plano para não causar flicker nem recriar nós DOM
+        void fetchApi<any>(`/secretario/sessoes/${encodeURIComponent(sidFinal)}/mensagens?turnos=1`)
+          .then((resp) => {
+            const msgsFinais = Array.isArray(resp) ? resp : (resp?.mensagens || []);
             if (Array.isArray(msgsFinais) && msgsFinais.length > 0) {
               setMensagens((prev) => reconciliarMensagens(prev, msgsFinais));
               const ult = msgsFinais[msgsFinais.length - 1];
               if (ult && (ult.concluida === false || ult.role === "user")) {
                 retomarMonitoramento(sidFinal);
-                return;
               }
             }
-            if (timerInterval) {
-              clearInterval(timerInterval);
-              timerInterval = null;
-            }
-            setCarregando(false);
           })
-          .catch(() => {
-            if (timerInterval) {
-              clearInterval(timerInterval);
-              timerInterval = null;
-            }
-            setCarregando(false);
-          });
-      } else {
-        if (timerInterval) {
-          clearInterval(timerInterval);
-          timerInterval = null;
-        }
-        setCarregando(false);
+          .catch(() => null);
       }
     }
     return true;

@@ -5,6 +5,7 @@
 @import "tailwindcss";
 @import "./legacy.css" layer(components);
 @import "./secretario-chat.css";
+@import "./chat-animations.css";
 @source "../";
 @source "../../../web-dist/index.html";
 

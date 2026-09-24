@@ -26,6 +26,8 @@ import type { RouteContext } from "../types.js";
 
 /** Streams `/secretario/conversa/stream` em voo por sessão. */
 export const streamsSecretarioAtivos = new Map<string, { res: { destroyed: boolean; writableEnded: boolean } }>();
+/** Timers de grace period antes de abortar caso o cliente reconecte (ex: F5 / refresh). */
+export const timersGraceAbort = new Map<string, NodeJS.Timeout>();
 
 interface StreamEnfileirado {
   sessaoId: string;
@@ -69,6 +71,11 @@ export function removerDaFilaStream(sessaoId: string, entrada: StreamEnfileirado
 }
 
 export function liberarStreamSecretario(sessaoId: string, res: { destroyed: boolean; writableEnded: boolean }): void {
+  const timerGrace = timersGraceAbort.get(sessaoId);
+  if (timerGrace) {
+    clearTimeout(timerGrace);
+    timersGraceAbort.delete(sessaoId);
+  }
   if (streamsSecretarioAtivos.get(sessaoId)?.res === res) {
     streamsSecretarioAtivos.delete(sessaoId);
     const lista = filaStreamsSecretario.get(sessaoId);
@@ -319,6 +326,13 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
             modelo: modeloInicial,
           });
 
+          // Limpa timer de grace period pendente desta sessão se cliente reconectou
+          const timerGracePendente = timersGraceAbort.get(sessaoId);
+          if (timerGracePendente) {
+            clearTimeout(timerGracePendente);
+            timersGraceAbort.delete(sessaoId);
+          }
+
           if (chaveStreamRegistrada && chaveStreamRegistrada !== sessaoId) {
             streamsSecretarioAtivos.delete(chaveStreamRegistrada);
             streamsSecretarioAtivos.set(sessaoId, { res });
@@ -357,7 +371,15 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
 
           onClientClose = () => {
             if (!concluida && !emSegundoPlano) {
-              void fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+              // Tolerância de 25s para recarregamento de página (F5) ou oscilações de rede sem matar o modelo
+              const t = setTimeout(() => {
+                timersGraceAbort.delete(sessaoId);
+                const streamAtual = streamsSecretarioAtivos.get(sessaoId);
+                if (!concluida && (!streamAtual || streamAtual.res.destroyed || streamAtual.res.writableEnded)) {
+                  void fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+                }
+              }, 25_000);
+              timersGraceAbort.set(sessaoId, t);
             }
           };
           res.on("close", onClientClose);
