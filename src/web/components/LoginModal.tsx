@@ -1,8 +1,11 @@
 import { type Component, createSignal, Show } from "solid-js";
 import { KeyRound, ShieldCheck, ArrowRight, Terminal, AlertCircle } from "lucide-solid";
 import { setToken, setAutenticado, carregarWorkspaces, conectarSSE } from "../lib/context";
+import { useOpenCorp } from "../providers/OpenCorpProvider";
+import { ProblemDetailsError } from "@opencorp/sdk";
 
 export const LoginModal: Component = () => {
+  const { client, tratarErro } = useOpenCorp();
   const [tokenInput, setTokenInput] = createSignal("");
   const [erro, setErro] = createSignal("");
   const [carregando, setCarregando] = createSignal(false);
@@ -19,24 +22,27 @@ export const LoginModal: Component = () => {
     setErro("");
 
     try {
-      const res = await fetch("/workspaces", {
+      await client().workspaces.listar({
         headers: {
           Authorization: `Bearer ${t}`,
         },
       });
-
-      if (res.status === 401) {
-        setErro("Token inválido ou expirado — verifique seu terminal ou ~/.opencorp/secrets.json");
-        setCarregando(false);
-        return;
-      }
 
       setToken(t);
       setAutenticado(true);
       await carregarWorkspaces();
       conectarSSE();
     } catch (err: any) {
-      setErro(`Erro de conexão com o servidor: ${err?.message || err}`);
+      if (err instanceof ProblemDetailsError) {
+        if (err.status === 401) {
+          setErro("Token inválido ou expirado — verifique seu terminal ou ~/.opencorp/secrets.json");
+        } else {
+          setErro(`[${err.status}] ${err.title}: ${err.detail ?? ""}`);
+        }
+      } else {
+        setErro(`Erro de conexão com o servidor: ${err?.message || err}`);
+      }
+      tratarErro(err, "Falha na autenticação");
     } finally {
       setCarregando(false);
     }

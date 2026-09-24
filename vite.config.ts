@@ -12,6 +12,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src/web'),
+      '@opencorp/sdk': resolve(__dirname, 'src/sdk/index.ts'),
     },
   },
   build: {

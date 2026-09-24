@@ -11,6 +11,8 @@ import {
   Brain,
   RotateCw,
 } from "lucide-solid";
+import { useOpenCorp } from "../../providers/OpenCorpProvider";
+import { ProblemDetailsError } from "@opencorp/sdk";
 
 export interface ConfigDrawerProps {
   isOpen: boolean;
@@ -48,20 +50,22 @@ const PRESET_MODELS = [
 ];
 
 export const SecretarioConfigDrawer: Component<ConfigDrawerProps> = (props) => {
+  const { client, tratarErro } = useOpenCorp();
   const [testandoMotor, setTestandoMotor] = createSignal(false);
   const [resultadoTeste, setResultadoTeste] = createSignal<{ ok: boolean; msg: string; latencyMs?: number } | null>(null);
 
   const testarConexao = async () => {
     setTestandoMotor(true);
     setResultadoTeste(null);
+    const inicio = performance.now();
     try {
-      const resp = await fetch("/secretario/status");
-      const data = await resp.json().catch(() => ({}));
-      if (resp.ok && data.rodando) {
+      const data = await client().secretary.getStatus();
+      const tempo = Math.round(performance.now() - inicio);
+      if (data.rodando) {
         setResultadoTeste({
           ok: true,
           msg: `Daemon ativo na porta ${data.porta || 4096} — Modelo: ${props.selectedModel.split("/").slice(-1)[0]}`,
-          latencyMs: Math.floor(45 + Math.random() * 30),
+          latencyMs: tempo,
         });
       } else {
         setResultadoTeste({
@@ -69,11 +73,20 @@ export const SecretarioConfigDrawer: Component<ConfigDrawerProps> = (props) => {
           msg: "Daemon do Secretário não respondeu ou está inativo",
         });
       }
-    } catch {
-      setResultadoTeste({
-        ok: false,
-        msg: "Falha de conexão com a API do Secretário",
-      });
+    } catch (err: unknown) {
+      if (err instanceof ProblemDetailsError) {
+        setResultadoTeste({
+          ok: false,
+          msg: `[${err.status}] ${err.title}: ${err.detail ?? "Daemon inacessível"}`,
+        });
+      } else {
+        const msg = err instanceof Error ? err.message : "Falha de conexão com a API do Secretário";
+        setResultadoTeste({
+          ok: false,
+          msg,
+        });
+      }
+      tratarErro(err, "Diagnóstico do Secretário");
     } finally {
       setTestandoMotor(false);
     }

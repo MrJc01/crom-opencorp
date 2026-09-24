@@ -7,7 +7,8 @@ import { GlobalTitlebar } from "./components/GlobalTitlebar";
 import { LoginModal } from "./components/LoginModal";
 import { ToastContainer } from "./ui/Toast";
 import { ChatStoreProvider } from "./lib/chat/store";
-import { carregarWorkspaces, conectarSSE, wsAtivo, autenticado, sidebarMobileAberta, dockSecretarioAberto, setDockSecretarioAberto } from "./lib/context";
+import { OpenCorpProvider } from "./providers/OpenCorpProvider";
+import { carregarWorkspaces, conectarSSE, token, wsAtivo, autenticado, sidebarMobileAberta, dockSecretarioAberto, setDockSecretarioAberto } from "./lib/context";
 
 // Views e componentes pesados carregados sob demanda via code-splitting
 const HomeView = lazy(() => import("./views/Home").then((m) => ({ default: m.HomeView })));
@@ -132,27 +133,29 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
 
 export const App: Component = () => {
   return (
-    <ChatStoreProvider>
-      <Router root={AppLayout}>
-        <Route path="/" component={HomeView} />
-        <Route path="/home" component={HomeView} />
-        <Route path="/secretario" component={SecretarioView} />
-        <Route path="/ativos" component={AtivosView} />
-        <Route path="/agente/:id" component={AgentCard} />
-        <Route path="/workspace" component={WorkspaceView} />
-        <Route path="/tasks" component={TasksView} />
-        <Route path="/agentes" component={AgentesView} />
-        <Route path="/reunioes" component={ReunioesView} />
-        <Route path="/agenda" component={() => <Navigate href="/fluxos?filtro=cron" />} />
-        <Route path="/fluxos" component={FluxosView} />
-        <Route path="/hooks" component={() => <Navigate href="/fluxos" />} />
-        <Route path="/apps" component={AppsView} />
-        <Route path="/secrets" component={SecretsView} />
-        <Route path="/historico" component={HistoricoView} />
-        <Route path="/notificacoes" component={NotificacoesView} />
-        <Route path="/docs" component={DocsView} />
-        <Route path="/config" component={ConfigView} />
-      </Router>
-    </ChatStoreProvider>
+    <OpenCorpProvider token={token} workspaceId={wsAtivo}>
+      <ChatStoreProvider>
+        <Router root={AppLayout}>
+          <Route path="/" component={HomeView} />
+          <Route path="/home" component={HomeView} />
+          <Route path="/secretario" component={SecretarioView} />
+          <Route path="/ativos" component={AtivosView} />
+          <Route path="/agente/:id" component={AgentCard} />
+          <Route path="/workspace" component={WorkspaceView} />
+          <Route path="/tasks" component={TasksView} />
+          <Route path="/agentes" component={AgentesView} />
+          <Route path="/reunioes" component={ReunioesView} />
+          <Route path="/agenda" component={() => <Navigate href="/fluxos?filtro=cron" />} />
+          <Route path="/fluxos" component={FluxosView} />
+          <Route path="/hooks" component={() => <Navigate href="/fluxos" />} />
+          <Route path="/apps" component={AppsView} />
+          <Route path="/secrets" component={SecretsView} />
+          <Route path="/historico" component={HistoricoView} />
+          <Route path="/notificacoes" component={NotificacoesView} />
+          <Route path="/docs" component={DocsView} />
+          <Route path="/config" component={ConfigView} />
+        </Router>
+      </ChatStoreProvider>
+    </OpenCorpProvider>
   );
 };

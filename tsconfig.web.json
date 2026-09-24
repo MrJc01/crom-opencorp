@@ -14,7 +14,12 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@opencorp/sdk": ["./src/sdk/index.ts"],
+      "@/*": ["./src/web/*"]
+    }
   },
   "include": ["src/web/**/*.ts", "src/web/**/*.tsx", "src/web/**/*.js", "src/web/**/*.jsx"],
   "exclude": ["src/web/**/*.svelte.ts", "src/web/**/*.svelte"]
