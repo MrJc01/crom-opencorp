@@ -7,6 +7,7 @@ import { GlobalTitlebar } from "./components/GlobalTitlebar";
 import { LoginModal } from "./components/LoginModal";
 import { ToastContainer } from "./ui/Toast";
 import { ChatStoreProvider } from "./lib/chat/store";
+import { RouteSkeleton } from "./components/RouteSkeleton";
 import { OpenCorpProvider } from "./providers/OpenCorpProvider";
 import { carregarWorkspaces, conectarSSE, token, wsAtivo, autenticado, sidebarMobileAberta, dockSecretarioAberto, setDockSecretarioAberto } from "./lib/context";
 
@@ -27,15 +28,6 @@ const NotificacoesView = lazy(() => import("./views/Notificacoes").then((m) => (
 const ConfigView = lazy(() => import("./views/Config").then((m) => ({ default: m.ConfigView })));
 const DocsView = lazy(() => import("./views/Docs").then((m) => ({ default: m.DocsView })));
 const SecretarioDock = lazy(() => import("./components/SecretarioDock"));
-
-const ViewLoader: Component = () => (
-  <div class="flex h-full w-full min-h-[50vh] items-center justify-center">
-    <div class="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-2.5 text-xs text-zinc-400 backdrop-blur-sm shadow-sm animate-pulse">
-      <div class="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
-      <span>Carregando módulo...</span>
-    </div>
-  </div>
-);
 
 export const AppLayout: Component<{ children?: any }> = (props) => {
   const location = useLocation();
@@ -102,7 +94,7 @@ export const AppLayout: Component<{ children?: any }> = (props) => {
         </Show>
         <div class="flex flex-1 min-h-0 overflow-hidden">
           <main class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative bg-zinc-950">
-            <Suspense fallback={<ViewLoader />}>
+            <Suspense fallback={<RouteSkeleton />}>
               {props.children}
             </Suspense>
           </main>

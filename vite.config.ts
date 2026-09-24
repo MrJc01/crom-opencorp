@@ -21,8 +21,19 @@ export default defineConfig({
     rollupOptions: {
       output: {
         entryFileNames: 'assets/app.js',
-        chunkFileNames: 'assets/chunk-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
+        manualChunks(id) {
+          if (id.includes('node_modules/mermaid') || id.includes('node_modules/@mermaid-js')) {
+            return 'vendor-mermaid';
+          }
+          if (id.includes('node_modules/lucide-solid')) {
+            return 'vendor-icons';
+          }
+          if (id.includes('node_modules/solid-js') || id.includes('node_modules/@solidjs/router')) {
+            return 'vendor-solid';
+          }
+        },
       },
     },
   },
