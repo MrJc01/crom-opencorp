@@ -6,7 +6,7 @@ import { showToast } from "../../../shared/ui/Toast.js";
 import { FileTree } from "../components/FileTree.js";
 import { CodeEditorTabs, type TabArquivo } from "../components/CodeEditorTabs.js";
 import { WorkspaceTerminals } from "../components/WorkspaceTerminals.js";
-import { GitBranch, RefreshCw } from "lucide-react";
+import { GitBranch, RefreshCw, AlertTriangle } from "lucide-react";
 
 export const WorkspaceView: FC = () => {
   const { client, workspaceId, tratarErro } = useOpenCorp();
@@ -21,8 +21,12 @@ export const WorkspaceView: FC = () => {
   const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus | null>(null);
   const [carregandoGit, setCarregandoGit] = useState(false);
 
-  // Resolução de workspace com fallback
+  // Resolução rigorosa de workspace SEM fallback hardcoded
   const wsEfetivo = useMemo(() => {
+    const urlWs = searchParams.get("workspace");
+    if (urlWs && urlWs.trim().length > 0) {
+      return urlWs.trim();
+    }
     if (workspaceId && workspaceId.trim().length > 0) {
       return workspaceId.trim();
     }
@@ -34,21 +38,26 @@ export const WorkspaceView: FC = () => {
         return salvo.trim();
       }
     }
-    return "yt-factory-01";
-  }, [workspaceId]);
+    return "";
+  }, [workspaceId, searchParams]);
 
-  // Carregar status do Git
+  // Carregar status do Git do workspace ativo
   const carregarGit = useCallback(async () => {
+    if (!wsEfetivo) {
+      setGitStatus(null);
+      return;
+    }
     setCarregandoGit(true);
     try {
       const git = await client.workspaces.gitStatus().catch(() => null);
       setGitStatus(git);
     } catch {
-      // Silencioso se git não estiver inicializado
+      // Falha não-fatal caso o Git não esteja inicializado no workspace
+      setGitStatus(null);
     } finally {
       setCarregandoGit(false);
     }
-  }, [client]);
+  }, [client, wsEfetivo]);
 
   useEffect(() => {
     void carregarGit();
@@ -57,6 +66,13 @@ export const WorkspaceView: FC = () => {
   // Abrir ou focar arquivo
   const abrirArquivo = useCallback(
     async (caminho: string) => {
+      if (!caminho) return;
+
+      if (!wsEfetivo) {
+        showToast("Nenhum workspace selecionado para abrir arquivos", "aviso");
+        return;
+      }
+
       // Se a aba já estiver aberta, apenas a foca
       const tabExistente = tabs.find((t) => t.caminho === caminho);
       if (tabExistente) {
@@ -69,7 +85,10 @@ export const WorkspaceView: FC = () => {
       }
 
       try {
-        const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:4100";
+        const origin =
+          typeof window !== "undefined"
+            ? window.location.origin
+            : "http://127.0.0.1:4100";
         const wsParam = `&workspace=${encodeURIComponent(wsEfetivo)}`;
         const resp = await fetch(
           `${origin}/files?path=${encodeURIComponent(caminho)}${wsParam}`,
@@ -78,11 +97,16 @@ export const WorkspaceView: FC = () => {
               "x-opencorp-workspace": wsEfetivo,
               "x-workspace-id": wsEfetivo,
             },
-          },
+          }
         );
 
         if (!resp.ok) {
-          throw new Error(`Falha ao ler arquivo (HTTP ${resp.status})`);
+          const errData = (await resp.json().catch(() => ({}))) as {
+            erro?: string;
+          };
+          throw new Error(
+            errData.erro || `Falha ao ler arquivo (HTTP ${resp.status})`
+          );
         }
 
         const data = await resp.json();
@@ -105,7 +129,9 @@ export const WorkspaceView: FC = () => {
           }
         }
 
-        const urlRaw = data.urlRaw || `${origin}/files/raw?path=${encodeURIComponent(caminho)}${wsParam}`;
+        const urlRaw =
+          data.urlRaw ||
+          `${origin}/files/raw?path=${encodeURIComponent(caminho)}${wsParam}`;
 
         const novaTab: TabArquivo = {
           caminho,
@@ -118,10 +144,16 @@ export const WorkspaceView: FC = () => {
           tamanho: data.tamanho,
           mime: data.mime,
           tipoMidia: ehVid ? "video" : ehImg ? "imagem" : ehAud ? "audio" : "outro",
-          workspace: data.workspace || workspaceId,
+          workspace: data.workspace || wsEfetivo,
         };
 
-        setTabs((prev) => [...prev, novaTab]);
+        setTabs((prev) => {
+          const jaExiste = prev.find((t) => t.caminho === caminho);
+          if (jaExiste) {
+            return prev.map((t) => (t.caminho === caminho ? novaTab : t));
+          }
+          return [...prev, novaTab];
+        });
         setTabAtiva(caminho);
         setSearchParams((prev) => {
           prev.set("file", caminho);
@@ -131,7 +163,7 @@ export const WorkspaceView: FC = () => {
         tratarErro(err, `Erro ao abrir ${caminho}`);
       }
     },
-    [tabs, workspaceId, setSearchParams, tratarErro],
+    [tabs, wsEfetivo, setSearchParams, tratarErro]
   );
 
   // Inicialização pelo parâmetro da URL ?file=
@@ -142,11 +174,15 @@ export const WorkspaceView: FC = () => {
     }
   }, [searchParams, tabs, abrirArquivo]);
 
-  // Fechar aba
+  // Fechar aba individual
   const fecharTab = (caminho: string) => {
     const t = tabs.find((x) => x.caminho === caminho);
     if (t && t.editado !== t.original) {
-      if (!confirm(`O arquivo "${t.nome}" possui alterações não salvas. Fechar mesmo assim?`)) {
+      if (
+        !confirm(
+          `O arquivo "${t.nome}" possui alterações não salvas. Fechar mesmo assim?`
+        )
+      ) {
         return;
       }
     }
@@ -169,28 +205,106 @@ export const WorkspaceView: FC = () => {
     }
   };
 
-  // Atualizar conteúdo digitado
+  // Callback de renomeação disparado pelo FileTree
+  const tratarRenomearArquivo = useCallback(
+    (antigo: string, novo: string) => {
+      setTabs((prev) =>
+        prev.map((t) => {
+          if (t.caminho === antigo) {
+            const nome = novo.split("/").pop() || novo;
+            return { ...t, caminho: novo, nome };
+          }
+          if (t.caminho.startsWith(antigo + "/")) {
+            const sufixo = t.caminho.slice(antigo.length);
+            const caminhoAtualizado = novo + sufixo;
+            const nome = caminhoAtualizado.split("/").pop() || caminhoAtualizado;
+            return { ...t, caminho: caminhoAtualizado, nome };
+          }
+          return t;
+        })
+      );
+
+      if (tabAtiva === antigo) {
+        setTabAtiva(novo);
+        setSearchParams((prev) => {
+          prev.set("file", novo);
+          return prev;
+        });
+      } else if (tabAtiva?.startsWith(antigo + "/")) {
+        const caminhoAtualizado = novo + tabAtiva.slice(antigo.length);
+        setTabAtiva(caminhoAtualizado);
+        setSearchParams((prev) => {
+          prev.set("file", caminhoAtualizado);
+          return prev;
+        });
+      }
+    },
+    [tabAtiva, setSearchParams]
+  );
+
+  // Callback de exclusão disparado pelo FileTree
+  const tratarExcluirArquivo = useCallback(
+    (caminho: string) => {
+      setTabs((prev) =>
+        prev.filter((t) => t.caminho !== caminho && !t.caminho.startsWith(caminho + "/"))
+      );
+
+      if (tabAtiva === caminho || tabAtiva?.startsWith(caminho + "/")) {
+        setTabAtiva(null);
+        setSearchParams((prev) => {
+          prev.delete("file");
+          return prev;
+        });
+      }
+    },
+    [tabAtiva, setSearchParams]
+  );
+
+  // Callback de descarte de alterações via Git
+  const tratarDescartarArquivo = useCallback(
+    (caminho: string) => {
+      const tabAberta = tabs.find((t) => t.caminho === caminho);
+      if (tabAberta) {
+        void abrirArquivo(caminho);
+      }
+      void carregarGit();
+    },
+    [tabs, abrirArquivo, carregarGit]
+  );
+
+  // Atualizar conteúdo digitado no editor
   const atualizarConteudo = (caminho: string, novoConteudo: string) => {
     setTabs((prev) =>
-      prev.map((t) => (t.caminho === caminho ? { ...t, editado: novoConteudo } : t)),
+      prev.map((t) => (t.caminho === caminho ? { ...t, editado: novoConteudo } : t))
     );
   };
 
   // Alternar modo da aba ativa (código, preview, split, media)
-  const mudarModoTab = (caminho: string, modo: "editor" | "preview" | "split" | "media") => {
+  const mudarModoTab = (
+    caminho: string,
+    modo: "editor" | "preview" | "split" | "media"
+  ) => {
     setTabs((prev) =>
-      prev.map((t) => (t.caminho === caminho ? { ...t, modo } : t)),
+      prev.map((t) => (t.caminho === caminho ? { ...t, modo } : t))
     );
   };
 
   // Salvar alterações da tab ativa via PUT /files
   const salvarTab = async (tab: TabArquivo) => {
     if (tab.binario) return;
+    const wsTab = tab.workspace || wsEfetivo;
+    if (!wsTab) {
+      showToast("Nenhum workspace ativo para salvar o arquivo", "aviso");
+      return;
+    }
+
     setSalvando(true);
     try {
-      const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:4100";
-      const wsTab = tab.workspace || wsEfetivo;
-      const wsParam = wsTab ? `&workspace=${encodeURIComponent(wsTab)}` : "";
+      const origin =
+        typeof window !== "undefined"
+          ? window.location.origin
+          : "http://127.0.0.1:4100";
+      const wsParam = `&workspace=${encodeURIComponent(wsTab)}`;
       const resp = await fetch(
         `${origin}/files?path=${encodeURIComponent(tab.caminho)}${wsParam}`,
         {
@@ -201,17 +315,24 @@ export const WorkspaceView: FC = () => {
             "x-workspace-id": wsTab,
           },
           body: JSON.stringify({ conteudo: tab.editado }),
-        },
+        }
       );
 
       if (!resp.ok) {
-        throw new Error(`Falha ao salvar (HTTP ${resp.status})`);
+        const errData = (await resp.json().catch(() => ({}))) as {
+          erro?: string;
+        };
+        throw new Error(
+          errData.erro || `Falha ao salvar (HTTP ${resp.status})`
+        );
       }
 
       setTabs((prev) =>
         prev.map((item) =>
-          item.caminho === tab.caminho ? { ...item, original: tab.editado } : item,
-        ),
+          item.caminho === tab.caminho
+            ? { ...item, original: tab.editado }
+            : item
+        )
       );
 
       showToast(`Arquivo "${tab.nome}" salvo com sucesso!`, "sucesso");
@@ -226,12 +347,16 @@ export const WorkspaceView: FC = () => {
   return (
     <div className="flex h-full w-full bg-zinc-950 overflow-hidden select-none">
       {/* ─────────────────────────────────────────────────────────────
-          ÁREA 1 (ESQUERDA): ÁRVORE DE ARQUIVOS (EXPLORER COMPLETO)
+          ÁREA 1 (ESQUERDA): ÁRVORE DE ARQUIVOS (EXPLORER COM CRUD)
          ───────────────────────────────────────────────────────────── */}
       <aside className="w-64 sm:w-72 h-full flex-shrink-0">
         <FileTree
           arquivoAtivo={tabAtiva}
+          workspaceId={wsEfetivo}
           aoSelecionarArquivo={(caminho) => void abrirArquivo(caminho)}
+          aoRenomearArquivo={tratarRenomearArquivo}
+          aoExcluirArquivo={tratarExcluirArquivo}
+          aoDescartarArquivo={tratarDescartarArquivo}
         />
       </aside>
 
@@ -243,7 +368,14 @@ export const WorkspaceView: FC = () => {
         <div className="h-8 border-b border-zinc-850 px-3 flex items-center justify-between bg-zinc-900/40 text-[11px] font-mono text-zinc-400 shrink-0">
           <div className="flex items-center gap-2">
             <span className="text-zinc-500">workspace:</span>
-            <span className="text-zinc-200 font-semibold">{wsEfetivo}</span>
+            {wsEfetivo ? (
+              <span className="text-zinc-200 font-semibold">{wsEfetivo}</span>
+            ) : (
+              <span className="text-amber-400 flex items-center gap-1 font-sans">
+                <AlertTriangle size={12} />
+                <span>nenhum workspace selecionado</span>
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
@@ -251,7 +383,10 @@ export const WorkspaceView: FC = () => {
               <GitBranch size={11} className="text-emerald-400" />
               <span>{gitStatus?.branch || "main"}</span>
               {gitStatus?.dirty && (
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Modificações Git pendentes" />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-amber-400"
+                  title="Modificações Git pendentes"
+                />
               )}
             </div>
 
@@ -259,9 +394,13 @@ export const WorkspaceView: FC = () => {
               type="button"
               onClick={carregarGit}
               title="Recarregar status Git"
-              className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
+              disabled={!wsEfetivo}
+              className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 disabled:opacity-30 transition-colors cursor-pointer"
             >
-              <RefreshCw size={11} className={carregandoGit ? "animate-spin" : ""} />
+              <RefreshCw
+                size={11}
+                className={carregandoGit ? "animate-spin" : ""}
+              />
             </button>
           </div>
         </div>
