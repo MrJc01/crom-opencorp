@@ -29,6 +29,7 @@ import { TasksResource } from "./resources/tasks.js";
 import { FlowsResource } from "./resources/flows.js";
 import { WorkspacesResource } from "./resources/workspaces.js";
 import { AgentsResource } from "./resources/agents.js";
+import { TeamsResource } from "./resources/teams.js";
 
 // ── Re-exports ──────────────────────────────────────────────────────
 
@@ -82,6 +83,12 @@ export {
   type ToolResumo,
   type AgentOptions,
 } from "./resources/agents.js";
+export {
+  TeamsResource,
+  type TeamSpec,
+  type TeamPasso,
+  type TeamOptions,
+} from "./resources/teams.js";
 
 // ── Classe principal ────────────────────────────────────────────────
 
@@ -114,6 +121,9 @@ export class OpenCorpClient {
   /** Endpoints de catálogo e gestão de agentes, skills e tools. */
   readonly agents: AgentsResource;
 
+  /** Endpoints de equipes autônomas multi-agente. */
+  readonly teams: TeamsResource;
+
   constructor(opts: HttpClientOptions = {}) {
     this.http = new HttpClient(opts);
     this.system = new SystemResource(this.http);
@@ -122,5 +132,6 @@ export class OpenCorpClient {
     this.flows = new FlowsResource(this.http);
     this.workspaces = new WorkspacesResource(this.http);
     this.agents = new AgentsResource(this.http);
+    this.teams = new TeamsResource(this.http);
   }
 }

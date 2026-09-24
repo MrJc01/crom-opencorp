@@ -11,14 +11,31 @@ import type { HttpClient, RequestOptions } from "../http-client.js";
 export interface AgentResumo {
   id: string;
   nome?: string;
+  name?: string;
+  role?: string;
   descricao?: string;
+  description?: string;
   modelo?: string;
+  model?: string;
+  ativo?: boolean;
+  active?: boolean;
   temperatura?: number;
   skills?: string[];
   tools?: string[];
   sistema?: string;
+  system_prompt?: string;
+  corpo_prompt?: string;
+  corpo?: string;
   instrucoes?: string;
   arquivo?: string;
+  permissions?: "level-1" | "level-2" | "level-3";
+  harness?: string;
+  harness_fallback?: string[];
+  rotation?: string[];
+  model_fallback?: string[];
+  workspace_rotation_fallback?: boolean;
+  budget_daily_usd?: number;
+  budget_max_turns?: number;
   [key: string]: unknown;
 }
 
@@ -112,6 +129,63 @@ export class AgentsResource {
     return this.http.post<{ exec_id?: string }>(
       `/agents/${encodeURIComponent(id)}/run`,
       payload,
+      {
+        ...opts,
+        headers: this.resolverHeaders(opts),
+      },
+    );
+  }
+
+  /** PUT /agents/:id — atualiza dados, prompt, permissões ou status do agente. */
+  async atualizar(
+    id: string,
+    payload: Partial<AgentResumo>,
+    opts?: AgentOptions,
+  ): Promise<AgentResumo> {
+    return this.http.put<AgentResumo>(
+      `/agents/${encodeURIComponent(id)}`,
+      payload,
+      {
+        ...opts,
+        headers: this.resolverHeaders(opts),
+      },
+    );
+  }
+
+  /** DELETE /agents/:id — exclui um agente (409 se citado em teams/flows/tasks). */
+  async excluir(
+    id: string,
+    opts?: AgentOptions,
+  ): Promise<{ ok: boolean; id: string }> {
+    return this.http.delete<{ ok: boolean; id: string }>(
+      `/agents/${encodeURIComponent(id)}`,
+      {
+        ...opts,
+        headers: this.resolverHeaders(opts),
+      },
+    );
+  }
+
+  /** POST /agents/aplicar-modelo-global — define o mesmo modelo para todos os agentes. */
+  async aplicarModeloGlobal(
+    model: string,
+    opts?: AgentOptions,
+  ): Promise<{ ok: boolean; alterados: number; modelo: string }> {
+    return this.http.post<{ ok: boolean; alterados: number; modelo: string }>(
+      "/agents/aplicar-modelo-global",
+      { model },
+      {
+        ...opts,
+        headers: this.resolverHeaders(opts),
+      },
+    );
+  }
+
+  /** POST /agents/semear-catalogo — restaura agentes de catálogo padrão. */
+  async semearCatalogo(opts?: AgentOptions): Promise<any> {
+    return this.http.post<any>(
+      "/agents/semear-catalogo",
+      {},
       {
         ...opts,
         headers: this.resolverHeaders(opts),
