@@ -49,9 +49,14 @@ export {
 } from "./resources/secretary.js";
 export {
   TasksResource,
+  type Task,
   type TaskResumo,
   type TaskDetalhada,
   type ListarTasksOpts,
+  type CriarTaskInput,
+  type AtualizarTaskInput,
+  type MoverTaskInput,
+  type TaskOptions,
 } from "./resources/tasks.js";
 export {
   FlowsResource,
