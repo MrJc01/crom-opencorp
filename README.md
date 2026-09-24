@@ -13,7 +13,9 @@
 
 O **OpenCorp** é um sistema operacional distribuído para governar empresas autônomas movidas por agentes de IA. Ele orquestra sessões de modelos de linguagem sobre múltiplos harnesses ([OpenCode](https://opencode.ai), [Claude Code](https://claude.ai), [Antigravity](https://github.com)), mantendo cada empresa (workspace) isolada com seu próprio banco de dados SQLite, sistema de segredos, arquivos de tarefas, registros e auditoria.
 
-> **Filosofia Core:** Tudo vive no sistema de arquivos em formatos legíveis e versionáveis (`.md`, `.json`, `.db`). O painel web reativo (SolidJS + TailwindCSS) espelha 100% dos comandos do terminal.
+> **Filosofia Core:** Tudo vive no sistema de arquivos em formatos legíveis e versionáveis (`.md`, `.json`, `.db`). O painel web reativo (React 19 + Assistant-UI + @xyflow/react + TailwindCSS v4 + DaisyUI 5) espelha 100% dos comandos do terminal.
+> 
+> 📖 Para a documentação técnica aprofundada dos 7 módulos e engenharia, consulte o [ARCHITECTURE.md](file:///home/j/Documentos/GitHub/opencorp/ARCHITECTURE.md).
 
 ---
 
@@ -21,6 +23,7 @@ O **OpenCorp** é um sistema operacional distribuído para governar empresas aut
 
 * 🏛️ **Repositório Oficial (Organização):** [crom-org/opencorp](https://github.com/crom-org/opencorp) · Org: [crom-org](https://github.com/crom-org)
 * 🛠️ **Repositório de Desenvolvimento Ativo:** [MrJc01/crom-opencorp](https://github.com/MrJc01/crom-opencorp) · Mantenedor: [@MrJc01](https://github.com/MrJc01)
+* 📐 **Arquitetura Oficial:** [ARCHITECTURE.md](file:///home/j/Documentos/GitHub/opencorp/ARCHITECTURE.md)
 
 ---
 
@@ -86,7 +89,7 @@ cd opencorp
 # 2. Instale as dependências
 npm install
 
-# 3. Compile o core (TypeScript) e a interface web (SolidJS)
+# 3. Compile o core (TypeScript) e a interface web (React 19)
 npm run build
 
 # 4. (Opcional) Crie um link global para usar o comando "oc" de qualquer pasta
