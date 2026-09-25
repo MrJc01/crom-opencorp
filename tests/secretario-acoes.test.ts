@@ -33,14 +33,22 @@ describe("extrairAcoesMensagens", () => {
     expect(r.itens).toEqual([{ tool: "opencorp_task_create", status: "running", resumo: "Nova" }]);
   });
 
-  it("mensagem assistant sem parts (stream morto) conta mas não gera item; resumo cai no title", () => {
+  it("não confunde mensagem vazia com ação e usa title como resumo da tool", () => {
     const msgs: MensagemOc[] = [
       msg("assistant", "a-vazia", []),
       msg("assistant", "a2", [{ type: "tool", tool: "opencorp_wp_publicar", state: { status: "pending", title: "Post 35" } }], false),
     ];
     const r = extrairAcoesMensagens(msgs, null);
-    expect(r.total).toBe(2);
+    expect(r.total).toBe(1);
     expect(r.itens).toEqual([{ tool: "opencorp_wp_publicar", status: "pending", resumo: "Post 35" }]);
+  });
+
+  it("retorna zero quando a resposta do assistente não executa ferramentas", () => {
+    const msgs: MensagemOc[] = [
+      msg("assistant", "a-texto", [{ type: "text", text: "Olá! Como posso ajudar?" }]),
+    ];
+
+    expect(extrairAcoesMensagens(msgs, null)).toEqual({ total: 0, itens: [] });
   });
 
   it("resumo aceita arrays de string e limita itens (cap)", () => {

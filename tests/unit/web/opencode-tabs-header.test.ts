@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { formatarTituloAba } from "../../../src/web/features/chat/components/OpenCodeTabsHeader.js";
 import {
+  atualizarAbaAtiva,
   carregarAbasWorkspace,
+  deduplicarAbas,
   salvarAbasWorkspace,
 } from "../../../src/web/features/chat/views/SecretarioView.js";
 import { converterMensagensBackend } from "../../../src/web/features/chat/runtime/secretary-runtime-adapter.js";
@@ -61,12 +63,66 @@ describe("SecretarioView — Persistência de Abas por Workspace", () => {
     salvarAbasWorkspace("projeto-a", abasWsA);
     salvarAbasWorkspace("projeto-b", abasWsB);
 
-    expect(carregarAbasWorkspace("projeto-a")).toEqual(abasWsA);
-    expect(carregarAbasWorkspace("projeto-b")).toEqual(abasWsB);
+    expect(carregarAbasWorkspace("projeto-a")).toEqual([
+      { ...abasWsA[0], tabKey: "tab_ses_1" },
+    ]);
+    expect(carregarAbasWorkspace("projeto-b")).toEqual([
+      { ...abasWsB[0], tabKey: "tab_ses_2" },
+    ]);
   });
 
   it("retorna array vazio quando não há abas salvas para o workspace", () => {
     expect(carregarAbasWorkspace("inexistente")).toEqual([]);
+  });
+
+  it("deduplica IDs e tabKeys persistidos mantendo a primeira aba", () => {
+    const abas = [
+      { id: "ses_1", tabKey: "tab_a", titulo: "oi", criadoEm: 1 },
+      { id: "ses_1", tabKey: "tab_b", titulo: "duplicada por id", criadoEm: 2 },
+      { id: "ses_2", tabKey: "tab_a", titulo: "duplicada por tabKey", criadoEm: 3 },
+    ];
+
+    expect(deduplicarAbas(abas)).toEqual([abas[0]]);
+  });
+
+  it("promove a aba ativa in-place sem aumentar a lista", () => {
+    const abas = [
+      { id: "sessao-rascunho", tabKey: "tab_estavel", titulo: "ola", criadoEm: 1 },
+      { id: "ses_anterior", tabKey: "tab_anterior", titulo: "anterior", criadoEm: 2 },
+    ];
+
+    const promovidas = atualizarAbaAtiva(abas, "sessao-rascunho", {
+      id: "ses_real",
+    });
+
+    expect(promovidas).toHaveLength(2);
+    expect(promovidas[0]).toEqual({
+      ...abas[0],
+      id: "ses_real",
+    });
+    expect(promovidas[0]?.tabKey).toBe("tab_estavel");
+  });
+
+  it("migra abas legadas automáticas preservando apenas a sessão ativa", () => {
+    localStorage.setItem(
+      "oc-secretario-abas:legado",
+      JSON.stringify([
+        { id: "ses_oi", titulo: "oi", criadoEm: 1 },
+        { id: "ses_ola", titulo: "ola", criadoEm: 2 },
+        { id: "ses_atual", titulo: "ola", criadoEm: 3 },
+      ]),
+    );
+    localStorage.setItem("oc-secretario-sessao-ativa:legado", "ses_atual");
+
+    expect(carregarAbasWorkspace("legado")).toEqual([
+      {
+        id: "ses_atual",
+        tabKey: "tab_ses_atual",
+        titulo: "ola",
+        criadoEm: 3,
+      },
+    ]);
+    expect(localStorage.getItem("oc-secretario-abas-schema:legado")).toBe("2");
   });
 });
 

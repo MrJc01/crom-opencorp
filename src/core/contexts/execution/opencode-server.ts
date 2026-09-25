@@ -436,9 +436,9 @@ export function extrairAcoesMensagens(
   const itens: AcaoOpencode[] = [];
   for (const m of novas) {
     if (m.info?.role !== "assistant") continue;
-    total++;
     for (const p of m.parts ?? []) {
       if (p.type !== "tool" || !p.tool) continue;
+      total++;
       if (itens.length < limite) {
         itens.push({
           tool: p.tool,

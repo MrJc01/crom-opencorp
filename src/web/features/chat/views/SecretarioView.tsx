@@ -14,22 +14,77 @@ export function gerarTabKey(): string {
   return `tab_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** Mantém uma única aba por sessão e por identidade visual persistente. */
+export function deduplicarAbas(abas: ChatTab[]): ChatTab[] {
+  const ids = new Set<string>();
+  const tabKeys = new Set<string>();
+
+  return abas.filter((aba) => {
+    if (!aba || typeof aba.id !== "string" || !aba.id.trim()) return false;
+    const tabKey = aba.tabKey || `tab_${aba.id}`;
+    if (ids.has(aba.id) || tabKeys.has(tabKey)) return false;
+    ids.add(aba.id);
+    tabKeys.add(tabKey);
+    return true;
+  });
+}
+
+/**
+ * Promove/atualiza a aba ativa sem criar uma conversa implicitamente.
+ * Novas abas são responsabilidade exclusiva do botão `+`.
+ */
+export function atualizarAbaAtiva(
+  abas: ChatTab[],
+  sessaoAtivaId: string | null,
+  mudancas: Partial<Pick<ChatTab, "id" | "titulo">>,
+): ChatTab[] {
+  if (abas.length === 0) return abas;
+  let idx = sessaoAtivaId
+    ? abas.findIndex((aba) => aba.id === sessaoAtivaId)
+    : -1;
+  if (idx < 0) {
+    idx = abas.findIndex(
+      (aba) => aba.id.startsWith("sessao-") || aba.id.startsWith("draft-"),
+    );
+  }
+  if (idx < 0) idx = 0;
+
+  const copia = [...abas];
+  copia[idx] = { ...copia[idx]!, ...mudancas };
+  return deduplicarAbas(copia);
+}
+
 /**
  * Lê as abas salvas do workspace no localStorage.
  */
 export function carregarAbasWorkspace(workspaceId: string): ChatTab[] {
   if (typeof localStorage === "undefined") return [];
   try {
+    const chaveVersao = `oc-secretario-abas-schema:${workspaceId}`;
+    const versaoAtual = localStorage.getItem(chaveVersao);
     const raw = localStorage.getItem(`oc-secretario-abas:${workspaceId}`);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed
+        const normalizadas = parsed
           .filter((t) => t && typeof t.id === "string")
           .map((t) => ({
             ...t,
             tabKey: t.tabKey || `tab_${t.id}`,
           }));
+        let unicas = deduplicarAbas(normalizadas);
+
+        // Migração única: versões antigas criavam uma aba a cada promoção de
+        // sessão. Preserva a aba ativa; as demais sessões seguem no histórico.
+        if (versaoAtual !== "2" && unicas.length > 1) {
+          const ativaId = localStorage.getItem(
+            `oc-secretario-sessao-ativa:${workspaceId}`,
+          );
+          const ativa = unicas.find((aba) => aba.id === ativaId) || unicas.at(-1)!;
+          unicas = [ativa];
+        }
+        salvarAbasWorkspace(workspaceId, unicas);
+        return unicas;
       }
     }
   } catch {}
@@ -44,8 +99,9 @@ export function salvarAbasWorkspace(workspaceId: string, abas: ChatTab[]): void 
   try {
     localStorage.setItem(
       `oc-secretario-abas:${workspaceId}`,
-      JSON.stringify(abas),
+      JSON.stringify(deduplicarAbas(abas)),
     );
+    localStorage.setItem(`oc-secretario-abas-schema:${workspaceId}`, "2");
   } catch {}
 }
 
@@ -112,17 +168,10 @@ export const SecretarioView: FC = () => {
     setAbas(atualizadas);
 
     if (sessaoParam) {
-      const existe = atualizadas.some((a) => a.id === sessaoParam);
-      if (!existe) {
-        const novaAba: ChatTab = {
-          id: sessaoParam,
-          tabKey: `tab_${sessaoParam}`,
-          titulo: "Conversa",
-          criadoEm: Date.now(),
-        };
-        const novaLista = [...atualizadas, novaAba];
-        setAbas(novaLista);
-        salvarAbasWorkspace(wsId, novaLista);
+      if (!atualizadas.some((a) => a.id === sessaoParam)) {
+        atualizadas = atualizarAbaAtiva(atualizadas, null, { id: sessaoParam });
+        setAbas(atualizadas);
+        salvarAbasWorkspace(wsId, atualizadas);
       }
       localStorage.setItem(`oc-secretario-sessao-ativa:${wsId}`, sessaoParam);
     } else if (atualizadas[0]) {
@@ -139,19 +188,20 @@ export const SecretarioView: FC = () => {
     }
   }, [wsId]);
 
-  // Se o param da URL mudar externamente, assegura presença na lista e atualiza storage
+  // Se a URL mudar externamente, promove a aba ativa; nunca cria uma aba implícita.
   useEffect(() => {
     if (!sessaoParam) return;
     localStorage.setItem(`oc-secretario-sessao-ativa:${wsId}`, sessaoParam);
     setAbas((prev) => {
       if (prev.some((a) => a.id === sessaoParam)) return prev;
-      const nova: ChatTab = {
-        id: sessaoParam,
-        tabKey: `tab_${sessaoParam}`,
-        titulo: "Conversa",
-        criadoEm: Date.now(),
-      };
-      const proximo = [...prev, nova];
+      const idPersistido = localStorage.getItem(
+        `oc-secretario-sessao-ativa:${wsId}`,
+      );
+      const proximo = atualizarAbaAtiva(
+        prev,
+        idPersistido && idPersistido !== sessaoParam ? idPersistido : null,
+        { id: sessaoParam },
+      );
       salvarAbasWorkspace(wsId, proximo);
       return proximo;
     });
@@ -251,15 +301,14 @@ export const SecretarioView: FC = () => {
   const aoAtualizarTitulo = useCallback(
     (sid: string, novoTitulo: string) => {
       setAbas((prev) => {
-        const idx = prev.findIndex((a) => a.id === sid);
-        if (idx === -1) return prev;
-        const copia = [...prev];
-        copia[idx] = { ...copia[idx]!, titulo: novoTitulo };
+        const copia = atualizarAbaAtiva(prev, sid || sessaoAtivaId, {
+          titulo: novoTitulo,
+        });
         salvarAbasWorkspace(wsId, copia);
         return copia;
       });
     },
-    [wsId],
+    [sessaoAtivaId, wsId],
   );
 
   const aoSessaoCriada = useCallback(
@@ -268,29 +317,7 @@ export const SecretarioView: FC = () => {
       if (!realId || sessaoAtivaId === realId) return;
 
       setAbas((prev) => {
-        let idx = prev.findIndex((a) => a.id === sessaoAtivaId);
-        if (idx === -1) {
-          idx = prev.findIndex((a) => a.id.startsWith("sessao-") || a.id.startsWith("draft-"));
-        }
-        let copia: ChatTab[];
-        if (idx >= 0) {
-          copia = [...prev];
-          copia[idx] = {
-            ...copia[idx]!,
-            id: realId,
-            tabKey: copia[idx]!.tabKey || `tab_${realId}`,
-          };
-        } else {
-          copia = [
-            ...prev,
-            {
-              id: realId,
-              tabKey: `tab_${realId}`,
-              titulo: "Conversa",
-              criadoEm: Date.now(),
-            },
-          ];
-        }
+        const copia = atualizarAbaAtiva(prev, sessaoAtivaId, { id: realId });
         salvarAbasWorkspace(wsId, copia);
         return copia;
       });

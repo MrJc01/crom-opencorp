@@ -40,9 +40,16 @@ export function parsearModelo(modelo: string): { providerID: string; modelID: st
     return { providerID: "opencode", modelID: m };
   }
   const idx = m.indexOf("/");
+  const providerID = m.slice(0, idx).trim();
+  let modelID = m.slice(idx + 1).trim();
+  // Defesa contra entradas já compostas duas vezes, por exemplo
+  // google/google/gemini-2.5-flash ou openrouter/openrouter/nvidia/...
+  if (modelID.startsWith(`${providerID}/`)) {
+    modelID = modelID.slice(providerID.length + 1);
+  }
   return {
-    providerID: m.slice(0, idx).trim(),
-    modelID: m.slice(idx + 1).trim(),
+    providerID,
+    modelID,
   };
 }
 
@@ -142,25 +149,7 @@ export function obterModelosDefensivos(
     } catch {}
   }
 
-  // 4. Prioridade 1: Google AI Studio / Gemini (custo zero e veloz)
-  const temGoogle = Boolean(
-    creds.GEMINI_API_KEY ||
-      process.env.GEMINI_API_KEY ||
-      authData.google?.key ||
-      authData.antigravity?.key,
-  );
-  if (temGoogle) {
-    modelos.push("google/gemini-2.5-flash", "google/gemini-2.0-flash-exp");
-  }
-
-  // 5. Prioridade 2: Contas ativas locais em engine-accounts (ex: custom / local)
-  for (const c of contasAtivas) {
-    if (c.modeloPadrao && typeof c.modeloPadrao === "string") {
-      modelos.push(normalizarNomeModelo(c.modeloPadrao));
-    }
-  }
-
-  // 6. Prioridade 3: OpenRouter (apenas se houver chave configurada)
+  // 4. Prioridade 1: cadeia OpenRouter gratuita comprovada por probes reais.
   const temOpenRouter = Boolean(
     creds.OPENROUTER_API_KEY ||
       authData.openrouter?.key ||
@@ -168,13 +157,41 @@ export function obterModelosDefensivos(
   );
   if (temOpenRouter) {
     modelos.push(
-      "openrouter/google/gemini-2.5-flash",
-      "openrouter/meta-llama/llama-3.3-70b-instruct:free",
-      "openrouter/deepseek/deepseek-r1:free",
+      "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "openrouter/nvidia/nemotron-3.5-lightning:free",
+      "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
     );
   }
 
-  // 7. Prioridade 4: OpenAI ou Anthropic diretos
+  // 5. Google direto somente com credencial Google AI Studio real.
+  // A credencial do runtime Antigravity não é uma GEMINI_API_KEY.
+  const temGoogle = Boolean(
+    creds.GEMINI_API_KEY ||
+      process.env.GEMINI_API_KEY ||
+      authData.google?.key,
+  );
+  if (temGoogle) {
+    modelos.push("google/gemini-2.5-flash");
+  }
+
+  // 6. Contas locais só entram quando o provider está explícito e registrado.
+  // O provider custom/GPT4Free responde direto, mas ainda não consta no catálogo
+  // conectado do OpenCode; não deve contaminar a rotação defensiva.
+  for (const c of contasAtivas) {
+    if (
+      c.provider &&
+      c.provider !== "custom" &&
+      c.modeloPadrao &&
+      typeof c.modeloPadrao === "string"
+    ) {
+      const modeloConta = c.modeloPadrao.includes("/")
+        ? c.modeloPadrao
+        : `${c.provider}/${c.modeloPadrao}`;
+      modelos.push(normalizarNomeModelo(modeloConta));
+    }
+  }
+
+  // 7. Contingência final: OpenAI ou Anthropic diretos.
   if (creds.OPENAI_API_KEY || authData.openai?.key) {
     modelos.push("openai/gpt-4o-mini");
   }

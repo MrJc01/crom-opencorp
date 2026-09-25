@@ -110,6 +110,47 @@ test.describe("Chat do Secretário", () => {
     await expect(page.locator(".oc-user").last()).toContainText("Executar testes de integração", { timeout: 10000 });
   });
 
+  test("fallback de modelo aparece imediatamente enquanto o stream aguarda resposta", async ({ page }) => {
+    await page.route("**/secretario/conversa/stream*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: "event: status\ndata: {\"tipo\":\"fallback_modelo\",\"modelo\":\"modelo-reserva\",\"aviso\":\"⚡ Alternando automaticamente para modelo-reserva...\"}\n\n",
+      });
+    });
+
+    await page.locator("#chat-input").fill("teste de fallback visível");
+    await page.click("#btn-enviar");
+
+    await expect(page.locator(".oc-assistant").last()).toContainText(
+      "Alternando automaticamente para modelo-reserva",
+      { timeout: 10000 },
+    );
+  });
+
+  test("turno sem conteúdo mostra indicador e nunca deixa balão vazio", async ({ page }) => {
+    await page.route("**/secretario/conversa/stream*", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: "event: fim\ndata: {\"resposta\":\"Processamento concluído.\"}\n\n",
+      });
+    });
+
+    await page.locator("#chat-input").fill("ola");
+    await page.click("#btn-enviar");
+
+    await expect(page.getByTestId("assistant-typing-indicator")).toContainText(
+      "Pensando...",
+      { timeout: 700 },
+    );
+    await expect(page.getByTestId("assistant-empty-response")).toContainText(
+      "O modelo não retornou texto",
+      { timeout: 5000 },
+    );
+  });
+
   test("resposta com git status renderiza card interativo de arquivos", async ({ page }) => {
     await page.route("**/secretario/conversa/stream*", async (route) => {
       await route.fulfill({
@@ -170,4 +211,3 @@ test.describe("Chat do Secretário", () => {
     await expect(drawer).not.toBeVisible();
   });
 });
-

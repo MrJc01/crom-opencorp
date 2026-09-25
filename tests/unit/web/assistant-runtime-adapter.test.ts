@@ -40,6 +40,30 @@ describe("Assistant-UI Runtime Adapter — buildAssistantParts", () => {
     });
   });
 
+  it("preserva o status operacional da ferramenta para a badge ao vivo", () => {
+    const partes = buildAssistantParts(
+      "",
+      [
+        {
+          ferramenta: "bash",
+          resumo: "Inspecionando workspace",
+          sucesso: true,
+          status: "running",
+        },
+      ],
+      "",
+    );
+
+    expect(partes[0]).toMatchObject({
+      type: "tool-call",
+      toolName: "bash",
+      args: {
+        resumo: "Inspecionando workspace",
+        statusOperacional: "running",
+      },
+    });
+  });
+
   it("mantém a ordem canônica: 1. reasoning -> 2. tool-calls -> 3. text", () => {
     const ferramentas = [{ ferramenta: "git", resumo: "commit efetuado", sucesso: true }];
     const partes = buildAssistantParts("Pensando...", ferramentas, "Aqui está a resposta final.");

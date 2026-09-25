@@ -180,8 +180,12 @@ export const ToolCallView: FC<{
   toolName?: string;
   result?: unknown;
   isError?: boolean;
-}> = ({ toolName = "ferramenta", result, isError }) => {
+  status?: string;
+}> = ({ toolName = "ferramenta", result, isError, status }) => {
   const nomeLower = toolName.toLowerCase();
+  const emExecucao = ["pending", "running"].includes(
+    String(status || "").toLowerCase(),
+  );
 
   const IconeFerramenta = nomeLower.includes("git")
     ? GitBranch
@@ -206,7 +210,11 @@ export const ToolCallView: FC<{
           <span className="font-semibold text-zinc-200">{toolName}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          {isError ? (
+          {emExecucao ? (
+            <span className="flex items-center gap-1 text-[10px] text-amber-300 bg-amber-950/40 border border-amber-800/40 px-2 py-0.5 rounded-full">
+              <Sparkles size={10} className="animate-pulse" /> Executando
+            </span>
+          ) : isError ? (
             <span className="flex items-center gap-1 text-[10px] text-rose-400 bg-rose-950/40 border border-rose-800/40 px-2 py-0.5 rounded-full">
               <AlertCircle size={10} /> Falha
             </span>
@@ -407,6 +415,19 @@ const SecretarioChatInterno: FC<{
                   .filter((p) => p && p.type === "text" && typeof p.text === "string")
                   .map((p) => p.text as string)
                   .join("\n");
+                const temTextoVisivel = textoAssistente.trim().length > 0;
+                const respostaVazia = textoAssistente.trim() ===
+                  "⚠️ O modelo não retornou texto. Tente reenviar ou selecione outro modelo.";
+                const temConteudoEstruturado = (message.content as any[]).some(
+                  (parte) => {
+                    if (!parte) return false;
+                    if (parte.type === "text" || parte.type === "reasoning") {
+                      return typeof parte.text === "string" && parte.text.trim().length > 0;
+                    }
+                    return parte.type === "tool-call";
+                  },
+                );
+                const emExecucao = message.status?.type === "running";
 
                 const arquivosGit = parsearSaidaGitStatus(textoAssistente);
 
@@ -417,8 +438,29 @@ const SecretarioChatInterno: FC<{
                         <Bot size={18} />
                       </div>
                       <div className="flex-1 min-w-0 rounded-2xl rounded-tl-sm bg-zinc-900/50 border border-zinc-800/80 px-4 py-3.5 text-sm shadow-sm space-y-2">
-                        <MessagePrimitive.Parts
-                          components={{
+                        {!temConteudoEstruturado && emExecucao && (
+                          <div
+                            data-testid="assistant-typing-indicator"
+                            className="flex items-center gap-2 text-zinc-300"
+                            role="status"
+                            aria-live="polite"
+                          >
+                            <span className="flex gap-1" aria-hidden="true">
+                              {[0, 1, 2].map((indice) => (
+                                <span
+                                  key={indice}
+                                  className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"
+                                  style={{ animationDelay: `${indice * 140}ms` }}
+                                />
+                              ))}
+                            </span>
+                            <span>Pensando...</span>
+                          </div>
+                        )}
+
+                        {!respostaVazia && (
+                          <MessagePrimitive.Parts
+                            components={{
                             Text: ({ text }: { text?: string }) => {
                               if (text && text.startsWith("```terminal\n")) {
                                 const limpo = text
@@ -509,16 +551,31 @@ const SecretarioChatInterno: FC<{
                                   );
                                 },
                               },
-                              Fallback: ({ toolName, result, isError }: any) => (
+                              Fallback: ({ toolName, result, isError, args, status }: any) => (
                                 <ToolCallView
                                   toolName={toolName}
-                                  result={result}
+                                  result={result ?? args?.resumo}
                                   isError={isError}
+                                  status={args?.statusOperacional ?? status?.type}
                                 />
                               ),
                             },
-                          }}
-                        />
+                            }}
+                          />
+                        )}
+
+                        {!emExecucao && (!temTextoVisivel || respostaVazia) && (
+                          <div
+                            data-testid="assistant-empty-response"
+                            className="flex items-start gap-2 rounded-lg border border-amber-800/50 bg-amber-950/30 px-3 py-2.5 text-amber-200"
+                            role="alert"
+                          >
+                            <AlertCircle size={15} className="mt-0.5 shrink-0" />
+                            <span>
+                              O modelo não retornou texto. Tente reenviar ou selecione outro modelo.
+                            </span>
+                          </div>
+                        )}
 
                         {/* Card Interativo de Git Status se houver alterações detectadas */}
                         {arquivosGit.length > 0 && (

@@ -53,7 +53,12 @@ export function converterMensagensBackend(
  */
 export function buildAssistantParts(
   pensamento: string,
-  ferramentas: Array<{ ferramenta: string; resumo: string; sucesso: boolean }>,
+  ferramentas: Array<{
+    ferramenta: string;
+    resumo: string;
+    sucesso: boolean;
+    status?: string;
+  }>,
   texto: string,
 ): any[] {
   const partes: any[] = [];
@@ -72,7 +77,10 @@ export function buildAssistantParts(
         type: "tool-call",
         toolName: item.ferramenta || "ferramenta",
         toolCallId: `tool_${i}_${item.ferramenta}`,
-        args: {},
+        args: {
+          resumo: item.resumo || "Executando inspeção de workspace...",
+          statusOperacional: item.status || "completed",
+        },
         result: item.resumo || "Concluído",
         isError: item.sucesso === false,
       });
@@ -111,11 +119,15 @@ export function obterAuthHeaders(): Record<string, string> {
  * - Execução direta de shell via "!comando"
  */
 export function criarSecretarioModelAdapter(
-  options: SecretaryRuntimeOptions,
+  options: SecretaryRuntimeOptions | (() => SecretaryRuntimeOptions),
   sessaoIdRef: React.MutableRefObject<string | undefined>,
 ): ChatModelAdapter {
   return {
     async *run({ messages, abortSignal }: ChatModelRunOptions) {
+      // O adapter permanece estável durante uma promoção de sessão, mas cada
+      // envio precisa enxergar callbacks, anexos e contexto do render atual.
+      const optionsAtuais =
+        typeof options === "function" ? options() : options;
       const lastMsg = messages[messages.length - 1];
       let userText = "";
 
@@ -143,7 +155,7 @@ export function criarSecretarioModelAdapter(
         typeof window !== "undefined"
           ? window.location.origin
           : "http://127.0.0.1:4100";
-      const wsId = options.workspaceId || "default";
+      const wsId = optionsAtuais.workspaceId || "default";
 
       // ── !comando: Execução Direta de Shell (POST /terminal) ──
       if (trimmed.startsWith("!")) {
@@ -167,7 +179,7 @@ export function criarSecretarioModelAdapter(
               headers: {
                 "Content-Type": "application/json",
                 ...authHeaders,
-                ...(options.headers ?? {}),
+                ...(optionsAtuais.headers ?? {}),
               },
               body: JSON.stringify({ comando: comandoBruto, workspace: wsId }),
               signal: abortSignal,
@@ -210,24 +222,24 @@ export function criarSecretarioModelAdapter(
 
       // Notifica a primeira mensagem para renomear aba
       if (messages.length <= 1) {
-        options.onPrimeiraMensagem?.(userText);
+        optionsAtuais.onPrimeiraMensagem?.(userText);
       }
 
       const queryParams = new URLSearchParams();
       if (sessaoIdRef.current) queryParams.set("sessao", sessaoIdRef.current);
       if (wsId) queryParams.set("workspace", wsId);
-      const urlBase = options.url ?? "/secretario/conversa/stream";
+      const urlBase = optionsAtuais.url ?? "/secretario/conversa/stream";
       const urlFinal = `${urlBase}?${queryParams.toString()}`;
 
-      const extra = options.obterContextoEnvio?.();
+      const extra = optionsAtuais.obterContextoEnvio?.();
       const body: Record<string, unknown> = {
         cliente_id: `react_${Date.now().toString(36)}`,
         mensagem: userText,
         prompt: userText,
-        agente: extra?.agente ?? options.agente ?? "secretario",
+        agente: extra?.agente ?? optionsAtuais.agente ?? "secretario",
       };
       if (sessaoIdRef.current) body.sessao_id = sessaoIdRef.current;
-      const modeloEfetivo = extra?.modelo ?? options.modelo;
+      const modeloEfetivo = extra?.modelo ?? optionsAtuais.modelo;
       if (modeloEfetivo) {
         body.modelo = modeloEfetivo;
         body.model = modeloEfetivo;
@@ -246,7 +258,7 @@ export function criarSecretarioModelAdapter(
           headers: {
             "Content-Type": "application/json",
             ...obterAuthHeaders(),
-            ...(options.headers ?? {}),
+            ...(optionsAtuais.headers ?? {}),
           },
           body: JSON.stringify(body),
           signal: abortSignal,
@@ -272,7 +284,7 @@ export function criarSecretarioModelAdapter(
             headers: {
               "Content-Type": "application/json",
               ...obterAuthHeaders(),
-              ...(options.headers ?? {}),
+              ...(optionsAtuais.headers ?? {}),
             },
             signal: abortSignal,
           });
@@ -282,7 +294,7 @@ export function criarSecretarioModelAdapter(
             headers: {
               "Content-Type": "application/json",
               ...obterAuthHeaders(),
-              ...(options.headers ?? {}),
+              ...(optionsAtuais.headers ?? {}),
             },
             body: JSON.stringify(body),
             signal: abortSignal,
@@ -292,7 +304,7 @@ export function criarSecretarioModelAdapter(
 
       if (!resp.ok) {
         const problem = await parseProblemDetails(resp);
-        options.onErro?.(problem);
+        optionsAtuais.onErro?.(problem);
         yield {
           content: [
             {
@@ -316,8 +328,14 @@ export function criarSecretarioModelAdapter(
       let buffer = "";
       let textoAcumulado = "";
       let pensamentoAcumulado = "";
+      let statusAtual = "";
       const thinkParser = new ThinkParser();
-      const acoesAcumuladas: Array<{ ferramenta: string; resumo: string; sucesso: boolean }> = [];
+      const acoesAcumuladas: Array<{
+        ferramenta: string;
+        resumo: string;
+        sucesso: boolean;
+        status?: string;
+      }> = [];
 
       try {
         while (true) {
@@ -341,32 +359,75 @@ export function criarSecretarioModelAdapter(
               try {
                 const parsed = JSON.parse(dados);
 
-                if ((evento === "inicio" || evento === "sessao" || evento === "fim") && parsed.sessao_id) {
+                if ((evento === "inicio" || evento === "sessao") && parsed.sessao_id) {
                   const realId = String(parsed.sessao_id).trim();
                   if (realId && sessaoIdRef.current !== realId) {
                     sessaoIdRef.current = realId;
-                    options.onSessaoCriada?.(realId);
+                    optionsAtuais.onSessaoCriada?.(realId);
+                  }
+                  statusAtual = parsed.modelo
+                    ? `⏳ Processando com ${parsed.modelo}...`
+                    : "⏳ Processando...";
+                } else if (evento === "status" || evento === "fallback_modelo") {
+                  statusAtual = parsed.aviso || parsed.status || "";
+                } else if (evento === "passos" && Array.isArray(parsed.passos)) {
+                  const pensamentos = parsed.passos
+                    .filter((passo: any) => passo?.tipo === "pensamento" && passo.texto)
+                    .map((passo: any) => String(passo.texto));
+                  if (pensamentos.length > 0) {
+                    pensamentoAcumulado = pensamentos.join("\n\n");
                   }
                 } else if (evento === "pensamento") {
                   pensamentoAcumulado =
                     parsed.acumulado || pensamentoAcumulado + (parsed.delta || "");
                 } else if (evento === "delta") {
+                  statusAtual = "";
                   const deltaStr = parsed.delta || "";
                   const { deltaConteudo, deltaPensamento } = thinkParser.processDelta(deltaStr);
                   if (deltaPensamento) pensamentoAcumulado += deltaPensamento;
                   if (deltaConteudo) textoAcumulado += deltaConteudo;
                 } else if (evento === "acao") {
-                  const itens = Array.isArray(parsed) ? parsed : [parsed];
+                  const itens = Array.isArray(parsed)
+                    ? parsed
+                    : Array.isArray(parsed.itens)
+                      ? parsed.itens
+                      : parsed.ferramenta
+                        ? [parsed]
+                        : [];
                   for (const it of itens) {
-                    acoesAcumuladas.push({
-                      ferramenta: it.ferramenta || "ferramenta",
-                      resumo: it.resumo || "Concluído",
-                      sucesso: it.sucesso !== false,
-                    });
+                    const ferramenta = it.ferramenta || it.tool || "ferramenta";
+                    const resumo = it.resumo || "Executando inspeção de workspace...";
+                    const status = String(it.status || "completed");
+                    const atualizada = {
+                      ferramenta,
+                      resumo,
+                      status,
+                      sucesso:
+                        it.sucesso !== false &&
+                        !["error", "failed", "falha"].includes(status.toLowerCase()),
+                    };
+                    const idxExistente = acoesAcumuladas.findIndex(
+                      (acao) =>
+                        acao.ferramenta === ferramenta && acao.resumo === resumo,
+                    );
+                    if (idxExistente >= 0) {
+                      acoesAcumuladas[idxExistente] = atualizada;
+                    } else {
+                      acoesAcumuladas.push(atualizada);
+                    }
+                    if (["pending", "running"].includes(status.toLowerCase())) {
+                      statusAtual = `⚡ Executando ${resumo}`;
+                    }
                   }
                 } else if (evento === "fim") {
+                  statusAtual = "";
                   if (parsed.resposta && !textoAcumulado) {
-                    textoAcumulado = parsed.resposta;
+                    const resposta = String(parsed.resposta).trim();
+                    textoAcumulado = ["Processamento concluído.", "Ação concluída."].includes(
+                      resposta,
+                    )
+                      ? "⚠️ O modelo não retornou texto. Tente reenviar ou selecione outro modelo."
+                      : resposta;
                   }
                 } else if (evento === "erro") {
                   const msgErro = parsed.mensagem || parsed.erro || "Erro interno no agente";
@@ -381,7 +442,7 @@ export function criarSecretarioModelAdapter(
               const partes = buildAssistantParts(
                 pensamentoAcumulado,
                 acoesAcumuladas,
-                textoAcumulado,
+                textoAcumulado || statusAtual,
               );
               if (partes.length > 0) {
                 yield { content: partes };
@@ -391,7 +452,7 @@ export function criarSecretarioModelAdapter(
         }
       } finally {
         reader.releaseLock();
-        options.onLimparContextoEnvio?.();
+        optionsAtuais.onLimparContextoEnvio?.();
       }
 
       // Emissão final garantida
@@ -416,6 +477,8 @@ export function useOpenCorpSecretarioRuntime(
   options: SecretaryRuntimeOptions = {},
 ): AssistantRuntime {
   const sessaoIdRef = useRef<string | undefined>(options.sessaoId);
+  const optionsRef = useRef<SecretaryRuntimeOptions>(options);
+  optionsRef.current = options;
   if (options.sessaoId) {
     sessaoIdRef.current = options.sessaoId;
   }
@@ -423,7 +486,7 @@ export function useOpenCorpSecretarioRuntime(
   // Adapter gerador com streaming contínuo. Mantém a mesma instância mesmo se o sessaoId
   // for promovido durante a conversa, lendo o ID atualizado diretamente via sessaoIdRef.
   const chatModelAdapter = useMemo(
-    () => criarSecretarioModelAdapter(options, sessaoIdRef),
+    () => criarSecretarioModelAdapter(() => optionsRef.current, sessaoIdRef),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [options.workspaceId, options.agente, options.modelo],
   );
