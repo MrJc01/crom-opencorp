@@ -48,8 +48,13 @@ export const TaskCard: FC<TaskCardProps> = ({
 
   return (
     <div
+      draggable={!executando}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", task.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
       onClick={() => aoSelecionar(task)}
-      className={`group p-3 rounded-xl border cursor-pointer transition-all shadow-xs flex flex-col gap-2 relative ${
+      className={`group p-3 rounded-xl border cursor-grab active:cursor-grabbing transition-all shadow-xs flex flex-col gap-2 relative ${
         selecionada
           ? "bg-zinc-850/90 border-emerald-500/80 ring-1 ring-emerald-500/40"
           : isBloqueada

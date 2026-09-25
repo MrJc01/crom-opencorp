@@ -31,7 +31,7 @@ export const HistoricoView: FC = () => {
       const salvo = localStorage.getItem("opencorp_workspace_id");
       if (salvo) return salvo;
     }
-    return "yt-factory-01";
+    return "default";
   }, [workspaceId]);
 
   // Estados de Dados Principais

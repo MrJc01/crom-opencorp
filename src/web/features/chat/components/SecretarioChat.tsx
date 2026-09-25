@@ -24,6 +24,7 @@ import {
   Brain,
 } from "lucide-react";
 import { useOpenCorpSecretarioRuntime } from "../runtime/secretary-runtime-adapter.js";
+import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 import type { SecretaryRuntimeOptions } from "../types.js";
 
 /**
@@ -130,7 +131,11 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
   options,
   className = "",
 }) => {
-  const internalRuntime = useOpenCorpSecretarioRuntime(options ?? {});
+  const { workspaceId } = useOpenCorp();
+  const internalRuntime = useOpenCorpSecretarioRuntime({
+    workspaceId: options?.workspaceId ?? workspaceId ?? "default",
+    ...options,
+  });
   const runtime = runtimeProp ?? internalRuntime;
 
   return (

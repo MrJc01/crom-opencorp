@@ -62,6 +62,7 @@ export const TasksView: FC = () => {
   const [modalCriarAberto, setModalCriarAberto] = useState(false);
   const [taskSelecionada, setTaskSelecionada] = useState<Task | null>(null);
   const [executandoIds, setExecutandoIds] = useState<Set<string>>(new Set());
+  const [colunaArrastandoSobre, setColunaArrastandoSobre] = useState<string | null>(null);
 
   // Carregamento de Tarefas e Agentes
   const carregarDados = useCallback(async (silencioso = false) => {
@@ -294,6 +295,31 @@ export const TasksView: FC = () => {
     });
   }, [tasks, busca, filtroResponsavel]);
 
+  const handleDragOver = (e: React.DragEvent, colId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (colunaArrastandoSobre !== colId) {
+      setColunaArrastandoSobre(colId);
+    }
+  };
+
+  const handleDragLeave = (colId: string) => {
+    if (colunaArrastandoSobre === colId) {
+      setColunaArrastandoSobre(null);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent, colId: string) => {
+    e.preventDefault();
+    setColunaArrastandoSobre(null);
+    const taskId = e.dataTransfer.getData("text/plain");
+    if (!taskId) return;
+    const task = tasks.find((t) => t.id === taskId);
+    if (task && task.coluna !== colId) {
+      await moverTask(task, colId);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full w-full overflow-hidden p-6 space-y-4 bg-zinc-950">
       {/* Barra de Filtros e Ações */}
@@ -312,11 +338,19 @@ export const TasksView: FC = () => {
       <div className="flex-1 flex gap-4 min-h-0 overflow-x-auto pb-4 scrollbar-thin">
         {COLUNAS.map((col) => {
           const itens = tasksFiltradas.filter((t) => (t.coluna || "backlog") === col.id);
+          const isArrastando = colunaArrastandoSobre === col.id;
 
           return (
             <div
               key={col.id}
-              className="flex flex-col h-full bg-zinc-900/40 rounded-2xl border border-zinc-800/80 p-3.5 flex-1 min-w-[280px] max-w-[360px] shrink-0 shadow-xs"
+              onDragOver={(e) => handleDragOver(e, col.id)}
+              onDragLeave={() => handleDragLeave(col.id)}
+              onDrop={(e) => void handleDrop(e, col.id)}
+              className={`flex flex-col h-full rounded-2xl border p-3.5 flex-1 min-w-[280px] max-w-[360px] shrink-0 shadow-xs transition-all duration-150 ${
+                isArrastando
+                  ? "bg-zinc-850/80 border-emerald-500/80 ring-2 ring-emerald-500/30"
+                  : "bg-zinc-900/40 border-zinc-800/80"
+              }`}
             >
               {/* Header da Coluna */}
               <div className={`flex items-center justify-between pb-2.5 mb-2.5 border-b-2 ${col.corBorda}`}>

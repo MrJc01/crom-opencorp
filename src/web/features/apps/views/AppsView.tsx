@@ -64,7 +64,7 @@ export const AppsView: FC = () => {
         localStorage.getItem("opencorp_workspace_id");
       if (salvo && salvo.trim().length > 0) return salvo.trim();
     }
-    return "yt-factory-01";
+    return "default";
   }, [workspaceId]);
 
   const carregarApps = useCallback(async () => {

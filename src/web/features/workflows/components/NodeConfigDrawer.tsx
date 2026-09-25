@@ -72,12 +72,12 @@ export const NodeConfigDrawer: FC<NodeConfigDrawerProps> = ({
 
   // Contexto OpenCorp (opcional, com fallback seguro)
   let contextClient: any = null;
-  let contextWs: string = "yt-factory-01";
+  let contextWs: string = "default";
   try {
     const ctx = useOpenCorp();
     if (ctx) {
       contextClient = ctx.client;
-      contextWs = ctx.workspaceId || "yt-factory-01";
+      contextWs = ctx.workspaceId || "default";
     }
   } catch {
     // Isolamento para testes unitários ou render sem provider

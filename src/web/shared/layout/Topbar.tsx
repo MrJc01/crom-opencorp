@@ -20,10 +20,14 @@ export const Topbar: FC<TopbarProps> = ({
     <header className="h-14 bg-zinc-950 border-b border-zinc-850 px-4 md:px-6 flex items-center justify-between z-20 select-none">
       {/* Lado Esquerdo: Identificação do Workspace Ativo */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 font-mono">
-          <Folder size={13} className="text-emerald-400" />
+        <Link
+          to="/home"
+          title="Ver detalhes do workspace ativo ou trocar empresa (/home)"
+          className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850 text-xs text-zinc-300 font-mono transition-colors cursor-pointer group"
+        >
+          <Folder size={13} className="text-emerald-400 group-hover:scale-110 transition-transform" />
           <span className="font-semibold text-zinc-200">{workspaceId || "principal"}</span>
-        </div>
+        </Link>
 
         <span className="hidden sm:inline-block text-xs text-zinc-600">|</span>
         <span className="hidden sm:flex items-center gap-1.5 text-xs text-zinc-400">

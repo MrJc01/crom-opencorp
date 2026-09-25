@@ -46,9 +46,9 @@ export const OpenCorpProvider: FC<OpenCorpProviderProps> = ({
       if (salvo && salvo.trim().length > 0) {
         return salvo.trim();
       }
-      return "yt-factory-01";
+      return "default";
     }
-    return "yt-factory-01";
+    return "default";
   });
 
   const [notificacoesNaoLidas, setNotificacoesNaoLidas] = useState<number>(0);
@@ -87,6 +87,24 @@ export const OpenCorpProvider: FC<OpenCorpProviderProps> = ({
       timeoutMs: 25_000,
     });
   }, [authToken, wsAtivo]);
+
+  useEffect(() => {
+    if (propWorkspaceId) return;
+    const salvo =
+      typeof window !== "undefined"
+        ? localStorage.getItem("oc-ws") || localStorage.getItem("opencorp_workspace_id")
+        : null;
+    if (!salvo) {
+      void client.workspaces
+        .listar()
+        .then((lista) => {
+          if (lista && lista.length > 0 && lista[0]?.id) {
+            definirWorkspaceId(lista[0].id);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [propWorkspaceId, client.workspaces, definirWorkspaceId]);
 
   const tratarErro = useCallback((erro: unknown, fallbackTitulo = "Erro na Operação") => {
     if (erro instanceof ProblemDetailsError) {
