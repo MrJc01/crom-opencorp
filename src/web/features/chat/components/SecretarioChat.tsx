@@ -241,6 +241,7 @@ export interface SecretarioChatProps {
   sessaoId?: string;
   aoAtualizarTitulo?: (sessaoId: string, titulo: string) => void;
   aoSessaoCriada?: (sid: string) => void;
+  contextoInicial?: ContextChip[];
   className?: string;
 }
 
@@ -254,6 +255,7 @@ const SecretarioChatInterno: FC<{
   initialMessages?: ThreadMessageLike[];
   aoAtualizarTitulo?: (sessaoId: string, titulo: string) => void;
   aoSessaoCriada?: (sid: string) => void;
+  contextoInicial?: ContextChip[];
   options?: SecretaryRuntimeOptions;
   className?: string;
 }> = ({
@@ -263,12 +265,25 @@ const SecretarioChatInterno: FC<{
   initialMessages,
   aoAtualizarTitulo,
   aoSessaoCriada,
+  contextoInicial = [],
   options,
   className = "",
 }) => {
   const [agenteAtivo, setAgenteAtivo] = useState<string | null>(null);
-  const [chipsContexto, setChipsContexto] = useState<ContextChip[]>([]);
+  const [chipsContexto, setChipsContexto] = useState<ContextChip[]>(contextoInicial);
   const [anexosImagens, setAnexosImagens] = useState<AnexoImagem[]>([]);
+
+  const chaveContextoInicial = contextoInicial.map((chip) => `${chip.id}:${chip.rotulo}`).join("|");
+  useEffect(() => {
+    if (contextoInicial.length === 0) return;
+    setChipsContexto((atuais) => {
+      const mapa = new Map(
+        atuais.filter((chip) => chip.tipo !== "flow").map((chip) => [chip.id, chip]),
+      );
+      for (const chip of contextoInicial) mapa.set(chip.id, chip);
+      return Array.from(mapa.values());
+    });
+  }, [chaveContextoInicial]);
 
   const runtimeInterno = useOpenCorpSecretarioRuntime({
     workspaceId,
@@ -601,29 +616,36 @@ const SecretarioChatInterno: FC<{
                 );
               }}
             </ThreadPrimitive.Messages>
-          </ThreadPrimitive.Viewport>
 
-          {/* Composer com Primitivas do Assistant-UI */}
-          <div className="p-4 md:px-8 bg-zinc-950 border-t border-zinc-850">
-            <ChatComposer
-              agenteAtivo={agenteAtivo}
-              onDefinirAgente={(ag) => setAgenteAtivo(ag)}
-              chipsContexto={chipsContexto}
-              onAdicionarChip={(c) =>
-                setChipsContexto((prev) => [...prev, c])
-              }
-              onRemoverChip={(id) =>
-                setChipsContexto((prev) => prev.filter((c) => c.id !== id))
-              }
-              anexosImagens={anexosImagens}
-              onAdicionarImagem={(img) =>
-                setAnexosImagens((prev) => [...prev, img])
-              }
-              onRemoverImagem={(id) =>
-                setAnexosImagens((prev) => prev.filter((i) => i.id !== id))
-              }
-            />
-          </div>
+            {/* O composer pertence ao viewport da thread para preservar o
+                auto-scroll, o foco e o estado running/cancel do assistant-ui. */}
+            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-20 -mx-4 md:-mx-8 mt-6 bg-linear-to-t from-zinc-950 via-zinc-950 to-transparent px-4 pb-4 pt-8 md:px-8">
+              <ThreadPrimitive.ScrollToBottom
+                className="absolute left-1/2 top-1 -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 p-1.5 text-zinc-400 shadow-lg hover:text-zinc-100 disabled:hidden"
+                aria-label="Ir para a mensagem mais recente"
+              >
+                <ChevronDown size={14} />
+              </ThreadPrimitive.ScrollToBottom>
+              <ChatComposer
+                agenteAtivo={agenteAtivo}
+                onDefinirAgente={(ag) => setAgenteAtivo(ag)}
+                chipsContexto={chipsContexto}
+                onAdicionarChip={(c) =>
+                  setChipsContexto((prev) => [...prev, c])
+                }
+                onRemoverChip={(id) =>
+                  setChipsContexto((prev) => prev.filter((c) => c.id !== id))
+                }
+                anexosImagens={anexosImagens}
+                onAdicionarImagem={(img) =>
+                  setAnexosImagens((prev) => [...prev, img])
+                }
+                onRemoverImagem={(id) =>
+                  setAnexosImagens((prev) => prev.filter((i) => i.id !== id))
+                }
+              />
+            </ThreadPrimitive.ViewportFooter>
+          </ThreadPrimitive.Viewport>
         </ThreadPrimitive.Root>
       </div>
     </AssistantRuntimeProvider>
@@ -639,6 +661,7 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
   sessaoId,
   aoAtualizarTitulo,
   aoSessaoCriada,
+  contextoInicial,
   className = "",
 }) => {
   const { workspaceId } = useOpenCorp();
@@ -745,6 +768,7 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
       initialMessages={mensagensIniciais}
       aoAtualizarTitulo={aoAtualizarTitulo}
       aoSessaoCriada={aoSessaoCriada}
+      contextoInicial={contextoInicial}
       options={options}
       className={className}
     />

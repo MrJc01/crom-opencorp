@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, type FC, type ChangeEvent } from "react";
+import React, { useState, useEffect, useCallback, type FC } from "react";
 import {
   Cpu,
   Play,
@@ -14,6 +14,7 @@ import {
 import { showToast } from "../../../../shared/ui/Toast.js";
 import { useOpenCorp } from "../../../../providers/OpenCorpProvider.js";
 import type { EntradaSettingsRow } from "../../types.js";
+import { ModelPicker } from "../../../../shared/ui/ModelPicker.js";
 
 export interface TabModelsProps {
   todasEntradas?: EntradaSettingsRow[];
@@ -22,14 +23,26 @@ export interface TabModelsProps {
   escopoConfig?: "global" | "workspace";
 }
 
+const MODELOS_AGENTES = [
+  "opencode/nemotron-3.5-lightning-free",
+  "opencode/nemotron-3-ultra-free",
+  "opencode/mimo-v2.6-flash-free",
+  "opencode/ling-3.0-flash-fin-free",
+  "opencode/muse-spark-1.3-contributor-free",
+  "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+  "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+  "openrouter/qwen/qwen3.8-27b:free",
+  "openrouter/google/gemma-4-31b-it:free",
+  "openrouter/z-ai/glm-5.2:free",
+  "openrouter/cohere/north-mini-code:free",
+  "openrouter/thinkingmachines/inkling:free",
+];
+
 export const TabModels: FC<TabModelsProps> = ({ escopoConfig = "workspace" }) => {
   const { client, tratarErro } = useOpenCorp();
   const [escopoAtivo, setEscopoAtivo] = useState<"global" | "workspace">(escopoConfig);
-  const [modeloPrincipal, setModeloPrincipal] = useState("openrouter/google/gemini-3.8-flash");
-  const [modeloCustomizado, setModeloCustomizado] = useState("");
-  const [ordemFallback, setOrdemFallback] = useState(
-    "openrouter/google/gemini-3.8-flash\nopenrouter/nvidia/nemotron-3.5-lightning:free\nopenrouter/nvidia/nemotron-3-ultra-550b-a55b:free\nopenrouter/minimax/minimax-m3:free"
-  );
+  const [modeloPrincipal, setModeloPrincipal] = useState(MODELOS_AGENTES[0]!);
+  const [ordemFallback, setOrdemFallback] = useState<string[]>(MODELOS_AGENTES);
   const [acessoTotalGlobal, setAcessoTotalGlobal] = useState(false);
   const [aplicandoEmTodos, setAplicandoEmTodos] = useState(false);
   const [testandoModelo, setTestandoModelo] = useState<string | null>(null);
@@ -48,7 +61,7 @@ export const TabModels: FC<TabModelsProps> = ({ escopoConfig = "workspace" }) =>
       const mod = await client.http.get<any>(`/settings/modelos${query}`);
       if (mod) {
         if (mod.default_model) setModeloPrincipal(mod.default_model);
-        if (Array.isArray(mod.rotation)) setOrdemFallback(mod.rotation.join("\n"));
+        if (Array.isArray(mod.rotation)) setOrdemFallback(mod.rotation);
         if (mod.global_full_access !== undefined)
           setAcessoTotalGlobal(Boolean(mod.global_full_access));
       }
@@ -60,20 +73,14 @@ export const TabModels: FC<TabModelsProps> = ({ escopoConfig = "workspace" }) =>
   const salvarModelos = async () => {
     setSalvandoLocal(true);
     try {
-      const modFinal =
-        modeloPrincipal === "__custom__"
-          ? modeloCustomizado.trim()
-          : modeloPrincipal.trim();
+      const modFinal = modeloPrincipal.trim();
 
       if (!modFinal) {
         showToast("Informe um modelo válido", "aviso");
         return;
       }
 
-      const listaFallback = ordemFallback
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const listaFallback = ordemFallback.map((modelo) => modelo.trim()).filter(Boolean);
 
       const res = await client.http.put<any>("/settings/modelos", {
         default_model: modFinal,
@@ -99,10 +106,7 @@ export const TabModels: FC<TabModelsProps> = ({ escopoConfig = "workspace" }) =>
   };
 
   const aplicarModeloEmTodos = async () => {
-    const modFinal =
-      modeloPrincipal === "__custom__"
-        ? modeloCustomizado.trim()
-        : modeloPrincipal.trim();
+    const modFinal = modeloPrincipal.trim();
 
     if (
       !confirm(
@@ -206,71 +210,13 @@ export const TabModels: FC<TabModelsProps> = ({ escopoConfig = "workspace" }) =>
             Modelo Principal do Workspace
           </label>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <select
-              value={
-                [
-                  "openrouter/google/gemini-3.8-flash",
-                  "openrouter/nvidia/nemotron-3.5-lightning:free",
-                  "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-                  "openrouter/minimax/minimax-m3:free",
-                  "openrouter/anthropic/claude-3.5-haiku",
-                  "opencode-go/glm-5.3-flash",
-                ].includes(modeloPrincipal)
-                  ? modeloPrincipal
-                  : "__custom__"
-              }
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => {
-                const val = e.target.value;
-                if (val === "__custom__") {
-                  setModeloPrincipal("__custom__");
-                } else {
-                  setModeloPrincipal(val);
-                }
-              }}
-              className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-orange-500 cursor-pointer"
-            >
-              <option value="openrouter/google/gemini-3.8-flash">
-                google/gemini-3.8-flash (BYOK $0 / Rápido & Preciso)
-              </option>
-              <option value="openrouter/nvidia/nemotron-3.5-lightning:free">
-                nvidia/nemotron-3.5-lightning:free (Free Tier / 3.8s)
-              </option>
-              <option value="openrouter/nvidia/nemotron-3-ultra-550b-a55b:free">
-                nvidia/nemotron-3-ultra-550b-a55b:free (Flagship Raciocínio)
-              </option>
-              <option value="openrouter/minimax/minimax-m3:free">
-                minimax/minimax-m3:free (Redação Criativa)
-              </option>
-              <option value="openrouter/anthropic/claude-3.5-haiku">
-                anthropic/claude-3.5-haiku (Refatoração de Código)
-              </option>
-              <option value="opencode-go/glm-5.3-flash">
-                opencode-go/glm-5.3-flash (OpenCode Engine Direto)
-              </option>
-              <option value="__custom__">Outro (Inserir Identificador Manual...)</option>
-            </select>
-
-            {modeloPrincipal === "__custom__" && (
-              <input
-                type="text"
-                placeholder="Ex: openrouter/deepseek/deepseek-r1:free"
-                value={modeloCustomizado}
-                onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  setModeloCustomizado(e.target.value)
-                }
-                className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-orange-500"
-              />
-            )}
+            <ModelPicker className="flex-1" value={modeloPrincipal} onChange={setModeloPrincipal} />
 
             <button
               type="button"
               disabled={testandoModelo !== null}
               onClick={() => {
-                const mod =
-                  modeloPrincipal === "__custom__"
-                    ? modeloCustomizado
-                    : modeloPrincipal;
-                void testarConexaoModelo(mod);
+                void testarConexaoModelo(modeloPrincipal);
               }}
               className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-850 text-zinc-200 border border-zinc-800 text-xs font-medium transition-colors cursor-pointer shrink-0 disabled:opacity-50"
             >
@@ -300,24 +246,24 @@ export const TabModels: FC<TabModelsProps> = ({ escopoConfig = "workspace" }) =>
         </div>
 
         {/* FEEDBACK DO TESTE */}
-        {resultadoTeste[modeloPrincipal === "__custom__" ? modeloCustomizado : modeloPrincipal] && (
+        {resultadoTeste[modeloPrincipal] && (
           <div
             className={`p-3 rounded-xl border text-xs flex items-center justify-between ${
-              resultadoTeste[modeloPrincipal === "__custom__" ? modeloCustomizado : modeloPrincipal].ok
+              resultadoTeste[modeloPrincipal].ok
                 ? "bg-emerald-950/30 border-emerald-800/40 text-emerald-300"
                 : "bg-rose-950/30 border-rose-800/40 text-rose-300"
             }`}
           >
             <div className="flex items-center gap-2">
-              {resultadoTeste[modeloPrincipal === "__custom__" ? modeloCustomizado : modeloPrincipal].ok ? (
+              {resultadoTeste[modeloPrincipal].ok ? (
                 <Check size={14} className="text-emerald-400" />
               ) : (
                 <AlertCircle size={14} className="text-rose-400" />
               )}
               <span className="font-semibold">
-                {resultadoTeste[modeloPrincipal === "__custom__" ? modeloCustomizado : modeloPrincipal].ok
-                  ? `Modelo online! Latência: ${resultadoTeste[modeloPrincipal === "__custom__" ? modeloCustomizado : modeloPrincipal].ms || 0}ms`
-                  : `Erro: ${resultadoTeste[modeloPrincipal === "__custom__" ? modeloCustomizado : modeloPrincipal].error}`}
+                {resultadoTeste[modeloPrincipal].ok
+                  ? `Modelo online! Latência: ${resultadoTeste[modeloPrincipal].ms || 0}ms`
+                  : `Erro: ${resultadoTeste[modeloPrincipal].error}`}
               </span>
             </div>
           </div>
@@ -332,14 +278,7 @@ export const TabModels: FC<TabModelsProps> = ({ escopoConfig = "workspace" }) =>
         <p className="text-[11px] text-zinc-400 leading-relaxed">
           Se o modelo principal responder com HTTP 429 (Rate Limit) ou falha de inferência, o motor rotacionará automaticamente seguindo esta hierarquia exata.
         </p>
-        <textarea
-          rows={4}
-          value={ordemFallback}
-          onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
-            setOrdemFallback(e.target.value)
-          }
-          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-orange-500 leading-relaxed"
-        />
+        <ModelPicker value={ordemFallback} onChange={setOrdemFallback} multiple />
       </div>
 
       {/* GOVERNANÇA DE TIERS xB */}

@@ -283,6 +283,12 @@ describe("Módulo Central de Resolução de Modelos e Isolamento de Workspace (4
       expect(t4.recomendado).toBe(true);
     });
 
+    it("não recomenda modelos desconhecidos sem metadados como agentes", () => {
+      const desconhecido = classificarQualidadeModelo("provedor/modelo-experimental-sem-metadata");
+      expect(desconhecido.recomendado).toBe(false);
+      expect(desconhecido.tier).toBe("NAO_RECOMENDADO");
+    });
+
     it("filtra modelos com critérios de minB, maxB, free e recommended", () => {
       const modelos = [
         "openrouter/liquid/lfm-2.5-2.6b:free",

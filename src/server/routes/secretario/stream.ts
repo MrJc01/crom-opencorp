@@ -233,6 +233,9 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
             ws,
           });
           const mensagem = resolvido.mensagem;
+          const fluxosContexto = (corpo.contexto ?? [])
+            .map((item) => String(item).match(/^#?(?:flow|fluxo):(.+)$/i)?.[1]?.trim())
+            .filter((id): id is string => Boolean(id));
 
           if (!res.headersSent && !res.writableEnded) {
             res.writeHead(200, {
@@ -324,6 +327,8 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
             fase: "inicio",
             agente,
             modelo: modeloInicial,
+            workspace: ws.id,
+            fluxos: fluxosContexto,
           });
 
           // Limpa timer de grace period pendente desta sessão se cliente reconectou
@@ -695,6 +700,8 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
             fase: "fim",
             agente,
             modelo: modeloAtivoFinal,
+            workspace: ws.id,
+            fluxos: fluxosContexto,
           });
           if (onClientClose) res.off("close", onClientClose);
           liberarStreamSecretario(sessaoId, res);

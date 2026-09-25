@@ -31,7 +31,7 @@ export interface AutocompleteItem {
 
 export interface ContextChip {
   id: string;
-  tipo: "arquivo" | "task";
+  tipo: "arquivo" | "task" | "flow";
   rotulo: string;
   detalhe?: string;
 }

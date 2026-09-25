@@ -38,6 +38,20 @@ export async function resolverMencoes(
   let mensagem = mensagemBruta;
   const hidratado: string[] = [];
 
+  for (const referencia of contextoBase) {
+    const matchFlow = referencia.match(/^#?(?:flow|fluxo):(.+)$/i);
+    if (!matchFlow?.[1]) continue;
+    const flowId = matchFlow[1].trim();
+    const flow = ctx.flows
+      ? await ctx.flows.obter(ws.path, flowId).catch(() => null)
+      : null;
+    hidratado.push(
+      flow
+        ? `Fonte: fluxo ativo "${flowId}" (editável no workspace "${ws.id}")\n${JSON.stringify(flow, null, 2).slice(0, CAP_KB_CONTEXTO)}\n\nAo alterar este fluxo, preserve o ID e use as operações de FlowStore/API do workspace. A interface será atualizada em tempo real após salvar.`
+        : `Fonte: fluxo ativo "${flowId}" — não encontrado no workspace "${ws.id}"`,
+    );
+  }
+
   if (totalMencoes === 1) {
     let alvoAgente: string | null = null;
     if (tipadas.length === 1 && tipadas[0]!.tipo === "agente") alvoAgente = tipadas[0]!.valor;

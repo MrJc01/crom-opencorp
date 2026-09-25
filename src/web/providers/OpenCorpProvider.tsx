@@ -285,6 +285,8 @@ export const OpenCorpProvider: FC<OpenCorpProviderProps> = ({
         window.dispatchEvent(
           new CustomEvent("secretario:mensagem", { detail: payload })
         );
+      } else if (tipoEvento === "flow-salvo" || tipoEvento === "flow-excluido") {
+        window.dispatchEvent(new CustomEvent(tipoEvento, { detail: payload }));
       }
     };
 
@@ -299,6 +301,9 @@ export const OpenCorpProvider: FC<OpenCorpProviderProps> = ({
     eventSource.addEventListener("notificacao", handleMessage);
     eventSource.addEventListener("notificacao.nova", handleMessage);
     eventSource.addEventListener("run-fim", handleMessage);
+    eventSource.addEventListener("secretario.mensagem", handleMessage);
+    eventSource.addEventListener("flow-salvo", handleMessage);
+    eventSource.addEventListener("flow-excluido", handleMessage);
 
     return () => {
       if (eventSource) {

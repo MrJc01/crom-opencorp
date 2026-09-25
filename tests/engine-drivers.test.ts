@@ -91,6 +91,29 @@ describe("EngineRegistry & Multi-Engine Drivers", () => {
     expect(prep.cwd).toBe("/tmp/ws1");
   });
 
+  it("MiMo encaminha o modelo selecionado para o CLI", async () => {
+    const mimo = engineRegistry.get("mimo")!;
+    const prep = await mimo.prepareExecution({
+      workspaceId: "ws1",
+      workspacePath: "/tmp/ws1",
+      sessionId: "sess-mimo",
+      agentId: "operario",
+      model: "mimo/MiMo-V2-Free",
+      prompt: "Responda OK",
+      homeDir: tempHome,
+    });
+    expect(prep.args).toEqual(expect.arrayContaining(["run", "--model", "mimo/MiMo-V2-Free", "Responda OK"]));
+  });
+
+  it("GET /modelos/catalogo agrega modelos de todos os motores", async () => {
+    const res = await fetch(`http://127.0.0.1:${serverPort}/modelos/catalogo`);
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as any;
+    expect(data.total).toBeGreaterThan(0);
+    expect(data.modelos.some((m: any) => m.motor === "antigravity" && m.id === "gemini-3.8-flash-high")).toBe(true);
+    expect(data.modelos.some((m: any) => m.motor === "mimo" && m.id === "mimo/MiMo-V2-Free")).toBe(true);
+  });
+
   it("GET /api/motores deve responder 200 com lista completa de motores e diagnósticos", async () => {
     const res = await fetch(`http://127.0.0.1:${serverPort}/api/motores`);
     expect(res.status).toBe(200);

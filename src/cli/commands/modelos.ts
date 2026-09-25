@@ -7,6 +7,7 @@ import {
   filtrarModelosQualificados,
   type QualidadeModelo,
 } from "../../core/contexts/agents/model-resolver.js";
+import { MODELOS_CATALOGO_BASE } from "../../core/contexts/agents/recommended-models.js";
 
 function colorize(text: string, color: "green" | "red" | "yellow" | "cyan" | "magenta" | "gray" | "bold"): string {
   const codes: Record<string, string> = {
@@ -21,24 +22,6 @@ function colorize(text: string, color: "green" | "red" | "yellow" | "cyan" | "ma
   const reset = "\x1b[0m";
   return `${codes[color] || ""}${text}${reset}`;
 }
-
-const MODELOS_CATALOGO_BASE = [
-  "opencode/nemotron-3-ultra-free",
-  "opencode/nemotron-3.5-lightning-free",
-  "opencode/mimo-v2.5-free",
-  "opencode/ling-3.0-flash-fin-free",
-  "opencode/muse-spark-1.3-contributor-free",
-  "opencode/muse-spark-1.2-contributor-free",
-  "opencode/big-pickle",
-  "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-  "openrouter/nvidia/nemotron-3.5-lightning:free",
-  "openrouter/google/gemma-4-26b-a4b-it:free",
-  "openrouter/nex-agi/nex-n2.5-mini:free",
-  "openrouter/google/gemini-2.5-flash",
-  "opencode-go/glm-5.3-flash",
-  "opencode-go/deepseek-v4-flash",
-  "opencode-go/qwen3.6-plus",
-];
 
 function coletarModelosDisponiveis(home: string): string[] {
   const mapa = new Set<string>(MODELOS_CATALOGO_BASE);

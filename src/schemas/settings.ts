@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ROTACAO_AGENTES_RECOMENDADA } from "../core/contexts/agents/recommended-models.js";
 
 export const settingsSchema = z.object({
   version: z.number().int().default(1),
@@ -54,11 +55,7 @@ export const settingsSchema = z.object({
       reports_dir: z.string().min(1).default(".opencorp/reports/testes"),
       rotation: z
         .array(z.string().min(1))
-        .default([
-          "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-          "openrouter/minimax/minimax-m3:free",
-          "opencode/nemotron-3-ultra-free",
-        ]),
+        .default([...ROTACAO_AGENTES_RECOMENDADA]),
       timeout_minutes: z.number().int().min(1).default(25),
       health_check: z.boolean().default(true),
     })
@@ -84,7 +81,7 @@ export const settingsSchema = z.object({
       moderator: z.string().min(1).default("secretario"),
       ata_model_rotation: z
         .array(z.string().min(1))
-        .default(["opencode/nemotron-3-ultra-free", "openrouter/minimax/minimax-m3:free"]),
+        .default([...ROTACAO_AGENTES_RECOMENDADA]),
     })
     .prefault({}),
   supervisor: z

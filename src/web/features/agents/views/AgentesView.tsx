@@ -15,6 +15,7 @@ import { TeamManageModal } from "../components/TeamManageModal.js";
 import { AgentRunModal, type AlvoExecucao } from "../components/AgentRunModal.js";
 import { MODELOS_DISPONIVEIS } from "../constants.js";
 import { Cpu, X } from "lucide-react";
+import { ModelPicker } from "../../../shared/ui/ModelPicker.js";
 
 export const AgentesView: FC = () => {
   const { client, tratarErro } = useOpenCorp();
@@ -403,17 +404,7 @@ export const AgentesView: FC = () => {
               <label className="block text-zinc-300 text-xs font-medium mb-1">
                 Selecione o Modelo Alvo
               </label>
-              <select
-                value={modeloGlobalSelecionado}
-                onChange={(e) => setModeloGlobalSelecionado(e.target.value)}
-                className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 text-xs focus:outline-none focus:border-cyan-500 cursor-pointer"
-              >
-                {MODELOS_DISPONIVEIS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
+              <ModelPicker value={modeloGlobalSelecionado} onChange={setModeloGlobalSelecionado} />
             </div>
 
             <div className="pt-3 border-t border-zinc-800 flex justify-end gap-2">

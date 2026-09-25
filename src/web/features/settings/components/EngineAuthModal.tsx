@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { showToast } from "../../../shared/ui/Toast.js";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
+import { ModelPicker } from "../../../shared/ui/ModelPicker.js";
 
 export interface EngineAuthModalProps {
   aberto: boolean;
@@ -987,12 +988,11 @@ export const EngineAuthModal: FC<EngineAuthModalProps> = ({
                 <label className="block text-xs font-semibold text-zinc-300 mb-1">
                   Modelo Padrão da Conta (Opcional)
                 </label>
-                <input
-                  type="text"
-                  placeholder="ex.: google/gemini-2.5-flash, claude-3-7-sonnet, llama3.3:70b..."
+                <ModelPicker
                   value={modeloPadrao}
-                  onChange={(e) => setModeloPadrao(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-200 font-mono placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
+                  onChange={setModeloPadrao}
+                  motor={motorId || undefined}
+                  placeholder="Pesquisar modelos deste motor..."
                 />
               </div>
 

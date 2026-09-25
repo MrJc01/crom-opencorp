@@ -149,6 +149,40 @@ export const FluxosView: FC = () => {
     }
   }, [fluxoParam, fluxoAtivo, carregarFluxoAtivo]);
 
+  // Mantém o Studio sincronizado quando o Secretário/API salva o fluxo aberto.
+  useEffect(() => {
+    if (!fluxoParam || typeof window === "undefined") return;
+    const aoSalvarRemotamente = (evento: Event) => {
+      const detail = (evento as CustomEvent<{ flow?: string }>).detail;
+      if (detail?.flow === fluxoParam) void carregarFluxoAtivo(fluxoParam);
+    };
+    const aoExcluirRemotamente = (evento: Event) => {
+      const detail = (evento as CustomEvent<{ flow?: string }>).detail;
+      if (detail?.flow !== fluxoParam) return;
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("fluxo");
+        return next;
+      }, { replace: true });
+      setFluxoAtivo(null);
+      void carregarFluxos();
+    };
+    const aoFinalizarSecretario = (evento: Event) => {
+      const detail = (evento as CustomEvent<{ fase?: string; fluxos?: string[] }>).detail;
+      if (detail?.fase === "fim" && detail.fluxos?.includes(fluxoParam)) {
+        void carregarFluxoAtivo(fluxoParam);
+      }
+    };
+    window.addEventListener("flow-salvo", aoSalvarRemotamente);
+    window.addEventListener("flow-excluido", aoExcluirRemotamente);
+    window.addEventListener("secretario:mensagem", aoFinalizarSecretario);
+    return () => {
+      window.removeEventListener("flow-salvo", aoSalvarRemotamente);
+      window.removeEventListener("flow-excluido", aoExcluirRemotamente);
+      window.removeEventListener("secretario:mensagem", aoFinalizarSecretario);
+    };
+  }, [fluxoParam, carregarFluxoAtivo, carregarFluxos, setSearchParams]);
+
   // ── Navegação: Abrir Studio vs Voltar para Lista ───────────────────────
   const handleAbrirStudio = (id: string) => {
     setSearchParams((prev) => {

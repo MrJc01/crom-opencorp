@@ -3,6 +3,7 @@ import { type AgentResumo, type SkillResumo } from "@opencorp/sdk";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 import { showToast } from "../../../shared/ui/Toast.js";
 import { MODELOS_DISPONIVEIS, MOTORES_FALLBACK } from "../constants.js";
+import { ModelPicker } from "../../../shared/ui/ModelPicker.js";
 import {
   X,
   Trash2,
@@ -35,9 +36,8 @@ export const AgentInspectDrawer: FC<AgentInspectDrawerProps> = ({
 
   const [role, setRole] = useState("");
   const [modelSelect, setModelSelect] = useState("");
-  const [modelCustom, setModelCustom] = useState("");
   const [harness, setHarness] = useState("");
-  const [rotation, setRotation] = useState("");
+  const [rotation, setRotation] = useState<string[]>([]);
   const [workspaceRotationFallback, setWorkspaceRotationFallback] = useState(true);
   const [permissions, setPermissions] = useState<"level-1" | "level-2" | "level-3">("level-2");
   const [prompt, setPrompt] = useState("");
@@ -54,21 +54,10 @@ export const AgentInspectDrawer: FC<AgentInspectDrawerProps> = ({
 
     setRole(agente.role || agente.descricao || "");
     const modeloAtual = agente.modelo || agente.model || "";
-    const modConhecido = MODELOS_DISPONIVEIS.find((m) => m.id === modeloAtual);
-
-    if (modConhecido) {
-      setModelSelect(modeloAtual);
-      setModelCustom("");
-    } else if (modeloAtual) {
-      setModelSelect("custom");
-      setModelCustom(modeloAtual);
-    } else {
-      setModelSelect(MODELOS_DISPONIVEIS[0]?.id || "");
-      setModelCustom("");
-    }
+    setModelSelect(modeloAtual || MODELOS_DISPONIVEIS[0]?.id || "");
 
     setHarness(agente.harness || "opencode");
-    setRotation(agente.rotation?.join(", ") || "");
+    setRotation(agente.rotation || []);
     setWorkspaceRotationFallback(agente.workspace_rotation_fallback !== false);
     setPermissions(agente.permissions || "level-2");
     setPrompt(agente.system_prompt || agente.corpo_prompt || agente.corpo || "");
@@ -96,19 +85,11 @@ export const AgentInspectDrawer: FC<AgentInspectDrawerProps> = ({
     setSalvando(true);
 
     try {
-      const modeloFinal =
-        modelSelect === "custom" ? modelCustom.trim() : modelSelect;
-
       const payload: Partial<AgentResumo> = {
         role: role.trim() || undefined,
-        model: modeloFinal || undefined,
+        model: modelSelect || undefined,
         harness: harness || undefined,
-        rotation: rotation
-          ? rotation
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : undefined,
+        rotation: rotation.length > 0 ? rotation : undefined,
         workspace_rotation_fallback: workspaceRotationFallback,
         permissions,
         corpo_prompt: prompt,
@@ -215,28 +196,7 @@ export const AgentInspectDrawer: FC<AgentInspectDrawerProps> = ({
         {/* Modelo de Inferência */}
         <div className="space-y-1.5">
           <label className="block text-zinc-300 font-medium">Modelo Principal de IA</label>
-          <select
-            value={modelSelect}
-            onChange={(e) => setModelSelect(e.target.value)}
-            className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
-          >
-            {MODELOS_DISPONIVEIS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-            <option value="custom">Outro modelo (especificar ID)...</option>
-          </select>
-
-          {modelSelect === "custom" && (
-            <input
-              type="text"
-              value={modelCustom}
-              onChange={(e) => setModelCustom(e.target.value)}
-              placeholder="Ex: openrouter/anthropic/claude-3.7-sonnet"
-              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-100 font-mono text-xs focus:outline-none focus:border-emerald-500 mt-1"
-            />
-          )}
+          <ModelPicker value={modelSelect} onChange={setModelSelect} motor={harness || undefined} />
         </div>
 
         {/* Harness & Permissões */}
@@ -283,13 +243,7 @@ export const AgentInspectDrawer: FC<AgentInspectDrawerProps> = ({
             <label className="block text-[11px] text-zinc-400 mb-1">
               Modelos de Fallback (separados por vírgula)
             </label>
-            <input
-              type="text"
-              value={rotation}
-              onChange={(e) => setRotation(e.target.value)}
-              placeholder="meta-llama/llama-3.3-70b-instruct:free, deepseek/deepseek-r1:free"
-              className="w-full px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 font-mono text-[11px] focus:outline-none focus:border-emerald-500"
-            />
+            <ModelPicker value={rotation} onChange={setRotation} multiple motor={harness || undefined} />
           </div>
 
           <div className="flex items-center gap-2 pt-1">

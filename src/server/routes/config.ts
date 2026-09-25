@@ -17,6 +17,8 @@ import type { EngineAccount } from "../../core/engines/engine-account-store.js";
 import { listarProvedoresStatus, testarModeloDirect, completarChatDirect } from "../../core/contexts/execution/llm-client.js";
 import type { SecretOrigem } from "../../core/contexts/storage/secrets-store.js";
 import type { RouteContext } from "./types.js";
+import { ROTACAO_AGENTES_RECOMENDADA } from "../../core/contexts/agents/recommended-models.js";
+import { classificarQualidadeModelo } from "../../core/contexts/agents/model-resolver.js";
 
 export async function detectarOpencodeInfo(homeDir: string) {
   let pathEncontrado: string | null = null;
@@ -95,6 +97,60 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
   // 1. SETTINGS & CONFIG
   // ─────────────────────────────────────────────────────────────────────
   if (settings) {
+    // GET /modelos/catalogo — descoberta ao vivo de modelos por motor/provedor.
+    if (rota === "/modelos/catalogo" && req.method === "GET") {
+      const motores = await engineRegistry.listSummaries(home, false);
+      const modelos: Array<Record<string, unknown>> = [];
+      const vistos = new Set<string>();
+      const adicionar = (id: string, motor: string, origem: "live" | "hint") => {
+        const limpo = id.trim();
+        const chave = `${motor}:${limpo}`;
+        if (!limpo || vistos.has(chave)) return;
+        vistos.add(chave);
+        const qualidade = classificarQualidadeModelo(limpo);
+        modelos.push({
+          id: limpo,
+          motor,
+          provedor: limpo.includes("/") ? limpo.split("/")[0] : motor,
+          origem,
+          gratuito: qualidade.gratuito || /(?:free|gratuito)/i.test(limpo),
+          recomendado: motor !== "opencode" || qualidade.recomendado,
+          tier: qualidade.tier,
+          motivo: qualidade.motivo,
+        });
+      };
+
+      const opencode = motores.find((motor) => motor.id === "opencode");
+      if (opencode?.installed && opencode.path) {
+        try {
+          const { stdout } = await promisify(execFile)(opencode.path, ["models"], {
+            timeout: 15_000,
+            maxBuffer: 8 * 1024 * 1024,
+          });
+          for (const linha of stdout.split("\n")) {
+            if (linha.trim() && !linha.includes(" ")) adicionar(linha, "opencode", "live");
+          }
+        } catch {}
+      }
+
+      for (const motor of motores) {
+        for (const modelo of motor.supportedModelsHint) adicionar(modelo, motor.id, "hint");
+      }
+      for (const modelo of ROTACAO_AGENTES_RECOMENDADA) adicionar(modelo, "opencode", "hint");
+
+      modelos.sort((a, b) =>
+        Number(Boolean(b.recomendado)) - Number(Boolean(a.recomendado)) ||
+        Number(Boolean(b.gratuito)) - Number(Boolean(a.gratuito)) ||
+        String(a.id).localeCompare(String(b.id)),
+      );
+      enviar(res, 200, {
+        total: modelos.length,
+        modelos,
+        motores: motores.map(({ id, name, installed, version }) => ({ id, nome: name, instalado: installed, versao: version })),
+      });
+      return true;
+    }
+
     // GET /settings ou /config
     if ((rota === "/settings" || rota === "/config") && req.method === "GET") {
       if (url.searchParams.get("escopo") === "global") {
@@ -130,12 +186,7 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
             ? globalConfig.modelos.rotacao
             : Array.isArray(globalConfig.tests?.rotation) && globalConfig.tests.rotation.length > 0
             ? globalConfig.tests.rotation
-            : [
-                defaultModel,
-                "opencode/nemotron-3-ultra-free",
-                "openrouter/liquid/lfm-2.5-2.6b:free",
-                "openrouter/openrouter/free",
-              ];
+            : [defaultModel, ...ROTACAO_AGENTES_RECOMENDADA];
 
         enviar(res, 200, {
           default_model: defaultModel,
@@ -171,12 +222,7 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
       const rotation =
         Array.isArray(wsConfig.modelos?.rotacao) && wsConfig.modelos.rotacao.length > 0
           ? wsConfig.modelos.rotacao
-          : [
-              defaultModel,
-              "opencode/nemotron-3-ultra-free",
-              "openrouter/liquid/lfm-2.5-2.6b:free",
-              "openrouter/openrouter/free",
-            ];
+          : [defaultModel, ...ROTACAO_AGENTES_RECOMENDADA];
 
       enviar(res, 200, {
         default_model: defaultModel,

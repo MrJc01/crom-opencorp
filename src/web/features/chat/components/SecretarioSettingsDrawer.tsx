@@ -3,7 +3,6 @@ import {
   X,
   Cpu,
   Bot,
-  Sparkles,
   RefreshCw,
   Check,
   AlertCircle,
@@ -11,14 +10,25 @@ import {
   Info,
 } from "lucide-react";
 import { obterAuthHeaders } from "../runtime/secretary-runtime-adapter.js";
+import { ModelPicker } from "../../../shared/ui/ModelPicker.js";
 
 export const MODELOS_PRESETS_POPULARES = [
-  "openrouter/google/gemini-2.5-flash",
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "anthropic/claude-3-7-sonnet",
-  "deepseek/deepseek-r1:free",
-  "openai/gpt-4o-mini",
+  "opencode/nemotron-3.5-lightning-free",
+  "opencode/nemotron-3-ultra-free",
+  "opencode/mimo-v2.6-flash-free",
+  "opencode/ling-3.0-flash-fin-free",
+  "opencode/muse-spark-1.3-contributor-free",
+  "openrouter/nvidia/nemotron-3.5-lightning:free",
+  "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+  "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+  "openrouter/qwen/qwen3.8-27b:free",
+  "openrouter/google/gemma-4-31b-it:free",
+  "openrouter/z-ai/glm-5.2:free",
+  "openrouter/cohere/north-mini-code:free",
+  "openrouter/thinkingmachines/inkling:free",
 ];
+
+const ROTACAO_PADRAO = [...MODELOS_PRESETS_POPULARES];
 
 export interface AgenteItem {
   id: string;
@@ -41,7 +51,7 @@ export const SecretarioSettingsDrawer: FC<SecretarioSettingsDrawerProps> = ({
   aberto,
   onFechar,
   workspaceId,
-  modeloAtivo = "openrouter/google/gemini-2.5-flash",
+  modeloAtivo = "opencode/nemotron-3.5-lightning-free",
   onAplicarModelo,
   agenteAtivo = "secretario",
   onAplicarAgente,
@@ -49,8 +59,8 @@ export const SecretarioSettingsDrawer: FC<SecretarioSettingsDrawerProps> = ({
   const [agentes, setAgentes] = useState<AgenteItem[]>([]);
   const [agenteSelecionado, setAgenteSelecionado] = useState<string>(agenteAtivo || "secretario");
   const [modeloPrincipal, setModeloPrincipal] = useState<string>(modeloAtivo);
-  const [rotacaoModelos, setRotacaoModelos] = useState<string>(
-    "openrouter/google/gemini-2.5-flash\nmeta-llama/llama-3.3-70b-instruct:free\ndeepseek/deepseek-r1:free",
+  const [rotacaoModelos, setRotacaoModelos] = useState<string[]>(
+    ROTACAO_PADRAO,
   );
 
   // Estados de teste de conectividade
@@ -84,19 +94,22 @@ export const SecretarioSettingsDrawer: FC<SecretarioSettingsDrawerProps> = ({
       })
       .catch(() => {});
 
-    // Carrega configurações do workspace
-    fetch(`${origin}/settings?workspace=${encodeURIComponent(workspaceId)}`, { headers })
+    fetch(`${origin}/settings/secretary.model?workspace=${encodeURIComponent(workspaceId)}`, { headers })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data?.secretary?.model) {
-          setModeloPrincipal(data.secretary.model);
-        }
-        if (data?.secretary?.agent) {
-          setAgenteSelecionado(data.secretary.agent);
-        }
-        if (Array.isArray(data?.secretary?.fallback_models)) {
-          setRotacaoModelos(data.secretary.fallback_models.join("\n"));
-        }
+        if (typeof data?.valor === "string") setModeloPrincipal(data.valor);
+      })
+      .catch(() => {});
+    fetch(`${origin}/settings/secretary.agent?workspace=${encodeURIComponent(workspaceId)}`, { headers })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (typeof data?.valor === "string") setAgenteSelecionado(data.valor);
+      })
+      .catch(() => {});
+    fetch(`${origin}/settings/modelos?workspace=${encodeURIComponent(workspaceId)}`, { headers })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (Array.isArray(data?.rotation)) setRotacaoModelos(data.rotation);
       })
       .catch(() => {});
   }, [aberto, workspaceId]);
@@ -146,27 +159,32 @@ export const SecretarioSettingsDrawer: FC<SecretarioSettingsDrawerProps> = ({
     setSalvando(true);
     setSalvoSucesso(false);
     const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:4100";
-    const listaRotacao = rotacaoModelos
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
+    const listaRotacao = rotacaoModelos.map((modelo) => modelo.trim()).filter(Boolean);
 
     try {
-      await fetch(`${origin}/settings?workspace=${encodeURIComponent(workspaceId)}`, {
+      const opcoes = {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           ...obterAuthHeaders(),
           ...(workspaceId ? { "x-opencorp-workspace": workspaceId } : {}),
         },
-        body: JSON.stringify({
-          secretary: {
-            agent: agenteSelecionado,
-            model: modeloPrincipal,
-            fallback_models: listaRotacao,
-          },
+      };
+      const respostas = await Promise.all([
+        fetch(`${origin}/settings?workspace=${encodeURIComponent(workspaceId)}`, {
+          ...opcoes,
+          body: JSON.stringify({ chave: "secretary.model", valor: modeloPrincipal, scope: "workspace" }),
         }),
-      });
+        fetch(`${origin}/settings?workspace=${encodeURIComponent(workspaceId)}`, {
+          ...opcoes,
+          body: JSON.stringify({ chave: "secretary.agent", valor: agenteSelecionado, scope: "workspace" }),
+        }),
+        fetch(`${origin}/settings/modelos?workspace=${encodeURIComponent(workspaceId)}`, {
+          ...opcoes,
+          body: JSON.stringify({ default_model: modeloPrincipal, rotation: listaRotacao, escopo: "workspace" }),
+        }),
+      ]);
+      if (respostas.some((res) => !res.ok)) throw new Error("Falha ao persistir configurações do Secretário");
 
       onAplicarModelo?.(modeloPrincipal);
       onAplicarAgente?.(agenteSelecionado);
@@ -175,8 +193,8 @@ export const SecretarioSettingsDrawer: FC<SecretarioSettingsDrawerProps> = ({
         setSalvoSucesso(false);
         onFechar();
       }, 700);
-    } catch {
-      // Ignora erro de persistência em modo offline
+    } catch (erro) {
+      setResultadoTeste({ ok: false, msg: erro instanceof Error ? erro.message : "Falha ao salvar" });
     } finally {
       setSalvando(false);
     }
@@ -237,39 +255,7 @@ export const SecretarioSettingsDrawer: FC<SecretarioSettingsDrawerProps> = ({
           {/* Modelo Principal */}
           <div className="space-y-1.5">
             <label className="font-medium text-zinc-300 block">Modelo Principal</label>
-            <input
-              type="text"
-              className="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500/80"
-              placeholder="ex.: openrouter/google/gemini-2.5-flash"
-              value={modeloPrincipal}
-              onChange={(e) => setModeloPrincipal(e.target.value)}
-            />
-
-            {/* Sugestões Rápidas de Modelos Populares */}
-            <div className="space-y-1 pt-1">
-              <span className="text-[11px] text-zinc-400 flex items-center gap-1">
-                <Sparkles size={11} className="text-amber-400" /> Presets rápidos (clique para aplicar):
-              </span>
-              <div className="flex flex-wrap gap-1">
-                {MODELOS_PRESETS_POPULARES.map((mod) => {
-                  const selecionado = modeloPrincipal === mod;
-                  return (
-                    <button
-                      key={mod}
-                      type="button"
-                      onClick={() => setModeloPrincipal(mod)}
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-mono border transition-colors cursor-pointer ${
-                        selecionado
-                          ? "bg-emerald-950/50 text-emerald-300 border-emerald-500/70 font-semibold"
-                          : "bg-zinc-850/80 hover:bg-zinc-750 text-zinc-300 border-zinc-700/60"
-                      }`}
-                    >
-                      {mod.split("/").slice(-1)[0]}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            <ModelPicker value={modeloPrincipal} onChange={setModeloPrincipal} />
           </div>
 
           {/* Rotação e Fallback de Modelos */}
@@ -277,13 +263,7 @@ export const SecretarioSettingsDrawer: FC<SecretarioSettingsDrawerProps> = ({
             <label className="font-medium text-zinc-300 block">
               Cadeia de Rotação / Fallback Autônomo
             </label>
-            <textarea
-              rows={4}
-              className="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500/80 scrollbar-thin resize-none leading-relaxed"
-              placeholder={"openrouter/google/gemini-2.5-flash\nmeta-llama/llama-3.3-70b-instruct:free\ndeepseek/deepseek-r1:free"}
-              value={rotacaoModelos}
-              onChange={(e) => setRotacaoModelos(e.target.value)}
-            />
+            <ModelPicker value={rotacaoModelos} onChange={setRotacaoModelos} multiple />
 
             <div className="p-2.5 rounded-lg bg-zinc-900/40 border border-zinc-800/80 space-y-1">
               <div className="flex items-center gap-1 text-zinc-300 font-medium">

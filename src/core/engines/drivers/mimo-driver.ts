@@ -18,7 +18,16 @@ export class MimoDriver implements EngineDriver {
   description = "Assistente de código e agente de execução autônomo da Xiaomi com modelos multimodais de contexto ilimitado";
   category = "cli" as const;
   maintainer = "Xiaomi";
-  supportedModelsHint = ["xiaomi/mimo-v2.6-pro", "xiaomi/mimo-v2.5"];
+  supportedModelsHint = [
+    "mimo/MiMo-V2-Free",
+    "xiaomi/mimo-v2.5-free",
+    "xiaomi/mimo-v2.5",
+    "xiaomi/mimo-v2.5-pro",
+    "xiaomi/mimo-v2.5-pro-ultraspeed",
+    "xiaomi/mimo-v2.6-flash",
+    "xiaomi/mimo-v2.6-pro",
+    "xiaomi/mimo-v2.6-pro-ultraspeed",
+  ];
   comandoPadrao = "mimo";
 
   private candidatePaths(homeDir: string): string[] {
@@ -168,9 +177,12 @@ export class MimoDriver implements EngineDriver {
     cwd: string;
   }> {
     const status = await this.isInstalled(opts.homeDir);
+    const args = ["run", "--dangerously-skip-permissions"];
+    if (opts.model?.trim()) args.push("--model", opts.model.trim());
+    args.push(opts.prompt);
     return {
       binary: status.path || this.comandoPadrao,
-      args: ["run", "--dangerously-skip-permissions", opts.prompt],
+      args,
       env: {
         ...(process.env as Record<string, string>),
         ...(opts.envOverrides || {}),

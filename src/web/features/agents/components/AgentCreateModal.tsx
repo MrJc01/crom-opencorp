@@ -4,6 +4,7 @@ import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 import { showToast } from "../../../shared/ui/Toast.js";
 import { MODELOS_DISPONIVEIS } from "../constants.js";
 import { X, Sparkles, Sliders, Copy, Plus, Wand2, Loader2 } from "lucide-react";
+import { ModelPicker } from "../../../shared/ui/ModelPicker.js";
 
 export interface AgentCreateModalProps {
   aberto: boolean;
@@ -282,17 +283,7 @@ export const AgentCreateModal: FC<AgentCreateModalProps> = ({
 
           <div>
             <label className="block text-zinc-300 font-medium mb-1">Modelo de Inferência</label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
-            >
-              {MODELOS_DISPONIVEIS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+            <ModelPicker value={model} onChange={setModel} />
           </div>
 
           <div>

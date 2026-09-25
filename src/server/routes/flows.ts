@@ -63,7 +63,7 @@ export async function handleFlowRoutes(ctx: RouteContext): Promise<boolean> {
         arestas: corpo.arestas ?? [],
         ativo: corpo.ativo ?? atual.ativo ?? true,
       });
-      eventBus.emit("flow-salvo", { flow: flowId });
+      eventBus.emit("flow-salvo", { flow: flowId, workspace: ws.id });
       enviar(res, 200, await flows.obter(ws.path, flowId));
       return true;
     }
@@ -77,10 +77,12 @@ export async function handleFlowRoutes(ctx: RouteContext): Promise<boolean> {
         arestas: corpo.arestas ?? [],
         ativo: corpo.ativo ?? true,
       });
+      eventBus.emit("flow-salvo", { flow: f.id, workspace: ws.id });
       enviar(res, 201, f);
       return true;
     }
     const f = await flows.criar(ws.path, flowId, corpo.nome ?? flowId);
+    eventBus.emit("flow-salvo", { flow: f.id, workspace: ws.id });
     enviar(res, 201, f);
     return true;
   }
@@ -103,7 +105,7 @@ export async function handleFlowRoutes(ctx: RouteContext): Promise<boolean> {
       sobrescrever,
       novoId: typeof novoId === "string" && novoId.trim().length > 0 ? novoId.trim() : undefined,
     });
-    eventBus.emit("flow-salvo", { flow: importado.id });
+    eventBus.emit("flow-salvo", { flow: importado.id, workspace: ws.id });
     enviar(res, 201, { ok: true, flow: importado });
     return true;
   }
@@ -147,7 +149,7 @@ export async function handleFlowRoutes(ctx: RouteContext): Promise<boolean> {
       nome: String(corpo.nome ?? atual.nome),
       ativo: typeof corpo.ativo === "boolean" ? corpo.ativo : (atual.ativo ?? true),
     } as Parameters<typeof flows.salvar>[1]);
-    eventBus.emit("flow-salvo", { flow: flowId });
+    eventBus.emit("flow-salvo", { flow: flowId, workspace: ws.id });
     enviar(res, 200, await flows.obter(ws.path, flowId));
     return true;
   }
@@ -156,7 +158,7 @@ export async function handleFlowRoutes(ctx: RouteContext): Promise<boolean> {
     const ws = await resolverWs(url);
     const flowId = decodeURIComponent(mFlow[1]!);
     await flows.deletar(ws.path, flowId);
-    eventBus.emit("flow-excluido", { flow: flowId });
+    eventBus.emit("flow-excluido", { flow: flowId, workspace: ws.id });
     enviar(res, 200, { ok: true, id: flowId });
     return true;
   }

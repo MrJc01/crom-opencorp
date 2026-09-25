@@ -126,6 +126,23 @@ export function classificarQualidadeModelo(modelo: string): QualidadeModelo {
     };
   }
 
+  const familiaConhecida = [
+    "nemotron", "gemini", "claude", "deepseek", "glm-", "qwen", "gemma",
+    "mimo", "minimax", "ling-", "muse-", "big-pickle", "space-bunny",
+    "north-mini-code", "inkling", "nex-n",
+  ].some((familia) => m.includes(familia));
+  if (parametrosB === null && !familiaConhecida) {
+    return {
+      modelo,
+      parametrosB: null,
+      gratuito,
+      tier: "NAO_RECOMENDADO",
+      recomendado: false,
+      categoria: "inadequado",
+      motivo: "Modelo sem metadados de capacidade conhecidos; valide tool-calling antes de usá-lo em agentes.",
+    };
+  }
+
   // Tier S: Flagships e Raciocínio Profundo (>70B)
   if (
     m.includes("gemini-2.5") ||
@@ -192,8 +209,8 @@ export function filtrarModelosQualificados(
     .filter((q) => {
       if (apenasGratuitos && !q.gratuito) return false;
       if (apenasRecomendados && !q.recomendado) return false;
-      if (minB !== undefined && q.parametrosB !== null && q.parametrosB < minB) return false;
-      if (maxB !== undefined && q.parametrosB !== null && q.parametrosB > maxB) return false;
+      if (minB !== undefined && (q.parametrosB === null || q.parametrosB < minB)) return false;
+      if (maxB !== undefined && (q.parametrosB === null || q.parametrosB > maxB)) return false;
       return true;
     });
 }
