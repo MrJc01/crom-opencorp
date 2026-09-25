@@ -249,12 +249,21 @@ export const SecretarioView: FC = () => {
 
   const aoSessaoCriada = useCallback(
     (sidBackend: string) => {
-      if (!sessaoAtivaId || sessaoAtivaId === sidBackend) return;
+      const realId = String(sidBackend || "").trim();
+      if (!realId || sessaoAtivaId === realId) return;
+
       setAbas((prev) => {
-        const idx = prev.findIndex((a) => a.id === sessaoAtivaId);
-        if (idx === -1) return prev;
-        const copia = [...prev];
-        copia[idx] = { ...copia[idx]!, id: sidBackend };
+        let idx = prev.findIndex((a) => a.id === sessaoAtivaId);
+        if (idx === -1) {
+          idx = prev.findIndex((a) => a.id.startsWith("sessao-") || a.id.startsWith("draft-"));
+        }
+        let copia: ChatTab[];
+        if (idx >= 0) {
+          copia = [...prev];
+          copia[idx] = { ...copia[idx]!, id: realId };
+        } else {
+          copia = [...prev, { id: realId, titulo: "Conversa", criadoEm: Date.now() }];
+        }
         salvarAbasWorkspace(wsId, copia);
         return copia;
       });
@@ -262,12 +271,12 @@ export const SecretarioView: FC = () => {
       setSearchParams(
         (p) => {
           const next = new URLSearchParams(p);
-          next.set("sessao", sidBackend);
+          next.set("sessao", realId);
           return next;
         },
         { replace: true },
       );
-      localStorage.setItem(`oc-secretario-sessao-ativa:${wsId}`, sidBackend);
+      localStorage.setItem(`oc-secretario-sessao-ativa:${wsId}`, realId);
     },
     [sessaoAtivaId, setSearchParams, wsId],
   );

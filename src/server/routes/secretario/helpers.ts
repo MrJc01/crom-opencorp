@@ -13,8 +13,28 @@ import type { RouteContext } from "../types.js";
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export function parsearModelo(modelo: string): { providerID: string; modelID: string } {
+export function normalizarNomeModelo(modelo: string): string {
   const m = String(modelo ?? "").trim();
+  if (!m) return "";
+  if (!m.includes("/")) {
+    if (m.startsWith("gemini-") || m.startsWith("gemma-")) {
+      return `google/${m}`;
+    }
+    if (m.startsWith("claude-")) {
+      return `anthropic/${m}`;
+    }
+    if (m.startsWith("gpt-") || m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4")) {
+      return `openai/${m}`;
+    }
+    if (m.startsWith("glm-")) {
+      return `opencode-go/${m}`;
+    }
+  }
+  return m;
+}
+
+export function parsearModelo(modelo: string): { providerID: string; modelID: string } {
+  const m = normalizarNomeModelo(modelo);
   if (!m) return { providerID: "opencode", modelID: "default" };
   if (!m.includes("/")) {
     return { providerID: "opencode", modelID: m };
@@ -96,7 +116,7 @@ export function obterModelosDefensivos(
 
   // 1. Se o usuário solicitou um modelo específico, ele é prioridade número 1
   if (modeloSolicitado && modeloSolicitado.trim()) {
-    modelos.push(modeloSolicitado.trim());
+    modelos.push(normalizarNomeModelo(modeloSolicitado.trim()));
   }
 
   // 2. Lê auth.json para checar provedores configurados
@@ -136,7 +156,7 @@ export function obterModelosDefensivos(
   // 5. Prioridade 2: Contas ativas locais em engine-accounts (ex: custom / local)
   for (const c of contasAtivas) {
     if (c.modeloPadrao && typeof c.modeloPadrao === "string") {
-      modelos.push(c.modeloPadrao);
+      modelos.push(normalizarNomeModelo(c.modeloPadrao));
     }
   }
 
@@ -193,14 +213,16 @@ export async function resolverModelos(
     } catch {}
   }
 
+  const modReq = modeloRequisicao ? normalizarNomeModelo(modeloRequisicao) : undefined;
+
   // Obtém modelos defensivos reais a partir das credenciais do usuário
   let defensivos: { modelos: string[]; motorPadrao: string };
   try {
-    defensivos = obterModelosDefensivos(home, modeloRequisicao);
+    defensivos = obterModelosDefensivos(home, modReq);
   } catch (err) {
     // Fallback permissivo para desenvolvimento com modelo solicitado
     defensivos = {
-      modelos: [modeloRequisicao || "google/gemini-2.5-flash"].filter(Boolean),
+      modelos: [modReq || "google/gemini-2.5-flash"].filter(Boolean),
       motorPadrao: "opencode",
     };
   }
@@ -209,10 +231,11 @@ export async function resolverModelos(
     const { cadeia } = resolverCadeiaModelosAgente({
       agente: ag?.frontmatter || ag,
       wsPath: wsPath || "",
-      modeloSolicitado: modeloRequisicao,
+      modeloSolicitado: modReq,
     });
+    const cadeiaNormalizada = cadeia.map((m) => normalizarNomeModelo(m));
     // Mescla cadeia do agente com contingência defensiva real sem duplicatas
-    const listaFinal = [...new Set([...cadeia, ...defensivos.modelos])];
+    const listaFinal = [...new Set([...cadeiaNormalizada, ...defensivos.modelos])];
     return { modelos: listaFinal, motorPadrao: "opencode" };
   } catch {
     return defensivos;

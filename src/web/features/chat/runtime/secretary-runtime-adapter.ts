@@ -341,9 +341,12 @@ export function criarSecretarioModelAdapter(
               try {
                 const parsed = JSON.parse(dados);
 
-                if (evento === "sessao" && parsed.sessao_id) {
-                  sessaoIdRef.current = parsed.sessao_id;
-                  options.onSessaoCriada?.(parsed.sessao_id);
+                if ((evento === "inicio" || evento === "sessao" || evento === "fim") && parsed.sessao_id) {
+                  const realId = String(parsed.sessao_id).trim();
+                  if (realId && sessaoIdRef.current !== realId) {
+                    sessaoIdRef.current = realId;
+                    options.onSessaoCriada?.(realId);
+                  }
                 } else if (evento === "pensamento") {
                   pensamentoAcumulado =
                     parsed.acumulado || pensamentoAcumulado + (parsed.delta || "");
