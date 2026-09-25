@@ -517,11 +517,11 @@ export const AtivosView: FC = () => {
       </div>
 
       {/* Navegação por Abas do Hub */}
-      <div className="flex items-center gap-2 border-b border-zinc-800/80 pb-3 overflow-x-auto text-xs">
+      <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800/80 pb-3 overflow-x-auto overflow-y-hidden text-xs">
         <button
           type="button"
           onClick={() => setAbaAtiva("packs")}
-          className={`px-4 py-2 rounded-xl font-medium flex items-center gap-2 transition-all cursor-pointer ${
+          className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-xl font-medium flex items-center gap-2 transition-all cursor-pointer ${
             abaAtiva === "packs"
               ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-950/20"
               : "bg-zinc-900/60 text-zinc-400 border border-zinc-800/80 hover:bg-zinc-800/60 hover:text-zinc-200"
@@ -537,7 +537,7 @@ export const AtivosView: FC = () => {
         <button
           type="button"
           onClick={() => setAbaAtiva("skills")}
-          className={`px-4 py-2 rounded-xl font-medium flex items-center gap-2 transition-all cursor-pointer ${
+          className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-xl font-medium flex items-center gap-2 transition-all cursor-pointer ${
             abaAtiva === "skills"
               ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-950/20"
               : "bg-zinc-900/60 text-zinc-400 border border-zinc-800/80 hover:bg-zinc-800/60 hover:text-zinc-200"
@@ -553,7 +553,7 @@ export const AtivosView: FC = () => {
         <button
           type="button"
           onClick={() => setAbaAtiva("agent-templates")}
-          className={`px-4 py-2 rounded-xl font-medium flex items-center gap-2 transition-all cursor-pointer ${
+          className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-xl font-medium flex items-center gap-2 transition-all cursor-pointer ${
             abaAtiva === "agent-templates"
               ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-950/20"
               : "bg-zinc-900/60 text-zinc-400 border border-zinc-800/80 hover:bg-zinc-800/60 hover:text-zinc-200"
@@ -569,7 +569,7 @@ export const AtivosView: FC = () => {
         <button
           type="button"
           onClick={() => setAbaAtiva("flow-templates")}
-          className={`px-4 py-2 rounded-xl font-medium flex items-center gap-2 transition-all cursor-pointer ${
+          className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-xl font-medium flex items-center gap-2 transition-all cursor-pointer ${
             abaAtiva === "flow-templates"
               ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-950/20"
               : "bg-zinc-900/60 text-zinc-400 border border-zinc-800/80 hover:bg-zinc-800/60 hover:text-zinc-200"
