@@ -5,6 +5,7 @@ import {
   OpenCodeTabsHeader,
   type ChatTab,
 } from "../components/OpenCodeTabsHeader.js";
+import { HistoricoModal } from "../components/HistoricoModal.js";
 import { SecretarioChat } from "../components/SecretarioChat.js";
 
 /**
@@ -58,6 +59,7 @@ export const SecretarioView: FC = () => {
   });
 
   const sessaoAtivaId = sessaoParam || abas[0]?.id || null;
+  const [historicoAberto, setHistoricoAberto] = useState<boolean>(false);
 
   // Sincroniza abas e URL ao montar ou mudar de workspaceId
   useEffect(() => {
@@ -258,6 +260,7 @@ export const SecretarioView: FC = () => {
         aoFecharAba={aoFecharAba}
         aoNovaAba={aoNovaAba}
         workspaceId={wsId}
+        onAbrirHistorico={() => setHistoricoAberto(true)}
       />
       <div className="flex-1 min-h-0 overflow-hidden relative">
         <SecretarioChat
@@ -267,6 +270,19 @@ export const SecretarioView: FC = () => {
           aoSessaoCriada={aoSessaoCriada}
         />
       </div>
+      <HistoricoModal
+        open={historicoAberto}
+        onOpenChange={setHistoricoAberto}
+        sessoes={abas.map((a) => ({
+          id: a.id,
+          titulo: a.titulo,
+          criado_em: a.criadoEm,
+        }))}
+        sessaoAtivaId={sessaoAtivaId}
+        onSelecionarSessao={aoSelecionarAba}
+        onNovaConversa={aoNovaAba}
+        onExcluirSessao={aoFecharAba}
+      />
     </div>
   );
 };

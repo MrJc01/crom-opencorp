@@ -265,7 +265,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
             return;
           }
 
-          const porta = await obterPorta(ctx);
+          const porta = await obterPorta(ctx, true);
           const baseUrl = `http://127.0.0.1:${porta}`;
           const agente = resolvido.agente ?? "secretario-exec";
           let sessaoId = corpo.sessao_id || url.searchParams.get("sessao") || undefined;

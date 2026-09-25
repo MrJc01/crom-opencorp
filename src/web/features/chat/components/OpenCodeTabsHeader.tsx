@@ -6,6 +6,7 @@ import {
   Maximize2,
   Minimize2,
   Sparkles,
+  History,
 } from "lucide-react";
 
 export interface ChatTab {
@@ -25,6 +26,7 @@ export interface OpenCodeTabsHeaderProps {
   carregando?: boolean;
   onToggleFullscreen?: () => void;
   isFullscreen?: boolean;
+  onAbrirHistorico?: () => void;
 }
 
 /**
@@ -52,6 +54,7 @@ export const OpenCodeTabsHeader: FC<OpenCodeTabsHeaderProps> = ({
   carregando = false,
   onToggleFullscreen,
   isFullscreen = false,
+  onAbrirHistorico,
 }) => {
   return (
     <header
@@ -135,10 +138,25 @@ export const OpenCodeTabsHeader: FC<OpenCodeTabsHeaderProps> = ({
           </div>
         )}
 
-        {/* Identificador do Workspace */}
-        <span className="hidden md:inline-block text-[10px] font-mono text-zinc-500">
-          {workspaceId}
+        {/* Identificador do Workspace e Título */}
+        <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-400">
+          <span className="text-zinc-300 font-semibold">Secretário</span>
+          <span className="text-zinc-600">·</span>
+          <span className="font-mono text-[10px] text-zinc-500">{workspaceId}</span>
         </span>
+
+        {/* Botão Histórico de Sessões */}
+        {onAbrirHistorico && (
+          <button
+            type="button"
+            onClick={onAbrirHistorico}
+            className="p-1 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 transition-colors cursor-pointer"
+            title="Histórico de Sessões"
+            aria-label="Histórico de Sessões"
+          >
+            <History size={13} />
+          </button>
+        )}
 
         {/* Botão Tela Cheia / Restaurar */}
         {onToggleFullscreen && (

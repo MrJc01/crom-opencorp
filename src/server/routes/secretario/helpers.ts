@@ -58,11 +58,20 @@ export async function resolverCaminhoLocal(wsPath: string, pathParam: string): P
   return alvo;
 }
 
-export async function obterPorta(ctx: RouteContext): Promise<number> {
+export async function obterPorta(ctx: RouteContext, autoIniciar = false): Promise<number> {
   const { portaOpencodeOuErro, opencodeServer } = ctx;
-  if (portaOpencodeOuErro) return portaOpencodeOuErro();
+  if (portaOpencodeOuErro) return portaOpencodeOuErro(autoIniciar);
   if (!opencodeServer) throw new SecretarioError("servidor do motor de IA não configurado", { status: 500 });
-  const st = await opencodeServer.status();
+  let st = await opencodeServer.status();
+  if (autoIniciar && (!st.rodando || !st.porta)) {
+    try {
+      const res = await opencodeServer.iniciar();
+      if (res.porta) return res.porta;
+      st = await opencodeServer.status();
+    } catch (err) {
+      console.error("[secretario] falha ao auto-iniciar opencode server:", err);
+    }
+  }
   if (!st.rodando || !st.porta) {
     throw new SecretarioError("motor do secretário não iniciado — execute POST /secretario/start", { status: 409 });
   }

@@ -93,6 +93,19 @@ export function buildAssistantParts(
  * de streaming SSE nativo (`POST /secretario/conversa/stream`) e hidrata
  * o histórico de mensagens da sessão ativa no F5.
  */
+function obterAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (typeof window !== "undefined") {
+    const t =
+      localStorage.getItem("oc-token") ||
+      localStorage.getItem("opencorp_token");
+    if (t) {
+      headers["Authorization"] = `Bearer ${t.trim()}`;
+    }
+  }
+  return headers;
+}
+
 export function useOpenCorpSecretarioRuntime(
   options: SecretaryRuntimeOptions = {},
 ): AssistantRuntime {
@@ -105,6 +118,31 @@ export function useOpenCorpSecretarioRuntime(
 
   const urlBase = options.url ?? "/secretario/conversa/stream";
   const wsId = options.workspaceId ?? "default";
+
+  // Garante que o motor do secretário esteja iniciado no backend (compatibilidade legada)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const origin = window.location.origin;
+    const authHeaders = obterAuthHeaders();
+    fetch(`${origin}/secretario/status`, {
+      headers: { ...authHeaders },
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const st = await res.json();
+        if (st && !st.rodando) {
+          await fetch(`${origin}/secretario/start`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...authHeaders,
+              ...(options.headers ?? {}),
+            },
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }, [options.headers]);
 
   // Hidratação no F5 ou troca de aba: carrega mensagens persistidas no backend
   useEffect(() => {
@@ -140,6 +178,7 @@ export function useOpenCorpSecretarioRuntime(
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      ...obterAuthHeaders(),
       ...(wsId ? { "x-opencorp-workspace": wsId } : {}),
       ...(options.headers ?? {}),
     };
@@ -246,77 +285,107 @@ export function useOpenCorpSecretarioRuntime(
         });
       };
 
-      try {
-        const queryParams = new URLSearchParams();
-        if (sessaoIdRef.current) queryParams.set("sessao", sessaoIdRef.current);
-        if (wsId) queryParams.set("workspace", wsId);
-        const urlFinal = `${urlBase}?${queryParams.toString()}`;
+      const dispararComRetry = async (tentativa = 1): Promise<void> => {
+        try {
+          const queryParams = new URLSearchParams();
+          if (sessaoIdRef.current) queryParams.set("sessao", sessaoIdRef.current);
+          if (wsId) queryParams.set("workspace", wsId);
+          const urlFinal = `${urlBase}?${queryParams.toString()}`;
 
-        const body: Record<string, unknown> = {
-          cliente_id: `react_${Date.now().toString(36)}`,
-          mensagem: userText,
-          prompt: userText,
-          agente: options.agente ?? "secretario",
-        };
-        if (sessaoIdRef.current) body.sessao_id = sessaoIdRef.current;
-        if (options.modelo) {
-          body.modelo = options.modelo;
-          body.model = options.modelo;
-        }
+          const body: Record<string, unknown> = {
+            cliente_id: `react_${Date.now().toString(36)}`,
+            mensagem: userText,
+            prompt: userText,
+            agente: options.agente ?? "secretario",
+          };
+          if (sessaoIdRef.current) body.sessao_id = sessaoIdRef.current;
+          if (options.modelo) {
+            body.modelo = options.modelo;
+            body.model = options.modelo;
+          }
 
-        await executarSecretarioStream({
-          url: urlFinal,
-          headers: {
-            "Content-Type": "application/json",
-            ...(options.headers ?? {}),
-          },
-          body,
-          signal: controller.signal,
-          callbacks: {
-            onSessaoId: (sid) => {
-              sessaoIdRef.current = sid;
-              options.onSessaoCriada?.(sid);
+          await executarSecretarioStream({
+            url: urlFinal,
+            headers: {
+              "Content-Type": "application/json",
+              ...obterAuthHeaders(),
+              ...(options.headers ?? {}),
             },
-            onPensamento: (_delta, acumulado) => {
-              pensamentoBuffer = acumulado;
-              sincronizarAssistente();
-            },
-            onDelta: (_delta, acumulado) => {
-              textoBuffer = acumulado;
-              sincronizarAssistente();
-            },
-            onAcao: (itens) => {
-              ferramentasBuffer = itens;
-              sincronizarAssistente();
-            },
-            onFim: () => {
-              setIsRunning(false);
-              abortControllerRef.current = null;
-            },
-            onError: (err) => {
-              setIsRunning(false);
-              abortControllerRef.current = null;
-              options.onErro?.(err);
-              if (!textoBuffer) {
-                textoBuffer = `⚠️ Erro ao processar resposta: ${err.message}`;
+            body,
+            signal: controller.signal,
+            callbacks: {
+              onSessaoId: (sid) => {
+                sessaoIdRef.current = sid;
+                options.onSessaoCriada?.(sid);
+              },
+              onPensamento: (_delta, acumulado) => {
+                pensamentoBuffer = acumulado;
                 sincronizarAssistente();
-              }
+              },
+              onDelta: (_delta, acumulado) => {
+                textoBuffer = acumulado;
+                sincronizarAssistente();
+              },
+              onAcao: (itens) => {
+                ferramentasBuffer = itens;
+                sincronizarAssistente();
+              },
+              onFim: () => {
+                setIsRunning(false);
+                abortControllerRef.current = null;
+              },
+              onError: (err) => {
+                setIsRunning(false);
+                abortControllerRef.current = null;
+                options.onErro?.(err);
+                if (!textoBuffer) {
+                  textoBuffer = `⚠️ Erro ao processar resposta: ${err.message}`;
+                  sincronizarAssistente();
+                }
+              },
             },
-          },
-        });
-      } catch (err: any) {
-        setIsRunning(false);
-        abortControllerRef.current = null;
-        const msgErro =
-          err instanceof ProblemDetailsError
-            ? `${err.title}: ${err.detail || err.message}`
-            : err.message || "Falha na comunicação com o Secretário";
-        options.onErro?.(err);
-        if (!textoBuffer) {
-          textoBuffer = `⚠️ ${msgErro}`;
-          sincronizarAssistente();
+          });
+        } catch (err: any) {
+          const msg = String(err?.detail || err?.message || "");
+          if (
+            tentativa === 1 &&
+            (err?.status === 409 ||
+              msg.includes("POST /secretario/start") ||
+              msg.includes("não iniciado"))
+          ) {
+            try {
+              const origin =
+                typeof window !== "undefined"
+                  ? window.location.origin
+                  : "http://127.0.0.1:4100";
+              await fetch(`${origin}/secretario/start`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...obterAuthHeaders(),
+                  ...(options.headers ?? {}),
+                },
+              });
+              await new Promise((r) => setTimeout(r, 600));
+              return await dispararComRetry(2);
+            } catch {}
+          }
+
+          setIsRunning(false);
+          abortControllerRef.current = null;
+          const msgErro =
+            err instanceof ProblemDetailsError
+              ? `${err.title}: ${err.detail || err.message}`
+              : err.message || "Falha na comunicação com o Secretário";
+          options.onErro?.(err);
+          if (!textoBuffer) {
+            textoBuffer = `⚠️ ${msgErro}`;
+            sincronizarAssistente();
+          }
         }
-      }
+      };
+
+      await dispararComRetry(1);
     },
     [options, urlBase, wsId],
   );

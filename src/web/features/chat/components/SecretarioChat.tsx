@@ -21,9 +21,11 @@ import {
   CheckCircle2,
   AlertCircle,
   Brain,
+  Copy,
 } from "lucide-react";
 import { useOpenCorpSecretarioRuntime } from "../runtime/secretary-runtime-adapter.js";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
+import { SUGESTOES_RAPIDAS } from "../../../lib/chat/constants.js";
 import type { SecretaryRuntimeOptions } from "../types.js";
 
 /**
@@ -179,6 +181,47 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
                     gerenciar o Kanban, planejar automações e coordenar agentes de IA.
                   </p>
                 </div>
+
+                {/* Sugestões Rápidas (Chips Clicáveis) */}
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-2 max-w-lg">
+                  {SUGESTOES_RAPIDAS.map((sugestao) => (
+                    <button
+                      key={sugestao}
+                      type="button"
+                      onClick={() => {
+                        const inputEl = document.getElementById(
+                          "chat-input",
+                        ) as HTMLTextAreaElement | null;
+                        if (inputEl) {
+                          const protoSetter = Object.getOwnPropertyDescriptor(
+                            window.HTMLTextAreaElement.prototype,
+                            "value",
+                          )?.set;
+                          if (protoSetter) {
+                            protoSetter.call(inputEl, sugestao);
+                          } else {
+                            inputEl.value = sugestao;
+                          }
+                          inputEl.dispatchEvent(
+                            new Event("input", { bubbles: true }),
+                          );
+                          inputEl.dispatchEvent(
+                            new Event("change", { bubbles: true }),
+                          );
+                          setTimeout(() => {
+                            const btnEnviar = document.getElementById(
+                              "btn-enviar",
+                            ) as HTMLButtonElement | null;
+                            btnEnviar?.click();
+                          }, 50);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-emerald-500/50 text-xs text-zinc-300 hover:text-emerald-300 transition-all cursor-pointer shadow-xs active:scale-95"
+                    >
+                      {sugestao}
+                    </button>
+                  ))}
+                </div>
               </div>
             </ThreadPrimitive.Empty>
 
@@ -186,9 +229,29 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
             <ThreadPrimitive.Messages>
               {({ message }) => {
                 if (message.role === "user") {
+                  const textoUsuario = message.content
+                    .filter(
+                      (p): p is { type: "text"; text: string } =>
+                        p.type === "text",
+                    )
+                    .map((p) => p.text)
+                    .join("\n");
+
                   return (
-                    <div className="flex justify-end my-4">
-                      <div className="flex items-start gap-3 max-w-[85%] lg:max-w-[75%]">
+                    <div className="flex justify-end my-4 oc-user group">
+                      <div className="flex items-start gap-2 max-w-[85%] lg:max-w-[75%]">
+                        <button
+                          type="button"
+                          title="Copiar prompt"
+                          onClick={() => {
+                            if (navigator.clipboard) {
+                              void navigator.clipboard.writeText(textoUsuario);
+                            }
+                          }}
+                          className="opacity-70 hover:opacity-100 p-1 text-zinc-500 hover:text-zinc-300 rounded transition-opacity cursor-pointer mt-2"
+                        >
+                          <Copy size={13} />
+                        </button>
                         <div className="rounded-2xl rounded-tr-sm bg-emerald-950/40 border border-emerald-800/40 text-emerald-100 px-4 py-3 text-sm shadow-sm leading-relaxed whitespace-pre-wrap">
                           <MessagePrimitive.Parts
                             components={{
@@ -207,7 +270,7 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
                 }
 
                 return (
-                  <div className="flex justify-start my-4">
+                  <div className="flex justify-start my-4 oc-assistant">
                     <div className="flex items-start gap-3 max-w-[95%] lg:max-w-[88%] w-full">
                       <div className="h-8 w-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white flex-shrink-0 shadow-md shadow-emerald-900/40 mt-0.5">
                         <Bot size={18} />
@@ -244,6 +307,7 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
           <div className="p-4 md:px-8 bg-zinc-950 border-t border-zinc-850">
             <ComposerPrimitive.Root className="relative flex flex-col p-2.5 bg-zinc-900/90 border border-zinc-800 rounded-2xl shadow-xl focus-within:border-emerald-500/60 focus-within:ring-1 focus-within:ring-emerald-500/20 transition-all">
               <ComposerPrimitive.Input
+                id="chat-input"
                 autoFocus
                 placeholder="Converse com o Secretário ou ordene uma tarefa... (Shift+Enter para quebra de linha)"
                 rows={1}
@@ -259,6 +323,7 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
                 <div className="flex items-center gap-2">
                   <ComposerPrimitive.Send asChild>
                     <button
+                      id="btn-enviar"
                       type="submit"
                       className="flex items-center justify-center h-8 w-8 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white transition-all cursor-pointer shadow-md shadow-emerald-950/50"
                       title="Enviar (Enter)"
