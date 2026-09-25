@@ -16,11 +16,23 @@ import {
   Webhook,
   RefreshCw,
   Hourglass,
+  Globe,
+  Code2,
+  FileText,
+  CheckCircle,
+  Users,
+  Play,
+  Loader2,
+  Search,
+  FlaskConical,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import type { NoGrafo, FluxoCompleto } from "../types.js";
 import { obterItemCatalogo } from "../catalog.js";
 import { showToast } from "../../../shared/ui/Toast.js";
 import { CronBuilder } from "./CronBuilder.js";
+import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 
 export interface NodeConfigDrawerProps {
   no: NoGrafo | null;
@@ -46,16 +58,87 @@ export const NodeConfigDrawer: FC<NodeConfigDrawerProps> = ({
   const [jsonText, setJsonText] = useState("");
   const [jsonErro, setJsonErro] = useState<string | null>(null);
 
+  // Contexto OpenCorp (opcional, com fallback seguro)
+  let contextClient: any = null;
+  let contextWs: string = "yt-factory-01";
+  try {
+    const ctx = useOpenCorp();
+    if (ctx) {
+      contextClient = ctx.client;
+      contextWs = ctx.workspaceId || "yt-factory-01";
+    }
+  } catch {
+    // Isolamento para testes unitários ou render sem provider
+  }
+
+  // Componentes do Workspace
+  const [componentes, setComponentes] = useState<any[]>([]);
+  const [carregandoComponentes, setCarregandoComponentes] = useState(false);
+
+  // Teste Unitário Isolado do Componente
+  const [entradaTesteComp, setEntradaTesteComp] = useState('{"parametro": "valor"}');
+  const [testandoComp, setTestandoComp] = useState(false);
+  const [resultadoTesteComp, setResultadoTesteComp] = useState<{
+    ok: boolean;
+    saida?: any;
+    json?: any;
+    erro?: string;
+    duracao_ms?: number;
+  } | null>(null);
+
+  // Tarefas Kanban (para task_create)
+  const [tasksExistentes, setTasksExistentes] = useState<any[]>([]);
+  const [buscaTask, setBuscaTask] = useState("");
+
   // Sincroniza estado quando o nó selecionado muda
   useEffect(() => {
     if (no) {
       setNoEditado(JSON.parse(JSON.stringify(no)));
       setJsonText(JSON.stringify(no, null, 2));
       setJsonErro(null);
+      setResultadoTesteComp(null);
     } else {
       setNoEditado(null);
     }
   }, [no]);
+
+  // Efeito para carregar componentes quando nó for do tipo "componente"
+  useEffect(() => {
+    if (no?.tipo === "componente" && contextClient?.http) {
+      setCarregandoComponentes(true);
+      contextClient.http
+        .get("/components", {
+          headers: { "x-opencorp-workspace": contextWs },
+        })
+        .then((res: any) => {
+          if (Array.isArray(res)) setComponentes(res);
+          else if (res && Array.isArray(res.componentes)) setComponentes(res.componentes);
+        })
+        .catch(() => {})
+        .finally(() => setCarregandoComponentes(false));
+    }
+  }, [no?.tipo, contextClient, contextWs]);
+
+  // Efeito para carregar tasks quando nó for do tipo "task_create"
+  useEffect(() => {
+    if (no?.tipo === "task_create" && contextClient) {
+      if (typeof contextClient.tasks?.listar === "function") {
+        contextClient.tasks
+          .listar({ workspaceId: contextWs })
+          .then((res: any) => {
+            if (Array.isArray(res)) setTasksExistentes(res);
+          })
+          .catch(() => {});
+      } else if (contextClient.http) {
+        contextClient.http
+          .get("/tasks", { headers: { "x-opencorp-workspace": contextWs } })
+          .then((res: any) => {
+            if (Array.isArray(res)) setTasksExistentes(res);
+          })
+          .catch(() => {});
+      }
+    }
+  }, [no?.tipo, contextClient, contextWs]);
 
   // Lista de antecessores para o session_from
   const antecessores = useMemo(() => {
@@ -109,6 +192,75 @@ export const NodeConfigDrawer: FC<NodeConfigDrawerProps> = ({
     } else {
       onSalvarNo(noEditado);
       showToast(`Nó "${noEditado.id}" atualizado com sucesso!`, "sucesso");
+    }
+  };
+
+  const handleExecutarTesteComponente = async () => {
+    if (!noEditado) return;
+    const cfg = noEditado.config || {};
+    const componenteId = cfg.componente_id;
+    if (!componenteId && !cfg.codigo && !cfg.arquivo) {
+      showToast("Selecione um componente ou forneça código/arquivo para testar", "aviso");
+      return;
+    }
+
+    setTestandoComp(true);
+    setResultadoTesteComp(null);
+    const inicio = Date.now();
+
+    try {
+      let res: any;
+      if (componenteId && contextClient?.http) {
+        res = await contextClient.http.post(
+          `/components/${encodeURIComponent(componenteId)}/test`,
+          { entrada: entradaTesteComp },
+          { headers: { "x-opencorp-workspace": contextWs } }
+        );
+      } else if (typeof window !== "undefined") {
+        const url = componenteId
+          ? `/components/${encodeURIComponent(componenteId)}/test`
+          : `/components/test`;
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-opencorp-workspace": contextWs,
+          },
+          body: JSON.stringify({
+            entrada: entradaTesteComp,
+            runtime: cfg.runtime || "node",
+            codigo: cfg.codigo,
+            arquivo: cfg.arquivo,
+          }),
+        });
+        res = await resp.json();
+      }
+
+      const duracao = res?.duracao_ms ?? (Date.now() - inicio);
+      const ok = res?.ok !== false && !res?.erro;
+      setResultadoTesteComp({
+        ok,
+        saida: res?.saida,
+        json: res?.json,
+        erro: res?.erro || (!ok ? "Falha na execução do componente" : undefined),
+        duracao_ms: duracao,
+      });
+
+      if (ok) {
+        showToast("Teste unitário executado com sucesso!", "sucesso");
+      } else {
+        showToast(res?.erro || "Falha na execução do teste", "erro");
+      }
+    } catch (err: any) {
+      const duracao = Date.now() - inicio;
+      setResultadoTesteComp({
+        ok: false,
+        erro: err?.message || "Erro de rede ao executar teste",
+        duracao_ms: duracao,
+      });
+      showToast(err?.message || "Erro ao conectar com o serviço de teste", "erro");
+    } finally {
+      setTestandoComp(false);
     }
   };
 
@@ -696,49 +848,488 @@ export const NodeConfigDrawer: FC<NodeConfigDrawerProps> = ({
                 </div>
               )}
 
-              {/* CRIAR TAREFA KANBAN */}
-              {noEditado.tipo === "task_create" && (
-                <div className="space-y-3 p-3 rounded-xl bg-blue-950/20 border border-blue-800/40">
+              {/* REQUISIÇÃO HTTP / API */}
+              {noEditado.tipo === "http_request" && (
+                <div className="space-y-3.5 p-3.5 rounded-xl bg-blue-950/20 border border-blue-800/40">
                   <h4 className="text-[11px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Layers size={13} />
-                    Criação de Tarefa no Kanban
+                    <Globe size={13} />
+                    Requisição HTTP / API REST
                   </h4>
+
+                  {/* Método HTTP */}
                   <div>
-                    <label className="block text-zinc-300 font-medium mb-1">
-                      Título da Tarefa
+                    <label className="block text-zinc-300 font-medium mb-1.5 text-xs">
+                      Método HTTP
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { m: "GET", cor: "bg-sky-500/10 border-sky-500/30 text-sky-400 hover:bg-sky-500/20", ativo: "bg-sky-600 text-white font-bold border-sky-500 shadow-xs" },
+                        { m: "POST", cor: "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20", ativo: "bg-emerald-600 text-white font-bold border-emerald-500 shadow-xs" },
+                        { m: "PUT", cor: "bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20", ativo: "bg-amber-600 text-white font-bold border-amber-500 shadow-xs" },
+                        { m: "PATCH", cor: "bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20", ativo: "bg-purple-600 text-white font-bold border-purple-500 shadow-xs" },
+                        { m: "DELETE", cor: "bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20", ativo: "bg-rose-600 text-white font-bold border-rose-500 shadow-xs" },
+                      ].map(({ m, cor, ativo }) => {
+                        const selecionado = (config.metodo || "GET").toUpperCase() === m;
+                        return (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => atualizarConfig("metodo", m)}
+                            className={`px-2.5 py-1 rounded text-[11px] font-mono border transition-all cursor-pointer ${
+                              selecionado ? ativo : cor
+                            }`}
+                          >
+                            {m}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* URL do Endpoint */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                      URL do Endpoint *
                     </label>
                     <input
                       type="text"
-                      placeholder="ex: Revisar Roteiro do Vídeo"
+                      placeholder="https://api.exemplo.com/v1/resource"
+                      value={config.url || ""}
+                      onChange={(e) => atualizarConfig("url", e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none focus:border-blue-500"
+                    />
+                    <span className="text-[10px] text-zinc-500 mt-1 block">
+                      Suporta interpolação com <code>{`{{entrada}}`}</code>, <code>{`{{id}}`}</code> ou <code>{`{{secret.TOKEN}}`}</code>.
+                    </span>
+                  </div>
+
+                  {/* Timeout (ms) */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs flex items-center justify-between">
+                      <span>Timeout da Requisição (ms)</span>
+                      <span className="text-[10px] text-blue-400 font-mono">
+                        {((config.timeout_ms ?? 10000) / 1000).toFixed(1)}s
+                      </span>
+                    </label>
+                    <input
+                      type="number"
+                      min={1000}
+                      max={120000}
+                      step={1000}
+                      value={config.timeout_ms ?? 10000}
+                      onChange={(e) =>
+                        atualizarConfig(
+                          "timeout_ms",
+                          Math.max(parseInt(e.target.value, 10) || 10000, 1000)
+                        )
+                      }
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  {/* Headers */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs flex items-center justify-between">
+                      <span>Cabeçalhos / Headers (JSON)</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">opcional</span>
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder='{"Authorization": "Bearer {{secret.API_KEY}}", "Content-Type": "application/json"}'
+                      value={
+                        typeof config.headers === "object"
+                          ? JSON.stringify(config.headers, null, 2)
+                          : config.headers || ""
+                      }
+                      onChange={(e) => atualizarConfig("headers", e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2 text-zinc-200 font-mono text-xs focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
+                    />
+                  </div>
+
+                  {/* Body / Corpo da Requisição */}
+                  {["POST", "PUT", "PATCH"].includes((config.metodo || "GET").toUpperCase()) && (
+                    <div>
+                      <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                        Corpo da Requisição (Body JSON)
+                      </label>
+                      <textarea
+                        rows={4}
+                        placeholder='{\n  "payload": "{{entrada}}",\n  "origem": "opencorp"\n}'
+                        value={
+                          typeof config.body === "object"
+                            ? JSON.stringify(config.body, null, 2)
+                            : config.body || ""
+                        }
+                        onChange={(e) => atualizarConfig("body", e.target.value)}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2 text-zinc-200 font-mono text-xs focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
+                      />
+                      <span className="text-[10px] text-zinc-500 mt-1 block">
+                        💡 Dica: Use <code>{`{{entrada}}`}</code> para injetar a saída produzida pelo nó antecessor.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* COMPONENTE MODULAR + TESTE UNITÁRIO ISOLADO */}
+              {noEditado.tipo === "componente" && (
+                <div className="space-y-3.5 p-3.5 rounded-xl bg-teal-950/20 border border-teal-800/40">
+                  <h4 className="text-[11px] font-bold text-teal-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Code2 size={13} />
+                    Componente Modular Reutilizável
+                  </h4>
+
+                  {/* Seleção de Componente */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs flex items-center justify-between">
+                      <span>Componente do Marketplace / Workspace</span>
+                      <span className="text-[10px] text-teal-400 font-mono">
+                        {carregandoComponentes ? "carregando..." : `${componentes.length} disponíveis`}
+                      </span>
+                    </label>
+                    <select
+                      value={config.componente_id || ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        atualizarConfig("componente_id", val || undefined);
+                        const selecionado = componentes.find((c) => c.id === val);
+                        if (selecionado) {
+                          if (selecionado.runtime) atualizarConfig("runtime", selecionado.runtime);
+                          if (selecionado.nome) atualizarConfig("nome", selecionado.nome);
+                        }
+                      }}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 text-xs focus:outline-none focus:border-teal-500"
+                    >
+                      <option value="">— Personalizado (Arquivo ou Código Inline) —</option>
+                      {componentes.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.builtin ? "📦 " : "🧩 "}
+                          {c.nome || c.id} (v{c.versao || "1.0.0"} · {c.runtime})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Metadados do Componente Selecionado */}
+                  {(() => {
+                    const cSel = componentes.find((c) => c.id === config.componente_id);
+                    if (!cSel) return null;
+                    return (
+                      <div className="p-2.5 rounded-lg bg-zinc-900/80 border border-zinc-850 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-zinc-200">{cSel.nome || cSel.id}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-400 font-mono border border-teal-500/20">
+                            v{cSel.versao || "1.0.0"} · {cSel.runtime}
+                          </span>
+                        </div>
+                        {cSel.descricao && (
+                          <p className="text-[11px] text-zinc-400 leading-relaxed">{cSel.descricao}</p>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Modo Personalizado se nenhum componente for selecionado */}
+                  {!config.componente_id && (
+                    <div className="space-y-2.5 pt-2 border-t border-teal-900/30">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-zinc-300 font-medium mb-1 text-xs">Runtime</label>
+                          <select
+                            value={config.runtime || "node"}
+                            onChange={(e) => atualizarConfig("runtime", e.target.value)}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-zinc-200 text-xs focus:outline-none focus:border-teal-500"
+                          >
+                            <option value="node">Node.js (JavaScript)</option>
+                            <option value="python">Python 3</option>
+                            <option value="bash">Bash Script</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-zinc-300 font-medium mb-1 text-xs">Arquivo (Opcional)</label>
+                          <input
+                            type="text"
+                            placeholder="scripts/conversor.mjs"
+                            value={config.arquivo || ""}
+                            onChange={(e) => atualizarConfig("arquivo", e.target.value)}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none focus:border-teal-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                          Código Inline (se não usar arquivo)
+                        </label>
+                        <textarea
+                          rows={4}
+                          placeholder="// export default async function(input) { return { ok: true, input }; }"
+                          value={config.codigo || ""}
+                          onChange={(e) => atualizarConfig("codigo", e.target.value)}
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2 text-zinc-200 font-mono text-xs focus:outline-none focus:border-teal-500 resize-none leading-relaxed"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PAINEL DE TESTE UNITÁRIO ISOLADO (ISOLATE NODE TEST) */}
+                  <div className="mt-3 pt-3 border-t border-zinc-800/80 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-teal-300 flex items-center gap-1.5">
+                        <FlaskConical size={13} className="text-teal-400" />
+                        Teste Unitário do Nó
+                      </span>
+                      <span className="text-[10px] text-zinc-500 font-mono">I/O Isolado</span>
+                    </div>
+
+                    <div>
+                      <label className="block text-zinc-400 font-medium mb-1 text-[11px]">
+                        Entrada de Teste Simulada (JSON / Payload)
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={entradaTesteComp}
+                        onChange={(e) => setEntradaTesteComp(e.target.value)}
+                        placeholder='{"parametro": "valor"}'
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-200 font-mono text-xs focus:outline-none focus:border-teal-500 resize-none"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-0.5">
+                      <button
+                        type="button"
+                        disabled={testandoComp || (!config.componente_id && !config.codigo && !config.arquivo)}
+                        onClick={handleExecutarTesteComponente}
+                        className="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                      >
+                        {testandoComp ? (
+                          <>
+                            <Loader2 size={13} className="animate-spin" />
+                            <span>Executando Teste...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Play size={13} />
+                            <span>Testar Nó Agora</span>
+                          </>
+                        )}
+                      </button>
+
+                      {resultadoTesteComp?.duracao_ms !== undefined && (
+                        <span className="text-[10px] text-zinc-400 font-mono">
+                          {resultadoTesteComp.duracao_ms}ms
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Caixa com o Resultado do Teste */}
+                    {resultadoTesteComp && (
+                      <div
+                        className={`p-2.5 rounded-lg border text-xs font-mono space-y-1.5 ${
+                          resultadoTesteComp.ok
+                            ? "bg-emerald-950/20 border-emerald-800/40 text-emerald-300"
+                            : "bg-rose-950/20 border-rose-800/40 text-rose-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[11px] font-bold">
+                          <span className="flex items-center gap-1">
+                            {resultadoTesteComp.ok ? (
+                              <>
+                                <CheckCircle2 size={13} className="text-emerald-400" />
+                                <span>Sucesso</span>
+                              </>
+                            ) : (
+                              <>
+                                <XCircle size={13} className="text-rose-400" />
+                                <span>Falha</span>
+                              </>
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const texto = resultadoTesteComp.ok
+                                ? (resultadoTesteComp.json
+                                    ? JSON.stringify(resultadoTesteComp.json, null, 2)
+                                    : String(resultadoTesteComp.saida ?? ""))
+                                : String(resultadoTesteComp.erro ?? "");
+                              navigator.clipboard.writeText(texto);
+                              showToast("Resultado copiado", "info");
+                            }}
+                            className="text-[10px] text-zinc-400 hover:text-zinc-200 cursor-pointer flex items-center gap-1"
+                          >
+                            <Copy size={11} />
+                            <span>Copiar</span>
+                          </button>
+                        </div>
+                        <pre className="whitespace-pre-wrap text-[11px] max-h-32 overflow-y-auto scrollbar-thin p-1.5 rounded bg-zinc-950/60 border border-zinc-850">
+                          {resultadoTesteComp.ok
+                            ? (resultadoTesteComp.json
+                                ? JSON.stringify(resultadoTesteComp.json, null, 2)
+                                : String(resultadoTesteComp.saida ?? ""))
+                            : String(resultadoTesteComp.erro ?? "Erro desconhecido")}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* REUNIÃO MULTI-AGENTE */}
+              {noEditado.tipo === "reuniao" && (
+                <div className="space-y-3.5 p-3.5 rounded-xl bg-indigo-950/20 border border-indigo-800/40">
+                  <h4 className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Users size={13} />
+                    Reunião Deliberativa Multi-Agente
+                  </h4>
+
+                  {/* Pauta da Reunião */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                      Pauta da Reunião *
+                    </label>
+                    <textarea
+                      rows={3}
+                      placeholder="Tema central, objetivos e diretrizes da deliberação coletiva..."
+                      value={config.pauta || ""}
+                      onChange={(e) => atualizarConfig("pauta", e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 text-xs focus:outline-none focus:border-indigo-500 resize-none leading-relaxed"
+                    />
+                  </div>
+
+                  {/* Moderador da Reunião */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                      Agente Moderador da Reunião
+                    </label>
+                    <select
+                      value={config.moderador || ""}
+                      onChange={(e) => atualizarConfig("moderador", e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 text-xs focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="">— Selecione o Moderador —</option>
+                      {agentes.map((ag) => (
+                        <option key={ag.id} value={ag.id}>
+                          👑 {ag.nome || ag.id} (@{ag.id})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Participantes da Reunião */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs flex items-center justify-between">
+                      <span>Agentes Participantes</span>
+                      <span className="text-[10px] text-indigo-400 font-mono">
+                        {(config.participantes || []).length} selecionados
+                      </span>
+                    </label>
+                    <div className="max-h-36 overflow-y-auto space-y-1 p-2 rounded-lg bg-zinc-900/60 border border-zinc-800 scrollbar-thin">
+                      {agentes.length === 0 ? (
+                        <div className="text-[11px] text-zinc-500 text-center py-2">
+                          Nenhum agente cadastrado no workspace.
+                        </div>
+                      ) : (
+                        agentes.map((ag) => {
+                          const participantesAtuais: string[] = Array.isArray(config.participantes)
+                            ? config.participantes
+                            : [];
+                          const ativo = participantesAtuais.includes(ag.id);
+                          return (
+                            <label
+                              key={ag.id}
+                              className="flex items-center gap-2 p-1.5 rounded hover:bg-zinc-850 cursor-pointer text-xs transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={ativo}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    atualizarConfig("participantes", [...participantesAtuais, ag.id]);
+                                  } else {
+                                    atualizarConfig(
+                                      "participantes",
+                                      participantesAtuais.filter((id) => id !== ag.id)
+                                    );
+                                  }
+                                }}
+                                className="rounded border-zinc-700 text-indigo-600 focus:ring-0"
+                              />
+                              <span className="text-zinc-200 font-medium">{ag.nome || ag.id}</span>
+                              <span className="text-[10px] text-zinc-500 font-mono">(@{ag.id})</span>
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Duração Estimada */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs flex items-center justify-between">
+                      <span>Duração Estimada (minutos)</span>
+                      <span className="text-[10px] text-indigo-400 font-mono">
+                        {config.duracao_min ?? 15} min
+                      </span>
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={120}
+                      value={config.duracao_min ?? 15}
+                      onChange={(e) =>
+                        atualizarConfig("duracao_min", Math.max(parseInt(e.target.value, 10) || 15, 5))
+                      }
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* CRIAR TAREFA KANBAN (COM VÍNCULO A TAREFA EXISTENTE) */}
+              {noEditado.tipo === "task_create" && (
+                <div className="space-y-3.5 p-3.5 rounded-xl bg-blue-950/20 border border-blue-800/40">
+                  <h4 className="text-[11px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Layers size={13} />
+                    Criação / Vinculação de Tarefa Kanban
+                  </h4>
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                      Título da Tarefa no Kanban *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="ex: Revisar Artigo e Publicar na Fila"
                       value={config.titulo || ""}
                       onChange={(e) => atualizarConfig("titulo", e.target.value)}
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-blue-500"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 text-xs focus:outline-none focus:border-blue-500"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-zinc-300 font-medium mb-1">
+                      <label className="block text-zinc-300 font-medium mb-1 text-xs">
                         Coluna
                       </label>
                       <select
                         value={config.coluna || "backlog"}
                         onChange={(e) => atualizarConfig("coluna", e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-blue-500"
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 text-xs focus:outline-none focus:border-blue-500"
                       >
                         <option value="backlog">Backlog</option>
-                        <option value="todo">A Fazer</option>
-                        <option value="in_progress">Em Andamento</option>
-                        <option value="done">Concluído</option>
+                        <option value="fazer">A Fazer</option>
+                        <option value="andamento">Em Andamento</option>
+                        <option value="revisao">Revisão</option>
+                        <option value="concluido">Concluído</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block text-zinc-300 font-medium mb-1">
+                      <label className="block text-zinc-300 font-medium mb-1 text-xs">
                         Prioridade
                       </label>
                       <select
                         value={config.prioridade || "media"}
                         onChange={(e) => atualizarConfig("prioridade", e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-blue-500"
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 text-xs focus:outline-none focus:border-blue-500"
                       >
                         <option value="baixa">Baixa</option>
                         <option value="media">Média</option>
@@ -746,6 +1337,146 @@ export const NodeConfigDrawer: FC<NodeConfigDrawerProps> = ({
                         <option value="urgente">Urgente</option>
                       </select>
                     </div>
+                  </div>
+
+                  {/* Selecionar / Vincular Tarefa Existente */}
+                  <div className="space-y-1.5 pt-2 border-t border-zinc-800">
+                    <label className="text-[11px] font-medium text-zinc-300 flex items-center justify-between">
+                      <span>ou Vincular a Tarefa Existente</span>
+                      <Search size={12} className="text-zinc-500" />
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Buscar por título ou ID..."
+                      value={buscaTask}
+                      onChange={(e) => setBuscaTask(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 text-xs focus:outline-none focus:border-blue-500 font-mono"
+                    />
+                    {buscaTask.trim().length >= 2 && (
+                      <div className="max-h-32 overflow-y-auto space-y-1 scrollbar-thin p-1 rounded-lg bg-zinc-950 border border-zinc-800">
+                        {tasksExistentes
+                          .filter((t) => {
+                            const q = buscaTask.toLowerCase();
+                            return (
+                              (t.titulo && t.titulo.toLowerCase().includes(q)) ||
+                              (t.id && t.id.toLowerCase().includes(q))
+                            );
+                          })
+                          .slice(0, 6)
+                          .map((t) => (
+                            <div
+                              key={t.id}
+                              onClick={() => {
+                                atualizarConfig("titulo", t.titulo || t.id);
+                                atualizarConfig("task_id", t.id);
+                                if (t.coluna) atualizarConfig("coluna", t.coluna);
+                                if (t.prioridade) atualizarConfig("prioridade", t.prioridade);
+                                setBuscaTask("");
+                                showToast(`Tarefa "${t.titulo || t.id}" selecionada!`, "sucesso");
+                              }}
+                              className="px-2.5 py-1.5 rounded bg-zinc-900 hover:bg-zinc-850 cursor-pointer text-xs flex items-center justify-between gap-2 transition-colors border border-zinc-800/60"
+                            >
+                              <span className="font-medium text-zinc-200 truncate">{t.titulo || t.id}</span>
+                              <span className="text-[10px] text-zinc-400 font-mono shrink-0">{t.coluna || "backlog"}</span>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* REGISTRO OU SAÍDA DOCUMENTAL */}
+              {(noEditado.tipo === "registro" || noEditado.tipo === "saida") && (
+                <div className="space-y-3.5 p-3.5 rounded-xl bg-purple-950/20 border border-purple-800/40">
+                  <h4 className="text-[11px] font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText size={13} />
+                    {noEditado.tipo === "saida" ? "Saída do Fluxo (Resultado Final)" : "Registro / Artefato Documental"}
+                  </h4>
+
+                  {/* Categoria do Registro */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1.5 text-xs">
+                      Categoria do Registro
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {[
+                        { id: "documentos", label: "Documentos", icone: "📄" },
+                        { id: "atas", label: "Atas de Reunião", icone: "📝" },
+                        { id: "relatorios", label: "Relatórios", icone: "📊" },
+                        { id: "metricas", label: "Métricas", icone: "📈" },
+                        { id: "custom", label: "Personalizado", icone: "⚙️" },
+                      ].map((cat) => {
+                        const selecionado = (config.categoria || "documentos") === cat.id;
+                        return (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => atualizarConfig("categoria", cat.id)}
+                            className={`px-2.5 py-1.5 rounded-lg border text-left text-xs flex items-center gap-2 transition-all cursor-pointer ${
+                              selecionado
+                                ? "bg-purple-950/80 border-purple-500 text-purple-200 font-bold"
+                                : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                            }`}
+                          >
+                            <span>{cat.icone}</span>
+                            <span>{cat.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Título / Nome do Artefato */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                      Título do Artefato / Documento
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="ex: Relatório Final de Performance"
+                      value={config.titulo || config.nome || ""}
+                      onChange={(e) => {
+                        atualizarConfig("titulo", e.target.value);
+                        atualizarConfig("nome", e.target.value);
+                      }}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 text-xs focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  {/* Formato do Arquivo */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                      Formato do Artefato
+                    </label>
+                    <select
+                      value={config.formato || "markdown"}
+                      onChange={(e) => atualizarConfig("formato", e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 text-xs focus:outline-none focus:border-purple-500"
+                    >
+                      <option value="markdown">Markdown (.md)</option>
+                      <option value="json">JSON (.json)</option>
+                      <option value="html">HTML (.html)</option>
+                      <option value="txt">Texto Puro (.txt)</option>
+                    </select>
+                  </div>
+
+                  {/* Chave de Saída no Contexto */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs flex items-center justify-between">
+                      <span>Chave de Saída no Contexto</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">variável</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="relatorio_final"
+                      value={config.chave_saida || "relatorio_final"}
+                      onChange={(e) => atualizarConfig("chave_saida", e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-purple-300 font-mono text-xs focus:outline-none focus:border-purple-500"
+                    />
+                    <span className="text-[10px] text-zinc-500 mt-1 block">
+                      O resultado produzido será indexado sob esta chave no contexto final de execução.
+                    </span>
                   </div>
                 </div>
               )}
