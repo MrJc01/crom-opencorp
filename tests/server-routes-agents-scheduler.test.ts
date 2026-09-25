@@ -229,32 +229,62 @@ describe("Rotas Modulares de Agentes e Scheduler (Micro-Passo 12)", () => {
       expect(tools.some((t) => t.id === "calculadora")).toBe(true);
     });
 
-    it("POST /skills/:id/toggle e GET /skills/ativas persistem habilitação no workspace", async () => {
-      // 1. Toggle habilita skill
-      const resToggle = await fetchApi("/skills/minha-skill/toggle?workspace=ws-principal", {
+    it("GET /skills/:id e POST /agents/:id/skills operam no padrão Agent Skills Standard", async () => {
+      // 1. Consulta detalhe da skill com corpo Markdown
+      const resSkillDetalhe = await fetchApi("/skills/minha-skill?workspace=ws-principal");
+      expect(resSkillDetalhe.status).toBe(200);
+      expect((resSkillDetalhe.json as any).name).toBe("minha-skill");
+      expect((resSkillDetalhe.json as any).corpo).toContain("Conteúdo da skill.");
+
+      // 2. Cria um agente no workspace
+      await fetchApi("/agents?workspace=ws-principal", {
         method: "POST",
+        body: JSON.stringify({ id: "agente-teste-skill", role: "Agente de Teste" }),
       });
-      expect(resToggle.status).toBe(200);
-      expect((resToggle.json as any).ok).toBe(true);
-      expect((resToggle.json as any).ativa).toBe(true);
-      expect((resToggle.json as any).skills_ativas).toContain("minha-skill");
 
-      // 2. Consulta skills ativas
-      const resAtivas = await fetchApi("/skills/ativas?workspace=ws-principal");
-      expect(resAtivas.status).toBe(200);
-      expect((resAtivas.json as any).skills_ativas).toContain("minha-skill");
-
-      // 3. GET /skills reflete status ativa: true
-      const resSkills = await fetchApi("/skills?workspace=ws-principal");
-      const skill = (resSkills.json as any[]).find((s) => s.name === "minha-skill");
-      expect(skill?.ativa).toBe(true);
-
-      // 4. Toggle desabilita skill
-      const resDesativa = await fetchApi("/skills/minha-skill/toggle?workspace=ws-principal", {
+      // 3. Atribui skill ao agente via POST /agents/:id/skills
+      const resAtribui = await fetchApi("/agents/agente-teste-skill/skills?workspace=ws-principal", {
         method: "POST",
+        body: JSON.stringify({ skill: "minha-skill", acao: "adicionar" }),
       });
-      expect((resDesativa.json as any).ativa).toBe(false);
-      expect((resDesativa.json as any).skills_ativas).not.toContain("minha-skill");
+      expect(resAtribui.status).toBe(200);
+      expect((resAtribui.json as any).skills).toContain("minha-skill");
+
+      // 4. Consulta detalhe do agente para confirmar frontmatter
+      const resAgente = await fetchApi("/agents/agente-teste-skill?workspace=ws-principal");
+      expect(resAgente.status).toBe(200);
+      expect((resAgente.json as any).skills).toContain("minha-skill");
+
+      // 5. Remove skill do agente
+      const resRemove = await fetchApi("/agents/agente-teste-skill/skills?workspace=ws-principal", {
+        method: "POST",
+        body: JSON.stringify({ skill: "minha-skill", acao: "remover" }),
+      });
+      expect(resRemove.status).toBe(200);
+      expect((resRemove.json as any).skills).not.toContain("minha-skill");
+    });
+
+    it("GET /packs e POST /packs/:id/install operam com Packs de Solução", async () => {
+      // 1. Lista packs
+      const resPacks = await fetchApi("/packs?workspace=ws-principal");
+      expect(resPacks.status).toBe(200);
+      expect(Array.isArray(resPacks.json)).toBe(true);
+      const packs = resPacks.json as any[];
+      expect(packs.some((p) => p.id === "youtube-factory")).toBe(true);
+
+      // 2. Consulta detalhe do pack
+      const resPackDetalhe = await fetchApi("/packs/youtube-factory?workspace=ws-principal");
+      expect(resPackDetalhe.status).toBe(200);
+      expect((resPackDetalhe.json as any).conteudo.agentes.length).toBeGreaterThan(0);
+
+      // 3. Instala pack no workspace
+      const resInstall = await fetchApi("/packs/youtube-factory/install?workspace=ws-principal", {
+        method: "POST",
+        body: JSON.stringify({ workspace: "ws-principal" }),
+      });
+      expect(resInstall.status).toBe(200);
+      expect((resInstall.json as any).ok).toBe(true);
+      expect((resInstall.json as any).instalados.agentes).toContain("pautador-youtube");
     });
   });
 

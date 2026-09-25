@@ -5,6 +5,7 @@ import { eventBus } from "../../core/shared/event-bus.js";
 import { completarChatDirect } from "../../core/contexts/execution/llm-client.js";
 import { opencorpHome } from "../../utils/paths.js";
 import { SkillStore } from "../../core/contexts/agents/skill-store.js";
+import { PackStore } from "../../core/contexts/platform/packs-store.js";
 import type { OpcoesRun } from "../../core/contexts/execution/session-manager.js";
 import type { RouteContext } from "./types.js";
 
@@ -152,6 +153,40 @@ export async function handleAgentRoutes(ctx: RouteContext): Promise<boolean> {
   // Unifica rotas em português e inglês (/agentes -> /agents)
   const rota = ctx.rota.replace(/^\/agentes(\/|$)/, "/agents$1");
 
+  // ── GET /packs (catálogo de packs de soluções) ──────────────────────
+  if ((rota === "/packs" || ctx.rota === "/packs") && req.method === "GET") {
+    const store = new PackStore();
+    const lista = await store.listar();
+    enviar(res, 200, lista);
+    return true;
+  }
+
+  // ── GET /packs/:id e POST /packs/:id/install ─────────────────────────
+  const matchPack = /^\/packs\/([^/]+)(\/install)?$/.exec(rota);
+  if (matchPack) {
+    const packId = decodeURIComponent(matchPack[1]!);
+    const ehInstall = Boolean(matchPack[2]) && req.method === "POST";
+    const store = new PackStore();
+
+    if (ehInstall) {
+      const ws = await resolverWs(url);
+      const resultado = await store.instalar(packId, ws);
+      eventBus.emit("workspace.atualizado", { workspace: ws.id, acao: "pack_instalado", packId });
+      enviar(res, 200, resultado);
+      return true;
+    }
+
+    if (req.method === "GET") {
+      const detalhe = await store.obter(packId);
+      if (!detalhe) {
+        enviar(res, 404, { erro: `Pack de solução "${packId}" não encontrado` });
+        return true;
+      }
+      enviar(res, 200, detalhe);
+      return true;
+    }
+  }
+
   // ── GET /skills (catálogo de skills e parâmetros) ───────────────────
   if ((rota === "/skills" || ctx.rota === "/skills") && req.method === "GET") {
     const ws = await resolverWs(url);
@@ -161,43 +196,20 @@ export async function handleAgentRoutes(ctx: RouteContext): Promise<boolean> {
     return true;
   }
 
-  // ── GET /skills/ativas ou /workspaces/:ws/skills ─────────────────────
-  const matchWsSkillsGet =
-    rota.match(/^\/workspaces\/([^/]+)\/skills$/) || (rota === "/skills/ativas" ? [rota] : null);
-  if (matchWsSkillsGet && req.method === "GET") {
+  // ── GET /skills/:id (detalhe completo da skill, incluindo corpo SKILL.md) ──
+  const matchSkillGet = /^\/skills\/([^/]+)$/.exec(rota);
+  if (matchSkillGet && req.method === "GET") {
     const ws = await resolverWs(url);
+    const skillId = decodeURIComponent(matchSkillGet[1]!);
     const store = skillStore ?? new SkillStore();
-    const skillsAtivas = await store.listarAtivas(ws.path);
-    enviar(res, 200, { ok: true, workspace: ws.id, skills_ativas: skillsAtivas });
-    return true;
-  }
-
-  // ── POST /skills/:id/toggle ou /skills/toggle ─────────────────────────
-  const matchSkillToggle =
-    rota.match(/^\/skills\/([^/]+)\/toggle$/) ||
-    rota.match(/^\/workspaces\/[^/]+\/skills\/([^/]+)\/toggle$/);
-  const ehToggleGenerico =
-    rota === "/skills/toggle" ||
-    /^\/workspaces\/[^/]+\/skills$/.test(rota);
-
-  if ((matchSkillToggle || ehToggleGenerico) && req.method === "POST") {
-    const ws = await resolverWs(url);
-    const corpo = ((await lerCorpo(req)) || {}) as { id?: string; workspace?: string; ativa?: boolean };
-    const idSkill = matchSkillToggle?.[1] || corpo.id;
-    if (!idSkill) {
-      enviar(res, 400, { erro: "ID da skill é obrigatório para alternar ativação" });
+    try {
+      const detalhe = await store.mostrar(ws.path, skillId);
+      enviar(res, 200, detalhe);
+      return true;
+    } catch (err: unknown) {
+      enviar(res, 404, { erro: err instanceof Error ? err.message : String(err) });
       return true;
     }
-    const store = skillStore ?? new SkillStore();
-    const resultado = await store.alternarAtiva(ws.path, idSkill, corpo.ativa);
-    enviar(res, 200, {
-      ok: true,
-      id: idSkill,
-      ativa: resultado.ativa,
-      skills_ativas: resultado.skills_ativas,
-      workspace: ws.id,
-    });
-    return true;
   }
 
   // ── GET /tools (registro de ferramentas disponíveis para os agentes) ─
@@ -221,6 +233,37 @@ export async function handleAgentRoutes(ctx: RouteContext): Promise<boolean> {
   }
 
   if (!agentes) return false;
+
+  // ── POST /agents/:id/skills (atribuir/desatribuir skill do agente) ─────
+  const matchAgentSkills = /^\/agents\/([^/]+)\/skills$/.exec(rota);
+  if (matchAgentSkills && req.method === "POST") {
+    const ws = await resolverWs(url);
+    const agId = decodeURIComponent(matchAgentSkills[1]!);
+    const corpo = ((await lerCorpo(req)) || {}) as { skill?: string; acao?: "adicionar" | "remover"; skills?: string[] };
+    const agenteAlvo = await agentes.carregar(ws.path, agId);
+    let novasSkills = [...(agenteAlvo.frontmatter.skills || [])];
+
+    if (Array.isArray(corpo.skills)) {
+      novasSkills = Array.from(new Set(corpo.skills.map(String).filter(Boolean)));
+    } else if (corpo.skill) {
+      const skillNome = corpo.skill.trim();
+      if (corpo.acao === "remover") {
+        novasSkills = novasSkills.filter((s) => s !== skillNome);
+      } else {
+        if (!novasSkills.includes(skillNome)) {
+          novasSkills.push(skillNome);
+        }
+      }
+    } else {
+      enviar(res, 400, { erro: "Parâmetro 'skill' ou array 'skills' é obrigatório" });
+      return true;
+    }
+
+    const salvo = await agentes.editar(ws.path, agId, { skills: novasSkills });
+    eventBus.emit("agente.editado", { agente: agId, skills: novasSkills });
+    enviar(res, 200, { ok: true, agente: agId, skills: salvo.skills });
+    return true;
+  }
 
   // ── GET /agents ou /agentes ──────────────────────────────────────────
   if (rota === "/agents" && req.method === "GET") {
@@ -362,6 +405,7 @@ export async function handleAgentRoutes(ctx: RouteContext): Promise<boolean> {
         model: corpo.model !== undefined ? String(corpo.model) : undefined,
         permissions: corpo.permissions !== undefined ? (String(corpo.permissions) as "level-1" | "level-2" | "level-3") : undefined,
         tools: Array.isArray(corpo.tools) ? (corpo.tools as unknown[]).map(String).filter(Boolean) : undefined,
+        skills: Array.isArray(corpo.skills) ? (corpo.skills as unknown[]).map(String).filter(Boolean) : undefined,
         budget_daily_usd: typeof corpo.budget_daily_usd === "number" ? corpo.budget_daily_usd : undefined,
         budget_max_turns: typeof corpo.budget_max_turns === "number" ? corpo.budget_max_turns : undefined,
         ativo: corpo.ativo as boolean | undefined,

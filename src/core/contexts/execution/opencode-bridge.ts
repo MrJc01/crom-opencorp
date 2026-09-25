@@ -3,7 +3,7 @@ import { join, basename } from "node:path";
 import Database from "better-sqlite3";
 import type { Agente } from "../../../schemas/agent.js";
 import { writeFileAtomic } from "../../../utils/fs-safe.js";
-import { montarSecaoSkills, SkillStore } from "../agents/skill-store.js";
+import { montarSecaoSkills, montarSumarioL1Skills, SkillStore } from "../agents/skill-store.js";
 import { PromptStore } from "../agents/prompt-store.js";
 
 const TOOLS_OPENCODE = [
@@ -357,14 +357,20 @@ export class OpenCodeBridge {
   async sincronizarAgente(wsPath: string, agente: Agente, corpo: string): Promise<string> {
     const dir = join(wsPath, ".opencorp", "opencode", "agent");
     const destino = join(dir, `${agente.id}.md`);
-    // Substitui {{workspace}} pelo id real (basename do wsPath) — prompts de
-    // template citam o workspace; sem isto o agente recebe o literal.
     const wsId = basename(wsPath);
     const priming = obterContextoAdaptativo(wsPath, wsId, agente);
+    const store = new SkillStore();
+    const todasSkills = await store.listar(wsPath, { incluirCatalogo: true });
+    const sumarioL1 = montarSumarioL1Skills(todasSkills);
     const secaoSkills = this.montarSkills(wsPath, agente);
     // F3-T02: corpo do agente pode referenciar {{prompt:chave}} (puxado em runtime).
     const corpoResolvido = await new PromptStore().resolverReferencias(wsPath, corpo);
-    const corpoFinal = corpoResolvido.replaceAll("{{workspace}}", wsId) + secaoSkills + "\n" + priming;
+    const corpoFinal =
+      corpoResolvido.replaceAll("{{workspace}}", wsId) +
+      secaoSkills +
+      (sumarioL1 ? `\n${sumarioL1}` : "") +
+      "\n" +
+      priming;
     await writeFileAtomic(destino, gerarAgenteOpencode(agente, corpoFinal));
     this.vincular(wsPath, agente.id, destino);
     return destino;

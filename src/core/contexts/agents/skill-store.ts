@@ -6,7 +6,6 @@ import { spawnSync } from "node:child_process";
 import { parseYamlSimples } from "../../../schemas/agent.js";
 import { AgentError } from "../../shared/errors.js";
 import { projectRoot } from "../../../utils/paths.js";
-import { writeFileAtomic } from "../../../utils/fs-safe.js";
 
 export const NOME_SKILL_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -88,7 +87,22 @@ export function parseSkillMd(conteudo: string): Skill {
   };
 }
 
-/** Monta a seção "## Skills" (ordem alfabética, teto ~8k chars com aviso). */
+/**
+ * Monta a seção de Descoberta L1 ("## Available Skills (Progressive Disclosure)").
+ * Injeta apenas o nome e descrição concisa de cada skill para que a LLM saiba que existem
+ * sem sobrecarregar a janela de contexto de tokens.
+ */
+export function montarSumarioL1Skills(skills: SkillResumo[]): string {
+  if (skills.length === 0) return "";
+  const ordenadas = [...skills].sort((a, b) => a.name.localeCompare(b.name));
+  const linhas = ordenadas.map((s) => {
+    const meta = s.allowed_tools && s.allowed_tools.length > 0 ? ` [tools: ${s.allowed_tools.join(", ")}]` : "";
+    return `- \`${s.name}\`${meta}: ${s.description}`;
+  });
+  return `\n## Available Skills (Progressive Disclosure)\n${linhas.join("\n")}\n`;
+}
+
+/** Monta a seção de Ativação L2 "## Skills" com o corpo completo de cada skill declarada pelo agente. */
 export function montarSecaoSkills(skills: Skill[]): string {
   if (skills.length === 0) return "";
   const ordenadas = [...skills].sort((a, b) => a.name.localeCompare(b.name));
@@ -130,57 +144,6 @@ export class SkillStore {
       if (existsSync(join(projectRoot(), ".agents", "skills", nome, "SKILL.md"))) return true;
     } catch {}
     return false;
-  }
-
-  async listarAtivas(wsPath: string): Promise<string[]> {
-    const configPath = join(wsPath, ".opencorp", "config.json");
-    if (!existsSync(configPath)) return [];
-    try {
-      const raw = readFileSync(configPath, "utf8");
-      const cfg = JSON.parse(raw);
-      if (Array.isArray(cfg.skills_ativas)) return cfg.skills_ativas.map(String);
-      if (Array.isArray(cfg.skills)) return cfg.skills.map(String);
-      return [];
-    } catch {
-      return [];
-    }
-  }
-
-  async alternarAtiva(
-    wsPath: string,
-    nomeSkill: string,
-    ativar?: boolean,
-  ): Promise<{ ativa: boolean; skills_ativas: string[] }> {
-    const dir = join(wsPath, ".opencorp");
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-    const configPath = join(dir, "config.json");
-    let cfg: Record<string, any> = {};
-    if (existsSync(configPath)) {
-      try {
-        cfg = JSON.parse(readFileSync(configPath, "utf8"));
-      } catch {}
-    }
-    const atuais: string[] = Array.isArray(cfg.skills_ativas)
-      ? cfg.skills_ativas.map(String)
-      : Array.isArray(cfg.skills)
-        ? cfg.skills.map(String)
-        : [];
-
-    const jaAtiva = atuais.includes(nomeSkill);
-    const novoEstado = ativar !== undefined ? Boolean(ativar) : !jaAtiva;
-
-    let novas: string[];
-    if (novoEstado) {
-      novas = jaAtiva ? atuais : [...atuais, nomeSkill];
-    } else {
-      novas = atuais.filter((s) => s !== nomeSkill);
-    }
-
-    cfg.skills_ativas = novas;
-    await writeFileAtomic(configPath, `${JSON.stringify(cfg, null, 2)}\n`);
-    return { ativa: novoEstado, skills_ativas: novas };
   }
 
   async listar(wsPath: string, opts?: ListarSkillsOptions): Promise<SkillResumo[]> {
@@ -240,12 +203,6 @@ export class SkillStore {
           coletarDeDiretorio(rootDir);
         }
       } catch {}
-
-      // Preenche status de ativação com base em config.json
-      const ativas = await this.listarAtivas(wsPath);
-      for (const r of resumos) {
-        r.ativa = ativas.includes(r.name);
-      }
     }
 
     return resumos.sort((a, b) => a.name.localeCompare(b.name));
