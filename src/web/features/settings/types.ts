@@ -87,6 +87,7 @@ export interface ContaMotor {
 export interface SecretItem {
   nome: string;
   definido?: boolean;
+  tipo_app?: string | null;
   origem?: "global" | "workspace";
 }
 
