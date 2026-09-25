@@ -17,6 +17,12 @@ import {
   Loader2,
   Sliders,
   Sparkles,
+  Download,
+  Unplug,
+  Trash2,
+  Edit3,
+  X,
+  Star,
 } from "lucide-react";
 import { showToast } from "../../../../shared/ui/Toast.js";
 import { useOpenCorp } from "../../../../providers/OpenCorpProvider.js";
@@ -51,6 +57,21 @@ export const TabEngines: FC<TabEnginesProps> = ({
   // Controle de abertura do EngineAuthModal
   const [modalAuthAberto, setModalAuthAberto] = useState(false);
   const [motorSelecionadoAuth, setMotorSelecionadoAuth] = useState<{ id: string; nome: string } | null>(null);
+
+  // Estados de Ciclo de Vida do Motor
+  const [instalandoMotor, setInstalandoMotor] = useState<string | null>(null);
+  const [desconectandoMotor, setDesconectandoMotor] = useState<string | null>(null);
+  const [conectandoPadraoMotor, setConectandoPadraoMotor] = useState<string | null>(null);
+
+  // Estados de Gestão de Contas
+  const [ativandoContaId, setAtivandoContaId] = useState<string | null>(null);
+  const [excluindoContaId, setExcluindoContaId] = useState<string | null>(null);
+  const [editandoContaId, setEditandoContaId] = useState<string | null>(null);
+  const [limitesContaEdicao, setLimitesContaEdicao] = useState<{ daily_cost_usd: number; rate_limit_rpm: number }>({
+    daily_cost_usd: 10,
+    rate_limit_rpm: 30,
+  });
+  const [salvandoLimitesConta, setSalvandoLimitesConta] = useState(false);
 
   const abrirModalAuth = (motor: { id: string; name?: string }) => {
     setMotorSelecionadoAuth({ id: motor.id, nome: motor.name || motor.id });
@@ -138,6 +159,134 @@ export const TabEngines: FC<TabEnginesProps> = ({
       tratarErro(err, "Erro ao salvar limites dos motores");
     } finally {
       setSalvandoLimites(false);
+    }
+  };
+
+  // Ciclo de vida: Instalar Motor
+  const instalarMotor = async (motorId: string) => {
+    setInstalandoMotor(motorId);
+    try {
+      showToast(`Iniciando instalação isolada de "${motorId}"...`, "aviso");
+      const res = await client.http.post<any>(`/api/motores/${encodeURIComponent(motorId)}/install`, {});
+      if (!res?.ok && res?.erro) {
+        throw new Error(res.erro || "Falha na instalação do motor");
+      }
+      showToast(res?.log || `Motor "${motorId}" instalado com sucesso!`, "sucesso");
+      await carregarDados();
+      await testarMotor(motorId);
+    } catch (err: unknown) {
+      tratarErro(err, `Falha ao instalar motor ${motorId}`);
+    } finally {
+      setInstalandoMotor(null);
+    }
+  };
+
+  // Ciclo de vida: Desconectar Motor
+  const desconectarMotor = async (motorId: string) => {
+    if (!confirm(`Deseja desconectar o motor "${motorId}"? O OpenCode será restaurado como executor padrão.`)) {
+      return;
+    }
+    setDesconectandoMotor(motorId);
+    try {
+      const res = await client.http.post<any>(`/api/motores/${encodeURIComponent(motorId)}/desconectar`, {});
+      if (!res?.ok && res?.erro) {
+        throw new Error(res.erro || "Falha ao desconectar motor");
+      }
+      showToast(`Motor "${motorId}" desconectado. OpenCode restaurado como padrão.`, "sucesso");
+      await carregarDados();
+    } catch (err: unknown) {
+      tratarErro(err, `Erro ao desconectar motor ${motorId}`);
+    } finally {
+      setDesconectandoMotor(null);
+    }
+  };
+
+  // Ciclo de vida: Ativar Motor como padrão no runner.json
+  const ativarMotorComoPadrao = async (motorId: string) => {
+    setConectandoPadraoMotor(motorId);
+    try {
+      const res = await client.http.post<any>(`/api/motores/${encodeURIComponent(motorId)}/conectar?forcar=true`, {});
+      if (!res?.ok && res?.erro) {
+        throw new Error(res.erro || "Falha ao ativar motor");
+      }
+      showToast(`Motor "${motorId}" definido como executor padrão no runner!`, "sucesso");
+      await carregarDados();
+    } catch (err: unknown) {
+      tratarErro(err, `Erro ao ativar motor ${motorId}`);
+    } finally {
+      setConectandoPadraoMotor(null);
+    }
+  };
+
+  // Gestão de Contas: Ativar Conta
+  const ativarContaMotor = async (motorId: string, contaId: string) => {
+    setAtivandoContaId(contaId);
+    try {
+      const res = await client.http.post<any>(
+        `/api/motores/${encodeURIComponent(motorId)}/contas/${encodeURIComponent(contaId)}/ativar`,
+        {}
+      );
+      if (!res?.ok && res?.erro) {
+        throw new Error(res.erro || "Falha ao ativar conta");
+      }
+      showToast("Conta ativada como principal do motor!", "sucesso");
+      await carregarDados();
+    } catch (err: unknown) {
+      tratarErro(err, "Erro ao ativar conta");
+    } finally {
+      setAtivandoContaId(null);
+    }
+  };
+
+  // Gestão de Contas: Excluir / Desconectar Conta
+  const desconectarContaMotor = async (motorId: string, contaId: string, nomeConta?: string) => {
+    if (!confirm(`Desconectar e remover a conta "${nomeConta || contaId}" deste motor?`)) {
+      return;
+    }
+    setExcluindoContaId(contaId);
+    try {
+      const res = await client.http.delete<any>(
+        `/api/motores/${encodeURIComponent(motorId)}/contas/${encodeURIComponent(contaId)}`
+      );
+      if (!res?.ok && res?.erro) {
+        throw new Error(res.erro || "Falha ao desconectar conta");
+      }
+      showToast("Conta desconectada com sucesso!", "sucesso");
+      await carregarDados();
+    } catch (err: unknown) {
+      tratarErro(err, "Erro ao desconectar conta");
+    } finally {
+      setExcluindoContaId(null);
+    }
+  };
+
+  // Gestão de Contas: Iniciar Edição de Limites
+  const abrirEdicaoLimitesConta = (conta: ContaMotor) => {
+    setEditandoContaId(conta.id);
+    setLimitesContaEdicao({
+      daily_cost_usd: conta.limits?.daily_cost_usd ?? 10,
+      rate_limit_rpm: conta.limits?.rate_limit_rpm ?? 30,
+    });
+  };
+
+  // Gestão de Contas: Salvar Limites da Conta
+  const salvarLimitesConta = async (motorId: string, contaId: string) => {
+    setSalvandoLimitesConta(true);
+    try {
+      const res = await client.http.put<any>(
+        `/api/motores/${encodeURIComponent(motorId)}/contas/${encodeURIComponent(contaId)}/limites`,
+        limitesContaEdicao
+      );
+      if (!res?.ok && res?.erro) {
+        throw new Error(res.erro || "Falha ao salvar limites da conta");
+      }
+      showToast("Limites da conta atualizados com sucesso!", "sucesso");
+      setEditandoContaId(null);
+      await carregarDados();
+    } catch (err: unknown) {
+      tratarErro(err, "Erro ao salvar limites da conta");
+    } finally {
+      setSalvandoLimitesConta(false);
     }
   };
 
@@ -273,28 +422,109 @@ export const TabEngines: FC<TabEnginesProps> = ({
           {/* Painel de Detalhes do Motor Selecionado */}
           {motorAtual && (
             <div className="p-4 sm:p-5 rounded-2xl border border-zinc-850 bg-zinc-900/40 space-y-4">
+              {/* Header do Motor Selecionado */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-zinc-800 gap-3">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 rounded-xl bg-orange-600/10 border border-orange-500/20 text-orange-400 shrink-0">
                     <Cpu size={20} />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-zinc-100">
-                      {motorAtual.name}
-                    </h3>
-                    <p className="text-xs text-zinc-400 mt-0.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-bold text-zinc-100">
+                        {motorAtual.name}
+                      </h3>
+                      {motorAtual.category && (
+                        <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                          {motorAtual.category}
+                        </span>
+                      )}
+                      {motorAtual.installed ? (
+                        motorAtual.ativo ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 font-semibold">
+                            <Star size={10} className="fill-emerald-400 text-emerald-400" />
+                            Motor Padrão Ativo
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full border border-zinc-800 bg-zinc-850 text-zinc-300">
+                            <Check size={10} className="text-zinc-400" />
+                            Instalado
+                          </span>
+                        )
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full border border-amber-800/50 bg-amber-950/30 text-amber-300 font-semibold">
+                          <AlertCircle size={10} className="text-amber-400" />
+                          Não Instalado
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-1">
                       {motorAtual.description}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 flex-wrap shrink-0">
+                  {/* Se o motor não estiver instalado, botão destacado para instalar */}
+                  {!motorAtual.installed && (
+                    <button
+                      type="button"
+                      disabled={instalandoMotor === motorAtual.id}
+                      onClick={() => instalarMotor(motorAtual.id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                      title="Instalar binário deste motor isolado em ~/.opencorp/bin"
+                    >
+                      {instalandoMotor === motorAtual.id ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Download size={13} />
+                      )}
+                      <span>Instalar Motor</span>
+                    </button>
+                  )}
+
+                  {/* Se o motor estiver instalado mas não for o padrão ativo */}
+                  {motorAtual.installed && !motorAtual.ativo && (
+                    <button
+                      type="button"
+                      disabled={conectandoPadraoMotor === motorAtual.id}
+                      onClick={() => ativarMotorComoPadrao(motorAtual.id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-200 border border-zinc-700 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                      title="Definir este motor como o executor padrão do sistema"
+                    >
+                      {conectandoPadraoMotor === motorAtual.id ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Star size={13} className="text-amber-400" />
+                      )}
+                      <span>Definir como Padrão</span>
+                    </button>
+                  )}
+
+                  {/* Se o motor for o padrão ativo e não for o opencode, botão de desconectar */}
+                  {motorAtual.ativo && motorAtual.id !== "opencode" && (
+                    <button
+                      type="button"
+                      disabled={desconectandoMotor === motorAtual.id}
+                      onClick={() => desconectarMotor(motorAtual.id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-rose-950/40 text-rose-400 hover:text-rose-300 border border-zinc-800 hover:border-rose-900/50 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                      title="Desconectar este motor e reverter o padrão para OpenCode"
+                    >
+                      {desconectandoMotor === motorAtual.id ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Unplug size={13} />
+                      )}
+                      <span>Desconectar</span>
+                    </button>
+                  )}
+
+                  {/* Botão de Autenticar / Adicionar Conta */}
                   <button
                     type="button"
                     onClick={() => abrirModalAuth(motorAtual)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-850 text-zinc-200 border border-zinc-800 text-xs font-semibold transition-colors cursor-pointer"
                   >
-                    <KeyRound size={13} />
+                    <KeyRound size={13} className="text-orange-400" />
                     <span>
                       {motorAtual.authStatus?.authenticated || motorAtual.contaAtiva || motorAtual.id === "opencode"
                         ? "+ Adicionar Conta"
@@ -302,6 +532,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
                     </span>
                   </button>
 
+                  {/* Botão de Testar Conexão / Diagnóstico */}
                   <button
                     type="button"
                     disabled={testandoMotor !== null}
@@ -317,6 +548,54 @@ export const TabEngines: FC<TabEnginesProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* Banner informativo de status do motor */}
+              {!motorAtual.installed && (
+                <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-amber-800/40 bg-amber-950/20 text-xs text-amber-200">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle size={15} className="shrink-0 text-amber-400" />
+                    <span>
+                      O binário isolado de <strong>{motorAtual.name}</strong> não está instalado em <code className="font-mono text-[11px] bg-amber-950/60 px-1 py-0.5 rounded">~/.opencorp/bin/</code>.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={instalandoMotor === motorAtual.id}
+                    onClick={() => instalarMotor(motorAtual.id)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] shrink-0 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {instalandoMotor === motorAtual.id ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <Download size={12} />
+                    )}
+                    <span>Instalar Agora</span>
+                  </button>
+                </div>
+              )}
+
+              {motorAtual.ativo && (
+                <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-emerald-800/40 bg-emerald-950/20 text-xs text-emerald-200">
+                  <div className="flex items-center gap-2">
+                    <Star size={15} className="fill-emerald-400 text-emerald-400 shrink-0" />
+                    <span>
+                      <strong>Motor Padrão Ativo do Sistema</strong> — Orquestrando turnos autônomos, tarefas agendadas e chamadas de ferramentas no OpenCorp.
+                    </span>
+                  </div>
+                  {motorAtual.id !== "opencode" && (
+                    <button
+                      type="button"
+                      disabled={desconectandoMotor === motorAtual.id}
+                      onClick={() => desconectarMotor(motorAtual.id)}
+                      className="text-[11px] text-zinc-400 hover:text-rose-300 font-medium flex items-center gap-1 transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+                      title="Reverter para o executor padrão OpenCode"
+                    >
+                      <Unplug size={11} />
+                      <span>Reverter p/ OpenCode</span>
+                    </button>
+                  )}
+                </div>
+              )}
 
               {resultadoTeste[motorAtual.id] && (
                 <div
@@ -341,7 +620,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
               )}
 
               {/* Contas / Perfis de Execução do Motor */}
-              <div className="space-y-2">
+              <div className="space-y-2.5 pt-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wider block">
                     Contas &amp; Instâncias Configuradas ({contasDoMotor.length})
@@ -355,44 +634,212 @@ export const TabEngines: FC<TabEnginesProps> = ({
                     <span>Adicionar Conta</span>
                   </button>
                 </div>
-                <div className="space-y-2">
-                  {contasDoMotor.map((conta) => (
-                    <div
-                      key={conta.id}
-                      className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-850 flex items-center justify-between text-xs"
-                    >
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-zinc-200 font-mono">
-                            {conta.nome || conta.id}
-                          </span>
-                          <span
-                            className={`text-[9px] font-mono px-1.5 py-0.2 rounded border font-semibold ${
-                              conta.ativa
-                                ? "text-emerald-400 bg-emerald-950/40 border-emerald-800/40"
-                                : "text-zinc-500 bg-zinc-900 border-zinc-800"
-                            }`}
-                          >
-                            {conta.ativa ? "Ativa" : "Inativa"}
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-mono text-zinc-500">
-                          {conta.previewChave || conta.authType || "autenticado"} · Cota: {conta.limits?.status_cota || "normal"}
-                        </span>
-                      </div>
 
-                      <div className="text-right text-[11px] font-mono text-zinc-400">
-                        <span>{conta.limits?.rate_limit_rpm || 60} RPM</span>
-                        <span className="text-zinc-600 block">
-                          Teto: ${conta.limits?.daily_cost_usd || 100}/dia
-                        </span>
+                <div className="space-y-2.5">
+                  {contasDoMotor.map((conta) => {
+                    const isEditando = editandoContaId === conta.id;
+
+                    return (
+                      <div
+                        key={conta.id}
+                        className="p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-850 hover:border-zinc-800 space-y-3 transition-colors text-xs"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-zinc-100 font-mono text-xs">
+                                {conta.nome || conta.label || conta.id}
+                              </span>
+
+                              {/* Badge de Ativa / Inativa */}
+                              {conta.ativa ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 font-semibold">
+                                  <Check size={11} />
+                                  Ativa
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border border-zinc-800 bg-zinc-900 text-zinc-500 font-medium">
+                                  Inativa
+                                </span>
+                              )}
+
+                              {conta.provider && (
+                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-850 text-zinc-300 border border-zinc-750">
+                                  {conta.provider}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="text-[11px] font-mono text-zinc-400 flex items-center gap-2 flex-wrap">
+                              <span className="text-amber-400/90" title="Chave mascarada">
+                                {conta.previewChave || conta.authType || "credencial ativa"}
+                              </span>
+                              {conta.modeloPadrao && (
+                                <>
+                                  <span className="text-zinc-600">•</span>
+                                  <span className="text-zinc-300">Mod: {conta.modeloPadrao}</span>
+                                </>
+                              )}
+                              <span className="text-zinc-600">•</span>
+                              <span className="text-zinc-400">
+                                Limites: ${conta.limits?.daily_cost_usd ?? 10}/dia · {conta.limits?.rate_limit_rpm ?? 30} RPM
+                              </span>
+                              <span className="text-zinc-600">•</span>
+                              <span className="text-zinc-500">
+                                Cota: {conta.limits?.status_cota || "normal"}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Ações da Conta */}
+                          <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+                            {/* Se não for a conta ativa, botão para Tornar Ativa */}
+                            {!conta.ativa && (
+                              <button
+                                type="button"
+                                disabled={ativandoContaId === conta.id}
+                                onClick={() => ativarContaMotor(motorAtual.id, conta.id)}
+                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-emerald-950/50 text-zinc-300 hover:text-emerald-300 border border-zinc-800 hover:border-emerald-800/60 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                                title="Definir esta conta como principal para este motor"
+                              >
+                                {ativandoContaId === conta.id ? (
+                                  <Loader2 size={12} className="animate-spin" />
+                                ) : (
+                                  <Check size={12} />
+                                )}
+                                <span>Tornar Ativa</span>
+                              </button>
+                            )}
+
+                            {/* Botão de Edição Rápida de Limites */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (isEditando) {
+                                  setEditandoContaId(null);
+                                } else {
+                                  abrirEdicaoLimitesConta(conta);
+                                }
+                              }}
+                              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                                isEditando
+                                  ? "bg-orange-950/40 text-orange-300 border-orange-800/60"
+                                  : "bg-zinc-900 hover:bg-zinc-850 text-zinc-300 hover:text-zinc-100 border-zinc-800"
+                              }`}
+                              title="Ajustar limites de custo diário e taxa de requisições"
+                            >
+                              <Edit3 size={12} className={isEditando ? "text-orange-400" : "text-zinc-400"} />
+                              <span>{isEditando ? "Fechar" : "Limites"}</span>
+                            </button>
+
+                            {/* Botão de Excluir / Desconectar Conta */}
+                            <button
+                              type="button"
+                              disabled={excluindoContaId === conta.id}
+                              onClick={() => desconectarContaMotor(motorAtual.id, conta.id, conta.nome)}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-rose-950/40 text-rose-400 hover:text-rose-300 border border-zinc-800 hover:border-rose-900/50 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                              title="Desconectar e remover esta conta do motor"
+                            >
+                              {excluindoContaId === conta.id ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <Trash2 size={12} />
+                              )}
+                              <span>Desconectar</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Painel Inline de Edição de Limites */}
+                        {isEditando && (
+                          <div className="pt-3 border-t border-zinc-800/60 mt-2 space-y-3 bg-zinc-900/40 p-3 rounded-lg border border-zinc-800/50">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                                <Sliders size={13} className="text-orange-400" />
+                                Limites Operacionais da Conta ({conta.nome || conta.id})
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setEditandoContaId(null)}
+                                className="text-zinc-400 hover:text-zinc-200"
+                              >
+                                <X size={13} />
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-[11px] font-medium text-zinc-400 mb-1">
+                                  Cota Diária Máxima (USD)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="2000"
+                                  step="1"
+                                  value={limitesContaEdicao.daily_cost_usd}
+                                  onChange={(e) =>
+                                    setLimitesContaEdicao((prev) => ({
+                                      ...prev,
+                                      daily_cost_usd: Number(e.target.value) || 0,
+                                    }))
+                                  }
+                                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 font-mono focus:outline-hidden focus:border-orange-500/60"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[11px] font-medium text-zinc-400 mb-1">
+                                  Taxa de Requisições (RPM)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="500"
+                                  step="1"
+                                  value={limitesContaEdicao.rate_limit_rpm}
+                                  onChange={(e) =>
+                                    setLimitesContaEdicao((prev) => ({
+                                      ...prev,
+                                      rate_limit_rpm: Number(e.target.value) || 0,
+                                    }))
+                                  }
+                                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 font-mono focus:outline-hidden focus:border-orange-500/60"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2 pt-2">
+                              <button
+                                type="button"
+                                onClick={() => setEditandoContaId(null)}
+                                className="px-2.5 py-1 rounded-lg bg-zinc-850 hover:bg-zinc-800 text-zinc-300 text-xs font-medium transition-colors"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={salvandoLimitesConta}
+                                onClick={() => salvarLimitesConta(motorAtual.id, conta.id)}
+                                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+                              >
+                                {salvandoLimitesConta ? (
+                                  <Loader2 size={12} className="animate-spin" />
+                                ) : (
+                                  <Save size={12} />
+                                )}
+                                <span>Salvar Limites</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
 
                   {contasDoMotor.length === 0 && (
-                    <p className="text-xs text-zinc-500 py-3 text-center border border-dashed border-zinc-850 rounded-xl">
-                      Nenhuma conta extra cadastrada para este motor. Utilizando autenticação nativa.
+                    <p className="text-xs text-zinc-500 py-4 text-center border border-dashed border-zinc-850 rounded-xl">
+                      Nenhuma conta extra cadastrada para este motor. Utilizando credenciais padrão do sistema.
                     </p>
                   )}
                 </div>
