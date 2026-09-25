@@ -4,6 +4,8 @@ import {
   RefreshCw,
   Cpu,
   Key,
+  KeyRound,
+  Plus,
   Play,
   Activity,
   Save,
@@ -18,6 +20,7 @@ import {
 } from "lucide-react";
 import { showToast } from "../../../../shared/ui/Toast.js";
 import { useOpenCorp } from "../../../../providers/OpenCorpProvider.js";
+import { EngineAuthModal } from "../EngineAuthModal.js";
 import type {
   TabConfigId,
   MotorInfo,
@@ -44,6 +47,15 @@ export const TabEngines: FC<TabEnginesProps> = ({
   const [salvandoLimites, setSalvandoLimites] = useState(false);
   const [testandoMotor, setTestandoMotor] = useState<string | null>(null);
   const [resultadoTeste, setResultadoTeste] = useState<Record<string, any>>({});
+
+  // Controle de abertura do EngineAuthModal
+  const [modalAuthAberto, setModalAuthAberto] = useState(false);
+  const [motorSelecionadoAuth, setMotorSelecionadoAuth] = useState<{ id: string; nome: string } | null>(null);
+
+  const abrirModalAuth = (motor: { id: string; name?: string }) => {
+    setMotorSelecionadoAuth({ id: motor.id, nome: motor.name || motor.id });
+    setModalAuthAberto(true);
+  };
 
   const carregarDados = useCallback(async () => {
     setCarregando(true);
@@ -234,13 +246,24 @@ export const TabEngines: FC<TabEnginesProps> = ({
 
                   <div className="flex items-center justify-between pt-2 border-t border-zinc-800/60 text-[10px] font-mono text-zinc-500">
                     <span>{m.version || "ativo"}</span>
-                    <span
-                      className={
-                        isAutenticado ? "text-emerald-400 font-semibold" : "text-zinc-500"
-                      }
-                    >
-                      {isAutenticado ? "Conectado" : "Disponível"}
-                    </span>
+                    {isAutenticado ? (
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                        <Check size={11} /> Conectado
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMotorSelecionado(m.id);
+                          abrirModalAuth(m);
+                        }}
+                        className="text-orange-400 hover:text-orange-300 font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <KeyRound size={11} />
+                        <span>Autenticar</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -266,6 +289,19 @@ export const TabEngines: FC<TabEnginesProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => abrirModalAuth(motorAtual)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                  >
+                    <KeyRound size={13} />
+                    <span>
+                      {motorAtual.authStatus?.authenticated || motorAtual.contaAtiva || motorAtual.id === "opencode"
+                        ? "+ Adicionar Conta"
+                        : "Autenticar / Conectar"}
+                    </span>
+                  </button>
+
                   <button
                     type="button"
                     disabled={testandoMotor !== null}
@@ -306,9 +342,19 @@ export const TabEngines: FC<TabEnginesProps> = ({
 
               {/* Contas / Perfis de Execução do Motor */}
               <div className="space-y-2">
-                <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wider block">
-                  Contas &amp; Instâncias Configuradas ({contasDoMotor.length})
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wider block">
+                    Contas &amp; Instâncias Configuradas ({contasDoMotor.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => abrirModalAuth(motorAtual)}
+                    className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Plus size={13} />
+                    <span>Adicionar Conta</span>
+                  </button>
+                </div>
                 <div className="space-y-2">
                   {contasDoMotor.map((conta) => (
                     <div
@@ -481,6 +527,20 @@ export const TabEngines: FC<TabEnginesProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal de Autenticação de Motores e Credenciais */}
+      <EngineAuthModal
+        aberto={modalAuthAberto}
+        motorId={motorSelecionadoAuth?.id || null}
+        motorNome={motorSelecionadoAuth?.nome}
+        aoFechar={() => {
+          setModalAuthAberto(false);
+          setMotorSelecionadoAuth(null);
+        }}
+        aoSalvarSucesso={() => {
+          void carregarDados();
+        }}
+      />
     </div>
   );
 };
