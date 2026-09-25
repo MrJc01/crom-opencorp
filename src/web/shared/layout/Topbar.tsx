@@ -1,15 +1,17 @@
 import React, { type FC } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useOpenCorp } from "../../providers/OpenCorpProvider.js";
-import { Bot, Terminal, Bell, Radio } from "lucide-react";
+import { Bot, Terminal, Bell, Menu, Radio } from "lucide-react";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 
 export interface TopbarProps {
+  onToggleMenuMobile: () => void;
   aoAlternarSecretario?: () => void;
   secretarioAberto?: boolean;
 }
 
 export const Topbar: FC<TopbarProps> = ({
+  onToggleMenuMobile,
   aoAlternarSecretario,
   secretarioAberto = false,
 }) => {
@@ -21,6 +23,16 @@ export const Topbar: FC<TopbarProps> = ({
     <header className="h-14 bg-zinc-950 border-b border-zinc-850 px-4 md:px-6 flex items-center justify-between z-20 select-none">
       {/* Lado Esquerdo: Identificação do Workspace Ativo com Seletor Rápido */}
       <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onToggleMenuMobile}
+          className="md:hidden p-2 -ml-2 rounded-lg hover:bg-zinc-900 transition-colors cursor-pointer"
+          aria-label="Abrir menu de navegação"
+          title="Abrir menu de navegação"
+        >
+          <Menu className="w-5 h-5 text-zinc-400 hover:text-white" />
+        </button>
+
         <WorkspaceSwitcher />
 
         <span className="hidden sm:inline-block text-xs text-zinc-600">|</span>
