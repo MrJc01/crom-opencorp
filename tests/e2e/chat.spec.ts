@@ -50,4 +50,47 @@ test.describe("Chat do Secretário", () => {
     await page.waitForSelector("#chat-input", { timeout: 20000 });
     await expect(page.getByText(texto).first()).toBeVisible({ timeout: 15000 });
   });
+
+  test("gatilho / abre popover de autocomplete e tecla Esc fecha", async ({ page }) => {
+    await page.locator("#chat-input").focus();
+    await page.keyboard.type("/");
+    await expect(page.locator("[data-autocomplete-popover]")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("/status").first()).toBeVisible();
+    await expect(page.getByText("/doctor").first()).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator("[data-autocomplete-popover]")).not.toBeVisible();
+  });
+
+  test("gatilho @ abre menções e cria pílula de destinatário", async ({ page }) => {
+    await page.locator('button[title="Mencionar agente, arquivo ou task (@)"]').click();
+    await expect(page.locator("[data-autocomplete-popover]")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("@agente:secretario-exec").first()).toBeVisible();
+
+    await page.getByText("@agente:secretario-exec").first().click();
+    await expect(page.getByText("para @secretario-exec")).toBeVisible();
+
+    // Botão de remover destinatário limpa a pílula
+    await page.locator('button[title="Remover destinatário (voltar ao Secretário padrão)"]').click();
+    await expect(page.getByText("para @secretario-exec")).not.toBeVisible();
+  });
+
+  test("gatilho ! executa comando no terminal e formata em bloco monospace", async ({ page }) => {
+    await page.locator("#chat-input").fill("!status");
+    await page.click("#btn-enviar");
+
+    await expect(page.locator(".oc-user").last()).toContainText("!status", { timeout: 10000 });
+    await expect(page.locator(".oc-assistant").last()).toContainText("$ !status", { timeout: 15000 });
+  });
+
+  test("seletor in-place de modelo alterna o modelo ativo", async ({ page }) => {
+    const seletorModelo = page.locator("[data-model-dropdown] button").first();
+    await expect(seletorModelo).toContainText("gemini-2.5-flash");
+
+    await seletorModelo.click();
+    await expect(page.getByText("llama-3.3-70b").first()).toBeVisible();
+
+    await page.getByText("llama-3.3-70b").first().click();
+    await expect(seletorModelo).toContainText("llama-3.3-70b");
+  });
 });

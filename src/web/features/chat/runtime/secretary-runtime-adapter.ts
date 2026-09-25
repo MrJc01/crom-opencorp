@@ -233,6 +233,108 @@ export function useOpenCorpSecretarioRuntime(
 
       if (!userText.trim()) return;
 
+      // ── /clear: Limpa o histórico visível imediatamente ──
+      if (userText.trim().toLowerCase() === "/clear") {
+        setMessages([]);
+        return;
+      }
+
+      // ── !comando: Execução Direta de Shell (POST /terminal) ──
+      if (userText.trim().startsWith("!")) {
+        const comandoBruto = userText.trim().slice(1).trim();
+        const userMsgId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const asstMsgId = `asst_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+        const userMsg: ThreadMessageLike = {
+          id: userMsgId,
+          role: "user",
+          content: [{ type: "text", text: userText }],
+          createdAt: new Date(),
+        };
+
+        const asstMsg: ThreadMessageLike = {
+          id: asstMsgId,
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: `\`\`\`terminal\n$ !${comandoBruto}\n[executando comando no terminal do workspace ${wsId}...]\n\`\`\``,
+            },
+          ],
+          createdAt: new Date(),
+        };
+
+        setMessages((prev) => [...prev, userMsg, asstMsg]);
+        setIsRunning(true);
+
+        try {
+          const origin =
+            typeof window !== "undefined"
+              ? window.location.origin
+              : "http://127.0.0.1:4100";
+          const authHeaders = obterAuthHeaders();
+          const res = await fetch(
+            `${origin}/terminal?workspace=${encodeURIComponent(wsId)}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...authHeaders,
+                ...(options.headers ?? {}),
+              },
+              body: JSON.stringify({ comando: comandoBruto, workspace: wsId }),
+            },
+          );
+
+          const data = await res.json().catch(() => ({}));
+          let saida = "";
+          if (data.saida) {
+            saida = data.saida;
+          } else if (data.erro) {
+            saida = `Erro: ${data.erro}`;
+          } else if (!res.ok) {
+            saida = `Erro HTTP ${res.status}: falha na execução do comando`;
+          } else {
+            saida = "(Comando executado com sucesso)";
+          }
+
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === asstMsgId);
+            if (idx === -1) return prev;
+            const copia = [...prev];
+            copia[idx] = {
+              ...copia[idx],
+              content: [
+                {
+                  type: "text",
+                  text: `\`\`\`terminal\n$ !${comandoBruto}\n${saida}\n\`\`\``,
+                },
+              ],
+            };
+            return copia;
+          });
+        } catch (err: any) {
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === asstMsgId);
+            if (idx === -1) return prev;
+            const copia = [...prev];
+            copia[idx] = {
+              ...copia[idx],
+              content: [
+                {
+                  type: "text",
+                  text: `\`\`\`terminal\n$ !${comandoBruto}\nFalha de conexão com terminal: ${err.message}\n\`\`\``,
+                },
+              ],
+            };
+            return copia;
+          });
+        } finally {
+          setIsRunning(false);
+        }
+        return;
+      }
+
       // Dispara callback de primeira mensagem para atualizar o título da aba
       if (messages.length === 0) {
         options.onPrimeiraMensagem?.(userText);
@@ -292,16 +394,24 @@ export function useOpenCorpSecretarioRuntime(
           if (wsId) queryParams.set("workspace", wsId);
           const urlFinal = `${urlBase}?${queryParams.toString()}`;
 
+          const extra = options.obterContextoEnvio?.();
           const body: Record<string, unknown> = {
             cliente_id: `react_${Date.now().toString(36)}`,
             mensagem: userText,
             prompt: userText,
-            agente: options.agente ?? "secretario",
+            agente: extra?.agente ?? options.agente ?? "secretario",
           };
           if (sessaoIdRef.current) body.sessao_id = sessaoIdRef.current;
-          if (options.modelo) {
-            body.modelo = options.modelo;
-            body.model = options.modelo;
+          const modeloEfetivo = extra?.modelo ?? options.modelo;
+          if (modeloEfetivo) {
+            body.modelo = modeloEfetivo;
+            body.model = modeloEfetivo;
+          }
+          if (extra?.imagens && extra.imagens.length > 0) {
+            body.imagens = extra.imagens;
+          }
+          if (extra?.contexto && extra.contexto.length > 0) {
+            body.contexto = extra.contexto;
           }
 
           await executarSecretarioStream({
@@ -333,6 +443,7 @@ export function useOpenCorpSecretarioRuntime(
               onFim: () => {
                 setIsRunning(false);
                 abortControllerRef.current = null;
+                options.onLimparContextoEnvio?.();
               },
               onError: (err) => {
                 setIsRunning(false);

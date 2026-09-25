@@ -12,6 +12,13 @@ export interface SecretaryRuntimeOptions {
   onSessaoCriada?: (sessaoId: string) => void;
   onPrimeiraMensagem?: (texto: string) => void;
   onErro?: (erro: Error) => void;
+  obterContextoEnvio?: () => {
+    agente?: string;
+    modelo?: string;
+    imagens?: Array<{ nome?: string; mime?: string; url?: string }>;
+    contexto?: string[];
+  };
+  onLimparContextoEnvio?: () => void;
 }
 
 export interface ToolExecutionItem {

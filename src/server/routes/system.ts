@@ -514,7 +514,8 @@ export async function handleSystemRoutes(ctx: RouteContext): Promise<boolean> {
       return true;
     }
     const args = argsBrutos.filter((a) => !a.startsWith("--") && !a.includes("/") && !a.includes("\\") && !a.includes(".."));
-    const bin = resolve(import.meta.dirname ?? ".", "..", "..", "bin", "opencorp.mjs");
+    const binCandidato = resolve(import.meta.dirname ?? ".", "..", "..", "..", "bin", "opencorp.mjs");
+    const bin = existsSync(binCandidato) ? binCandidato : resolve(import.meta.dirname ?? ".", "..", "..", "bin", "opencorp.mjs");
     const CAP = 100 * 1024;
     const juntarSaida = (out: string, err: string): string =>
       (out + (err ? (out ? "\n" : "") + err : "")).trim().slice(0, CAP);

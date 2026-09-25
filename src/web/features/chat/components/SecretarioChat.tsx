@@ -118,6 +118,12 @@ export const ToolCallView: FC<{
   );
 };
 
+import {
+  ChatComposer,
+  type ContextChip,
+  type AnexoImagem,
+} from "./ChatComposer.js";
+
 export interface SecretarioChatProps {
   runtime?: AssistantRuntime;
   options?: SecretaryRuntimeOptions;
@@ -140,9 +146,28 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
 }) => {
   const { workspaceId } = useOpenCorp();
   const idSessaoAtiva = sessaoId ?? options?.sessaoId;
+
+  // Estados locais para controle de modelo, agente e anexos no Composer
+  const [modeloSelecionado, setModeloSelecionado] = useState<string>("gemini-2.5-flash");
+  const [agenteAtivo, setAgenteAtivo] = useState<string | null>(null);
+  const [chipsContexto, setChipsContexto] = useState<ContextChip[]>([]);
+  const [anexosImagens, setAnexosImagens] = useState<AnexoImagem[]>([]);
+
   const internalRuntime = useOpenCorpSecretarioRuntime({
     workspaceId: options?.workspaceId ?? workspaceId ?? "default",
     sessaoId: idSessaoAtiva,
+    modelo: modeloSelecionado,
+    agente: agenteAtivo ?? options?.agente ?? "secretario",
+    obterContextoEnvio: () => ({
+      agente: agenteAtivo ?? undefined,
+      modelo: modeloSelecionado,
+      imagens: anexosImagens,
+      contexto: chipsContexto.map((c) => c.rotulo),
+    }),
+    onLimparContextoEnvio: () => {
+      setChipsContexto([]);
+      setAnexosImagens([]);
+    },
     onSessaoCriada: (sid) => {
       options?.onSessaoCriada?.(sid);
       aoSessaoCriada?.(sid);
@@ -278,9 +303,21 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
                       <div className="flex-1 min-w-0 rounded-2xl rounded-tl-sm bg-zinc-900/50 border border-zinc-800/80 px-4 py-3.5 text-sm shadow-sm">
                         <MessagePrimitive.Parts
                           components={{
-                            Text: () => (
-                              <MarkdownTextPrimitive className="prose prose-invert prose-emerald text-sm max-w-none text-zinc-100 leading-relaxed break-words" />
-                            ),
+                            Text: ({ text }: { text?: string }) => {
+                              if (text && text.startsWith("```terminal\n")) {
+                                const limpo = text
+                                  .replace(/^```terminal\n/, "")
+                                  .replace(/\n```$/, "");
+                                return (
+                                  <div className="bg-zinc-950 text-emerald-400 font-mono p-3 rounded-lg border border-zinc-800 text-xs overflow-x-auto whitespace-pre leading-relaxed shadow-inner">
+                                    {limpo}
+                                  </div>
+                                );
+                              }
+                              return (
+                                <MarkdownTextPrimitive className="prose prose-invert prose-emerald text-sm max-w-none text-zinc-100 leading-relaxed break-words" />
+                              );
+                            },
                             Reasoning: ({ text }: { text?: string }) => (
                               <ReasoningView text={text} />
                             ),
@@ -303,47 +340,46 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
             </ThreadPrimitive.Messages>
           </ThreadPrimitive.Viewport>
 
-          {/* Composer / Caixa de Input */}
+          {/* Composer com Gatilhos (/, @, !), Autocomplete, Chips e Toolbar */}
           <div className="p-4 md:px-8 bg-zinc-950 border-t border-zinc-850">
-            <ComposerPrimitive.Root className="relative flex flex-col p-2.5 bg-zinc-900/90 border border-zinc-800 rounded-2xl shadow-xl focus-within:border-emerald-500/60 focus-within:ring-1 focus-within:ring-emerald-500/20 transition-all">
-              <ComposerPrimitive.Input
-                id="chat-input"
-                autoFocus
-                placeholder="Converse com o Secretário ou ordene uma tarefa... (Shift+Enter para quebra de linha)"
-                rows={1}
-                className="w-full bg-transparent text-sm text-zinc-100 placeholder-zinc-500 outline-none resize-none min-h-[44px] max-h-36 px-2 py-1 font-sans"
-              />
-
-              <div className="flex items-center justify-between pt-2 px-1 text-[11px] text-zinc-500 border-t border-zinc-800/40 mt-1">
-                <span className="flex items-center gap-1 font-mono">
-                  <Sparkles size={11} className="text-emerald-400" />
-                  <span>OpenCorp v0.7 · Assistant-UI</span>
-                </span>
-
-                <div className="flex items-center gap-2">
-                  <ComposerPrimitive.Send asChild>
-                    <button
-                      id="btn-enviar"
-                      type="submit"
-                      className="flex items-center justify-center h-8 w-8 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white transition-all cursor-pointer shadow-md shadow-emerald-950/50"
-                      title="Enviar (Enter)"
-                    >
-                      <Send size={14} />
-                    </button>
-                  </ComposerPrimitive.Send>
-
-                  <ComposerPrimitive.Cancel asChild>
-                    <button
-                      type="button"
-                      className="flex items-center justify-center h-8 w-8 rounded-xl bg-rose-600/80 hover:bg-rose-500 active:scale-95 text-white transition-all cursor-pointer shadow-md shadow-rose-950/50"
-                      title="Interromper"
-                    >
-                      <Square size={13} />
-                    </button>
-                  </ComposerPrimitive.Cancel>
-                </div>
-              </div>
-            </ComposerPrimitive.Root>
+            <ChatComposer
+              modeloAtivo={modeloSelecionado}
+              onTrocarModelo={(m) => setModeloSelecionado(m)}
+              agenteAtivo={agenteAtivo}
+              onDefinirAgente={(ag) => setAgenteAtivo(ag)}
+              chipsContexto={chipsContexto}
+              onAdicionarChip={(c) =>
+                setChipsContexto((prev) => [...prev, c])
+              }
+              onRemoverChip={(id) =>
+                setChipsContexto((prev) => prev.filter((c) => c.id !== id))
+              }
+              anexosImagens={anexosImagens}
+              onAdicionarImagem={(img) =>
+                setAnexosImagens((prev) => [...prev, img])
+              }
+              onRemoverImagem={(id) =>
+                setAnexosImagens((prev) => prev.filter((i) => i.id !== id))
+              }
+              onLimparHistorico={() => {
+                void runtime.thread.append({
+                  role: "user",
+                  content: [{ type: "text", text: "/clear" }],
+                });
+              }}
+              onEnviar={({ texto: textoEnvio, agente, modelo }) => {
+                if (agente) setAgenteAtivo(agente);
+                if (modelo) setModeloSelecionado(modelo);
+                void runtime.thread.append({
+                  role: "user",
+                  content: [{ type: "text", text: textoEnvio }],
+                });
+              }}
+              isProcessando={runtime.thread.getState().isRunning}
+              onCancelar={() => {
+                runtime.thread.cancelRun();
+              }}
+            />
           </div>
         </ThreadPrimitive.Root>
       </div>
