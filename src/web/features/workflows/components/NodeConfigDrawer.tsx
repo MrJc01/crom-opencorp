@@ -27,6 +27,10 @@ import {
   FlaskConical,
   CheckCircle2,
   XCircle,
+  GitBranch,
+  ArrowRight,
+  ArrowLeft,
+  Plus,
 } from "lucide-react";
 import type { NoGrafo, FluxoCompleto } from "../types.js";
 import { obterItemCatalogo } from "../catalog.js";
@@ -39,6 +43,10 @@ export interface NodeConfigDrawerProps {
   fluxo: FluxoCompleto | null;
   agentes: any[];
   fluxosExistentes: FluxoCompleto[];
+  arestas?: Array<{ id?: string; source?: string; target?: string; de?: string; para?: string; label?: string; condicao?: string }>;
+  nosDisponiveis?: Array<{ id: string; nome?: string; tipo: string }>;
+  aoRemoverAresta?: (origemOuId: string, destino?: string) => void;
+  aoAdicionarAresta?: (origem: string, destino: string, label?: string) => void;
   onClose: () => void;
   onSalvarNo: (noAtualizado: NoGrafo) => void;
   onExcluirNo: (noId: string) => void;
@@ -49,6 +57,10 @@ export const NodeConfigDrawer: FC<NodeConfigDrawerProps> = ({
   fluxo,
   agentes,
   fluxosExistentes,
+  arestas,
+  nosDisponiveis,
+  aoRemoverAresta,
+  aoAdicionarAresta,
   onClose,
   onSalvarNo,
   onExcluirNo,
@@ -147,6 +159,40 @@ export const NodeConfigDrawer: FC<NodeConfigDrawerProps> = ({
       .filter((a) => a.para === no.id)
       .map((a) => a.de);
   }, [fluxo, no]);
+
+  // Estados para nova conexão rápida (n8n-style)
+  const [novoDestinoLigacao, setNovoDestinoLigacao] = useState("");
+  const [novaCondicaoLigacao, setNovaCondicaoLigacao] = useState("");
+
+  // Arestas consolidadas
+  const arestasConsolidadas = useMemo(() => {
+    if (arestas && Array.isArray(arestas) && arestas.length > 0) return arestas;
+    return fluxo?.arestas || [];
+  }, [arestas, fluxo]);
+
+  // Ligações de Entrada (target === no.id ou para === no.id)
+  const entradasConexao = useMemo(() => {
+    if (!no) return [];
+    return arestasConsolidadas.filter(
+      (a) => (a.target || a.para) === no.id
+    );
+  }, [arestasConsolidadas, no]);
+
+  // Ligações de Saída (source === no.id ou de === no.id)
+  const saidasConexao = useMemo(() => {
+    if (!no) return [];
+    return arestasConsolidadas.filter(
+      (a) => (a.source || a.de) === no.id
+    );
+  }, [arestasConsolidadas, no]);
+
+  // Lista de nós disponíveis para ligar
+  const listaNosParaLigar = useMemo(() => {
+    if (nosDisponiveis && Array.isArray(nosDisponiveis) && nosDisponiveis.length > 0) {
+      return nosDisponiveis.filter((n) => n.id !== no?.id);
+    }
+    return (fluxo?.nos || []).filter((n) => n.id !== no?.id);
+  }, [nosDisponiveis, fluxo, no]);
 
   if (!no || !noEditado) return null;
 
@@ -1509,6 +1555,217 @@ export const NodeConfigDrawer: FC<NodeConfigDrawerProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* ─────────────────────────────────────────────────────────
+                  SEÇÃO N8N: CONEXÕES DO NÓ (LIGAÇÕES DE ENTRADA & SAÍDA)
+                 ───────────────────────────────────────────────────────── */}
+              <div className="pt-3.5 border-t border-zinc-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
+                    <GitBranch size={13} className="text-orange-400" />
+                    Conexões &amp; Fluxo (n8n-style)
+                  </span>
+                  <span className="text-[10px] text-zinc-500 font-mono">
+                    {entradasConexao.length} in · {saidasConexao.length} out
+                  </span>
+                </div>
+
+                {/* Ligações de Entrada */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] text-zinc-400 font-semibold flex items-center gap-1">
+                    <ArrowLeft size={11} className="text-sky-400" />
+                    Entradas (ativado após):
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {entradasConexao.length === 0 ? (
+                      <span className="text-[10px] text-zinc-600 italic">
+                        Gatilho inicial ou sem nós predecessores
+                      </span>
+                    ) : (
+                      entradasConexao.map((aresta, idx) => {
+                        const origemId = aresta.source || aresta.de || "";
+                        const arestaId = aresta.id || `e-${origemId}-${noEditado.id}-${idx}`;
+                        return (
+                          <span
+                            key={arestaId}
+                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-900 border border-zinc-800 text-[11px] font-mono text-zinc-300 hover:border-zinc-700 transition-colors"
+                          >
+                            <span className="text-sky-400">←</span>
+                            <span className="font-semibold">{origemId}</span>
+                            {aresta.label && (
+                              <span className="text-[9px] px-1 py-0.2 rounded bg-zinc-800 text-zinc-400">
+                                {aresta.label}
+                              </span>
+                            )}
+                            {aoRemoverAresta && (
+                              <button
+                                type="button"
+                                onClick={() => aoRemoverAresta(aresta.id || origemId, noEditado.id)}
+                                className="text-zinc-500 hover:text-rose-400 ml-0.5 cursor-pointer font-bold transition-colors p-0.5"
+                                title="Remover conexão"
+                              >
+                                <X size={11} />
+                              </button>
+                            )}
+                          </span>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* Ligações de Saída */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] text-zinc-400 font-semibold flex items-center gap-1">
+                    <ArrowRight size={11} className="text-emerald-400" />
+                    Saídas (dispara em seguida):
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {saidasConexao.length === 0 ? (
+                      <span className="text-[10px] text-zinc-600 italic">
+                        Fim da esteira ou sem ramificações
+                      </span>
+                    ) : (
+                      saidasConexao.map((aresta, idx) => {
+                        const destinoId = aresta.target || aresta.para || "";
+                        const arestaId = aresta.id || `e-${noEditado.id}-${destinoId}-${idx}`;
+                        const condicao = aresta.label || aresta.condicao;
+                        return (
+                          <span
+                            key={arestaId}
+                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-900 border border-zinc-800 text-[11px] font-mono text-zinc-300 hover:border-zinc-700 transition-colors"
+                          >
+                            <span className="text-emerald-400">→</span>
+                            <span className="font-semibold">{destinoId}</span>
+                            {condicao && (
+                              <span
+                                className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
+                                  condicao === "entao" || condicao === "sim"
+                                    ? "bg-emerald-950/80 text-emerald-400 border border-emerald-800"
+                                    : condicao === "senao" || condicao === "nao"
+                                    ? "bg-rose-950/80 text-rose-400 border border-rose-800"
+                                    : "bg-zinc-800 text-zinc-300"
+                                }`}
+                              >
+                                {condicao}
+                              </span>
+                            )}
+                            {aoRemoverAresta && (
+                              <button
+                                type="button"
+                                onClick={() => aoRemoverAresta(aresta.id || noEditado.id, destinoId)}
+                                className="text-zinc-500 hover:text-rose-400 ml-0.5 cursor-pointer font-bold transition-colors p-0.5"
+                                title="Remover conexão"
+                              >
+                                <X size={11} />
+                              </button>
+                            )}
+                          </span>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* Conectar a Outro Nó (Atalho Rápido) */}
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[10px] text-zinc-400 font-semibold block">
+                    Conectar a Outro Nó (Atalho Rápido):
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={novoDestinoLigacao}
+                      onChange={(e) => setNovoDestinoLigacao(e.target.value)}
+                      className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-[11px] text-zinc-200 focus:outline-none focus:border-orange-500 font-mono"
+                    >
+                      <option value="">Ligar este nó para...</option>
+                      {listaNosParaLigar.map((outro) => (
+                        <option key={outro.id} value={outro.id}>
+                          → {outro.id} ({outro.tipo})
+                        </option>
+                      ))}
+                    </select>
+
+                    {(noEditado.tipo === "condicao" || noEditado.tipo === "decisao") && (
+                      <select
+                        value={novaCondicaoLigacao}
+                        onChange={(e) => setNovaCondicaoLigacao(e.target.value)}
+                        className="w-24 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-[11px] text-zinc-200 focus:outline-none focus:border-orange-500 font-mono"
+                      >
+                        <option value="">(Padrão)</option>
+                        <option value="entao">então</option>
+                        <option value="senao">senão</option>
+                      </select>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={!novoDestinoLigacao}
+                      onClick={() => {
+                        if (!novoDestinoLigacao) {
+                          showToast("Selecione um nó de destino", "aviso");
+                          return;
+                        }
+                        if (aoAdicionarAresta) {
+                          aoAdicionarAresta(
+                            noEditado.id,
+                            novoDestinoLigacao,
+                            novaCondicaoLigacao || undefined
+                          );
+                        }
+                        setNovoDestinoLigacao("");
+                        setNovaCondicaoLigacao("");
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                    >
+                      <Plus size={13} />
+                      <span>Ligar</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* ─────────────────────────────────────────────────────────
+                  SEÇÃO N8N: CONTEXTO DO NÓ ANTERIOR & VARIÁVEIS DE ENTRADA
+                 ───────────────────────────────────────────────────────── */}
+              <div className="pt-3 border-t border-zinc-800 space-y-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
+                  <Terminal size={13} className="text-cyan-400" />
+                  Dados Anteriores &amp; Variáveis (n8n)
+                </span>
+                <p className="text-[10px] text-zinc-400 leading-relaxed">
+                  Clique na variável para copiar ou injetar diretamente no contexto de instrução deste nó.
+                </p>
+
+                <div className="flex flex-wrap gap-1.5 text-[10px] font-mono">
+                  {[
+                    { tag: "{{entrada}}", desc: "Saída direta do nó anterior" },
+                    { tag: "{{$input}}", desc: "Payload de entrada do nó" },
+                    { tag: "{{json}}", desc: "Objeto serializado" },
+                    { tag: "$OPENCORP_INPUT", desc: "Carga do webhook / inicial" },
+                  ].map(({ tag, desc }) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(tag);
+                        showToast(`"${tag}" copiado para a área de transferência!`, "info");
+                        if (config.ordem !== undefined) {
+                          atualizarConfig("ordem", `${config.ordem} ${tag}`.trim());
+                        } else if (config.prompt !== undefined) {
+                          atualizarConfig("prompt", `${config.prompt} ${tag}`.trim());
+                        } else if (config.body !== undefined && typeof config.body === "string") {
+                          atualizarConfig("body", `${config.body} ${tag}`.trim());
+                        }
+                      }}
+                      className="px-2 py-1 rounded bg-zinc-900 border border-zinc-800 hover:border-cyan-500 text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer flex items-center gap-1"
+                      title={desc}
+                    >
+                      <span>{tag}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </div>

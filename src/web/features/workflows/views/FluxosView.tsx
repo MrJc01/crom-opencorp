@@ -292,6 +292,68 @@ export const FluxosView: FC = () => {
     showToast(`Nó "${noId}" removido do fluxo.`, "info");
   };
 
+  // ── Conexões n8n-style no Drawer ─────────────────────────────────────
+  const handleAdicionarAresta = useCallback(
+    (origem: string, destino: string, label?: string) => {
+      if (!fluxoAtivo) return;
+      const arestasAtuais = fluxoAtivo.arestas || [];
+      const jaExiste = arestasAtuais.some(
+        (a) =>
+          (a.de === origem || a.source === origem) &&
+          (a.para === destino || a.target === destino)
+      );
+      if (jaExiste) {
+        showToast("Essa conexão já existe no fluxo.", "aviso");
+        return;
+      }
+      const novaAresta = {
+        id: `e-${origem}-${destino}-${Date.now()}`,
+        de: origem,
+        para: destino,
+        source: origem,
+        target: destino,
+        condicao: label,
+        label: label,
+      };
+      setFluxoAtivo({
+        ...fluxoAtivo,
+        arestas: [...arestasAtuais, novaAresta],
+      });
+      showToast(`Conexão de "${origem}" para "${destino}" criada!`, "sucesso");
+    },
+    [fluxoAtivo]
+  );
+
+  const handleRemoverAresta = useCallback(
+    (origemOuId: string, destino?: string) => {
+      if (!fluxoAtivo) return;
+      const arestasAtuais = fluxoAtivo.arestas || [];
+      let novasArestas: any[];
+      if (destino) {
+        novasArestas = arestasAtuais.filter(
+          (a) =>
+            !(
+              (a.de === origemOuId || a.source === origemOuId) &&
+              (a.para === destino || a.target === destino)
+            )
+        );
+      } else {
+        novasArestas = arestasAtuais.filter(
+          (a) =>
+            a.id !== origemOuId &&
+            `${a.de}->${a.para}` !== origemOuId &&
+            `${a.source}->${a.target}` !== origemOuId
+        );
+      }
+      setFluxoAtivo({
+        ...fluxoAtivo,
+        arestas: novasArestas,
+      });
+      showToast("Conexão removida.", "info");
+    },
+    [fluxoAtivo]
+  );
+
   // ── Auto-Layout DAG Simples ───────────────────────────────────────────
   const handleAutoLayout = () => {
     if (!fluxoAtivo) return;
@@ -590,6 +652,21 @@ export const FluxosView: FC = () => {
             fluxo={fluxoAtivo}
             agentes={agentes}
             fluxosExistentes={fluxos}
+            arestas={(fluxoAtivo.arestas || []).map((a, idx) => ({
+              id: a.id || `aresta-${a.de || a.source}-${a.para || a.target}-${idx}`,
+              source: a.de || a.source,
+              target: a.para || a.target,
+              de: a.de || a.source,
+              para: a.para || a.target,
+              label: a.condicao || a.label,
+            }))}
+            nosDisponiveis={(fluxoAtivo.nos || []).map((n) => ({
+              id: n.id,
+              nome: n.nome || n.id,
+              tipo: n.tipo,
+            }))}
+            aoRemoverAresta={handleRemoverAresta}
+            aoAdicionarAresta={handleAdicionarAresta}
             onClose={() => setNoSelecionado(null)}
             onSalvarNo={handleSalvarNoConfig}
             onExcluirNo={handleExcluirNo}

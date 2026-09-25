@@ -1,4 +1,5 @@
 import React, { useState, useMemo, type FC } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   History,
   ChevronDown,
@@ -12,6 +13,8 @@ import {
   Layers,
   Code,
   ArrowRight,
+  ExternalLink,
+  Search,
 } from "lucide-react";
 import type { FlowRunLog } from "../types.js";
 
@@ -32,9 +35,12 @@ export const ExecutionLogsPanel: FC<ExecutionLogsPanelProps> = ({
   onToggleAberto,
   onRecarregar,
 }) => {
+  const navigate = useNavigate();
   const [execSelecionadaId, setExecSelecionadaId] = useState<string | null>(null);
   const [noSelecionadoId, setNoSelecionadoId] = useState<string | null>(null);
   const [abaDetalhe, setAbaDetalhe] = useState<"dados" | "entrada" | "contexto">("dados");
+  const [filtroNoTexto, setFiltroNoTexto] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState<"todos" | "sucesso" | "falha">("todos");
 
   const execSelecionada = useMemo(() => {
     if (!logs || logs.length === 0) return null;
@@ -48,6 +54,20 @@ export const ExecutionLogsPanel: FC<ExecutionLogsPanelProps> = ({
   const nosExecutados = useMemo(() => {
     return execSelecionada?.nos_executados || [];
   }, [execSelecionada]);
+
+  const nosExecutadosFiltrados = useMemo(() => {
+    let lista = nosExecutados;
+    if (filtroStatus === "sucesso") {
+      lista = lista.filter((n) => n.status === "concluido" || n.status === "sucesso");
+    } else if (filtroStatus === "falha") {
+      lista = lista.filter((n) => n.status !== "concluido" && n.status !== "sucesso");
+    }
+    if (filtroNoTexto.trim()) {
+      const q = filtroNoTexto.toLowerCase();
+      lista = lista.filter((n) => n.no_id.toLowerCase().includes(q));
+    }
+    return lista;
+  }, [nosExecutados, filtroStatus, filtroNoTexto]);
 
   const noSelecionado = useMemo(() => {
     if (!nosExecutados || nosExecutados.length === 0) return null;
@@ -67,18 +87,36 @@ export const ExecutionLogsPanel: FC<ExecutionLogsPanelProps> = ({
         <div className="flex items-center gap-2">
           <History size={14} className="text-orange-400" />
           <span className="text-xs font-bold text-zinc-200">
-            Execuções & Telemetria I/O
+            Execuções &amp; Telemetria I/O
           </span>
           <span className="text-[10px] text-zinc-500 font-mono">
             ({logs.length} execuções registradas)
           </span>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
+          {execSelecionada && (
+            <button
+              type="button"
+              onClick={() => {
+                const runId = execSelecionada.execId || execSelecionada.id;
+                if (runId) {
+                  navigate(`/historico?run=${encodeURIComponent(runId)}`);
+                } else {
+                  navigate("/historico");
+                }
+              }}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-orange-400 hover:text-white hover:bg-orange-600 transition-colors border border-orange-500/30 cursor-pointer shadow-xs"
+              title="Abrir auditoria forense detalhada na central de Histórico"
+            >
+              <ExternalLink size={12} />
+              <span className="hidden sm:inline">Abrir no Histórico</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onRecarregar}
-            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
             title="Recarregar histórico"
           >
             <RefreshCw size={12} className={carregando ? "animate-spin text-orange-400" : ""} />
@@ -86,7 +124,7 @@ export const ExecutionLogsPanel: FC<ExecutionLogsPanelProps> = ({
           <button
             type="button"
             onClick={onToggleAberto}
-            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
             title="Recolher painel"
           >
             <ChevronDown size={14} />
@@ -150,49 +188,99 @@ export const ExecutionLogsPanel: FC<ExecutionLogsPanelProps> = ({
         </div>
 
         {/* Coluna 2: Trilha de Nós Executados */}
-        <div className="w-52 sm:w-64 shrink-0 border-r border-zinc-800 overflow-y-auto p-1.5 space-y-1 scrollbar-thin bg-zinc-900/30">
-          <div className="px-2 py-1 text-[10px] uppercase font-bold text-zinc-500 font-mono">
-            Trilha de Execução do Grafo
-          </div>
-          {nosExecutados.length === 0 ? (
-            <div className="p-4 text-center text-zinc-500 text-[11px]">
-              Sem telemetria de nós individuais para este run.
+        <div className="w-56 sm:w-68 shrink-0 border-r border-zinc-800 flex flex-col min-h-0 bg-zinc-900/30">
+          <div className="p-1.5 border-b border-zinc-800/80 space-y-1.5 shrink-0 bg-zinc-950/40">
+            <div className="flex items-center justify-between px-0.5">
+              <span className="text-[10px] uppercase font-bold text-zinc-400 font-mono">
+                Trilha de Execução
+              </span>
+              <span className="text-[9px] text-zinc-500 font-mono">
+                {nosExecutadosFiltrados.length}/{nosExecutados.length} nós
+              </span>
             </div>
-          ) : (
-            nosExecutados.map((item, idx) => {
-              const isSelected = noSelecionado?.no_id === item.no_id;
-              const isOk = item.status === "concluido" || item.status === "sucesso";
 
-              return (
+            {/* Input de Busca de Nó */}
+            <div className="relative">
+              <Search size={11} className="absolute left-2 top-2 text-zinc-500" />
+              <input
+                type="text"
+                placeholder="Filtrar por ID do nó..."
+                value={filtroNoTexto}
+                onChange={(e) => setFiltroNoTexto(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 pl-6 text-[10px] text-zinc-200 font-mono focus:outline-none focus:border-orange-500"
+              />
+            </div>
+
+            {/* Pílulas de Status */}
+            <div className="flex items-center gap-1 text-[9px] font-mono">
+              {[
+                { id: "todos", label: "Todos" },
+                { id: "sucesso", label: "Sucesso" },
+                { id: "falha", label: "Falhas" },
+              ].map((f) => (
                 <button
-                  key={`${item.no_id}-${idx}`}
+                  key={f.id}
                   type="button"
-                  onClick={() => setNoSelecionadoId(item.no_id)}
-                  className={`w-full flex items-center justify-between p-2 rounded-lg text-xs transition-colors cursor-pointer border ${
-                    isSelected
-                      ? "bg-zinc-800 border-zinc-700 text-white"
-                      : "hover:bg-zinc-850/40 text-zinc-300 border-transparent"
+                  onClick={() => setFiltroStatus(f.id as any)}
+                  className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
+                    filtroStatus === f.id
+                      ? f.id === "falha"
+                        ? "bg-rose-950 border border-rose-800 text-rose-300 font-bold"
+                        : f.id === "sucesso"
+                        ? "bg-emerald-950 border border-emerald-800 text-emerald-300 font-bold"
+                        : "bg-zinc-800 text-white font-bold"
+                      : "text-zinc-500 hover:text-zinc-300"
                   }`}
                 >
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    {isOk ? (
-                      <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
-                    ) : (
-                      <XCircle size={13} className="text-rose-400 shrink-0" />
-                    )}
-                    <span className="font-mono text-[11px] font-semibold truncate">
-                      {item.no_id}
-                    </span>
-                  </div>
-                  {item.duracao_ms && (
-                    <span className="font-mono text-[10px] text-zinc-500">
-                      {item.duracao_ms}ms
-                    </span>
-                  )}
+                  {f.label}
                 </button>
-              );
-            })
-          )}
+              ))}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-1.5 space-y-1 scrollbar-thin">
+            {nosExecutadosFiltrados.length === 0 ? (
+              <div className="p-4 text-center text-zinc-500 text-[11px]">
+                {nosExecutados.length === 0
+                  ? "Sem telemetria de nós individuais para este run."
+                  : "Nenhum nó corresponde aos filtros."}
+              </div>
+            ) : (
+              nosExecutadosFiltrados.map((item, idx) => {
+                const isSelected = noSelecionado?.no_id === item.no_id;
+                const isOk = item.status === "concluido" || item.status === "sucesso";
+
+                return (
+                  <button
+                    key={`${item.no_id}-${idx}`}
+                    type="button"
+                    onClick={() => setNoSelecionadoId(item.no_id)}
+                    className={`w-full flex items-center justify-between p-2 rounded-lg text-xs transition-colors cursor-pointer border ${
+                      isSelected
+                        ? "bg-zinc-800 border-zinc-700 text-white"
+                        : "hover:bg-zinc-850/40 text-zinc-300 border-transparent"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {isOk ? (
+                        <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                      ) : (
+                        <XCircle size={13} className="text-rose-400 shrink-0" />
+                      )}
+                      <span className="font-mono text-[11px] font-semibold truncate">
+                        {item.no_id}
+                      </span>
+                    </div>
+                    {item.duracao_ms && (
+                      <span className="font-mono text-[10px] text-zinc-500 shrink-0">
+                        {item.duracao_ms}ms
+                      </span>
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
         </div>
 
         {/* Coluna 3: Inspeção de Dados I/O */}
