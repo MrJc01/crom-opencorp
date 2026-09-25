@@ -59,11 +59,61 @@ test.describe("Roteamento canônico por workspace", () => {
 
     const contextoSemWorkspace = await browser.newContext();
     const paginaSemWorkspace = await contextoSemWorkspace.newPage();
+    const requisicoesGlobais: Array<{ path: string; workspace?: string }> = [];
+    paginaSemWorkspace.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (path === "/workspaces" || path === "/events") {
+        requisicoesGlobais.push({
+          path,
+          workspace: request.headers()["x-opencorp-workspace"],
+        });
+      }
+    });
     await paginaSemWorkspace.addInitScript((token) => {
       localStorage.setItem("oc-token", token);
     }, TOKEN);
     await paginaSemWorkspace.goto("/");
     await expect(paginaSemWorkspace).toHaveURL(/\/workspaces$/);
+    await expect.poll(() => requisicoesGlobais.some((item) => item.path === "/workspaces")).toBe(true);
+    expect(requisicoesGlobais.filter((item) => item.path === "/workspaces"))
+      .toEqual(expect.arrayContaining([{ path: "/workspaces", workspace: undefined }]));
+    expect(requisicoesGlobais.some((item) => item.path === "/events")).toBe(false);
     await contextoSemWorkspace.close();
+  });
+
+  test("duas abas mantêm o client da URL após o storage compartilhado mudar", async ({ page }) => {
+    const outroWorkspace = "e2e-corp-b";
+    await seederEmpresaBasica(api(page), TOKEN, outroWorkspace);
+
+    const paginaB = await page.context().newPage();
+    await paginaB.addInitScript((token) => {
+      localStorage.setItem("oc-token", token);
+    }, TOKEN);
+
+    const workspacesPaginaA: string[] = [];
+    const workspacesPaginaB: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/tasks") {
+        workspacesPaginaA.push(request.headers()["x-opencorp-workspace"] ?? "");
+      }
+    });
+    paginaB.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/tasks") {
+        workspacesPaginaB.push(request.headers()["x-opencorp-workspace"] ?? "");
+      }
+    });
+
+    await page.goto(`/w/${WORKSPACE}/tasks`);
+    await expect.poll(() => workspacesPaginaA.includes(WORKSPACE)).toBe(true);
+
+    await paginaB.goto(`/w/${outroWorkspace}/tasks`);
+    await expect.poll(() => workspacesPaginaB.includes(outroWorkspace)).toBe(true);
+
+    // A aba B sobrescreveu o storage compartilhado; a URL da aba A continua soberana.
+    await page.reload();
+    await expect(page).toHaveURL(new RegExp(`/w/${WORKSPACE}/tasks$`));
+    await expect.poll(() => workspacesPaginaA.at(-1)).toBe(WORKSPACE);
+
+    await paginaB.close();
   });
 });

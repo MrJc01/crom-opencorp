@@ -160,30 +160,14 @@ const RedirectWorkspace: FC<{
 export const App: FC = () => {
   return (
     <BrowserRouter>
-      <OpenCorpProvider>
+      <OpenCorpProvider workspaceId={null}>
         <Routes>
+          {/* Rotas globais usam client sem header de workspace e não abrem SSE. */}
           <Route element={<AppLayout />}>
-            {/* Rotas globais, independentes de um workspace na URL. */}
             <Route path="/" element={<RedirectWorkspace raiz />} />
             <Route path="/workspaces" element={<WorkspacesRoute />} />
             <Route path="/config/global" element={<ConfigView />} />
             <Route path="/docs" element={<DocsView />} />
-
-            {/* O segmento de rota é a autoridade do workspace operacional. */}
-            <Route path="/w/:workspaceId" element={<WorkspaceBoundary />}>
-              <Route index element={<HomeView />} />
-              <Route path="workspace" element={<WorkspaceView />} />
-              <Route path="tasks" element={<TasksView />} />
-              <Route path="secretario" element={<SecretarioView />} />
-              <Route path="agentes" element={<AgentesView />} />
-              <Route path="fluxos" element={<FluxosView />} />
-              <Route path="reunioes" element={<ReunioesView />} />
-              <Route path="historico" element={<HistoricoView />} />
-              <Route path="apps" element={<AppsView />} />
-              <Route path="ativos" element={<AtivosView />} />
-              <Route path="notificacoes" element={<NotificacoesView />} />
-              <Route path="config" element={<ConfigView />} />
-            </Route>
 
             {/* Compatibilidade: valida o último workspace e preserva a query original. */}
             {ROTAS_LEGADAS.map(({ path, modulo, queryPadrao }) => (
@@ -195,6 +179,22 @@ export const App: FC = () => {
             ))}
 
             <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+
+          {/* O boundary monta provider e layout isolados pelo workspace da URL. */}
+          <Route path="/w/:workspaceId" element={<WorkspaceBoundary />}>
+            <Route index element={<HomeView />} />
+            <Route path="workspace" element={<WorkspaceView />} />
+            <Route path="tasks" element={<TasksView />} />
+            <Route path="secretario" element={<SecretarioView />} />
+            <Route path="agentes" element={<AgentesView />} />
+            <Route path="fluxos" element={<FluxosView />} />
+            <Route path="reunioes" element={<ReunioesView />} />
+            <Route path="historico" element={<HistoricoView />} />
+            <Route path="apps" element={<AppsView />} />
+            <Route path="ativos" element={<AtivosView />} />
+            <Route path="notificacoes" element={<NotificacoesView />} />
+            <Route path="config" element={<ConfigView />} />
           </Route>
         </Routes>
       </OpenCorpProvider>

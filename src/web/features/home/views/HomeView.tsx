@@ -23,7 +23,7 @@ import {
 
 export const HomeView: FC = () => {
   const navigate = useNavigate();
-  const { client, workspaceId, definirWorkspaceId, tratarErro } = useOpenCorp();
+  const { client, workspaceId, tratarErro } = useOpenCorp();
 
   const [workspaces, setWorkspaces] = useState<WorkspaceResumo[]>([]);
   const [carregandoWs, setCarregandoWs] = useState(true);
@@ -135,7 +135,7 @@ export const HomeView: FC = () => {
 
             <button
               type="button"
-              onClick={() => definirWorkspaceId("")}
+              onClick={() => navigate("/workspaces")}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs border border-zinc-800 transition-colors cursor-pointer"
               title="Trocar para outro workspace ou cadastrar novo"
             >

@@ -17,9 +17,9 @@ import {
   Shield,
   Layers,
 } from "lucide-react";
-import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 import { NovoWorkspaceModal } from "./NovoWorkspaceModal.js";
 import type { WorkspaceResumo } from "@opencorp/sdk";
+import { workspacePath } from "../../../lib/routes.js";
 
 export interface HomeZeroStateProps {
   workspaces: WorkspaceResumo[];
@@ -40,7 +40,6 @@ export const HomeZeroState: FC<HomeZeroStateProps> = ({
   aoAtualizarWorkspaces,
 }) => {
   const navigate = useNavigate();
-  const { definirWorkspaceId } = useOpenCorp();
   const [modalNovoWs, setModalNovoWs] = useState(false);
   const [modalAjuda, setModalAjuda] = useState(false);
   const [busca, setBusca] = useState("");
@@ -116,8 +115,7 @@ export const HomeZeroState: FC<HomeZeroStateProps> = ({
   }, [busca, catalogoPesquisa, workspaces]);
 
   const selecionarWorkspace = (id: string) => {
-    definirWorkspaceId(id);
-    navigate("/home");
+    navigate(workspacePath(id));
   };
 
   return (
@@ -428,7 +426,10 @@ export const HomeZeroState: FC<HomeZeroStateProps> = ({
       <NovoWorkspaceModal
         aberto={modalNovoWs}
         aoFechar={() => setModalNovoWs(false)}
-        aoWorkspaceCriado={() => aoAtualizarWorkspaces?.()}
+        aoWorkspaceCriado={(id) => {
+          aoAtualizarWorkspaces?.();
+          selecionarWorkspace(id);
+        }}
       />
 
       {/* Modal de Ajuda / Primeiros Passos */}

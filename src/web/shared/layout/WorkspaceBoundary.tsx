@@ -1,8 +1,9 @@
 import React, { useEffect, useState, type FC } from "react";
-import { Navigate, Outlet, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { FolderX, LoaderCircle } from "lucide-react";
 import { ProblemDetailsError } from "@opencorp/sdk";
-import { useOpenCorp } from "../../providers/OpenCorpProvider.js";
+import { OpenCorpProvider, useOpenCorp } from "../../providers/OpenCorpProvider.js";
+import { AppLayout } from "./AppLayout.js";
 
 type EstadoValidacao = "carregando" | "valido" | "nao-encontrado" | "erro";
 
@@ -20,12 +21,7 @@ function workspaceNaoEncontrado(erro: unknown): boolean {
 export const WorkspaceBoundary: FC = () => {
   const { workspaceId: workspaceIdParam } = useParams<{ workspaceId: string }>();
   const navigate = useNavigate();
-  const {
-    client,
-    workspaceId: workspaceIdAtivo,
-    definirWorkspaceId,
-    tratarErro,
-  } = useOpenCorp();
+  const { client } = useOpenCorp();
   const workspaceId = workspaceIdParam?.trim() ?? "";
   const idValido = WORKSPACE_ID_RE.test(workspaceId) && workspaceId.length <= 64;
   const [estado, setEstado] = useState<EstadoValidacao>("carregando");
@@ -42,7 +38,6 @@ export const WorkspaceBoundary: FC = () => {
       })
       .then(() => {
         if (controller.signal.aborted) return;
-        definirWorkspaceId(workspaceId);
         setEstado("valido");
       })
       .catch((erro: unknown) => {
@@ -52,19 +47,18 @@ export const WorkspaceBoundary: FC = () => {
           return;
         }
         setEstado("erro");
-        tratarErro(erro, "Falha ao validar workspace");
       });
 
     return () => controller.abort();
-  }, [client.http, definirWorkspaceId, idValido, tratarErro, workspaceId]);
+  }, [client.http, idValido, workspaceId]);
 
   if (!idValido) {
     return <Navigate to="/workspaces" replace />;
   }
 
-  if (estado === "carregando" || (estado === "valido" && workspaceIdAtivo !== workspaceId)) {
+  if (estado === "carregando") {
     return (
-      <div className="flex h-full items-center justify-center bg-zinc-950 text-zinc-400">
+      <div className="flex h-screen items-center justify-center bg-zinc-950 text-zinc-400">
         <div className="flex items-center gap-2 text-sm">
           <LoaderCircle size={18} className="animate-spin text-emerald-400" />
           <span>Validando workspace…</span>
@@ -75,7 +69,7 @@ export const WorkspaceBoundary: FC = () => {
 
   if (estado === "nao-encontrado") {
     return (
-      <div className="flex h-full items-center justify-center bg-zinc-950 p-6 text-zinc-100">
+      <div className="flex h-screen items-center justify-center bg-zinc-950 p-6 text-zinc-100">
         <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/60 p-8 text-center shadow-2xl">
           <FolderX size={36} className="mx-auto mb-4 text-amber-400" />
           <h1 className="text-lg font-semibold">Workspace não encontrado</h1>
@@ -96,15 +90,15 @@ export const WorkspaceBoundary: FC = () => {
 
   if (estado === "erro") {
     return (
-      <div className="flex h-full items-center justify-center bg-zinc-950 p-6 text-center text-sm text-zinc-400">
+      <div className="flex h-screen items-center justify-center bg-zinc-950 p-6 text-center text-sm text-zinc-400">
         Não foi possível validar o workspace. Verifique a conexão e recarregue a página.
       </div>
     );
   }
 
   return (
-    <React.Fragment key={workspaceId}>
-      <Outlet />
-    </React.Fragment>
+    <OpenCorpProvider key={workspaceId} workspaceId={workspaceId}>
+      <AppLayout />
+    </OpenCorpProvider>
   );
 };
