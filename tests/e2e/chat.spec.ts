@@ -93,4 +93,68 @@ test.describe("Chat do Secretário", () => {
     await page.getByText("llama-3.3-70b").first().click();
     await expect(seletorModelo).toContainText("llama-3.3-70b");
   });
+
+  test("resposta com opções numeradas renderiza botões HITL e clique despacha mensagem", async ({ page }) => {
+    await page.route("**/secretario/conversa/stream*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: "event: delta\ndata: {\"delta\":\"Análise finalizada.\\n1. Executar testes de integração\\n2. Fazer commit das alterações\"}\n\nevent: fim\ndata: {}\n\n",
+      });
+    });
+
+    await page.locator("#chat-input").fill("como proceder?");
+    await page.click("#btn-enviar");
+
+    await expect(page.locator(".chat-opcao-btn").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator(".chat-opcao-btn")).toHaveCount(2);
+
+    // Clicar na opção 1 despacha automaticamente como turno do usuário
+    await page.locator(".chat-opcao-btn").first().click();
+    await expect(page.locator(".oc-user").last()).toContainText("Executar testes de integração", { timeout: 10000 });
+  });
+
+  test("resposta com git status renderiza card interativo de arquivos", async ({ page }) => {
+    await page.route("**/secretario/conversa/stream*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: "event: delta\ndata: {\"delta\":\"Status atual do repositório:\\nM src/index.ts\\n?? docs/teste.md\"}\n\nevent: fim\ndata: {}\n\n",
+      });
+    });
+
+    await page.locator("#chat-input").fill("/git status");
+    await page.click("#btn-enviar");
+
+    await expect(page.getByText("Git Status").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("src/index.ts").first()).toBeVisible();
+    await expect(page.getByText("docs/teste.md").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Descartar" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Abrir" }).first()).toBeVisible();
+  });
+
+  test("bloco de raciocínio CoT expande e recolhe suavemente", async ({ page }) => {
+    await page.route("**/secretario/conversa/stream*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: "event: delta\ndata: {\"delta\":\"<think>Analisando arquitetura e dependências...</think>Aqui está a resposta.\"}\n\nevent: fim\ndata: {}\n\n",
+      });
+    });
+
+    await page.locator("#chat-input").fill("analise o projeto");
+    await page.click("#btn-enviar");
+
+    await expect(page.getByText("Processo de Raciocínio").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("Inspecionar").first()).toBeVisible();
+
+    // Clica para expandir
+    await page.getByText("Processo de Raciocínio").first().click();
+    await expect(page.getByText("Ocultar").first()).toBeVisible();
+    await expect(page.getByText("Analisando arquitetura e dependências...").first()).toBeVisible();
+
+    // Clica para recolher
+    await page.getByText("Processo de Raciocínio").first().click();
+    await expect(page.getByText("Inspecionar").first()).toBeVisible();
+  });
 });

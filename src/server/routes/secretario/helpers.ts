@@ -1,4 +1,7 @@
-import { resolve, relative, isAbsolute } from "node:path";
+import { resolve, relative, isAbsolute, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { opencorpHome } from "../../../utils/paths.js";
+import { resolveEngineCredentials } from "../../../core/engines/credentials-bridge.js";
 import { WorkspaceError } from "../../../core/shared/errors.js";
 import {
   SecretarioError,
@@ -84,6 +87,93 @@ export async function sincronizarCorp(ctx: RouteContext, porta: number, sessaoId
   }
 }
 
+export function obterModelosDefensivos(
+  homeDir: string,
+  modeloSolicitado?: string,
+): { modelos: string[]; motorPadrao: string } {
+  const creds = resolveEngineCredentials(homeDir);
+  const modelos: string[] = [];
+
+  // 1. Se o usuário solicitou um modelo específico, ele é prioridade número 1
+  if (modeloSolicitado && modeloSolicitado.trim()) {
+    modelos.push(modeloSolicitado.trim());
+  }
+
+  // 2. Lê auth.json para checar provedores configurados
+  const authPath = join(homeDir, ".opencorp", "opencode-data", "opencode", "auth.json");
+  let authData: Record<string, any> = {};
+  if (existsSync(authPath)) {
+    try {
+      authData = JSON.parse(readFileSync(authPath, "utf8"));
+    } catch {}
+  }
+
+  // 3. Lê engine-accounts.json para checar contas ativas
+  const acctPath = join(homeDir, ".opencorp", "engine-accounts.json");
+  let contasAtivas: any[] = [];
+  if (existsSync(acctPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(acctPath, "utf8"));
+      if (Array.isArray(parsed)) {
+        contasAtivas = parsed.filter(
+          (c: any) => c && c.ativa !== false && c.limits?.status_cota !== "esgotado",
+        );
+      }
+    } catch {}
+  }
+
+  // 4. Prioridade 1: Google AI Studio / Gemini (custo zero e veloz)
+  const temGoogle = Boolean(
+    creds.GEMINI_API_KEY ||
+      process.env.GEMINI_API_KEY ||
+      authData.google?.key ||
+      authData.antigravity?.key,
+  );
+  if (temGoogle) {
+    modelos.push("google/gemini-2.5-flash", "google/gemini-2.0-flash-exp");
+  }
+
+  // 5. Prioridade 2: Contas ativas locais em engine-accounts (ex: custom / local)
+  for (const c of contasAtivas) {
+    if (c.modeloPadrao && typeof c.modeloPadrao === "string") {
+      modelos.push(c.modeloPadrao);
+    }
+  }
+
+  // 6. Prioridade 3: OpenRouter (apenas se houver chave configurada)
+  const temOpenRouter = Boolean(
+    creds.OPENROUTER_API_KEY ||
+      authData.openrouter?.key ||
+      process.env.OPENROUTER_API_KEY,
+  );
+  if (temOpenRouter) {
+    modelos.push(
+      "openrouter/google/gemini-2.5-flash",
+      "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+      "openrouter/deepseek/deepseek-r1:free",
+    );
+  }
+
+  // 7. Prioridade 4: OpenAI ou Anthropic diretos
+  if (creds.OPENAI_API_KEY || authData.openai?.key) {
+    modelos.push("openai/gpt-4o-mini");
+  }
+  if (creds.ANTHROPIC_API_KEY || authData.anthropic?.key) {
+    modelos.push("anthropic/claude-3-7-sonnet");
+  }
+
+  const modelosUnicos = [...new Set(modelos.filter(Boolean))];
+
+  if (modelosUnicos.length === 0) {
+    throw new SecretarioError(
+      "Nenhum provedor de IA com credenciais válidas configurado. Acesse Configurações > Motores (TabEngines) ou configure uma chave GEMINI_API_KEY ou OPENROUTER_API_KEY.",
+      { status: 400 },
+    );
+  }
+
+  return { modelos: modelosUnicos, motorPadrao: "opencode" };
+}
+
 export async function resolverModelos(
   ctx: RouteContext,
   opts: {
@@ -93,7 +183,8 @@ export async function resolverModelos(
   },
 ): Promise<{ modelos: string[]; motorPadrao: string }> {
   const { modeloRequisicao, agenteId, wsPath } = opts;
-  const { agentes } = ctx;
+  const { agentes, homeDir } = ctx;
+  const home = homeDir ?? opencorpHome();
 
   let ag: any = undefined;
   if (agenteId && agentes && wsPath) {
@@ -102,23 +193,29 @@ export async function resolverModelos(
     } catch {}
   }
 
+  // Obtém modelos defensivos reais a partir das credenciais do usuário
+  let defensivos: { modelos: string[]; motorPadrao: string };
+  try {
+    defensivos = obterModelosDefensivos(home, modeloRequisicao);
+  } catch (err) {
+    // Fallback permissivo para desenvolvimento com modelo solicitado
+    defensivos = {
+      modelos: [modeloRequisicao || "google/gemini-2.5-flash"].filter(Boolean),
+      motorPadrao: "opencode",
+    };
+  }
+
   try {
     const { cadeia } = resolverCadeiaModelosAgente({
       agente: ag?.frontmatter || ag,
       wsPath: wsPath || "",
       modeloSolicitado: modeloRequisicao,
     });
-    return { modelos: cadeia, motorPadrao: "opencode" };
+    // Mescla cadeia do agente com contingência defensiva real sem duplicatas
+    const listaFinal = [...new Set([...cadeia, ...defensivos.modelos])];
+    return { modelos: listaFinal, motorPadrao: "opencode" };
   } catch {
-    return {
-      modelos: [
-        modeloRequisicao,
-        "openrouter/nvidia/nemotron-3.5-lightning:free",
-        "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
-        "openrouter/google/gemma-4-31b-it:free",
-      ].filter(Boolean) as string[],
-      motorPadrao: "opencode",
-    };
+    return defensivos;
   }
 }
 

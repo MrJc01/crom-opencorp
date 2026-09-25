@@ -1,4 +1,5 @@
-import React, { useState, type FC } from "react";
+import React, { useState, useMemo, type FC } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AssistantRuntimeProvider,
   ThreadPrimitive,
@@ -6,7 +7,10 @@ import {
   MessagePrimitive,
   type AssistantRuntime,
 } from "@assistant-ui/react";
-import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
+import {
+  MarkdownTextPrimitive,
+  type CodeHeaderProps,
+} from "@assistant-ui/react-markdown";
 import {
   Bot,
   User,
@@ -22,46 +26,143 @@ import {
   AlertCircle,
   Brain,
   Copy,
+  Check,
+  FileText,
+  ExternalLink,
 } from "lucide-react";
 import { useOpenCorpSecretarioRuntime } from "../runtime/secretary-runtime-adapter.js";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 import { SUGESTOES_RAPIDAS } from "../../../lib/chat/constants.js";
 import type { SecretaryRuntimeOptions } from "../types.js";
+import { GitStatusCard, parsearSaidaGitStatus } from "./GitStatusCard.js";
+import { HitlOptionsView } from "./HitlOptionsView.js";
 
 /**
  * Componente de exibição de blocos de raciocínio (Chain of Thought).
- * Suporta expansão/colapso suave e tipografia monoespaçada discreta.
+ * Suporta expansão/colapso suave e tipografia monoespaçada discreta com estilo roxo/zinco.
  */
-export const ReasoningView: FC<{ text?: string }> = ({ text = "" }) => {
+export const ReasoningView: FC<{ text?: string; tempoFmt?: string }> = ({
+  text = "",
+  tempoFmt,
+}) => {
   const [expandido, setExpandido] = useState(false);
 
   if (!text || text.trim().length === 0) return null;
 
   return (
-    <div className="my-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/40 text-xs overflow-hidden transition-all">
+    <div className="my-2.5 rounded-xl border border-purple-900/40 bg-purple-950/20 text-xs overflow-hidden transition-all shadow-sm">
       <button
         type="button"
         onClick={() => setExpandido((prev) => !prev)}
-        className="w-full flex items-center justify-between px-3.5 py-2 bg-zinc-900/60 hover:bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 transition-colors text-left font-mono cursor-pointer select-none"
+        className="w-full flex items-center justify-between px-3.5 py-2 bg-purple-950/30 hover:bg-purple-950/50 text-purple-300 hover:text-purple-100 transition-colors text-left font-mono cursor-pointer select-none border-b border-transparent group"
       >
         <div className="flex items-center gap-2">
           <Brain size={14} className="text-purple-400 animate-pulse" />
-          <span className="font-semibold text-zinc-300">Raciocínio do Modelo</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-950/40 border border-purple-800/30 text-purple-300">
+          <span className="font-semibold text-purple-200">Processo de Raciocínio</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-900/50 border border-purple-700/40 text-purple-300">
             Chain of Thought
           </span>
+          {tempoFmt && (
+            <span className="text-[10px] text-zinc-400 font-mono">
+              ({tempoFmt})
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-1 text-zinc-500">
+        <div className="flex items-center gap-1 text-purple-400/80 group-hover:text-purple-200 text-[11px]">
           <span>{expandido ? "Ocultar" : "Inspecionar"}</span>
           {expandido ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </div>
       </button>
 
       {expandido && (
-        <div className="p-3.5 bg-black/40 font-mono text-[11px] text-zinc-400 leading-relaxed whitespace-pre-wrap border-t border-zinc-800/40 max-h-72 overflow-y-auto">
+        <div className="p-3.5 bg-black/50 font-mono text-[11px] text-zinc-300 leading-relaxed whitespace-pre-wrap border-t border-purple-900/30 max-h-72 overflow-y-auto scrollbar-thin select-text">
           {text}
         </div>
       )}
+    </div>
+  );
+};
+
+/**
+ * Cabeçalho de bloco de código com Handoff para Workspace IDE e botão Copiar
+ */
+export const CodeHeaderWithHandoff: FC<
+  CodeHeaderProps & { workspaceId?: string }
+> = ({ language, code, workspaceId = "default" }) => {
+  const navigate = useNavigate();
+  const [copiado, setCopiado] = useState(false);
+
+  // Extrai possível caminho de arquivo da primeira linha do código
+  // Ex: "// src/index.ts", "# scripts/run.py", "/* src/App.tsx */", "file: src/index.ts"
+  const caminhoArquivo = useMemo(() => {
+    if (!code) return null;
+    const primeiraLinha = code.trim().split("\n")[0] || "";
+    const m = primeiraLinha.match(
+      /^(?:\/\/\s*|#\s*|\/\*\s*|<!--\s*|(?:file|arquivo):\s*)([a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+)/,
+    );
+    if (m && m[1] && !m[1].startsWith("http")) {
+      return m[1].replace(/\*\/|-->/, "").trim();
+    }
+    return null;
+  }, [code]);
+
+  const copiar = () => {
+    if (navigator.clipboard) {
+      void navigator.clipboard.writeText(code);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+    }
+  };
+
+  const abrirNoWorkspace = () => {
+    if (caminhoArquivo) {
+      navigate(
+        `/w/${encodeURIComponent(workspaceId)}/workspace?file=${encodeURIComponent(caminhoArquivo)}`,
+      );
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 text-[11px] font-mono text-zinc-400 select-none">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-zinc-500 uppercase text-[10px] font-bold">
+          {language || "código"}
+        </span>
+        {caminhoArquivo && (
+          <span className="flex items-center gap-1 text-emerald-400 font-mono text-[11px] truncate">
+            <FileText size={11} />
+            <span className="truncate">{caminhoArquivo}</span>
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-1.5 shrink-0">
+        {caminhoArquivo && (
+          <button
+            type="button"
+            onClick={abrirNoWorkspace}
+            className="flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors cursor-pointer text-[10px]"
+            title={`Abrir ${caminhoArquivo} na Workspace IDE`}
+          >
+            <ExternalLink size={11} />
+            <span>Abrir no Workspace</span>
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={copiar}
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors cursor-pointer text-[10px]"
+          title="Copiar código"
+        >
+          {copiado ? (
+            <Check size={11} className="text-emerald-400" />
+          ) : (
+            <Copy size={11} />
+          )}
+          <span>{copiado ? "Copiado" : "Copiar"}</span>
+        </button>
+      </div>
     </div>
   );
 };
@@ -294,13 +395,20 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
                   );
                 }
 
+                const textoAssistente = (message.content as any[])
+                  .filter((p) => p && p.type === "text" && typeof p.text === "string")
+                  .map((p) => p.text as string)
+                  .join("\n");
+
+                const arquivosGit = parsearSaidaGitStatus(textoAssistente);
+
                 return (
                   <div className="flex justify-start my-4 oc-assistant">
                     <div className="flex items-start gap-3 max-w-[95%] lg:max-w-[88%] w-full">
                       <div className="h-8 w-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white flex-shrink-0 shadow-md shadow-emerald-900/40 mt-0.5">
                         <Bot size={18} />
                       </div>
-                      <div className="flex-1 min-w-0 rounded-2xl rounded-tl-sm bg-zinc-900/50 border border-zinc-800/80 px-4 py-3.5 text-sm shadow-sm">
+                      <div className="flex-1 min-w-0 rounded-2xl rounded-tl-sm bg-zinc-900/50 border border-zinc-800/80 px-4 py-3.5 text-sm shadow-sm space-y-2">
                         <MessagePrimitive.Parts
                           components={{
                             Text: ({ text }: { text?: string }) => {
@@ -315,7 +423,17 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
                                 );
                               }
                               return (
-                                <MarkdownTextPrimitive className="prose prose-invert prose-emerald text-sm max-w-none text-zinc-100 leading-relaxed break-words" />
+                                <MarkdownTextPrimitive
+                                  className="prose prose-invert prose-emerald text-sm max-w-none text-zinc-100 leading-relaxed break-words"
+                                  components={{
+                                    CodeHeader: (props) => (
+                                      <CodeHeaderWithHandoff
+                                        {...props}
+                                        workspaceId={workspaceId ?? "default"}
+                                      />
+                                    ),
+                                  }}
+                                />
                               );
                             },
                             Reasoning: ({ text }: { text?: string }) => (
@@ -331,6 +449,26 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
                               ),
                             },
                           }}
+                        />
+
+                        {/* Card Interativo de Git Status se houver alterações detectadas */}
+                        {arquivosGit.length > 0 && (
+                          <GitStatusCard
+                            workspaceId={workspaceId ?? "default"}
+                            arquivos={arquivosGit}
+                          />
+                        )}
+
+                        {/* Opções Interativas da LLM (Interactive HITL) para resposta em 1 clique */}
+                        <HitlOptionsView
+                          texto={textoAssistente}
+                          onSelecionarOpcao={(opcao) => {
+                            void runtime.thread.append({
+                              role: "user",
+                              content: [{ type: "text", text: opcao }],
+                            });
+                          }}
+                          desabilitado={runtime.thread.getState().isRunning}
                         />
                       </div>
                     </div>
