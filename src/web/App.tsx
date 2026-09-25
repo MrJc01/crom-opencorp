@@ -1,7 +1,19 @@
-import React, { type FC } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import React, { useEffect, useState, type FC } from "react";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
+import { ProblemDetailsError, type WorkspaceResumo } from "@opencorp/sdk";
 import { OpenCorpProvider } from "./providers/OpenCorpProvider.js";
+import { useOpenCorp } from "./providers/OpenCorpProvider.js";
 import { AppLayout } from "./shared/layout/AppLayout.js";
+import { WorkspaceBoundary } from "./shared/layout/WorkspaceBoundary.js";
+import { RouteSkeleton } from "./shared/ui/RouteSkeleton.js";
+import { workspacePath } from "./lib/routes.js";
 
 // Views Nativas em React 19
 import { SecretarioView } from "./features/chat/views/SecretarioView.js";
@@ -17,41 +29,175 @@ import { HistoricoView } from "./features/history/views/HistoricoView.js";
 import { AtivosView } from "./features/assets/views/AtivosView.js";
 import { NotificacoesView } from "./features/notifications/views/NotificacoesView.js";
 import { DocsView } from "./features/docs/views/DocsView.js";
+import { HomeZeroState } from "./features/home/components/HomeZeroState.js";
+
+const ROTAS_LEGADAS: ReadonlyArray<{
+  path: string;
+  modulo: string;
+  queryPadrao?: Record<string, string>;
+}> = [
+  { path: "/home", modulo: "" },
+  { path: "/secretario", modulo: "secretario" },
+  { path: "/tasks", modulo: "tasks" },
+  { path: "/agentes", modulo: "agentes" },
+  { path: "/fluxos", modulo: "fluxos" },
+  { path: "/workspace", modulo: "workspace" },
+  { path: "/config", modulo: "config" },
+  { path: "/apps", modulo: "apps" },
+  { path: "/reunioes", modulo: "reunioes" },
+  { path: "/historico", modulo: "historico" },
+  { path: "/ativos", modulo: "ativos" },
+  { path: "/notificacoes", modulo: "notificacoes" },
+  { path: "/agenda", modulo: "fluxos", queryPadrao: { filtro: "cron" } },
+  { path: "/hooks", modulo: "fluxos" },
+  { path: "/secrets", modulo: "config" },
+];
+
+function lerUltimoWorkspace(): string | null {
+  if (typeof window === "undefined") return null;
+  const salvo =
+    localStorage.getItem("oc-ws") ||
+    localStorage.getItem("opencorp_workspace_id");
+  return salvo?.trim() || null;
+}
+
+function workspaceNaoEncontrado(erro: unknown): boolean {
+  return (
+    erro instanceof ProblemDetailsError &&
+    (erro.status === 404 ||
+      (erro.status === 422 && erro.detail?.toLowerCase().includes("workspace") === true &&
+        erro.detail.toLowerCase().includes("não encontrado")))
+  );
+}
+
+const WorkspacesRoute: FC = () => {
+  const { client, tratarErro } = useOpenCorp();
+  const [workspaces, setWorkspaces] = useState<WorkspaceResumo[]>([]);
+  const [carregando, setCarregando] = useState(true);
+
+  const carregar = async () => {
+    setCarregando(true);
+    try {
+      setWorkspaces((await client.workspaces.listar()) ?? []);
+    } catch (erro: unknown) {
+      tratarErro(erro, "Falha ao listar workspaces");
+    } finally {
+      setCarregando(false);
+    }
+  };
+
+  useEffect(() => {
+    void carregar();
+  }, [client]);
+
+  if (carregando) return <RouteSkeleton />;
+
+  return (
+    <HomeZeroState
+      workspaces={workspaces}
+      aoAtualizarWorkspaces={() => void carregar()}
+    />
+  );
+};
+
+const RedirectWorkspace: FC<{
+  modulo?: string;
+  raiz?: boolean;
+  queryPadrao?: Record<string, string>;
+}> = ({
+  modulo = "",
+  raiz = false,
+  queryPadrao,
+}) => {
+  const { client } = useOpenCorp();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const workspaceId = lerUltimoWorkspace();
+    if (!workspaceId) {
+      const destino = raiz
+        ? "/workspaces"
+        : `/workspaces?${new URLSearchParams({ next: `${location.pathname}${location.search}` })}`;
+      navigate(destino, { replace: true });
+      return;
+    }
+
+    const controller = new AbortController();
+    void client.http
+      .get(`/workspaces/${encodeURIComponent(workspaceId)}`, {
+        signal: controller.signal,
+      })
+      .then(() => {
+        if (controller.signal.aborted) return;
+        const query = new URLSearchParams(location.search);
+        for (const [chave, valor] of Object.entries(queryPadrao ?? {})) {
+          if (!query.has(chave)) query.set(chave, valor);
+        }
+        const queryString = query.toString();
+        navigate(`${workspacePath(workspaceId, modulo)}${queryString ? `?${queryString}` : ""}`, {
+          replace: true,
+        });
+      })
+      .catch((erro: unknown) => {
+        if (controller.signal.aborted) return;
+        if (workspaceNaoEncontrado(erro)) {
+          localStorage.removeItem("oc-ws");
+          localStorage.removeItem("opencorp_workspace_id");
+        }
+        const destino = raiz
+          ? "/workspaces"
+          : `/workspaces?${new URLSearchParams({ next: `${location.pathname}${location.search}` })}`;
+        navigate(destino, { replace: true });
+      });
+
+    return () => controller.abort();
+  }, [client.http, location.pathname, location.search, modulo, navigate, queryPadrao, raiz]);
+
+  return <RouteSkeleton />;
+};
 
 export const App: FC = () => {
   return (
-    <OpenCorpProvider>
-      <BrowserRouter>
+    <BrowserRouter>
+      <OpenCorpProvider>
         <Routes>
           <Route element={<AppLayout />}>
-            {/* Rota Raiz: Home com Onboarding de Workspaces */}
-            <Route path="/" element={<HomeView />} />
-            <Route path="/home" element={<HomeView />} />
-            <Route path="/secretario" element={<SecretarioView />} />
-
-            {/* Módulos Operacionais Conectados via @opencorp/sdk */}
-            <Route path="/tasks" element={<TasksView />} />
-            <Route path="/agentes" element={<AgentesView />} />
-            <Route path="/fluxos" element={<FluxosView />} />
-            <Route path="/workspace" element={<WorkspaceView />} />
-            <Route path="/config" element={<ConfigView />} />
-            <Route path="/apps" element={<AppsView />} />
-            <Route path="/reunioes" element={<ReunioesView />} />
-            <Route path="/historico" element={<HistoricoView />} />
-
-            {/* Ativos, Notificações & Documentação */}
-            <Route path="/ativos" element={<AtivosView />} />
-            <Route path="/notificacoes" element={<NotificacoesView />} />
+            {/* Rotas globais, independentes de um workspace na URL. */}
+            <Route path="/" element={<RedirectWorkspace raiz />} />
+            <Route path="/workspaces" element={<WorkspacesRoute />} />
+            <Route path="/config/global" element={<ConfigView />} />
             <Route path="/docs" element={<DocsView />} />
 
-            {/* Redirecionamentos de conveniência */}
-            <Route path="/agenda" element={<Navigate to="/fluxos" replace />} />
-            <Route path="/hooks" element={<Navigate to="/fluxos" replace />} />
-            <Route path="/secrets" element={<Navigate to="/config" replace />} />
+            {/* O segmento de rota é a autoridade do workspace operacional. */}
+            <Route path="/w/:workspaceId" element={<WorkspaceBoundary />}>
+              <Route index element={<HomeView />} />
+              <Route path="workspace" element={<WorkspaceView />} />
+              <Route path="tasks" element={<TasksView />} />
+              <Route path="secretario" element={<SecretarioView />} />
+              <Route path="agentes" element={<AgentesView />} />
+              <Route path="fluxos" element={<FluxosView />} />
+              <Route path="reunioes" element={<ReunioesView />} />
+              <Route path="historico" element={<HistoricoView />} />
+              <Route path="apps" element={<AppsView />} />
+              <Route path="ativos" element={<AtivosView />} />
+              <Route path="notificacoes" element={<NotificacoesView />} />
+              <Route path="config" element={<ConfigView />} />
+            </Route>
+
+            {/* Compatibilidade: valida o último workspace e preserva a query original. */}
+            {ROTAS_LEGADAS.map(({ path, modulo, queryPadrao }) => (
+              <Route
+                key={path}
+                path={path}
+                element={<RedirectWorkspace modulo={modulo} queryPadrao={queryPadrao} />}
+              />
+            ))}
+
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
-      </BrowserRouter>
-    </OpenCorpProvider>
+      </OpenCorpProvider>
+    </BrowserRouter>
   );
 };

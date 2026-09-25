@@ -205,12 +205,14 @@ describe("Rotas Modulares de Sistema, Legado e Estáticos (Micro-Passo 15)", () 
   describe("Entrega de Estáticos e Fallback SPA (static.ts)", () => {
     it("GET / e SPA fallback entregam index.html quando solicitado HTML", async () => {
       const base = `http://127.0.0.1:${port}`;
-      const res = await fetch(`${base}/tasks`, {
-        headers: { accept: "text/html" },
-      });
-      expect(res.status).toBe(200);
-      const text = await res.text();
-      expect(text).toContain("opencorp");
+      for (const rota of ["/tasks", "/workspaces", "/w/default/tasks?task=tsk-1"]) {
+        const res = await fetch(`${base}${rota}`, {
+          headers: { accept: "text/html" },
+        });
+        expect(res.status).toBe(200);
+        const text = await res.text();
+        expect(text).toContain("opencorp");
+      }
     });
   });
 });
