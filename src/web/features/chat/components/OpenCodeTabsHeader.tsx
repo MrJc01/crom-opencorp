@@ -7,6 +7,10 @@ import {
   Minimize2,
   Sparkles,
   History,
+  GitBranch,
+  Cpu,
+  Clock,
+  Settings2,
 } from "lucide-react";
 
 export interface ChatTab {
@@ -24,9 +28,13 @@ export interface OpenCodeTabsHeaderProps {
   aoNovaAba: () => void;
   workspaceId: string;
   carregando?: boolean;
+  tempoInferencia?: string;
+  gitBranch?: string;
+  modeloAtivo?: string;
   onToggleFullscreen?: () => void;
   isFullscreen?: boolean;
   onAbrirHistorico?: () => void;
+  onAbrirConfiguracoes?: () => void;
 }
 
 /**
@@ -42,7 +50,7 @@ export function formatarTituloAba(titulo?: string): string {
 }
 
 /**
- * Cabeçalho de Abas de Conversas do Secretário Executivo (Estilo OpenCode)
+ * Cabeçalho de Abas de Conversas do Secretário Executivo com Telemetria e Governança
  */
 export const OpenCodeTabsHeader: FC<OpenCodeTabsHeaderProps> = ({
   abas,
@@ -52,9 +60,13 @@ export const OpenCodeTabsHeader: FC<OpenCodeTabsHeaderProps> = ({
   aoNovaAba,
   workspaceId,
   carregando = false,
+  tempoInferencia,
+  gitBranch,
+  modeloAtivo,
   onToggleFullscreen,
   isFullscreen = false,
   onAbrirHistorico,
+  onAbrirConfiguracoes,
 }) => {
   return (
     <header
@@ -128,15 +140,40 @@ export const OpenCodeTabsHeader: FC<OpenCodeTabsHeaderProps> = ({
         </button>
       </nav>
 
-      {/* Ações da Direita */}
+      {/* Ações da Direita e Telemetria Operacional */}
       <div className="flex items-center gap-2 text-xs shrink-0 pl-2 border-l border-zinc-800/80">
-        {/* Status de Execução Ao Vivo */}
-        {carregando && (
+        {/* Badge de Branch Git Ativa */}
+        {gitBranch && (
+          <div
+            className="hidden md:flex items-center gap-1 font-mono text-[10px] text-zinc-400 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-md"
+            title={`Branch git ativa: ${gitBranch}`}
+          >
+            <GitBranch size={11} className="text-emerald-400" />
+            <span className="truncate max-w-[80px]">{gitBranch}</span>
+          </div>
+        )}
+
+        {/* Badge do Modelo Ativo */}
+        {modeloAtivo && (
+          <div
+            className="hidden lg:flex items-center gap-1 font-mono text-[10px] text-zinc-400 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-md"
+            title={`Modelo em uso: ${modeloAtivo}`}
+          >
+            <Cpu size={11} className="text-emerald-400" />
+            <span className="truncate max-w-[110px]">
+              {modeloAtivo.split("/").pop()}
+            </span>
+          </div>
+        )}
+
+        {/* Cronômetro de Inferência / Status de Execução Ao Vivo */}
+        {carregando ? (
           <div className="flex items-center gap-1.5 font-mono text-[10px] text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-2 py-0.5 rounded-full animate-pulse">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             <span>AO VIVO</span>
+            {tempoInferencia && <span className="text-zinc-300">({tempoInferencia})</span>}
           </div>
-        )}
+        ) : null}
 
         {/* Identificador do Workspace e Título */}
         <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-400">
@@ -155,6 +192,19 @@ export const OpenCodeTabsHeader: FC<OpenCodeTabsHeaderProps> = ({
             aria-label="Histórico de Sessões"
           >
             <History size={13} />
+          </button>
+        )}
+
+        {/* Botão Configurações do Secretário (Drawer Lateral) */}
+        {onAbrirConfiguracoes && (
+          <button
+            type="button"
+            onClick={onAbrirConfiguracoes}
+            className="p-1 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 transition-colors cursor-pointer"
+            title="Configurações do Secretário (Motor, Modelos e Agentes)"
+            aria-label="Configurações do Secretário"
+          >
+            <Settings2 size={13} />
           </button>
         )}
 

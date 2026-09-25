@@ -153,4 +153,21 @@ test.describe("Chat do Secretário", () => {
     await page.getByText("Processo de Raciocínio").first().click();
     await expect(page.getByText("Inspecionar").first()).toBeVisible();
   });
+
+  test("botão de engrenagem abre o drawer lateral de configurações do Secretário", async ({ page }) => {
+    const btnConfig = page.locator('button[title="Configurações do Secretário (Motor, Modelos e Agentes)"]').first();
+    await expect(btnConfig).toBeVisible({ timeout: 10000 });
+    await btnConfig.click();
+
+    const drawer = page.locator('[data-testid="drawer-lateral-config"]');
+    await expect(drawer).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Configurações do Secretário").first()).toBeVisible();
+    await expect(page.getByText("Agente Supervisor do Workspace").first()).toBeVisible();
+    await expect(page.getByText("Cadeia de Rotação / Fallback Autônomo").first()).toBeVisible();
+
+    // Fecha o drawer
+    await page.locator('button[title="Fechar painel"]').click();
+    await expect(drawer).not.toBeVisible();
+  });
 });
+

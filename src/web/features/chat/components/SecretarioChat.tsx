@@ -240,26 +240,58 @@ export interface SecretarioChatProps {
  * Componente interno conectado ao AssistantRuntimeProvider
  */
 const SecretarioChatInterno: FC<{
-  runtime: AssistantRuntime;
+  runtimeProp?: AssistantRuntime;
   workspaceId: string;
-  agenteAtivo: string | null;
-  setAgenteAtivo: (a: string | null) => void;
-  chipsContexto: ContextChip[];
-  setChipsContexto: React.Dispatch<React.SetStateAction<ContextChip[]>>;
-  anexosImagens: AnexoImagem[];
-  setAnexosImagens: React.Dispatch<React.SetStateAction<AnexoImagem[]>>;
+  sessaoId?: string;
+  initialMessages?: ThreadMessageLike[];
+  aoAtualizarTitulo?: (sessaoId: string, titulo: string) => void;
+  aoSessaoCriada?: (sid: string) => void;
+  options?: SecretaryRuntimeOptions;
   className?: string;
 }> = ({
-  runtime,
+  runtimeProp,
   workspaceId,
-  agenteAtivo,
-  setAgenteAtivo,
-  chipsContexto,
-  setChipsContexto,
-  anexosImagens,
-  setAnexosImagens,
+  sessaoId,
+  initialMessages,
+  aoAtualizarTitulo,
+  aoSessaoCriada,
+  options,
   className = "",
 }) => {
+  const [agenteAtivo, setAgenteAtivo] = useState<string | null>(null);
+  const [chipsContexto, setChipsContexto] = useState<ContextChip[]>([]);
+  const [anexosImagens, setAnexosImagens] = useState<AnexoImagem[]>([]);
+
+  const runtimeInterno = useOpenCorpSecretarioRuntime({
+    workspaceId,
+    sessaoId,
+    agente: agenteAtivo ?? options?.agente ?? "secretario",
+    initialMessages,
+    obterContextoEnvio: () => ({
+      agente: agenteAtivo ?? undefined,
+      imagens: anexosImagens,
+      contexto: chipsContexto.map((c) => c.rotulo),
+    }),
+    onLimparContextoEnvio: () => {
+      setChipsContexto([]);
+      setAnexosImagens([]);
+    },
+    onSessaoCriada: (sid) => {
+      options?.onSessaoCriada?.(sid);
+      aoSessaoCriada?.(sid);
+    },
+    onPrimeiraMensagem: (texto) => {
+      options?.onPrimeiraMensagem?.(texto);
+      if (sessaoId) {
+        const tituloFormatado = texto.slice(0, 30).trim();
+        aoAtualizarTitulo?.(sessaoId, tituloFormatado || "Conversa");
+      }
+    },
+    ...options,
+  });
+
+  const runtime = runtimeProp ?? runtimeInterno;
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <div
@@ -556,11 +588,6 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
   const wsId = options?.workspaceId ?? workspaceId ?? "default";
   const idSessaoAtiva = sessaoId ?? options?.sessaoId;
 
-  // Estados locais para contexto e anexos no Composer
-  const [agenteAtivo, setAgenteAtivo] = useState<string | null>(null);
-  const [chipsContexto, setChipsContexto] = useState<ContextChip[]>([]);
-  const [anexosImagens, setAnexosImagens] = useState<AnexoImagem[]>([]);
-
   // Carregamento de mensagens iniciais persistidas (hidratação no F5 ou troca de aba)
   const [mensagensIniciais, setMensagensIniciais] = useState<
     ThreadMessageLike[] | undefined
@@ -624,36 +651,6 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
     };
   }, [idSessaoAtiva, wsId, options?.initialMessages]);
 
-  const runtimeInterno = useOpenCorpSecretarioRuntime({
-    workspaceId: wsId,
-    sessaoId: idSessaoAtiva,
-    agente: agenteAtivo ?? options?.agente ?? "secretario",
-    initialMessages: mensagensIniciais,
-    obterContextoEnvio: () => ({
-      agente: agenteAtivo ?? undefined,
-      imagens: anexosImagens,
-      contexto: chipsContexto.map((c) => c.rotulo),
-    }),
-    onLimparContextoEnvio: () => {
-      setChipsContexto([]);
-      setAnexosImagens([]);
-    },
-    onSessaoCriada: (sid) => {
-      options?.onSessaoCriada?.(sid);
-      aoSessaoCriada?.(sid);
-    },
-    onPrimeiraMensagem: (texto) => {
-      options?.onPrimeiraMensagem?.(texto);
-      if (idSessaoAtiva) {
-        const tituloFormatado = texto.slice(0, 30).trim();
-        aoAtualizarTitulo?.(idSessaoAtiva, tituloFormatado || "Conversa");
-      }
-    },
-    ...options,
-  });
-
-  const runtime = runtimeProp ?? runtimeInterno;
-
   if (carregandoHistorico) {
     return (
       <div className="flex items-center justify-center h-full w-full bg-zinc-950 text-zinc-500 font-mono text-xs">
@@ -664,14 +661,14 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
 
   return (
     <SecretarioChatInterno
-      runtime={runtime}
+      key={`${idSessaoAtiva || "draft"}-${mensagensIniciais ? mensagensIniciais.length : 0}`}
+      runtimeProp={runtimeProp}
       workspaceId={wsId}
-      agenteAtivo={agenteAtivo}
-      setAgenteAtivo={setAgenteAtivo}
-      chipsContexto={chipsContexto}
-      setChipsContexto={setChipsContexto}
-      anexosImagens={anexosImagens}
-      setAnexosImagens={setAnexosImagens}
+      sessaoId={idSessaoAtiva}
+      initialMessages={mensagensIniciais}
+      aoAtualizarTitulo={aoAtualizarTitulo}
+      aoSessaoCriada={aoSessaoCriada}
+      options={options}
       className={className}
     />
   );

@@ -7,6 +7,8 @@ import {
 } from "../components/OpenCodeTabsHeader.js";
 import { HistoricoModal } from "../components/HistoricoModal.js";
 import { SecretarioChat } from "../components/SecretarioChat.js";
+import { SecretarioSettingsDrawer } from "../components/SecretarioSettingsDrawer.js";
+import { obterAuthHeaders } from "../runtime/secretary-runtime-adapter.js";
 
 /**
  * Lê as abas salvas do workspace no localStorage.
@@ -60,6 +62,25 @@ export const SecretarioView: FC = () => {
 
   const sessaoAtivaId = sessaoParam || abas[0]?.id || null;
   const [historicoAberto, setHistoricoAberto] = useState<boolean>(false);
+  const [configLateralAberta, setConfigLateralAberta] = useState<boolean>(false);
+  const [gitBranch, setGitBranch] = useState<string>("main");
+  const [modeloAtivo, setModeloAtivo] = useState<string>("gemini-2.5-flash");
+
+  // Sincroniza branch git do workspace
+  useEffect(() => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:4100";
+    fetch(`${origin}/workspaces/git/status?workspace=${encodeURIComponent(wsId)}`, {
+      headers: {
+        ...obterAuthHeaders(),
+        ...(wsId ? { "x-opencorp-workspace": wsId } : {}),
+      },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.branch) setGitBranch(data.branch);
+      })
+      .catch(() => {});
+  }, [wsId]);
 
   // Sincroniza abas e URL ao montar ou mudar de workspaceId
   useEffect(() => {
@@ -260,7 +281,10 @@ export const SecretarioView: FC = () => {
         aoFecharAba={aoFecharAba}
         aoNovaAba={aoNovaAba}
         workspaceId={wsId}
+        gitBranch={gitBranch}
+        modeloAtivo={modeloAtivo}
         onAbrirHistorico={() => setHistoricoAberto(true)}
+        onAbrirConfiguracoes={() => setConfigLateralAberta(true)}
       />
       <div className="flex-1 min-h-0 overflow-hidden relative">
         <SecretarioChat
@@ -282,6 +306,13 @@ export const SecretarioView: FC = () => {
         onSelecionarSessao={aoSelecionarAba}
         onNovaConversa={aoNovaAba}
         onExcluirSessao={aoFecharAba}
+      />
+      <SecretarioSettingsDrawer
+        aberto={configLateralAberta}
+        onFechar={() => setConfigLateralAberta(false)}
+        workspaceId={wsId}
+        modeloAtivo={modeloAtivo}
+        onAplicarModelo={(m) => setModeloAtivo(m)}
       />
     </div>
   );

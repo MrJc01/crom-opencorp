@@ -5,7 +5,7 @@ import React, {
   useMemo,
   type FC,
 } from "react";
-import { ComposerPrimitive } from "@assistant-ui/react";
+import { ComposerPrimitive, ThreadPrimitive } from "@assistant-ui/react";
 import {
   Send,
   Square,
@@ -550,22 +550,26 @@ export const ChatComposer: FC<ChatComposerProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Botão de Cancelar nativo da primitiva do assistant-ui */}
-          <ComposerPrimitive.Cancel
-            className="flex items-center justify-center h-8 w-8 rounded-xl bg-rose-600/80 hover:bg-rose-500 active:scale-95 text-white transition-all cursor-pointer shadow-md shadow-rose-950/50"
-            title="Interromper processamento"
-          >
-            <Square size={13} />
-          </ComposerPrimitive.Cancel>
+          {/* Botão de Cancelar nativo exibido apenas durante execução */}
+          <ThreadPrimitive.If running={true}>
+            <ComposerPrimitive.Cancel
+              className="flex items-center justify-center h-8 w-8 rounded-xl bg-rose-600/80 hover:bg-rose-500 active:scale-95 text-white transition-all cursor-pointer shadow-md shadow-rose-950/50"
+              title="Interromper processamento"
+            >
+              <Square size={13} />
+            </ComposerPrimitive.Cancel>
+          </ThreadPrimitive.If>
 
-          {/* Botão de Enviar nativo da primitiva do assistant-ui */}
-          <ComposerPrimitive.Send
-            id="btn-enviar"
-            className="flex items-center justify-center h-8 w-8 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white transition-all cursor-pointer shadow-md shadow-emerald-950/50"
-            title="Enviar (Enter)"
-          >
-            <Send size={14} />
-          </ComposerPrimitive.Send>
+          {/* Botão de Enviar nativo exibido quando o chat está ocioso */}
+          <ThreadPrimitive.If running={false}>
+            <ComposerPrimitive.Send
+              id="btn-enviar"
+              className="flex items-center justify-center h-8 w-8 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white transition-all cursor-pointer shadow-md shadow-emerald-950/50"
+              title="Enviar (Enter)"
+            >
+              <Send size={14} />
+            </ComposerPrimitive.Send>
+          </ThreadPrimitive.If>
         </div>
       </div>
     </ComposerPrimitive.Root>
