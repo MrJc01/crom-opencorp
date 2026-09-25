@@ -1,7 +1,8 @@
-/** @jsxImportSource react */
 import React, { type FC } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bot, Maximize2, X, Sparkles } from "lucide-react";
+import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
+import { workspacePath } from "../../../lib/routes.js";
 import { SecretarioChat } from "./SecretarioChat.js";
 
 export interface SecretarioDockProps {
@@ -11,8 +12,15 @@ export interface SecretarioDockProps {
 
 export const SecretarioDock: FC<SecretarioDockProps> = ({ aberto, aoFechar }) => {
   const navigate = useNavigate();
+  const { workspaceId } = useOpenCorp();
+  const wsId = workspaceId || "default";
 
   if (!aberto) return null;
+
+  const sessaoAtivaId =
+    typeof window !== "undefined"
+      ? localStorage.getItem(`oc-secretario-sessao-ativa:${wsId}`) || undefined
+      : undefined;
 
   return (
     <div className="fixed inset-y-0 right-0 z-50 flex flex-col w-full sm:w-[480px] lg:w-[540px] bg-zinc-950 border-l border-zinc-800 shadow-2xl animate-in slide-in-from-right duration-200">
@@ -35,12 +43,18 @@ export const SecretarioDock: FC<SecretarioDockProps> = ({ aberto, aoFechar }) =>
         </div>
 
         <div className="flex items-center gap-1">
-          {/* Botão Tela Cheia */}
+          {/* Botão Tela Cheia com preservação de sessão */}
           <button
             type="button"
             onClick={() => {
               aoFechar();
-              navigate("/secretario");
+              navigate(
+                workspacePath(
+                  wsId,
+                  "secretario",
+                  sessaoAtivaId ? { sessao: sessaoAtivaId } : undefined,
+                ),
+              );
             }}
             className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors cursor-pointer"
             title="Expandir para tela cheia (/secretario)"
@@ -60,9 +74,12 @@ export const SecretarioDock: FC<SecretarioDockProps> = ({ aberto, aoFechar }) =>
         </div>
       </div>
 
-      {/* Conteúdo: Chat do Secretário */}
+      {/* Conteúdo: Chat do Secretário com sessão ativa */}
       <div className="flex-1 min-h-0 overflow-hidden relative">
-        <SecretarioChat />
+        <SecretarioChat
+          key={sessaoAtivaId || "dock"}
+          sessaoId={sessaoAtivaId}
+        />
       </div>
     </div>
   );

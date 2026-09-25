@@ -1,5 +1,4 @@
-/** @jsxImportSource react */
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   useExternalStoreRuntime,
   type ThreadMessageLike,
@@ -9,6 +8,41 @@ import {
 import { executarSecretarioStream } from "../../../lib/chat/secretary-stream.js";
 import { ProblemDetailsError } from "@opencorp/sdk";
 import type { SecretaryRuntimeOptions } from "../types.js";
+
+/**
+ * Converte mensagens retornadas da API /secretario/sessoes/:id/mensagens
+ * para o formato ThreadMessageLike do @assistant-ui/react.
+ */
+export function converterMensagensBackend(
+  mensagens: any[],
+  sessaoId: string,
+): ThreadMessageLike[] {
+  if (!Array.isArray(mensagens)) return [];
+
+  return mensagens.map((m: any, idx: number) => {
+    if (m.role === "user") {
+      return {
+        id: m.id || `user_${sessaoId}_${idx}`,
+        role: "user",
+        content: [{ type: "text", text: m.content || "" }],
+        createdAt: m.criado_em ? new Date(m.criado_em) : new Date(),
+      };
+    }
+
+    const partes = buildAssistantParts(
+      m.pensamento || "",
+      m.acoes || [],
+      m.content || "",
+    );
+
+    return {
+      id: m.id || `asst_${sessaoId}_${idx}`,
+      role: "assistant",
+      content: partes,
+      createdAt: m.criado_em ? new Date(m.criado_em) : new Date(),
+    };
+  });
+}
 
 /**
  * Constrói ordenadamente as partes internas da mensagem do assistente:
@@ -56,7 +90,8 @@ export function buildAssistantParts(
 
 /**
  * Hook oficial do OpenCorp que conecta o `@assistant-ui/react` ao endpoint
- * de streaming SSE nativo (`POST /secretario/conversa/stream`).
+ * de streaming SSE nativo (`POST /secretario/conversa/stream`) e hidrata
+ * o histórico de mensagens da sessão ativa no F5.
  */
 export function useOpenCorpSecretarioRuntime(
   options: SecretaryRuntimeOptions = {},
@@ -65,11 +100,76 @@ export function useOpenCorpSecretarioRuntime(
     options.initialMessages ?? [],
   );
   const [isRunning, setIsRunning] = useState<boolean>(false);
-  const sessaoIdRef = useRef<string | undefined>(undefined);
+  const sessaoIdRef = useRef<string | undefined>(options.sessaoId);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const urlBase = options.url ?? "/secretario/conversa/stream";
   const wsId = options.workspaceId ?? "default";
+
+  // Hidratação no F5 ou troca de aba: carrega mensagens persistidas no backend
+  useEffect(() => {
+    sessaoIdRef.current = options.sessaoId;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsRunning(false);
+    }
+
+    const sid = options.sessaoId?.trim();
+    if (!sid) {
+      setMessages(options.initialMessages ?? []);
+      return;
+    }
+
+    // Sessão rascunho criada localmente: inicia vazia sem disparar requisição 404
+    const isRascunhoLocal =
+      (sid.startsWith("sessao-") || sid.startsWith("draft-")) &&
+      !options.sessaoPersistida;
+    if (isRascunhoLocal) {
+      setMessages(options.initialMessages ?? []);
+      return;
+    }
+
+    // Sessão existente com ID persistido: carrega histórico do backend
+    const controller = new AbortController();
+    const origin =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : "http://127.0.0.1:4100";
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(wsId ? { "x-opencorp-workspace": wsId } : {}),
+      ...(options.headers ?? {}),
+    };
+
+    void fetch(
+      `${origin}/secretario/sessoes/${encodeURIComponent(sid)}/mensagens`,
+      {
+        headers,
+        signal: controller.signal,
+      },
+    )
+      .then(async (res) => {
+        if (controller.signal.aborted) return;
+        if (!res.ok) {
+          setMessages([]);
+          return;
+        }
+        const data = await res.json();
+        const convertidas = converterMensagensBackend(data, sid);
+        setMessages(convertidas);
+      })
+      .catch((_err: unknown) => {
+        if (controller.signal.aborted) return;
+        setMessages([]);
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [options.sessaoId, options.sessaoPersistida, wsId]);
 
   const onCancel = useCallback(async () => {
     if (abortControllerRef.current) {
@@ -93,6 +193,11 @@ export function useOpenCorpSecretarioRuntime(
       }
 
       if (!userText.trim()) return;
+
+      // Dispara callback de primeira mensagem para atualizar o título da aba
+      if (messages.length === 0) {
+        options.onPrimeiraMensagem?.(userText);
+      }
 
       const userMsgId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const asstMsgId = `asst_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;

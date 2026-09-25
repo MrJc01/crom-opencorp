@@ -1,4 +1,3 @@
-/** @jsxImportSource react */
 import React, { useState, type FC } from "react";
 import {
   AssistantRuntimeProvider,
@@ -120,6 +119,9 @@ export const ToolCallView: FC<{
 export interface SecretarioChatProps {
   runtime?: AssistantRuntime;
   options?: SecretaryRuntimeOptions;
+  sessaoId?: string;
+  aoAtualizarTitulo?: (sessaoId: string, titulo: string) => void;
+  aoSessaoCriada?: (sid: string) => void;
   className?: string;
 }
 
@@ -129,11 +131,27 @@ export interface SecretarioChatProps {
 export const SecretarioChat: FC<SecretarioChatProps> = ({
   runtime: runtimeProp,
   options,
+  sessaoId,
+  aoAtualizarTitulo,
+  aoSessaoCriada,
   className = "",
 }) => {
   const { workspaceId } = useOpenCorp();
+  const idSessaoAtiva = sessaoId ?? options?.sessaoId;
   const internalRuntime = useOpenCorpSecretarioRuntime({
     workspaceId: options?.workspaceId ?? workspaceId ?? "default",
+    sessaoId: idSessaoAtiva,
+    onSessaoCriada: (sid) => {
+      options?.onSessaoCriada?.(sid);
+      aoSessaoCriada?.(sid);
+    },
+    onPrimeiraMensagem: (texto) => {
+      options?.onPrimeiraMensagem?.(texto);
+      if (idSessaoAtiva) {
+        const tituloFormatado = texto.slice(0, 30).trim();
+        aoAtualizarTitulo?.(idSessaoAtiva, tituloFormatado || "Conversa");
+      }
+    },
     ...options,
   });
   const runtime = runtimeProp ?? internalRuntime;

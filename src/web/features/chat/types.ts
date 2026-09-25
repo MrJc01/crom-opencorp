@@ -1,14 +1,16 @@
-/** @jsxImportSource react */
 import type { ThreadMessageLike } from "@assistant-ui/react";
 
 export interface SecretaryRuntimeOptions {
   url?: string;
   workspaceId?: string;
+  sessaoId?: string;
   agente?: string;
   modelo?: string;
   headers?: Record<string, string>;
   initialMessages?: ThreadMessageLike[];
+  sessaoPersistida?: boolean;
   onSessaoCriada?: (sessaoId: string) => void;
+  onPrimeiraMensagem?: (texto: string) => void;
   onErro?: (erro: Error) => void;
 }
 
