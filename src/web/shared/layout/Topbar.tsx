@@ -1,7 +1,8 @@
 import React, { type FC } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useOpenCorp } from "../../providers/OpenCorpProvider.js";
-import { Bot, Folder, Terminal, Bell, Radio } from "lucide-react";
+import { Bot, Terminal, Bell, Radio } from "lucide-react";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 
 export interface TopbarProps {
   aoAlternarSecretario?: () => void;
@@ -12,22 +13,15 @@ export const Topbar: FC<TopbarProps> = ({
   aoAlternarSecretario,
   secretarioAberto = false,
 }) => {
-  const { workspaceId, notificacoesNaoLidas, sseConectado } = useOpenCorp();
+  const { notificacoesNaoLidas, sseConectado } = useOpenCorp();
   const location = useLocation();
   const estaNaRotaNotificacoes = location.pathname === "/notificacoes";
 
   return (
     <header className="h-14 bg-zinc-950 border-b border-zinc-850 px-4 md:px-6 flex items-center justify-between z-20 select-none">
-      {/* Lado Esquerdo: Identificação do Workspace Ativo */}
+      {/* Lado Esquerdo: Identificação do Workspace Ativo com Seletor Rápido */}
       <div className="flex items-center gap-3">
-        <Link
-          to="/home"
-          title="Ver detalhes do workspace ativo ou trocar empresa (/home)"
-          className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850 text-xs text-zinc-300 font-mono transition-colors cursor-pointer group"
-        >
-          <Folder size={13} className="text-emerald-400 group-hover:scale-110 transition-transform" />
-          <span className="font-semibold text-zinc-200">{workspaceId || "principal"}</span>
-        </Link>
+        <WorkspaceSwitcher />
 
         <span className="hidden sm:inline-block text-xs text-zinc-600">|</span>
         <span className="hidden sm:flex items-center gap-1.5 text-xs text-zinc-400">
