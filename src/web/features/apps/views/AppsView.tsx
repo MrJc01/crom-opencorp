@@ -17,6 +17,7 @@ import {
   Bot,
   User,
   Wrench,
+  Info,
 } from "lucide-react";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 import { showToast } from "../../../shared/ui/Toast.js";
@@ -39,7 +40,6 @@ export const AppsView: FC = () => {
   const [appSelecionado, setAppSelecionado] = useState<MiniApp | null>(null);
   const [modoVisualizacao, setModoVisualizacao] = useState<ModoVisualizacaoApp>("app");
   const [mensagensApp, setMensagensApp] = useState<Array<{ role: string; content: string }>>([]);
-  const [carregandoChat, setCarregandoChat] = useState(false);
   const [inputChat, setInputChat] = useState("");
   const [iframeKey, setIframeKey] = useState(0);
 
@@ -105,7 +105,7 @@ export const AppsView: FC = () => {
     setMensagensApp([
       {
         role: "assistant",
-        content: `👋 Olá! Estou pronto para ajudar você a customizar a aplicação **${app.titulo}**.\n\nCódigo-fonte: \`apps/${app.id}/index.html\`\nPreview: ${url}\n\nO que você gostaria de ajustar no layout, nos dados ou nas APIs?`,
+        content: `👋 Aplicação: **${app.titulo}**\n\nCódigo-fonte: \`apps/${app.id}/index.html\`\nPreview: ${url}\n\nO assistente de customização de apps está em integração com o Secretário Executivo. Para modificar o código, utilize o Workspace IDE ou solicite ao Secretário.`,
       },
     ]);
   };
@@ -118,42 +118,17 @@ export const AppsView: FC = () => {
 
   const enviarMensagemChat = async () => {
     const texto = inputChat.trim();
-    if (!texto || !appSelecionado || carregandoChat) return;
+    if (!texto || !appSelecionado) return;
 
     setInputChat("");
-    setMensagensApp((prev) => [...prev, { role: "user", content: texto }]);
-    setCarregandoChat(true);
-
-    try {
-      const res = await client.http.post<any>(
-        `/api/apps/${encodeURIComponent(appSelecionado.id)}/chat`,
-        { mensagem: texto },
-        { headers: { "x-opencorp-workspace": wsEfetivo } }
-      );
-
-      setMensagensApp((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content:
-            res?.resposta ||
-            "Alterações processadas com sucesso! O preview foi atualizado com as novas modificações.",
-        },
-      ]);
-      // Recarrega o iframe
-      setIframeKey((k) => k + 1);
-    } catch (err: unknown) {
-      tratarErro(err, "Falha ao enviar instrução para o app");
-      setMensagensApp((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "⚠️ Ocorreu um erro ao processar sua instrução com a IA.",
-        },
-      ]);
-    } finally {
-      setCarregandoChat(false);
-    }
+    setMensagensApp((prev) => [
+      ...prev,
+      { role: "user", content: texto },
+      {
+        role: "assistant",
+        content: `ℹ️ O assistente de customização de apps está em integração com o Secretário Executivo. Para editar \`apps/${appSelecionado.id}/index.html\`, utilize o Workspace IDE ou acione o Secretário Executivo.`,
+      },
+    ]);
   };
 
   const salvarNovoApp = async (e: FormEvent) => {
@@ -349,6 +324,14 @@ export const AppsView: FC = () => {
                   </span>
                 </div>
 
+                {/* Banner Informativo de Integração */}
+                <div className="px-3.5 py-2.5 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2 text-xs text-amber-300">
+                  <Info size={14} className="shrink-0 text-amber-400" />
+                  <span className="leading-snug">
+                    Assistente de customização de apps em integração com o Secretário Executivo
+                  </span>
+                </div>
+
                 {/* Mensagens */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-3.5 scrollbar-thin">
                   {mensagensApp.map((m, idx) => {
@@ -382,37 +365,25 @@ export const AppsView: FC = () => {
                       </div>
                     );
                   })}
-
-                  {carregandoChat && (
-                    <div className="flex items-center gap-2 text-xs text-blue-400 italic">
-                      <Loader2 size={13} className="animate-spin" />
-                      <span>Processando alterações no código da aplicação...</span>
-                    </div>
-                  )}
                 </div>
 
-                {/* Composer do Chat */}
+                {/* Composer do Chat (Desativado até conexão com Secretário Executivo) */}
                 <div className="p-3 border-t border-zinc-850 bg-zinc-900/60 shrink-0">
                   <div className="flex items-end gap-2">
                     <textarea
                       rows={2}
-                      placeholder="Peça para ajustar cores, adicionar gráficos, consultar endpoints..."
+                      disabled
+                      placeholder="Assistente de customização em integração com o Secretário Executivo..."
                       value={inputChat}
                       onChange={(e) => setInputChat(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          void enviarMensagemChat();
-                        }
-                      }}
-                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
+                      className="flex-1 bg-zinc-950/60 border border-zinc-800/80 rounded-xl p-2.5 text-xs text-zinc-400 placeholder-zinc-500 focus:outline-none resize-none leading-relaxed cursor-not-allowed opacity-75"
                     />
 
                     <button
                       type="button"
-                      disabled={carregandoChat || !inputChat.trim()}
-                      onClick={enviarMensagemChat}
-                      className="p-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer disabled:opacity-40 shrink-0"
+                      disabled
+                      className="p-3 rounded-xl bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-40 shrink-0"
+                      title="Assistente em integração com o Secretário Executivo"
                     >
                       <Send size={15} />
                     </button>

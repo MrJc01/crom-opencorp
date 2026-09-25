@@ -8,7 +8,6 @@ import {
   Activity,
   Check,
   Loader2,
-  RotateCw,
 } from "lucide-react";
 import { showToast } from "../../../../shared/ui/Toast.js";
 import { useOpenCorp } from "../../../../providers/OpenCorpProvider.js";
@@ -32,7 +31,6 @@ export const TabRunner: FC = () => {
   } | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [salvando, setSalvando] = useState(false);
-  const [reiniciando, setReiniciando] = useState(false);
 
   const carregarRunner = useCallback(async () => {
     setCarregando(true);
@@ -71,28 +69,19 @@ export const TabRunner: FC = () => {
   const salvarRunner = async () => {
     setSalvando(true);
     try {
-      await client.http.put("/settings/runner", runner);
-      showToast("Configurações do Runner Daemon salvas com sucesso!", "sucesso");
+      const res = await client.http.put<any>("/settings/runner", runner);
+      if (!res?.ok && res?.erro) {
+        throw new Error(res.erro || "Falha ao salvar configurações do Runner");
+      }
+      showToast(
+        "Configurações salvas. As novas regras serão aplicadas na próxima execução do runner.",
+        "sucesso"
+      );
       await carregarRunner();
     } catch (err: unknown) {
       tratarErro(err, "Falha ao salvar configurações do Runner");
     } finally {
       setSalvando(false);
-    }
-  };
-
-  const handleReiniciarDaemon = async () => {
-    setReiniciando(true);
-    try {
-      // Salva antes de reiniciar
-      await client.http.put("/settings/runner", runner).catch(() => null);
-      showToast("Comando de re-sincronização do daemon despachado!", "sucesso");
-      await new Promise((r) => setTimeout(r, 1000));
-      await carregarRunner();
-    } catch (err: unknown) {
-      tratarErro(err, "Erro ao reiniciar runner");
-    } finally {
-      setReiniciando(false);
     }
   };
 
@@ -106,7 +95,7 @@ export const TabRunner: FC = () => {
         <div>
           <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
             <Server size={16} className="text-purple-400" />
-            Configuração do Runner Daemon & Supervisão
+            Configuração do Runner Daemon &amp; Supervisão
           </h2>
           <p className="text-xs text-zinc-400 mt-0.5">
             Processo em segundo plano que orquestra workspaces, janelas de execução de agentes e workers de tarefas.
@@ -115,17 +104,17 @@ export const TabRunner: FC = () => {
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            disabled={reiniciando}
-            onClick={handleReiniciarDaemon}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 border border-purple-500/40 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
-            title="Reiniciar daemon em segundo plano"
+            disabled={salvando}
+            onClick={salvarRunner}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            title="Gravar novas regras em runner.json"
           >
-            {reiniciando ? (
+            {salvando ? (
               <Loader2 size={13} className="animate-spin" />
             ) : (
-              <RotateCw size={13} />
+              <Save size={13} />
             )}
-            <span>Reiniciar Daemon</span>
+            <span>Salvar Configurações do Runner</span>
           </button>
 
           <button

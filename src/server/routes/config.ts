@@ -110,6 +110,42 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
 
     // GET /settings/modelos ou /modelos
     if ((rota === "/settings/modelos" || rota === "/modelos") && req.method === "GET") {
+      const escopoGlobal = url.searchParams.get("escopo") === "global";
+
+      if (escopoGlobal) {
+        const sPath = join(home, ".opencorp", "settings.json");
+        let globalConfig: any = {};
+        if (existsSync(sPath)) {
+          try {
+            globalConfig = JSON.parse(readFileSync(sPath, "utf8"));
+          } catch {}
+        }
+        const defaultModel =
+          globalConfig.modelos?.padrao ||
+          globalConfig.default_model ||
+          "openrouter/google/gemini-2.5-flash";
+
+        const rotation =
+          Array.isArray(globalConfig.modelos?.rotacao) && globalConfig.modelos.rotacao.length > 0
+            ? globalConfig.modelos.rotacao
+            : Array.isArray(globalConfig.tests?.rotation) && globalConfig.tests.rotation.length > 0
+            ? globalConfig.tests.rotation
+            : [
+                defaultModel,
+                "opencode/nemotron-3-ultra-free",
+                "openrouter/liquid/lfm-2.5-2.6b:free",
+                "openrouter/openrouter/free",
+              ];
+
+        enviar(res, 200, {
+          default_model: defaultModel,
+          rotation,
+          global_full_access: Boolean(globalConfig.security?.global_full_access),
+          escopo: "global",
+        });
+        return true;
+      }
+
       const ws = await resolverWs(url);
       const wsConfigPath = join(ws.path, ".opencorp", "config.json");
       let wsConfig: any = {};
@@ -146,6 +182,7 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
         default_model: defaultModel,
         rotation,
         global_full_access: secPolicy.global_full_access === true || secPolicy.level === "permissive",
+        escopo: "workspace",
       });
       return true;
     }
@@ -185,6 +222,10 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
             cur.tests.rotation = rotacaoLimpa;
             cur.modelos.rotacao = rotacaoLimpa;
           }
+          if (corpo.global_full_access !== undefined) {
+            cur.security = cur.security || {};
+            cur.security.global_full_access = Boolean(corpo.global_full_access);
+          }
           await writeFileAtomic(sPath, `${JSON.stringify(cur, null, 2)}\n`);
         } catch {}
       } else {
@@ -207,25 +248,26 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
           wsConfig.modelos.rotacao = rotacaoLimpa;
         }
         await writeFileAtomic(wsConfigPath, `${JSON.stringify(wsConfig, null, 2)}\n`);
+
+        if (corpo.global_full_access !== undefined) {
+          const policyDir = join(ws.path, ".opencorp");
+          await mkdirRecursive(policyDir);
+          const policyFile = join(policyDir, "security_policy.json");
+          let atual: any = {};
+          if (existsSync(policyFile)) {
+            try {
+              atual = JSON.parse(readFileSync(policyFile, "utf8"));
+            } catch {}
+          }
+          atual.global_full_access = Boolean(corpo.global_full_access);
+          if (atual.global_full_access) {
+            atual.level = "permissive";
+          }
+          await writeFileAtomic(policyFile, `${JSON.stringify(atual, null, 2)}\n`);
+        }
       }
 
-      if (corpo.global_full_access !== undefined) {
-        const policyDir = join(ws.path, ".opencorp");
-        await mkdirRecursive(policyDir);
-        const policyFile = join(policyDir, "security_policy.json");
-        let atual: any = {};
-        if (existsSync(policyFile)) {
-          try {
-            atual = JSON.parse(readFileSync(policyFile, "utf8"));
-          } catch {}
-        }
-        atual.global_full_access = Boolean(corpo.global_full_access);
-        if (atual.global_full_access) {
-          atual.level = "permissive";
-        }
-        await writeFileAtomic(policyFile, `${JSON.stringify(atual, null, 2)}\n`);
-      }
-      enviar(res, 200, { ok: true });
+      enviar(res, 200, { ok: true, escopo: escopoGlobal ? "global" : "workspace" });
       return true;
     }
 

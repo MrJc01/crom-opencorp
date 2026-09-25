@@ -207,6 +207,7 @@ export const ConfigView: FC = () => {
             todasEntradas={todasEntradas}
             onSalvarChave={salvarChaveConfig}
             salvando={salvando}
+            escopoConfig={escopoConfig}
           />
         )}
 

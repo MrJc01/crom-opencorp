@@ -19,10 +19,12 @@ export interface TabModelsProps {
   todasEntradas?: EntradaSettingsRow[];
   onSalvarChave?: (chave: string, valor: unknown) => Promise<void>;
   salvando?: boolean;
+  escopoConfig?: "global" | "workspace";
 }
 
-export const TabModels: FC<TabModelsProps> = () => {
+export const TabModels: FC<TabModelsProps> = ({ escopoConfig = "workspace" }) => {
   const { client, tratarErro } = useOpenCorp();
+  const [escopoAtivo, setEscopoAtivo] = useState<"global" | "workspace">(escopoConfig);
   const [modeloPrincipal, setModeloPrincipal] = useState("openrouter/google/gemini-3.8-flash");
   const [modeloCustomizado, setModeloCustomizado] = useState("");
   const [ordemFallback, setOrdemFallback] = useState(
@@ -34,19 +36,26 @@ export const TabModels: FC<TabModelsProps> = () => {
   const [resultadoTeste, setResultadoTeste] = useState<Record<string, any>>({});
   const [salvandoLocal, setSalvandoLocal] = useState(false);
 
+  useEffect(() => {
+    if (escopoConfig) {
+      setEscopoAtivo(escopoConfig);
+    }
+  }, [escopoConfig]);
+
   const carregarModelos = useCallback(async () => {
     try {
-      const mod = await client.http.get<any>("/settings/modelos");
+      const query = escopoAtivo === "global" ? "?escopo=global" : "?escopo=workspace";
+      const mod = await client.http.get<any>(`/settings/modelos${query}`);
       if (mod) {
         if (mod.default_model) setModeloPrincipal(mod.default_model);
         if (Array.isArray(mod.rotation)) setOrdemFallback(mod.rotation.join("\n"));
         if (mod.global_full_access !== undefined)
           setAcessoTotalGlobal(Boolean(mod.global_full_access));
       }
-    } catch {
-      // Defaults mantidos
+    } catch (err: unknown) {
+      tratarErro(err, "Falha ao carregar configurações de modelos");
     }
-  }, [client]);
+  }, [client, escopoAtivo, tratarErro]);
 
   const salvarModelos = async () => {
     setSalvandoLocal(true);
@@ -66,13 +75,21 @@ export const TabModels: FC<TabModelsProps> = () => {
         .map((s) => s.trim())
         .filter(Boolean);
 
-      await client.http.put("/settings/modelos", {
+      const res = await client.http.put<any>("/settings/modelos", {
         default_model: modFinal,
         rotation: listaFallback,
         global_full_access: acessoTotalGlobal,
+        escopo: escopoAtivo,
       });
 
-      showToast("Configurações de modelos e contingência salvas!", "sucesso");
+      if (!res?.ok && res?.erro) {
+        throw new Error(res.erro || "Falha ao salvar modelos");
+      }
+
+      showToast(
+        `Configurações de modelos salvas no escopo ${escopoAtivo === "global" ? "Global" : "Workspace"}!`,
+        "sucesso"
+      );
       await carregarModelos();
     } catch (err: unknown) {
       tratarErro(err, "Erro ao salvar modelos");
@@ -142,14 +159,44 @@ export const TabModels: FC<TabModelsProps> = () => {
 
   return (
     <div className="space-y-6 bg-transparent">
-      <div className="pb-3 border-b border-zinc-800">
-        <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
-          <Cpu size={16} className="text-cyan-400" />
-          Modelo Padrão e Rotação Automática de Contingência
-        </h2>
-        <p className="text-xs text-zinc-400 mt-0.5">
-          Defina a inteligência primária do sistema e a ordem de revezamento em caso de 429, cota esgotada ou instabilidade.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-zinc-800 gap-3">
+        <div>
+          <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+            <Cpu size={16} className="text-cyan-400" />
+            Modelo Padrão e Rotação Automática de Contingência
+          </h2>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            Defina a inteligência primária do sistema e a ordem de revezamento em caso de 429, cota esgotada ou instabilidade.
+          </p>
+        </div>
+
+        {/* Seletor de Escopo Workspace vs Global */}
+        <div className="flex items-center gap-1 bg-zinc-900/80 p-1 rounded-lg border border-zinc-800 text-xs shrink-0 self-start sm:self-center">
+          <button
+            type="button"
+            onClick={() => setEscopoAtivo("workspace")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+              escopoAtivo === "workspace"
+                ? "bg-purple-950/60 text-purple-300 border border-purple-800/60 font-semibold shadow-xs"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <Layers size={12} />
+            <span>Workspace Ativo</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setEscopoAtivo("global")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+              escopoAtivo === "global"
+                ? "bg-cyan-950/60 text-cyan-300 border border-cyan-800/60 font-semibold shadow-xs"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <Sparkles size={12} />
+            <span>Global (Padrão)</span>
+          </button>
+        </div>
       </div>
 
       {/* SELEÇÃO DO MODELO PRINCIPAL */}
