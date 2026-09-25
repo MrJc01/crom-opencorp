@@ -81,6 +81,7 @@ export const HistoryInspectionDrawer: FC<HistoryInspectionDrawerProps> = ({
     { id: "chat", label: "Chat", icon: MessageSquare },
     { id: "telemetria", label: "Telemetria", icon: Activity, count: acoes.length || undefined },
     { id: "terminal", label: "Terminal", icon: Terminal },
+    { id: "diff", label: "Diff / Git", icon: GitBranch, count: arquivosDiff.length || undefined },
     {
       id: "fluxo",
       label: "Grafo DAG",

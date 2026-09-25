@@ -8,6 +8,7 @@ import {
   HistoryFilterBar,
   HistoryTable,
   HistoryInspectionDrawer,
+  HistoryTaskDrawer,
 } from "../components/index.js";
 
 export const HistoricoView: FC = () => {
@@ -15,6 +16,7 @@ export const HistoricoView: FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const runParam = searchParams.get("run");
+  const taskParam = searchParams.get("task");
   const tipoParam = searchParams.get("tipo") || "todos";
   const statusParam = searchParams.get("status") || "todos";
   const agenteParam = searchParams.get("agente") || "todos";
@@ -42,6 +44,7 @@ export const HistoricoView: FC = () => {
 
   // Estado do Item Selecionado e Detalhes da Gaveta Forense
   const [itemSelecionado, setItemSelecionado] = useState<ItemHistorico | null>(null);
+  const [taskInspecaoId, setTaskInspecaoId] = useState<string | null>(null);
   const [logRun, setLogRun] = useState<string>("");
   const [acoesRun, setAcoesRun] = useState<AcaoAgente[]>([]);
   const [diffRun, setDiffRun] = useState<string>("");
@@ -312,6 +315,15 @@ export const HistoricoView: FC = () => {
     }
   }, [runParam, itemSelecionado, abrirInspecao]);
 
+  // Sincroniza deep-link ?task=<id>
+  useEffect(() => {
+    if (taskParam) {
+      setTaskInspecaoId(taskParam.replace(/^task-/, ""));
+    } else {
+      setTaskInspecaoId(null);
+    }
+  }, [taskParam]);
+
   const fecharInspecao = () => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -319,6 +331,15 @@ export const HistoricoView: FC = () => {
       return next;
     });
     setItemSelecionado(null);
+  };
+
+  const fecharInspecaoTask = () => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("task");
+      return next;
+    });
+    setTaskInspecaoId(null);
   };
 
   // ── Controles Operacionais Ativos ─────────────────────────────────────
@@ -409,15 +430,38 @@ export const HistoricoView: FC = () => {
         }}
       />
 
-      {/* Tabela Unificada das 5 Entidades */}
+      {/* Tabela Unificada das 5 Entidades com Roteamento Polimórfico */}
       <HistoryTable
         itens={itensFiltrados}
-        itemSelecionadoId={itemSelecionado?.id || null}
-        onSelecionarItem={(it) => void abrirInspecao(it.id)}
+        itemSelecionadoId={
+          itemSelecionado?.id ||
+          (taskInspecaoId ? `task-${taskInspecaoId}` : null) ||
+          taskInspecaoId
+        }
+        onSelecionarItem={(it) => {
+          if (it.tipo === "task") {
+            if (itemSelecionado) fecharInspecao();
+            const idLimpo = it.id.replace(/^task-/, "");
+            setTaskInspecaoId(idLimpo);
+            setSearchParams((prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete("run");
+              next.set("task", idLimpo);
+              return next;
+            });
+          } else if (it.tipo === "rotina") {
+            showToast("Inspeção de rotinas/scheduler será liberada no próximo micro-passo", "info");
+          } else if (it.tipo === "conversa") {
+            showToast("Histórico de conversas da Secretária em breve", "info");
+          } else {
+            if (taskInspecaoId) fecharInspecaoTask();
+            void abrirInspecao(it.id);
+          }
+        }}
         carregando={carregando}
       />
 
-      {/* Gaveta Lateral Forense com as 6 Abas Analíticas */}
+      {/* Gaveta Lateral Forense com as 6 Abas Analíticas (Execução / Fluxo) */}
       <HistoryInspectionDrawer
         item={itemSelecionado}
         log={logRun}
@@ -434,6 +478,17 @@ export const HistoricoView: FC = () => {
         onResume={handleResume}
         onRestaurarArquivo={handleRestaurarArquivo}
         onSelecionarSubExecucao={(execFilhaId) => void abrirInspecao(execFilhaId)}
+      />
+
+      {/* Gaveta Lateral de Inspeção de Tarefas (Kanban) */}
+      <HistoryTaskDrawer
+        aberto={Boolean(taskInspecaoId)}
+        taskId={taskInspecaoId}
+        aoFechar={fecharInspecaoTask}
+        aoAbrirExecucao={(execId) => {
+          fecharInspecaoTask();
+          void abrirInspecao(execId);
+        }}
       />
     </div>
   );

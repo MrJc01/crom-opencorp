@@ -8,3 +8,4 @@ export * from "./tabs/HistoryTerminalTab.js";
 export * from "./tabs/HistoryDiffTab.js";
 export * from "./tabs/HistoryFlowTab.js";
 export * from "./tabs/HistoryResultTab.js";
+export * from "./HistoryTaskDrawer.js";

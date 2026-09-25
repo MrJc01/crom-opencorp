@@ -1,0 +1,7 @@
+export * from "./views/HistoricoView.js";
+export * from "./components/HistoryInspectionDrawer.js";
+export * from "./components/HistoryTaskDrawer.js";
+export * from "./components/HistoryTable.js";
+export * from "./components/HistoryFilterBar.js";
+export * from "./components/HistoryMetricsHeader.js";
+export * from "./types.js";
