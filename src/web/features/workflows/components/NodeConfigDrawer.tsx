@@ -13,10 +13,14 @@ import {
   Copy,
   AlertCircle,
   Sparkles,
+  Webhook,
+  RefreshCw,
+  Hourglass,
 } from "lucide-react";
 import type { NoGrafo, FluxoCompleto } from "../types.js";
 import { obterItemCatalogo } from "../catalog.js";
 import { showToast } from "../../../shared/ui/Toast.js";
+import { CronBuilder } from "./CronBuilder.js";
 
 export interface NodeConfigDrawerProps {
   no: NoGrafo | null;
@@ -249,40 +253,135 @@ export const NodeConfigDrawer: FC<NodeConfigDrawerProps> = ({
               {/* Campos Contextuais por Tipo */}
               {/* GATILHO CRON */}
               {noEditado.tipo === "cron" && (
-                <div className="space-y-3 p-3 rounded-xl bg-sky-950/20 border border-sky-800/40">
+                <div className="space-y-3 p-3.5 rounded-xl bg-sky-950/20 border border-sky-800/40">
                   <h4 className="text-[11px] font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
                     <Clock size={13} />
                     Configuração de Agendamento Cron
                   </h4>
-                  <div>
-                    <label className="block text-zinc-300 font-medium mb-1">
-                      Expressão Cron (5 ou 6 campos)
+
+                  <CronBuilder
+                    value={config.cron || config.expressao || config.expressao_cron || "*/15 * * * *"}
+                    onChange={(cron) => {
+                      atualizarConfig("cron", cron);
+                      atualizarConfig("expressao_cron", cron);
+                    }}
+                  />
+
+                  {/* Fuso Horário */}
+                  <div className="pt-2 border-t border-sky-900/30">
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                      Fuso Horário
                     </label>
                     <input
                       type="text"
-                      placeholder="ex: 0 */3 * * * ou */15 * * * *"
-                      value={config.cron || config.expressao || ""}
-                      onChange={(e) => atualizarConfig("cron", e.target.value)}
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sky-300 font-mono focus:outline-none focus:border-sky-500"
+                      placeholder="America/Sao_Paulo"
+                      value={config.timezone || config.fuso || "America/Sao_Paulo"}
+                      onChange={(e) => atualizarConfig("timezone", e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none focus:border-sky-500"
+                    />
+                    <span className="text-[10px] text-zinc-500 mt-1 block">
+                      Referência de fuso horário avaliada pelo scheduler.
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* GATILHO WEBHOOK */}
+              {noEditado.tipo === "webhook" && (
+                <div className="space-y-3 p-3.5 rounded-xl bg-amber-950/20 border border-amber-800/40">
+                  <h4 className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Webhook size={13} />
+                    Gatilho Webhook (Entrada HTTP)
+                  </h4>
+
+                  {/* URL de Disparo */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                      URL de Disparo do Webhook
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        readOnly
+                        value={
+                          typeof window !== "undefined" && fluxo?.id
+                            ? `${window.location.origin}/flows/${fluxo.id}/webhook`
+                            : `/flows/${fluxo?.id || "fluxo"}/webhook`
+                        }
+                        className="w-full bg-zinc-900/90 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-emerald-400 font-mono text-[11px] select-all focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof window !== "undefined" && fluxo?.id) {
+                            const url = `${window.location.origin}/flows/${fluxo.id}/webhook`;
+                            navigator.clipboard.writeText(url);
+                            showToast("URL do webhook copiada para a área de transferência!", "sucesso");
+                          }
+                        }}
+                        className="p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 transition-colors cursor-pointer shrink-0"
+                        title="Copiar URL do Webhook"
+                      >
+                        <Copy size={13} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Chave Secreta de Validação */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs flex items-center justify-between">
+                      <span>Chave Secreta / Token de Validação</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">opcional</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="ex: segredo-super-protegido-123"
+                      value={config.secret || config.token || ""}
+                      onChange={(e) => {
+                        atualizarConfig("secret", e.target.value);
+                        atualizarConfig("token", e.target.value);
+                      }}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none focus:border-amber-500"
+                    />
+                    <span className="text-[10px] text-zinc-500 mt-1 block">
+                      Valida o cabeçalho <code>x-webhook-secret</code> ou parâmetro <code>?token=</code>.
+                    </span>
+                  </div>
+
+                  {/* Método HTTP Permitido */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                      Método HTTP Permitido
+                    </label>
+                    <select
+                      value={config.metodo || "POST"}
+                      onChange={(e) => atualizarConfig("metodo", e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 text-xs focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="POST">POST (Padrão — aceita JSON)</option>
+                      <option value="GET">GET (Query Parameters)</option>
+                      <option value="ANY">ANY (Qualquer Método)</option>
+                    </select>
+                  </div>
+
+                  {/* URL Destino opcional */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs flex items-center justify-between">
+                      <span>URL Destino (para webhook reverso/saída)</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">opcional</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="ex: https://api.exemplo.com/webhook-callback"
+                      value={config.url || ""}
+                      onChange={(e) => atualizarConfig("url", e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none focus:border-amber-500"
                     />
                   </div>
-                  {/* Presets Rápidos */}
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {[
-                      { label: "A cada 15 min", cron: "*/15 * * * *" },
-                      { label: "A cada hora", cron: "0 * * * *" },
-                      { label: "A cada 3 horas", cron: "0 */3 * * *" },
-                      { label: "Todo dia às 09:00", cron: "0 9 * * *" },
-                    ].map((p) => (
-                      <button
-                        key={p.cron}
-                        type="button"
-                        onClick={() => atualizarConfig("cron", p.cron)}
-                        className="px-2 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[10px] font-mono text-zinc-300 cursor-pointer"
-                      >
-                        {p.label}
-                      </button>
-                    ))}
+
+                  {/* Box Explicativo */}
+                  <div className="p-2.5 rounded-lg bg-amber-950/30 border border-amber-800/40 text-[11px] text-amber-300/90 leading-relaxed">
+                    💡 O corpo da requisição JSON recebida é injetado diretamente no fluxo como contexto inicial e fica acessível na variável <code>$OPENCORP_INPUT</code> e <code>{`{{entrada}}`}</code> para os nós seguintes.
                   </div>
                 </div>
               )}
@@ -392,6 +491,159 @@ export const NodeConfigDrawer: FC<NodeConfigDrawerProps> = ({
                   <p className="text-[11px] text-zinc-400">
                     Se a expressão for verdadeira, o fluxo seguirá pela saída verde <span className="text-emerald-400 font-bold">então</span>; senão, pela saída vermelha <span className="text-rose-400 font-bold">senão</span>.
                   </p>
+                </div>
+              )}
+
+              {/* CONTROLE DE LOOP / ITERAÇÃO */}
+              {noEditado.tipo === "loop" && (
+                <div className="space-y-3 p-3.5 rounded-xl bg-orange-950/20 border border-orange-800/40">
+                  <h4 className="text-[11px] font-bold text-orange-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <RefreshCw size={13} />
+                    Controle de Loop &amp; Iterador (Ciclo)
+                  </h4>
+
+                  {/* Teto Máximo de Segurança */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs flex items-center justify-between">
+                      <span>Teto Máximo de Iterações (Segurança) *</span>
+                      <span className="text-[10px] text-orange-400 font-mono">1 a 50 voltas</span>
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={config.max_iteracoes ?? 3}
+                      onChange={(e) =>
+                        atualizarConfig(
+                          "max_iteracoes",
+                          Math.min(Math.max(parseInt(e.target.value, 10) || 1, 1), 50)
+                        )
+                      }
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none focus:border-orange-500"
+                    />
+                    <span className="text-[10px] text-zinc-500 mt-1 block">
+                      Proteção essencial contra loops infinitos de agentes e consumo descontrolado de tokens.
+                    </span>
+                  </div>
+
+                  {/* Condição de Parada */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                      Condição de Parada (Texto ou Expressão)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="ex: SUCESSO ou CONCLUIDO ou resultado.aprovado === true"
+                      value={config.condicao_parada || ""}
+                      onChange={(e) => atualizarConfig("condicao_parada", e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none focus:border-orange-500"
+                    />
+                    <span className="text-[10px] text-zinc-500 mt-1 block">
+                      O ciclo é encerrado se o contexto contiver este texto ou satisfizer a condição.
+                    </span>
+                  </div>
+
+                  {/* Nó de Retorno */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                      Nó de Retorno do Loop (Próxima Volta)
+                    </label>
+                    <select
+                      value={config.retornar_para || ""}
+                      onChange={(e) => atualizarConfig("retornar_para", e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 text-xs focus:outline-none focus:border-orange-500 font-mono"
+                    >
+                      <option value="">Selecione o nó para onde retornar...</option>
+                      {(fluxo?.nos || [])
+                        .filter((n) => n.id !== noEditado.id)
+                        .map((n) => (
+                          <option key={n.id} value={n.id}>
+                            {n.id} ({n.tipo})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  {/* Nó de Saída Final */}
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs">
+                      Nó de Saída Final (Após o Encerramento do Loop)
+                    </label>
+                    <select
+                      value={config.saida_final || ""}
+                      onChange={(e) => atualizarConfig("saida_final", e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 text-xs focus:outline-none focus:border-orange-500 font-mono"
+                    >
+                      <option value="">Selecione o nó para saída...</option>
+                      {(fluxo?.nos || [])
+                        .filter((n) => n.id !== noEditado.id)
+                        .map((n) => (
+                          <option key={n.id} value={n.id}>
+                            {n.id} ({n.tipo})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* PAUSA / DELAY */}
+              {noEditado.tipo === "delay" && (
+                <div className="space-y-3 p-3.5 rounded-xl bg-yellow-950/20 border border-yellow-800/40">
+                  <h4 className="text-[11px] font-bold text-yellow-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Hourglass size={13} />
+                    Pausa Programada (Delay)
+                  </h4>
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1 text-xs flex items-center justify-between">
+                      <span>Tempo de Espera (segundos) *</span>
+                      <span className="text-[10px] text-yellow-400 font-mono">
+                        {config.segundos ?? 30}s
+                        {Number(config.segundos ?? 30) >= 60 &&
+                          ` (${(Number(config.segundos ?? 30) / 60).toFixed(1)} min)`}
+                      </span>
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={3600}
+                      value={config.segundos ?? 30}
+                      onChange={(e) =>
+                        atualizarConfig(
+                          "segundos",
+                          Math.min(Math.max(parseInt(e.target.value, 10) || 1, 1), 3600)
+                        )
+                      }
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none focus:border-yellow-500"
+                    />
+                    <span className="text-[10px] text-zinc-500 mt-1 block">
+                      Aguarda o tempo especificado de forma não-bloqueante antes de propagar o contexto para o próximo nó.
+                    </span>
+                  </div>
+
+                  {/* Presets Rápidos de Pausa */}
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {[
+                      { label: "10 seg", seg: 10 },
+                      { label: "30 seg", seg: 30 },
+                      { label: "1 min", seg: 60 },
+                      { label: "2 min", seg: 120 },
+                      { label: "5 min", seg: 300 },
+                    ].map((p) => (
+                      <button
+                        key={p.seg}
+                        type="button"
+                        onClick={() => atualizarConfig("segundos", p.seg)}
+                        className={`px-2 py-1 rounded text-[10px] font-mono border transition-colors cursor-pointer ${
+                          (config.segundos ?? 30) === p.seg
+                            ? "bg-yellow-950 border-yellow-500 text-yellow-300 font-bold"
+                            : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
