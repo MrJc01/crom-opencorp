@@ -1,6 +1,7 @@
 import React, { type FC } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { useOpenCorp } from "../../providers/OpenCorpProvider.js";
-import { Bot, Folder, Sparkles, Terminal } from "lucide-react";
+import { Bot, Folder, Terminal, Bell, Radio } from "lucide-react";
 
 export interface TopbarProps {
   aoAlternarSecretario?: () => void;
@@ -11,7 +12,9 @@ export const Topbar: FC<TopbarProps> = ({
   aoAlternarSecretario,
   secretarioAberto = false,
 }) => {
-  const { workspaceId } = useOpenCorp();
+  const { workspaceId, notificacoesNaoLidas, sseConectado } = useOpenCorp();
+  const location = useLocation();
+  const estaNaRotaNotificacoes = location.pathname === "/notificacoes";
 
   return (
     <header className="h-14 bg-zinc-950 border-b border-zinc-850 px-4 md:px-6 flex items-center justify-between z-20 select-none">
@@ -29,8 +32,58 @@ export const Topbar: FC<TopbarProps> = ({
         </span>
       </div>
 
-      {/* Lado Direito: Botão / Badge do Secretário & Atalho Ctrl+J */}
+      {/* Lado Direito: Status SSE + Central de Notificações com Badge + Botão / Badge do Secretário & Atalho Ctrl+J */}
       <div className="flex items-center gap-2.5">
+        {/* Indicador de Conexão SSE */}
+        <div
+          className={`hidden md:flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg border transition-all select-none ${
+            sseConectado
+              ? "bg-emerald-950/30 border-emerald-800/50 text-emerald-300"
+              : "bg-zinc-900/60 border-zinc-800/60 text-zinc-400"
+          }`}
+          title={
+            sseConectado
+              ? "Canal de eventos em tempo real conectado (SSE)"
+              : "Canal de eventos offline (reconectando automaticamente)"
+          }
+        >
+          <Radio
+            size={12}
+            className={sseConectado ? "text-emerald-400 animate-pulse" : "text-zinc-500"}
+          />
+          <span className="font-mono text-[10px]">
+            {sseConectado ? "stream" : "offline"}
+          </span>
+        </div>
+
+        {/* Central de Notificações com Badge */}
+        <Link
+          to="/notificacoes"
+          data-view="notificacoes"
+          id="btn-notificacoes-topbar"
+          className={`relative p-2 rounded-lg border transition-all flex items-center justify-center cursor-pointer ${
+            estaNaRotaNotificacoes
+              ? "bg-zinc-800 border-zinc-700 text-zinc-100 shadow-xs"
+              : "bg-zinc-900/60 border-zinc-800/80 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 hover:border-zinc-700"
+          }`}
+          title={
+            notificacoesNaoLidas > 0
+              ? `${notificacoesNaoLidas} notificação(ões) não lida(s)`
+              : "Central de Notificações"
+          }
+        >
+          <Bell className="w-4 h-4" />
+          {notificacoesNaoLidas > 0 && (
+            <span
+              id="nav-badge-notificacoes"
+              className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-zinc-950 ring-2 ring-zinc-950 animate-pulse"
+            >
+              {notificacoesNaoLidas > 99 ? "99+" : notificacoesNaoLidas}
+            </span>
+          )}
+        </Link>
+
+        {/* Botão do Secretário Executivo */}
         <button
           type="button"
           onClick={aoAlternarSecretario}
