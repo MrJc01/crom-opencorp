@@ -560,7 +560,10 @@ export const EngineAuthModal: FC<EngineAuthModalProps> = ({
         aoSalvarSucesso();
       } else {
         const causa = res?.health?.statusText || res?.erro || "Requer autenticação";
-        showToast(`Motor requer autenticação: ${causa}`, "aviso");
+        showToast(
+          motorId === "mimo" ? `MiMo ainda não está pronto: ${causa}` : `Motor requer autenticação: ${causa}`,
+          "aviso",
+        );
       }
     } catch (err: unknown) {
       tratarErro(err, "Erro ao testar prontidão do motor");

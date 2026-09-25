@@ -127,6 +127,9 @@ export const TabEngines: FC<TabEnginesProps> = ({
   };
 
   const motorAtual = motores.find((m) => m.id === motorSelecionado) || motores[0];
+  const motorSemAutenticacao = (motor: MotorInfo) => motor.id === "mimo";
+  const motorPronto = (motor: MotorInfo) =>
+    motor.installed && (motorSemAutenticacao(motor) || Boolean(motor.authStatus?.authenticated || motor.contaAtiva));
   const contasDoMotor: ContaMotor[] = (statusMotores?.contas || []).filter(
     (c: any) => c.motorId === motorAtual?.id
   );
@@ -379,7 +382,8 @@ export const TabEngines: FC<TabEnginesProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {motores.map((m) => {
               const isSel = m.id === motorAtual?.id;
-              const isAutenticado = m.authStatus?.authenticated || m.contaAtiva || m.id === "opencode" || (m.id === "mimo" && m.installed);
+              const isPronto = motorPronto(m);
+              const isAtivo = Boolean(m.ativo && m.installed);
 
               return (
                 <div
@@ -398,7 +402,9 @@ export const TabEngines: FC<TabEnginesProps> = ({
                       </span>
                       <span
                         className={`w-2 h-2 rounded-full ${
-                          isAutenticado ? "bg-emerald-400" : "bg-zinc-600"
+                          isAtivo || isPronto
+                            ? "bg-emerald-400"
+                            : m.installed ? "bg-orange-400" : "bg-amber-400"
                         }`}
                       />
                     </div>
@@ -408,10 +414,18 @@ export const TabEngines: FC<TabEnginesProps> = ({
                   </div>
 
                   <div className="flex items-center justify-between pt-2 border-t border-zinc-800/60 text-[10px] font-mono text-zinc-500">
-                    <span>{m.version || "ativo"}</span>
-                    {isAutenticado ? (
+                    <span>{m.installed ? (m.version || "Versão detectada") : "Não instalado"}</span>
+                    {isAtivo ? (
                       <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                        <Check size={11} /> Conectado
+                        <Star size={11} className="fill-emerald-400" /> Em uso
+                      </span>
+                    ) : isPronto ? (
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                        <Check size={11} /> Pronto
+                      </span>
+                    ) : !m.installed ? (
+                      <span className="text-amber-400 font-semibold flex items-center gap-1">
+                        <Download size={11} /> Instalar
                       </span>
                     ) : (
                       <button
@@ -484,7 +498,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
 
                 <div className="flex items-center gap-2 flex-wrap shrink-0">
                   {/* Se o motor não estiver instalado, botão destacado para instalar */}
-                  {!motorAtual.installed && (
+                  {!motorAtual.installed && motorAtual.id !== "mimo" && (
                     <button
                       type="button"
                       disabled={instalandoMotor === motorAtual.id}
@@ -537,19 +551,21 @@ export const TabEngines: FC<TabEnginesProps> = ({
                     </button>
                   )}
 
-                  {/* Botão de Autenticar / Adicionar Conta */}
-                  <button
-                    type="button"
-                    onClick={() => abrirModalAuth(motorAtual)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-850 text-zinc-200 border border-zinc-800 text-xs font-semibold transition-colors cursor-pointer"
-                  >
-                    <KeyRound size={13} className="text-orange-400" />
-                    <span>
-                      {motorAtual.authStatus?.authenticated || motorAtual.contaAtiva || motorAtual.id === "opencode"
-                        ? "+ Adicionar Conta"
-                        : "Autenticar / Conectar"}
-                    </span>
-                  </button>
+                  {/* Autenticação só existe para motores instalados que usam conta/chave. */}
+                  {motorAtual.installed && !motorSemAutenticacao(motorAtual) && (
+                    <button
+                      type="button"
+                      onClick={() => abrirModalAuth(motorAtual)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-850 text-zinc-200 border border-zinc-800 text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      <KeyRound size={13} className="text-orange-400" />
+                      <span>
+                        {motorAtual.authStatus?.authenticated || motorAtual.contaAtiva
+                          ? "+ Adicionar Conta"
+                          : "Autenticar / Conectar"}
+                      </span>
+                    </button>
+                  )}
 
                   {/* Botão de Testar Conexão / Diagnóstico */}
                   <button
@@ -563,13 +579,13 @@ export const TabEngines: FC<TabEnginesProps> = ({
                     ) : (
                       <Play size={13} className="text-emerald-400" />
                     )}
-                    <span>Testar Conexão</span>
+                    <span>{motorAtual.id === "mimo" ? "Testar Prontidão" : "Testar Conexão"}</span>
                   </button>
                 </div>
               </div>
 
               {/* Banner informativo de status do motor */}
-              {!motorAtual.installed && (
+              {!motorAtual.installed && motorAtual.id !== "mimo" && (
                 <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-amber-800/40 bg-amber-950/20 text-xs text-amber-200">
                   <div className="flex items-center gap-2">
                     <AlertCircle size={15} className="shrink-0 text-amber-400" />
@@ -594,8 +610,27 @@ export const TabEngines: FC<TabEnginesProps> = ({
               )}
 
               {motorAtual.id === "mimo" && !motorAtual.installed && (
-                <div className="flex flex-col gap-2 p-3 rounded-xl border border-sky-800/40 bg-sky-950/20 text-xs text-sky-200">
-                  <span className="font-semibold">Instalação oficial do Xiaomi MiMo Code</span>
+                <div className="flex flex-col gap-3 p-3 rounded-xl border border-amber-800/40 bg-amber-950/20 text-xs text-amber-200">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle size={15} className="mt-0.5 shrink-0 text-amber-400" />
+                      <div>
+                        <span className="font-semibold block">MiMo Code ainda não está instalado</span>
+                        <span className="text-[11px] text-amber-200/80">
+                          A detecção verifica o PATH, <code>~/.mimo/bin/mimo</code> e <code>~/.mimocode/bin/mimo</code>.
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={instalandoMotor === motorAtual.id}
+                      onClick={() => instalarMotor(motorAtual.id)}
+                      className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] shrink-0 transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {instalandoMotor === motorAtual.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                      <span>Instalar via Script Oficial</span>
+                    </button>
+                  </div>
                   <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-[11px] text-emerald-400">
                     <code className="select-all overflow-x-auto">$ {comandoInstalacaoMimo}</code>
                     <button
@@ -617,7 +652,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
                 </div>
               )}
 
-              {motorAtual.ativo && (
+              {motorAtual.ativo && motorAtual.installed && (
                 <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-emerald-800/40 bg-emerald-950/20 text-xs text-emerald-200">
                   <div className="flex items-center gap-2">
                     <Star size={15} className="fill-emerald-400 text-emerald-400 shrink-0" />
@@ -663,6 +698,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
               )}
 
               {/* Contas / Perfis de Execução do Motor */}
+              {!motorSemAutenticacao(motorAtual) ? (
               <div className="space-y-2.5 pt-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wider block">
@@ -887,6 +923,17 @@ export const TabEngines: FC<TabEnginesProps> = ({
                   )}
                 </div>
               </div>
+              ) : (
+                <div className="flex items-start gap-2 rounded-xl border border-sky-800/40 bg-sky-950/20 p-3 text-xs text-sky-200">
+                  <Shield size={15} className="mt-0.5 shrink-0 text-sky-400" />
+                  <div>
+                    <span className="font-semibold block">Nenhuma conta necessária</span>
+                    <span className="text-[11px] text-sky-200/80">
+                      O MiMo Code usa o tier gratuito oficial sem login ou chave de API. Após instalar, teste a prontidão e defina-o como padrão se desejar.
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

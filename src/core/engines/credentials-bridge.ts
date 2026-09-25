@@ -256,6 +256,33 @@ export function checkEngineAuthStatus(engineId: string, homeDir: string): Engine
       };
     }
 
+    case "aider": {
+      const hasKey = Boolean(
+        creds.OPENROUTER_API_KEY ||
+        creds.ANTHROPIC_API_KEY ||
+        creds.OPENAI_API_KEY ||
+        creds.GEMINI_API_KEY
+      );
+      return hasKey
+        ? {
+            authenticated: true,
+            method: "Provedor de LLM configurado",
+            details: "Aider pronto para usar as credenciais compartilhadas do OpenCorp",
+          }
+        : {
+            authenticated: false,
+            method: "Chave de LLM ausente",
+            details: "Configure OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY ou GEMINI_API_KEY",
+          };
+    }
+
+    case "mimo":
+      return {
+        authenticated: true,
+        method: "Sem login obrigatório",
+        details: "O tier gratuito oficial não exige conta ou chave de API",
+      };
+
     default:
       return {
         authenticated: true,
