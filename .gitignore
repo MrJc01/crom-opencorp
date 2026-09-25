@@ -98,7 +98,3 @@ tsconfig.tsbuildinfo
 patch_agents.js
 corp-deep-sre/
 data/
-
-# Espelho integral do repositório legado para auditoria de paridade
-legacy_snapshot/
-
