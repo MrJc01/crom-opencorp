@@ -12,8 +12,15 @@ export {
 } from "./components/SecretarioDock.js";
 
 export {
+  GitStatusToolUI,
+  HitlApprovalToolUI,
+  TerminalExecToolUI,
+} from "./components/AssistantTools.js";
+
+export {
   useOpenCorpSecretarioRuntime,
   buildAssistantParts,
+  criarSecretarioModelAdapter,
 } from "./runtime/secretary-runtime-adapter.js";
 
 export type {

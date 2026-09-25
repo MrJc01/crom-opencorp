@@ -1,10 +1,10 @@
-import React, { useState, useMemo, type FC } from "react";
+import React, { useState, useEffect, useMemo, type FC } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AssistantRuntimeProvider,
   ThreadPrimitive,
-  ComposerPrimitive,
   MessagePrimitive,
+  type ThreadMessageLike,
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import {
@@ -15,8 +15,6 @@ import {
   Bot,
   User,
   Sparkles,
-  Send,
-  Square,
   ChevronDown,
   ChevronRight,
   Terminal,
@@ -30,12 +28,21 @@ import {
   FileText,
   ExternalLink,
 } from "lucide-react";
-import { useOpenCorpSecretarioRuntime } from "../runtime/secretary-runtime-adapter.js";
+import {
+  useOpenCorpSecretarioRuntime,
+  converterMensagensBackend,
+  obterAuthHeaders,
+} from "../runtime/secretary-runtime-adapter.js";
 import { useOpenCorp } from "../../../providers/OpenCorpProvider.js";
 import { SUGESTOES_RAPIDAS } from "../../../lib/chat/constants.js";
 import type { SecretaryRuntimeOptions } from "../types.js";
 import { GitStatusCard, parsearSaidaGitStatus } from "./GitStatusCard.js";
 import { HitlOptionsView } from "./HitlOptionsView.js";
+import {
+  ChatComposer,
+  type ContextChip,
+  type AnexoImagem,
+} from "./ChatComposer.js";
 
 /**
  * Componente de exibição de blocos de raciocínio (Chain of Thought).
@@ -93,7 +100,6 @@ export const CodeHeaderWithHandoff: FC<
   const [copiado, setCopiado] = useState(false);
 
   // Extrai possível caminho de arquivo da primeira linha do código
-  // Ex: "// src/index.ts", "# scripts/run.py", "/* src/App.tsx */", "file: src/index.ts"
   const caminhoArquivo = useMemo(() => {
     if (!code) return null;
     const primeiraLinha = code.trim().split("\n")[0] || "";
@@ -179,7 +185,9 @@ export const ToolCallView: FC<{
 
   const IconeFerramenta = nomeLower.includes("git")
     ? GitBranch
-    : nomeLower.includes("bash") || nomeLower.includes("sh") || nomeLower.includes("terminal")
+    : nomeLower.includes("bash") ||
+      nomeLower.includes("sh") ||
+      nomeLower.includes("terminal")
     ? Terminal
     : Wrench;
 
@@ -219,12 +227,6 @@ export const ToolCallView: FC<{
   );
 };
 
-import {
-  ChatComposer,
-  type ContextChip,
-  type AnexoImagem,
-} from "./ChatComposer.js";
-
 export interface SecretarioChatProps {
   runtime?: AssistantRuntime;
   options?: SecretaryRuntimeOptions;
@@ -235,55 +237,29 @@ export interface SecretarioChatProps {
 }
 
 /**
- * Componente visual Flagship do Secretário Executivo com @assistant-ui/react
+ * Componente interno conectado ao AssistantRuntimeProvider
  */
-export const SecretarioChat: FC<SecretarioChatProps> = ({
-  runtime: runtimeProp,
-  options,
-  sessaoId,
-  aoAtualizarTitulo,
-  aoSessaoCriada,
+const SecretarioChatInterno: FC<{
+  runtime: AssistantRuntime;
+  workspaceId: string;
+  agenteAtivo: string | null;
+  setAgenteAtivo: (a: string | null) => void;
+  chipsContexto: ContextChip[];
+  setChipsContexto: React.Dispatch<React.SetStateAction<ContextChip[]>>;
+  anexosImagens: AnexoImagem[];
+  setAnexosImagens: React.Dispatch<React.SetStateAction<AnexoImagem[]>>;
+  className?: string;
+}> = ({
+  runtime,
+  workspaceId,
+  agenteAtivo,
+  setAgenteAtivo,
+  chipsContexto,
+  setChipsContexto,
+  anexosImagens,
+  setAnexosImagens,
   className = "",
 }) => {
-  const { workspaceId } = useOpenCorp();
-  const idSessaoAtiva = sessaoId ?? options?.sessaoId;
-
-  // Estados locais para controle de modelo, agente e anexos no Composer
-  const [modeloSelecionado, setModeloSelecionado] = useState<string>("gemini-2.5-flash");
-  const [agenteAtivo, setAgenteAtivo] = useState<string | null>(null);
-  const [chipsContexto, setChipsContexto] = useState<ContextChip[]>([]);
-  const [anexosImagens, setAnexosImagens] = useState<AnexoImagem[]>([]);
-
-  const internalRuntime = useOpenCorpSecretarioRuntime({
-    workspaceId: options?.workspaceId ?? workspaceId ?? "default",
-    sessaoId: idSessaoAtiva,
-    modelo: modeloSelecionado,
-    agente: agenteAtivo ?? options?.agente ?? "secretario",
-    obterContextoEnvio: () => ({
-      agente: agenteAtivo ?? undefined,
-      modelo: modeloSelecionado,
-      imagens: anexosImagens,
-      contexto: chipsContexto.map((c) => c.rotulo),
-    }),
-    onLimparContextoEnvio: () => {
-      setChipsContexto([]);
-      setAnexosImagens([]);
-    },
-    onSessaoCriada: (sid) => {
-      options?.onSessaoCriada?.(sid);
-      aoSessaoCriada?.(sid);
-    },
-    onPrimeiraMensagem: (texto) => {
-      options?.onPrimeiraMensagem?.(texto);
-      if (idSessaoAtiva) {
-        const tituloFormatado = texto.slice(0, 30).trim();
-        aoAtualizarTitulo?.(idSessaoAtiva, tituloFormatado || "Conversa");
-      }
-    },
-    ...options,
-  });
-  const runtime = runtimeProp ?? internalRuntime;
-
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <div
@@ -429,7 +405,7 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
                                     CodeHeader: (props) => (
                                       <CodeHeaderWithHandoff
                                         {...props}
-                                        workspaceId={workspaceId ?? "default"}
+                                        workspaceId={workspaceId}
                                       />
                                     ),
                                   }}
@@ -440,6 +416,67 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
                               <ReasoningView text={text} />
                             ),
                             tools: {
+                              by_name: {
+                                git_status: ({ args, result }: any) => {
+                                  const arquivos =
+                                    args?.arquivos ||
+                                    (result && typeof result === "object" && "arquivos" in result
+                                      ? result.arquivos
+                                      : []);
+                                  return (
+                                    <GitStatusCard
+                                      arquivos={arquivos}
+                                      workspaceId={workspaceId}
+                                    />
+                                  );
+                                },
+                                hitl_approval: ({ args }: any) => (
+                                  <HitlOptionsView
+                                    texto={
+                                      args?.pergunta ||
+                                      (args?.opcoes
+                                        ? args.opcoes
+                                            .map((o: string, idx: number) => `${idx + 1}. ${o}`)
+                                            .join("\n")
+                                        : "")
+                                    }
+                                    onSelecionarOpcao={(opcao) => {
+                                      void runtime.thread.append({
+                                        role: "user",
+                                        content: [{ type: "text", text: opcao }],
+                                      });
+                                    }}
+                                  />
+                                ),
+                                pergunta_opcoes: ({ args }: any) => (
+                                  <HitlOptionsView
+                                    texto={
+                                      args?.pergunta ||
+                                      (args?.opcoes
+                                        ? args.opcoes
+                                            .map((o: string, idx: number) => `${idx + 1}. ${o}`)
+                                            .join("\n")
+                                        : "")
+                                    }
+                                    onSelecionarOpcao={(opcao) => {
+                                      void runtime.thread.append({
+                                        role: "user",
+                                        content: [{ type: "text", text: opcao }],
+                                      });
+                                    }}
+                                  />
+                                ),
+                                terminal_exec: ({ args, result }: any) => {
+                                  const cmd = args?.comando || "";
+                                  const out = String(result ?? args?.saida ?? "");
+                                  return (
+                                    <div className="bg-zinc-950 text-emerald-400 font-mono p-3 rounded-lg border border-zinc-800 text-xs overflow-x-auto whitespace-pre leading-relaxed shadow-inner my-2">
+                                      {cmd ? `$ !${cmd}\n` : ""}
+                                      {out}
+                                    </div>
+                                  );
+                                },
+                              },
                               Fallback: ({ toolName, result, isError }: any) => (
                                 <ToolCallView
                                   toolName={toolName}
@@ -454,7 +491,7 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
                         {/* Card Interativo de Git Status se houver alterações detectadas */}
                         {arquivosGit.length > 0 && (
                           <GitStatusCard
-                            workspaceId={workspaceId ?? "default"}
+                            workspaceId={workspaceId}
                             arquivos={arquivosGit}
                           />
                         )}
@@ -468,7 +505,6 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
                               content: [{ type: "text", text: opcao }],
                             });
                           }}
-                          desabilitado={runtime.thread.getState().isRunning}
                         />
                       </div>
                     </div>
@@ -478,11 +514,9 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
             </ThreadPrimitive.Messages>
           </ThreadPrimitive.Viewport>
 
-          {/* Composer com Gatilhos (/, @, !), Autocomplete, Chips e Toolbar */}
+          {/* Composer com Primitivas do Assistant-UI */}
           <div className="p-4 md:px-8 bg-zinc-950 border-t border-zinc-850">
             <ChatComposer
-              modeloAtivo={modeloSelecionado}
-              onTrocarModelo={(m) => setModeloSelecionado(m)}
               agenteAtivo={agenteAtivo}
               onDefinirAgente={(ag) => setAgenteAtivo(ag)}
               chipsContexto={chipsContexto}
@@ -499,28 +533,146 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
               onRemoverImagem={(id) =>
                 setAnexosImagens((prev) => prev.filter((i) => i.id !== id))
               }
-              onLimparHistorico={() => {
-                void runtime.thread.append({
-                  role: "user",
-                  content: [{ type: "text", text: "/clear" }],
-                });
-              }}
-              onEnviar={({ texto: textoEnvio, agente, modelo }) => {
-                if (agente) setAgenteAtivo(agente);
-                if (modelo) setModeloSelecionado(modelo);
-                void runtime.thread.append({
-                  role: "user",
-                  content: [{ type: "text", text: textoEnvio }],
-                });
-              }}
-              isProcessando={runtime.thread.getState().isRunning}
-              onCancelar={() => {
-                runtime.thread.cancelRun();
-              }}
             />
           </div>
         </ThreadPrimitive.Root>
       </div>
     </AssistantRuntimeProvider>
+  );
+};
+
+/**
+ * Componente visual Flagship do Secretário Executivo com @assistant-ui/react
+ */
+export const SecretarioChat: FC<SecretarioChatProps> = ({
+  runtime: runtimeProp,
+  options,
+  sessaoId,
+  aoAtualizarTitulo,
+  aoSessaoCriada,
+  className = "",
+}) => {
+  const { workspaceId } = useOpenCorp();
+  const wsId = options?.workspaceId ?? workspaceId ?? "default";
+  const idSessaoAtiva = sessaoId ?? options?.sessaoId;
+
+  // Estados locais para contexto e anexos no Composer
+  const [agenteAtivo, setAgenteAtivo] = useState<string | null>(null);
+  const [chipsContexto, setChipsContexto] = useState<ContextChip[]>([]);
+  const [anexosImagens, setAnexosImagens] = useState<AnexoImagem[]>([]);
+
+  // Carregamento de mensagens iniciais persistidas (hidratação no F5 ou troca de aba)
+  const [mensagensIniciais, setMensagensIniciais] = useState<
+    ThreadMessageLike[] | undefined
+  >(() => options?.initialMessages);
+  const [carregandoHistorico, setCarregandoHistorico] = useState<boolean>(() => {
+    if (options?.initialMessages) return false;
+    const sid = idSessaoAtiva?.trim();
+    if (!sid) return false;
+    if (sid.startsWith("sessao-") || sid.startsWith("draft-")) return false;
+    return true;
+  });
+
+  useEffect(() => {
+    if (options?.initialMessages) {
+      setMensagensIniciais(options.initialMessages);
+      setCarregandoHistorico(false);
+      return;
+    }
+
+    const sid = idSessaoAtiva?.trim();
+    if (!sid || sid.startsWith("sessao-") || sid.startsWith("draft-")) {
+      setMensagensIniciais([]);
+      setCarregandoHistorico(false);
+      return;
+    }
+
+    let cancelado = false;
+    const origin =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : "http://127.0.0.1:4100";
+
+    fetch(`${origin}/secretario/sessoes/${encodeURIComponent(sid)}/mensagens`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...obterAuthHeaders(),
+        ...(wsId ? { "x-opencorp-workspace": wsId } : {}),
+      },
+    })
+      .then(async (res) => {
+        if (cancelado) return;
+        if (!res.ok) {
+          setMensagensIniciais([]);
+          setCarregandoHistorico(false);
+          return;
+        }
+        const data = await res.json();
+        const conv = converterMensagensBackend(data, sid);
+        setMensagensIniciais(conv);
+        setCarregandoHistorico(false);
+      })
+      .catch(() => {
+        if (!cancelado) {
+          setMensagensIniciais([]);
+          setCarregandoHistorico(false);
+        }
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, [idSessaoAtiva, wsId, options?.initialMessages]);
+
+  const runtimeInterno = useOpenCorpSecretarioRuntime({
+    workspaceId: wsId,
+    sessaoId: idSessaoAtiva,
+    agente: agenteAtivo ?? options?.agente ?? "secretario",
+    initialMessages: mensagensIniciais,
+    obterContextoEnvio: () => ({
+      agente: agenteAtivo ?? undefined,
+      imagens: anexosImagens,
+      contexto: chipsContexto.map((c) => c.rotulo),
+    }),
+    onLimparContextoEnvio: () => {
+      setChipsContexto([]);
+      setAnexosImagens([]);
+    },
+    onSessaoCriada: (sid) => {
+      options?.onSessaoCriada?.(sid);
+      aoSessaoCriada?.(sid);
+    },
+    onPrimeiraMensagem: (texto) => {
+      options?.onPrimeiraMensagem?.(texto);
+      if (idSessaoAtiva) {
+        const tituloFormatado = texto.slice(0, 30).trim();
+        aoAtualizarTitulo?.(idSessaoAtiva, tituloFormatado || "Conversa");
+      }
+    },
+    ...options,
+  });
+
+  const runtime = runtimeProp ?? runtimeInterno;
+
+  if (carregandoHistorico) {
+    return (
+      <div className="flex items-center justify-center h-full w-full bg-zinc-950 text-zinc-500 font-mono text-xs">
+        <span className="animate-pulse">Carregando histórico da conversa...</span>
+      </div>
+    );
+  }
+
+  return (
+    <SecretarioChatInterno
+      runtime={runtime}
+      workspaceId={wsId}
+      agenteAtivo={agenteAtivo}
+      setAgenteAtivo={setAgenteAtivo}
+      chipsContexto={chipsContexto}
+      setChipsContexto={setChipsContexto}
+      anexosImagens={anexosImagens}
+      setAnexosImagens={setAnexosImagens}
+      className={className}
+    />
   );
 };

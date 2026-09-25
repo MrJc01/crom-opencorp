@@ -83,15 +83,11 @@ test.describe("Chat do Secretário", () => {
     await expect(page.locator(".oc-assistant").last()).toContainText("$ !status", { timeout: 15000 });
   });
 
-  test("seletor in-place de modelo alterna o modelo ativo", async ({ page }) => {
-    const seletorModelo = page.locator("[data-model-dropdown] button").first();
-    await expect(seletorModelo).toContainText("gemini-2.5-flash");
-
-    await seletorModelo.click();
-    await expect(page.getByText("llama-3.3-70b").first()).toBeVisible();
-
-    await page.getByText("llama-3.3-70b").first().click();
-    await expect(seletorModelo).toContainText("llama-3.3-70b");
+  test("toolbar do composer exibe apenas atalhos limpos sem dropdown manual de modelo", async ({ page }) => {
+    await expect(page.locator("[data-model-dropdown]")).not.toBeVisible();
+    await expect(page.getByTitle("Comandos rápidos (/)")).toBeVisible();
+    await expect(page.getByTitle("Mencionar agente, arquivo ou task (@)")).toBeVisible();
+    await expect(page.getByTitle("Execução shell direta (!)")).toBeVisible();
   });
 
   test("resposta com opções numeradas renderiza botões HITL e clique despacha mensagem", async ({ page }) => {

@@ -1,11 +1,12 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import {
-  useExternalStoreRuntime,
-  type ThreadMessageLike,
-  type AppendMessage,
-  type AssistantRuntime,
+import { useState, useRef, useEffect, useMemo } from "react";
+import type {
+  ChatModelAdapter,
+  ChatModelRunOptions,
+  ThreadMessageLike,
+  AssistantRuntime,
 } from "@assistant-ui/react";
-import { executarSecretarioStream } from "../../../lib/chat/secretary-stream.js";
+import { useLocalRuntime } from "@assistant-ui/react";
+import { ThinkParser, parseProblemDetails } from "../../../lib/chat/secretary-stream.js";
 import { ProblemDetailsError } from "@opencorp/sdk";
 import type { SecretaryRuntimeOptions } from "../types.js";
 
@@ -88,12 +89,7 @@ export function buildAssistantParts(
   return partes;
 }
 
-/**
- * Hook oficial do OpenCorp que conecta o `@assistant-ui/react` ao endpoint
- * de streaming SSE nativo (`POST /secretario/conversa/stream`) e hidrata
- * o histórico de mensagens da sessão ativa no F5.
- */
-function obterAuthHeaders(): Record<string, string> {
+export function obterAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   if (typeof window !== "undefined") {
     const t =
@@ -106,172 +102,63 @@ function obterAuthHeaders(): Record<string, string> {
   return headers;
 }
 
-export function useOpenCorpSecretarioRuntime(
-  options: SecretaryRuntimeOptions = {},
-): AssistantRuntime {
-  const [messages, setMessages] = useState<ThreadMessageLike[]>(
-    options.initialMessages ?? [],
-  );
-  const [isRunning, setIsRunning] = useState<boolean>(false);
-  const sessaoIdRef = useRef<string | undefined>(options.sessaoId);
-  const abortControllerRef = useRef<AbortController | null>(null);
-
-  const urlBase = options.url ?? "/secretario/conversa/stream";
-  const wsId = options.workspaceId ?? "default";
-
-  // Garante que o motor do secretário esteja iniciado no backend (compatibilidade legada)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const origin = window.location.origin;
-    const authHeaders = obterAuthHeaders();
-    fetch(`${origin}/secretario/status`, {
-      headers: { ...authHeaders },
-    })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const st = await res.json();
-        if (st && !st.rodando) {
-          await fetch(`${origin}/secretario/start`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...authHeaders,
-              ...(options.headers ?? {}),
-            },
-          }).catch(() => {});
-        }
-      })
-      .catch(() => {});
-  }, [options.headers]);
-
-  // Hidratação no F5 ou troca de aba: carrega mensagens persistidas no backend
-  useEffect(() => {
-    sessaoIdRef.current = options.sessaoId;
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-      setIsRunning(false);
-    }
-
-    const sid = options.sessaoId?.trim();
-    if (!sid) {
-      setMessages(options.initialMessages ?? []);
-      return;
-    }
-
-    // Sessão rascunho criada localmente: inicia vazia sem disparar requisição 404
-    const isRascunhoLocal =
-      (sid.startsWith("sessao-") || sid.startsWith("draft-")) &&
-      !options.sessaoPersistida;
-    if (isRascunhoLocal) {
-      setMessages(options.initialMessages ?? []);
-      return;
-    }
-
-    // Sessão existente com ID persistido: carrega histórico do backend
-    const controller = new AbortController();
-    const origin =
-      typeof window !== "undefined"
-        ? window.location.origin
-        : "http://127.0.0.1:4100";
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...obterAuthHeaders(),
-      ...(wsId ? { "x-opencorp-workspace": wsId } : {}),
-      ...(options.headers ?? {}),
-    };
-
-    void fetch(
-      `${origin}/secretario/sessoes/${encodeURIComponent(sid)}/mensagens`,
-      {
-        headers,
-        signal: controller.signal,
-      },
-    )
-      .then(async (res) => {
-        if (controller.signal.aborted) return;
-        if (!res.ok) {
-          setMessages([]);
-          return;
-        }
-        const data = await res.json();
-        const convertidas = converterMensagensBackend(data, sid);
-        setMessages(convertidas);
-      })
-      .catch((_err: unknown) => {
-        if (controller.signal.aborted) return;
-        setMessages([]);
-      });
-
-    return () => {
-      controller.abort();
-    };
-  }, [options.sessaoId, options.sessaoPersistida, wsId]);
-
-  const onCancel = useCallback(async () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    setIsRunning(false);
-  }, []);
-
-  const onNew = useCallback(
-    async (message: AppendMessage) => {
-      // Extração determinística do texto do usuário
+/**
+ * Cria o ChatModelAdapter idiomático do Secretário Executivo com suporte a:
+ * - Streaming contínuo via gerador assíncrono (async *run)
+ * - Cancelamento nativo com abortSignal
+ * - Segregação em tempo real de blocos <think> (Reasoning / Chain-of-Thought)
+ * - Chamadas de ferramentas nativas (tool-call)
+ * - Execução direta de shell via "!comando"
+ */
+export function criarSecretarioModelAdapter(
+  options: SecretaryRuntimeOptions,
+  sessaoIdRef: React.MutableRefObject<string | undefined>,
+): ChatModelAdapter {
+  return {
+    async *run({ messages, abortSignal }: ChatModelRunOptions) {
+      const lastMsg = messages[messages.length - 1];
       let userText = "";
-      if (typeof message.content === "string") {
-        userText = message.content;
-      } else if (Array.isArray(message.content)) {
-        userText = message.content
-          .filter((p): p is { type: "text"; text: string } => p.type === "text")
-          .map((p) => p.text)
-          .join("\n");
+
+      if (lastMsg) {
+        if (typeof lastMsg.content === "string") {
+          userText = lastMsg.content;
+        } else if (Array.isArray(lastMsg.content)) {
+          userText = lastMsg.content
+            .filter((p: any) => p && p.type === "text" && typeof p.text === "string")
+            .map((p: any) => p.text)
+            .join("\n");
+        }
       }
 
-      if (!userText.trim()) return;
+      const trimmed = userText.trim();
+      if (!trimmed) return;
 
-      // ── /clear: Limpa o histórico visível imediatamente ──
-      if (userText.trim().toLowerCase() === "/clear") {
-        setMessages([]);
+      // ── /clear: Limpeza de histórico ──
+      if (trimmed.toLowerCase() === "/clear") {
+        yield { content: [] };
         return;
       }
 
+      const origin =
+        typeof window !== "undefined"
+          ? window.location.origin
+          : "http://127.0.0.1:4100";
+      const wsId = options.workspaceId || "default";
+
       // ── !comando: Execução Direta de Shell (POST /terminal) ──
-      if (userText.trim().startsWith("!")) {
-        const comandoBruto = userText.trim().slice(1).trim();
-        const userMsgId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        const asstMsgId = `asst_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      if (trimmed.startsWith("!")) {
+        const comandoBruto = trimmed.slice(1).trim();
 
-        const userMsg: ThreadMessageLike = {
-          id: userMsgId,
-          role: "user",
-          content: [{ type: "text", text: userText }],
-          createdAt: new Date(),
-        };
-
-        const asstMsg: ThreadMessageLike = {
-          id: asstMsgId,
-          role: "assistant",
+        yield {
           content: [
             {
               type: "text",
               text: `\`\`\`terminal\n$ !${comandoBruto}\n[executando comando no terminal do workspace ${wsId}...]\n\`\`\``,
             },
           ],
-          createdAt: new Date(),
         };
 
-        setMessages((prev) => [...prev, userMsg, asstMsg]);
-        setIsRunning(true);
-
         try {
-          const origin =
-            typeof window !== "undefined"
-              ? window.location.origin
-              : "http://127.0.0.1:4100";
           const authHeaders = obterAuthHeaders();
           const res = await fetch(
             `${origin}/terminal?workspace=${encodeURIComponent(wsId)}`,
@@ -283,6 +170,7 @@ export function useOpenCorpSecretarioRuntime(
                 ...(options.headers ?? {}),
               },
               body: JSON.stringify({ comando: comandoBruto, workspace: wsId }),
+              signal: abortSignal,
             },
           );
 
@@ -298,214 +186,243 @@ export function useOpenCorpSecretarioRuntime(
             saida = "(Comando executado com sucesso)";
           }
 
-          setMessages((prev) => {
-            const idx = prev.findIndex((m) => m.id === asstMsgId);
-            if (idx === -1) return prev;
-            const copia = [...prev];
-            copia[idx] = {
-              ...copia[idx],
-              content: [
-                {
-                  type: "text",
-                  text: `\`\`\`terminal\n$ !${comandoBruto}\n${saida}\n\`\`\``,
-                },
-              ],
-            };
-            return copia;
-          });
+          yield {
+            content: [
+              {
+                type: "text",
+                text: `\`\`\`terminal\n$ !${comandoBruto}\n${saida}\n\`\`\``,
+              },
+            ],
+          };
         } catch (err: any) {
-          setMessages((prev) => {
-            const idx = prev.findIndex((m) => m.id === asstMsgId);
-            if (idx === -1) return prev;
-            const copia = [...prev];
-            copia[idx] = {
-              ...copia[idx],
-              content: [
-                {
-                  type: "text",
-                  text: `\`\`\`terminal\n$ !${comandoBruto}\nFalha de conexão com terminal: ${err.message}\n\`\`\``,
-                },
-              ],
-            };
-            return copia;
-          });
-        } finally {
-          setIsRunning(false);
+          if (abortSignal.aborted) return;
+          yield {
+            content: [
+              {
+                type: "text",
+                text: `\`\`\`terminal\n$ !${comandoBruto}\nFalha de conexão com terminal: ${err.message}\n\`\`\``,
+              },
+            ],
+          };
         }
         return;
       }
 
-      // Dispara callback de primeira mensagem para atualizar o título da aba
-      if (messages.length === 0) {
+      // Notifica a primeira mensagem para renomear aba
+      if (messages.length <= 1) {
         options.onPrimeiraMensagem?.(userText);
       }
 
-      const userMsgId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const asstMsgId = `asst_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const queryParams = new URLSearchParams();
+      if (sessaoIdRef.current) queryParams.set("sessao", sessaoIdRef.current);
+      if (wsId) queryParams.set("workspace", wsId);
+      const urlBase = options.url ?? "/secretario/conversa/stream";
+      const urlFinal = `${urlBase}?${queryParams.toString()}`;
 
-      const userMsg: ThreadMessageLike = {
-        id: userMsgId,
-        role: "user",
-        content: [{ type: "text", text: userText }],
-        createdAt: new Date(),
+      const extra = options.obterContextoEnvio?.();
+      const body: Record<string, unknown> = {
+        cliente_id: `react_${Date.now().toString(36)}`,
+        mensagem: userText,
+        prompt: userText,
+        agente: extra?.agente ?? options.agente ?? "secretario",
       };
+      if (sessaoIdRef.current) body.sessao_id = sessaoIdRef.current;
+      const modeloEfetivo = extra?.modelo ?? options.modelo;
+      if (modeloEfetivo) {
+        body.modelo = modeloEfetivo;
+        body.model = modeloEfetivo;
+      }
+      if (extra?.imagens && extra.imagens.length > 0) {
+        body.imagens = extra.imagens;
+      }
+      if (extra?.contexto && extra.contexto.length > 0) {
+        body.contexto = extra.contexto;
+      }
 
-      const asstMsg: ThreadMessageLike = {
-        id: asstMsgId,
-        role: "assistant",
-        content: [],
-        createdAt: new Date(),
-      };
-
-      setMessages((prev) => [...prev, userMsg, asstMsg]);
-      setIsRunning(true);
-
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-
-      let pensamentoBuffer = "";
-      let textoBuffer = "";
-      let ferramentasBuffer: Array<{ ferramenta: string; resumo: string; sucesso: boolean }> = [];
-
-      const sincronizarAssistente = () => {
-        setMessages((prev) => {
-          const idx = prev.findIndex((m) => m.id === asstMsgId);
-          if (idx === -1) return prev;
-
-          const partes = buildAssistantParts(
-            pensamentoBuffer,
-            ferramentasBuffer,
-            textoBuffer,
-          );
-
-          const copia = [...prev];
-          copia[idx] = {
-            ...prev[idx],
-            content: partes,
-          };
-          return copia;
+      let resp: Response;
+      try {
+        resp = await fetch(urlFinal, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...obterAuthHeaders(),
+            ...(options.headers ?? {}),
+          },
+          body: JSON.stringify(body),
+          signal: abortSignal,
         });
-      };
+      } catch (err: any) {
+        if (abortSignal.aborted) return;
+        yield {
+          content: [
+            {
+              type: "text",
+              text: `⚠️ Erro de conexão com o Secretário: ${err.message}`,
+            },
+          ],
+        };
+        return;
+      }
 
-      const dispararComRetry = async (tentativa = 1): Promise<void> => {
+      // Se o secretário não estiver rodando (409), tenta iniciar e repetir uma vez
+      if (resp.status === 409) {
         try {
-          const queryParams = new URLSearchParams();
-          if (sessaoIdRef.current) queryParams.set("sessao", sessaoIdRef.current);
-          if (wsId) queryParams.set("workspace", wsId);
-          const urlFinal = `${urlBase}?${queryParams.toString()}`;
-
-          const extra = options.obterContextoEnvio?.();
-          const body: Record<string, unknown> = {
-            cliente_id: `react_${Date.now().toString(36)}`,
-            mensagem: userText,
-            prompt: userText,
-            agente: extra?.agente ?? options.agente ?? "secretario",
-          };
-          if (sessaoIdRef.current) body.sessao_id = sessaoIdRef.current;
-          const modeloEfetivo = extra?.modelo ?? options.modelo;
-          if (modeloEfetivo) {
-            body.modelo = modeloEfetivo;
-            body.model = modeloEfetivo;
-          }
-          if (extra?.imagens && extra.imagens.length > 0) {
-            body.imagens = extra.imagens;
-          }
-          if (extra?.contexto && extra.contexto.length > 0) {
-            body.contexto = extra.contexto;
-          }
-
-          await executarSecretarioStream({
-            url: urlFinal,
+          await fetch(`${origin}/secretario/start`, {
+            method: "POST",
             headers: {
               "Content-Type": "application/json",
               ...obterAuthHeaders(),
               ...(options.headers ?? {}),
             },
-            body,
-            signal: controller.signal,
-            callbacks: {
-              onSessaoId: (sid) => {
-                sessaoIdRef.current = sid;
-                options.onSessaoCriada?.(sid);
-              },
-              onPensamento: (_delta, acumulado) => {
-                pensamentoBuffer = acumulado;
-                sincronizarAssistente();
-              },
-              onDelta: (_delta, acumulado) => {
-                textoBuffer = acumulado;
-                sincronizarAssistente();
-              },
-              onAcao: (itens) => {
-                ferramentasBuffer = itens;
-                sincronizarAssistente();
-              },
-              onFim: () => {
-                setIsRunning(false);
-                abortControllerRef.current = null;
-                options.onLimparContextoEnvio?.();
-              },
-              onError: (err) => {
-                setIsRunning(false);
-                abortControllerRef.current = null;
-                options.onErro?.(err);
-                if (!textoBuffer) {
-                  textoBuffer = `⚠️ Erro ao processar resposta: ${err.message}`;
-                  sincronizarAssistente();
-                }
-              },
-            },
+            signal: abortSignal,
           });
-        } catch (err: any) {
-          const msg = String(err?.detail || err?.message || "");
-          if (
-            tentativa === 1 &&
-            (err?.status === 409 ||
-              msg.includes("POST /secretario/start") ||
-              msg.includes("não iniciado"))
-          ) {
-            try {
-              const origin =
-                typeof window !== "undefined"
-                  ? window.location.origin
-                  : "http://127.0.0.1:4100";
-              await fetch(`${origin}/secretario/start`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  ...obterAuthHeaders(),
-                  ...(options.headers ?? {}),
-                },
-              });
-              await new Promise((r) => setTimeout(r, 600));
-              return await dispararComRetry(2);
-            } catch {}
-          }
+          await new Promise((r) => setTimeout(r, 600));
+          resp = await fetch(urlFinal, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...obterAuthHeaders(),
+              ...(options.headers ?? {}),
+            },
+            body: JSON.stringify(body),
+            signal: abortSignal,
+          });
+        } catch {}
+      }
 
-          setIsRunning(false);
-          abortControllerRef.current = null;
-          const msgErro =
-            err instanceof ProblemDetailsError
-              ? `${err.title}: ${err.detail || err.message}`
-              : err.message || "Falha na comunicação com o Secretário";
-          options.onErro?.(err);
-          if (!textoBuffer) {
-            textoBuffer = `⚠️ ${msgErro}`;
-            sincronizarAssistente();
+      if (!resp.ok) {
+        const problem = await parseProblemDetails(resp);
+        options.onErro?.(problem);
+        yield {
+          content: [
+            {
+              type: "text",
+              text: `⚠️ ${problem.title || "Erro"}: ${problem.detail || problem.message}`,
+            },
+          ],
+        };
+        return;
+      }
+
+      const reader = resp.body?.getReader();
+      if (!reader) {
+        yield {
+          content: [{ type: "text", text: "⚠️ Resposta vazia recebida do servidor." }],
+        };
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let textoAcumulado = "";
+      let pensamentoAcumulado = "";
+      const thinkParser = new ThinkParser();
+      const acoesAcumuladas: Array<{ ferramenta: string; resumo: string; sucesso: boolean }> = [];
+
+      try {
+        while (true) {
+          if (abortSignal.aborted) break;
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const linhas = buffer.split("\n");
+          buffer = linhas.pop() || "";
+
+          let evento = "mensagem";
+          let dados = "";
+
+          for (const linha of linhas) {
+            if (linha.startsWith("event: ")) {
+              evento = linha.slice(7).trim();
+            } else if (linha.startsWith("data: ")) {
+              dados = linha.slice(6);
+            } else if (linha === "" && dados) {
+              try {
+                const parsed = JSON.parse(dados);
+
+                if (evento === "sessao" && parsed.sessao_id) {
+                  sessaoIdRef.current = parsed.sessao_id;
+                  options.onSessaoCriada?.(parsed.sessao_id);
+                } else if (evento === "pensamento") {
+                  pensamentoAcumulado =
+                    parsed.acumulado || pensamentoAcumulado + (parsed.delta || "");
+                } else if (evento === "delta") {
+                  const deltaStr = parsed.delta || "";
+                  const { deltaConteudo, deltaPensamento } = thinkParser.processDelta(deltaStr);
+                  if (deltaPensamento) pensamentoAcumulado += deltaPensamento;
+                  if (deltaConteudo) textoAcumulado += deltaConteudo;
+                } else if (evento === "acao") {
+                  const itens = Array.isArray(parsed) ? parsed : [parsed];
+                  for (const it of itens) {
+                    acoesAcumuladas.push({
+                      ferramenta: it.ferramenta || "ferramenta",
+                      resumo: it.resumo || "Concluído",
+                      sucesso: it.sucesso !== false,
+                    });
+                  }
+                } else if (evento === "fim") {
+                  if (parsed.resposta && !textoAcumulado) {
+                    textoAcumulado = parsed.resposta;
+                  }
+                } else if (evento === "erro") {
+                  const msgErro = parsed.mensagem || parsed.erro || "Erro interno no agente";
+                  textoAcumulado += `\n\n⚠️ ${msgErro}`;
+                }
+              } catch {}
+
+              dados = "";
+              evento = "mensagem";
+
+              // Despacha atualização imediata das partes para o runtime
+              const partes = buildAssistantParts(
+                pensamentoAcumulado,
+                acoesAcumuladas,
+                textoAcumulado,
+              );
+              if (partes.length > 0) {
+                yield { content: partes };
+              }
+            }
           }
         }
-      };
+      } finally {
+        reader.releaseLock();
+        options.onLimparContextoEnvio?.();
+      }
 
-      await dispararComRetry(1);
+      // Emissão final garantida
+      const partesFinais = buildAssistantParts(
+        pensamentoAcumulado,
+        acoesAcumuladas,
+        textoAcumulado,
+      );
+      if (partesFinais.length > 0) {
+        yield { content: partesFinais };
+      }
     },
-    [options, urlBase, wsId],
+  };
+}
+
+/**
+ * Hook oficial do OpenCorp que implementa a arquitetura nativa com useLocalRuntime
+ * e ChatModelAdapter, eliminando a necessidade de loops manuais e permitindo
+ * streaming fluido em tempo real sem F5.
+ */
+export function useOpenCorpSecretarioRuntime(
+  options: SecretaryRuntimeOptions = {},
+): AssistantRuntime {
+  const sessaoIdRef = useRef<string | undefined>(options.sessaoId);
+  sessaoIdRef.current = options.sessaoId;
+
+  // Adapter gerador com streaming contínuo
+  const chatModelAdapter = useMemo(
+    () => criarSecretarioModelAdapter(options, sessaoIdRef),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [options.sessaoId, options.workspaceId, options.agente, options.modelo],
   );
 
-  return useExternalStoreRuntime({
-    messages,
-    isRunning,
-    convertMessage: (msg: ThreadMessageLike) => msg,
-    onNew,
-    onCancel,
+  return useLocalRuntime(chatModelAdapter, {
+    initialMessages: options.initialMessages,
   });
 }
