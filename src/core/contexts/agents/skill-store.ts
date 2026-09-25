@@ -5,6 +5,8 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseYamlSimples } from "../../../schemas/agent.js";
 import { AgentError } from "../../shared/errors.js";
+import { projectRoot } from "../../../utils/paths.js";
+import { writeFileAtomic } from "../../../utils/fs-safe.js";
 
 export const NOME_SKILL_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -13,6 +15,7 @@ export const TETO_SKILLS_CHARS = 8000;
 export interface Skill {
   name: string;
   description: string;
+  category?: string;
   allowed_tools?: string[];
   corpo: string;
   versao?: string;
@@ -20,11 +23,18 @@ export interface Skill {
 }
 
 export interface SkillResumo {
+  id?: string;
   name: string;
   description: string;
+  category?: string;
   allowed_tools: string[];
   versao?: string;
   requires: string[];
+  ativa?: boolean;
+}
+
+export interface ListarSkillsOptions {
+  incluirCatalogo?: boolean;
 }
 
 function msg(erro: unknown): string {
@@ -63,12 +73,16 @@ export function parseSkillMd(conteudo: string): Skill {
   if (typeof description !== "string" || description.trim().length === 0) {
     throw new AgentError(`skill "${name}": o campo "description" é obrigatório no frontmatter`);
   }
+  const category = typeof dados.category === "string" && dados.category.trim()
+    ? dados.category.trim()
+    : undefined;
   const allowedTools = Array.isArray(dados["allowed-tools"])
     ? dados["allowed-tools"].map(String).filter((t) => t.length > 0)
     : undefined;
   return {
     name,
     description: description.trim(),
+    category,
     allowed_tools: allowedTools,
     corpo: m[2]!.replace(/^\r?\n/, ""),
   };
@@ -110,40 +124,159 @@ export class SkillStore {
   }
 
   existe(wsPath: string, nome: string): boolean {
-    return existsSync(this.caminhoSkillMd(wsPath, nome));
+    if (existsSync(this.caminhoSkillMd(wsPath, nome))) return true;
+    if (existsSync(join(wsPath, ".agents", "skills", nome, "SKILL.md"))) return true;
+    try {
+      if (existsSync(join(projectRoot(), ".agents", "skills", nome, "SKILL.md"))) return true;
+    } catch {}
+    return false;
   }
 
-  async listar(wsPath: string): Promise<SkillResumo[]> {
-    const dir = this.dirSkills(wsPath);
-    if (!existsSync(dir)) return [];
-    const nomes = readdirSync(dir).filter((f) => !f.startsWith("."));
-    const resumos: SkillResumo[] = [];
-    for (const nome of nomes) {
+  async listarAtivas(wsPath: string): Promise<string[]> {
+    const configPath = join(wsPath, ".opencorp", "config.json");
+    if (!existsSync(configPath)) return [];
+    try {
+      const raw = readFileSync(configPath, "utf8");
+      const cfg = JSON.parse(raw);
+      if (Array.isArray(cfg.skills_ativas)) return cfg.skills_ativas.map(String);
+      if (Array.isArray(cfg.skills)) return cfg.skills.map(String);
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  async alternarAtiva(
+    wsPath: string,
+    nomeSkill: string,
+    ativar?: boolean,
+  ): Promise<{ ativa: boolean; skills_ativas: string[] }> {
+    const dir = join(wsPath, ".opencorp");
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    const configPath = join(dir, "config.json");
+    let cfg: Record<string, any> = {};
+    if (existsSync(configPath)) {
       try {
-        const skill = this.carregar(wsPath, nome);
-        resumos.push({
-          name: skill.name,
-          description: skill.description,
-          allowed_tools: skill.allowed_tools ?? [],
-          versao: skill.versao,
-          requires: skill.requires ?? [],
-        });
+        cfg = JSON.parse(readFileSync(configPath, "utf8"));
+      } catch {}
+    }
+    const atuais: string[] = Array.isArray(cfg.skills_ativas)
+      ? cfg.skills_ativas.map(String)
+      : Array.isArray(cfg.skills)
+        ? cfg.skills.map(String)
+        : [];
+
+    const jaAtiva = atuais.includes(nomeSkill);
+    const novoEstado = ativar !== undefined ? Boolean(ativar) : !jaAtiva;
+
+    let novas: string[];
+    if (novoEstado) {
+      novas = jaAtiva ? atuais : [...atuais, nomeSkill];
+    } else {
+      novas = atuais.filter((s) => s !== nomeSkill);
+    }
+
+    cfg.skills_ativas = novas;
+    await writeFileAtomic(configPath, `${JSON.stringify(cfg, null, 2)}\n`);
+    return { ativa: novoEstado, skills_ativas: novas };
+  }
+
+  async listar(wsPath: string, opts?: ListarSkillsOptions): Promise<SkillResumo[]> {
+    const resumos: SkillResumo[] = [];
+    const nomesVistos = new Set<string>();
+
+    const coletarDeDiretorio = (diretorio: string) => {
+      if (!existsSync(diretorio)) return;
+      let nomes: string[] = [];
+      try {
+        nomes = readdirSync(diretorio).filter((f) => !f.startsWith("."));
       } catch {
-        continue;
+        return;
+      }
+      for (const nome of nomes) {
+        if (nomesVistos.has(nome)) continue;
+        const mdPath = join(diretorio, nome, "SKILL.md");
+        if (!existsSync(mdPath)) continue;
+        try {
+          const skill = parseSkillMd(readFileSync(mdPath, "utf8"));
+          const metaPath = join(diretorio, nome, "skill.json");
+          let meta: { versao?: string; requires?: string[] } | undefined;
+          if (existsSync(metaPath)) {
+            try {
+              const j = JSON.parse(readFileSync(metaPath, "utf8"));
+              meta = {
+                versao: typeof j.versao === "string" ? j.versao : undefined,
+                requires: Array.isArray(j.requires) ? j.requires.map(String).filter((s: string) => s.length > 0) : undefined,
+              };
+            } catch {}
+          }
+          nomesVistos.add(skill.name);
+          resumos.push({
+            id: skill.name,
+            name: skill.name,
+            description: skill.description,
+            category: skill.category,
+            allowed_tools: skill.allowed_tools ?? [],
+            versao: meta?.versao,
+            requires: meta?.requires ?? [],
+          });
+        } catch {}
+      }
+    };
+
+    // 1. Diretório oficial de skills do workspace (.opencorp/skills)
+    coletarDeDiretorio(this.dirSkills(wsPath));
+
+    if (opts?.incluirCatalogo) {
+      // 2. Diretório local de skills sob .agents/skills (se houver)
+      coletarDeDiretorio(join(wsPath, ".agents", "skills"));
+
+      // 3. Catálogo global do repositório em .agents/skills
+      try {
+        const rootDir = join(projectRoot(), ".agents", "skills");
+        if (resolve(rootDir) !== resolve(this.dirSkills(wsPath))) {
+          coletarDeDiretorio(rootDir);
+        }
+      } catch {}
+
+      // Preenche status de ativação com base em config.json
+      const ativas = await this.listarAtivas(wsPath);
+      for (const r of resumos) {
+        r.ativa = ativas.includes(r.name);
       }
     }
+
     return resumos.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   carregar(wsPath: string, nome: string): Skill {
-    const mdPath = this.caminhoSkillMd(wsPath, nome);
+    let mdPath = this.caminhoSkillMd(wsPath, nome);
+    let metaDir = this.caminhoSkill(wsPath, nome);
+
     if (!existsSync(mdPath)) {
-      throw new AgentError(
-        `skill "${nome}" não instalada em ${this.dirSkills(wsPath)} — veja "oc skill listar"`,
-      );
+      const localAgentsPath = join(wsPath, ".agents", "skills", nome, "SKILL.md");
+      let rootAgentsPath = "";
+      try {
+        rootAgentsPath = join(projectRoot(), ".agents", "skills", nome, "SKILL.md");
+      } catch {}
+
+      if (existsSync(localAgentsPath)) {
+        mdPath = localAgentsPath;
+        metaDir = dirname(localAgentsPath);
+      } else if (rootAgentsPath && existsSync(rootAgentsPath)) {
+        mdPath = rootAgentsPath;
+        metaDir = dirname(rootAgentsPath);
+      } else {
+        throw new AgentError(
+          `skill "${nome}" não instalada em ${this.dirSkills(wsPath)} — veja "oc skill listar"`,
+        );
+      }
     }
+
     const skill = parseSkillMd(readFileSync(mdPath, "utf8"));
-    const meta = this.lerSkillJson(wsPath, nome);
+    const meta = this.lerSkillJson(metaDir, nome);
     return {
       ...skill,
       versao: meta?.versao,

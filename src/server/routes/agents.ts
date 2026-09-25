@@ -156,8 +156,47 @@ export async function handleAgentRoutes(ctx: RouteContext): Promise<boolean> {
   if ((rota === "/skills" || ctx.rota === "/skills") && req.method === "GET") {
     const ws = await resolverWs(url);
     const store = skillStore ?? new SkillStore();
-    const skills = await store.listar(ws.path);
+    const skills = await store.listar(ws.path, { incluirCatalogo: true });
     enviar(res, 200, skills);
+    return true;
+  }
+
+  // ── GET /skills/ativas ou /workspaces/:ws/skills ─────────────────────
+  const matchWsSkillsGet =
+    rota.match(/^\/workspaces\/([^/]+)\/skills$/) || (rota === "/skills/ativas" ? [rota] : null);
+  if (matchWsSkillsGet && req.method === "GET") {
+    const ws = await resolverWs(url);
+    const store = skillStore ?? new SkillStore();
+    const skillsAtivas = await store.listarAtivas(ws.path);
+    enviar(res, 200, { ok: true, workspace: ws.id, skills_ativas: skillsAtivas });
+    return true;
+  }
+
+  // ── POST /skills/:id/toggle ou /skills/toggle ─────────────────────────
+  const matchSkillToggle =
+    rota.match(/^\/skills\/([^/]+)\/toggle$/) ||
+    rota.match(/^\/workspaces\/[^/]+\/skills\/([^/]+)\/toggle$/);
+  const ehToggleGenerico =
+    rota === "/skills/toggle" ||
+    /^\/workspaces\/[^/]+\/skills$/.test(rota);
+
+  if ((matchSkillToggle || ehToggleGenerico) && req.method === "POST") {
+    const ws = await resolverWs(url);
+    const corpo = ((await lerCorpo(req)) || {}) as { id?: string; workspace?: string; ativa?: boolean };
+    const idSkill = matchSkillToggle?.[1] || corpo.id;
+    if (!idSkill) {
+      enviar(res, 400, { erro: "ID da skill é obrigatório para alternar ativação" });
+      return true;
+    }
+    const store = skillStore ?? new SkillStore();
+    const resultado = await store.alternarAtiva(ws.path, idSkill, corpo.ativa);
+    enviar(res, 200, {
+      ok: true,
+      id: idSkill,
+      ativa: resultado.ativa,
+      skills_ativas: resultado.skills_ativas,
+      workspace: ws.id,
+    });
     return true;
   }
 

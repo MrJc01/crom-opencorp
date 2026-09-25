@@ -228,6 +228,34 @@ describe("Rotas Modulares de Agentes e Scheduler (Micro-Passo 12)", () => {
       const tools = resTools.json as any[];
       expect(tools.some((t) => t.id === "calculadora")).toBe(true);
     });
+
+    it("POST /skills/:id/toggle e GET /skills/ativas persistem habilitação no workspace", async () => {
+      // 1. Toggle habilita skill
+      const resToggle = await fetchApi("/skills/minha-skill/toggle?workspace=ws-principal", {
+        method: "POST",
+      });
+      expect(resToggle.status).toBe(200);
+      expect((resToggle.json as any).ok).toBe(true);
+      expect((resToggle.json as any).ativa).toBe(true);
+      expect((resToggle.json as any).skills_ativas).toContain("minha-skill");
+
+      // 2. Consulta skills ativas
+      const resAtivas = await fetchApi("/skills/ativas?workspace=ws-principal");
+      expect(resAtivas.status).toBe(200);
+      expect((resAtivas.json as any).skills_ativas).toContain("minha-skill");
+
+      // 3. GET /skills reflete status ativa: true
+      const resSkills = await fetchApi("/skills?workspace=ws-principal");
+      const skill = (resSkills.json as any[]).find((s) => s.name === "minha-skill");
+      expect(skill?.ativa).toBe(true);
+
+      // 4. Toggle desabilita skill
+      const resDesativa = await fetchApi("/skills/minha-skill/toggle?workspace=ws-principal", {
+        method: "POST",
+      });
+      expect((resDesativa.json as any).ativa).toBe(false);
+      expect((resDesativa.json as any).skills_ativas).not.toContain("minha-skill");
+    });
   });
 
   describe("Rotas de Scheduler e Jobs (/scheduler/jobs, /jobs, /schedules, /scheduler/status)", () => {
