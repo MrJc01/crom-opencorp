@@ -39,7 +39,7 @@ Ao configurar agentes, fluxos ou rotinas:
 2. **Operações Atômicas de Filesystem**:
    - Gravações em disco devem usar `writeFileAtomic` de `src/utils/fs-safe.ts` para evitar arquivos corrompidos em caso de parada abrupta.
 3. **Tratamento de Erros Sem Silenciamento**:
-   - Erros devem ser capturados e propagados via classes customizadas derivadas de `OpencorpError` (`src/core/errors.ts`).
+   - Erros devem ser capturados e propagados via classes customizadas derivadas de `OpencorpError` (`src/core/shared/errors.ts`) ou classes ativas em `src/core/domain/`, com serialização HTTP padronizada em RFC 7807 (`ProblemDetails`).
 4. **Resiliência e Timeouts**:
    - Requisições HTTP e execuções de scripts devem sempre possuir timeouts declarados (`AbortSignal.timeout` ou `timeout_ms`).
 5. **Zero Mocks em Produção**:

@@ -145,7 +145,7 @@ Abaixo está o detalhamento dos 7 maiores God Files e os riscos arquiteturais as
 
 ### 3.1 A Anomalia do Acesso Bimodal da CLI
 
-A auditoria em [`src/cli/commands/`](file:///home/j/Documentos/GitHub/opencorp/src/cli/commands) revelou um dos mais graves anti-patterns da plataforma:
+A auditoria em [`src/cli/commands/`](src/cli/commands) revelou um dos mais graves anti-patterns da plataforma:
 
 ```
                             ANOMALIA DE ACESSO DA CLI
@@ -178,7 +178,7 @@ A auditoria em [`src/cli/commands/`](file:///home/j/Documentos/GitHub/opencorp/s
 ```
 
 #### Fatos Mapeados:
-- **Apenas 2 comandos usam `cliFetch` (rede HTTP):** [`saude.ts`](file:///home/j/Documentos/GitHub/opencorp/src/cli/commands/saude.ts) e [`secretario.ts`](file:///home/j/Documentos/GitHub/opencorp/src/cli/commands/secretario.ts).
+- **Apenas 2 comandos usam `cliFetch` (rede HTTP):** [`saude.ts`](src/cli/commands/saude.ts) e [`secretario.ts`](src/cli/commands/secretario.ts).
 - **39 comandos instanciam o motor in-process:** `task.ts`, `flow.ts`, `agent.ts`, `session.ts`, `workspace.ts`, `schedule.ts`, `historico.ts`, `budget.ts`, `template.ts`, `tool.ts`, `hook.ts`, `meeting.ts`, `app.ts`, `secrets.ts`, `monitor.ts`, `status.ts`, entre outros.
 
 #### Consequências para a Engenharia:
@@ -190,7 +190,7 @@ A auditoria em [`src/cli/commands/`](file:///home/j/Documentos/GitHub/opencorp/s
 
 ### 3.2 O "God Context" do Servidor HTTP (`RouteContext`)
 
-No servidor HTTP ([`src/server/index.ts`](file:///home/j/Documentos/GitHub/opencorp/src/server/index.ts) e [`src/server/routes/types.ts`](file:///home/j/Documentos/GitHub/opencorp/src/server/routes/types.ts)), a injeção de dependências opera sob o anti-pattern de **Service Locator Gigante**:
+No servidor HTTP ([`src/server/index.ts`](src/server/index.ts) e [`src/server/routes/types.ts`](src/server/routes/types.ts)), a injeção de dependências opera sob o anti-pattern de **Service Locator Gigante**:
 
 ```typescript
 // src/server/routes/types.ts
@@ -453,24 +453,24 @@ graph TD
 ### Checklist de Execução Detalhado
 
 #### 🔴 Onda 1: Hotfix do Core e Estabilização da Esteira de Mídia (Imediato)
-- [ ] Aplicar o patch de adjacência idempotente com `Map<string, Set<string>>` na função `grauEntradaJoin` em [`src/core/flow-store.ts`](file:///home/j/Documentos/GitHub/opencorp/src/core/flow-store.ts).
-- [ ] Criar a suite de testes de regressão de DAG em `tests/unit/flow-engine-dag.test.ts`.
-- [ ] Adicionar `"join": "any"` nos nós condicionais de [`yt-boletim-diario.json`](file:///home/j/.opencorp/workspaces/yt-factory-01/.opencorp/flows/yt-boletim-diario.json).
-- [ ] Rodar o pautador para gerar o roteiro `boletim-2026-09-23.json` e validar a renderização completa de `video_final.mp4` via `produzir_longo.mjs`.
+- [ ] Aplicar o patch de adjacência idempotente com `Map<string, Set<string>>` na função `grauEntradaJoin` em [`src/core/contexts/orchestration/flow-store.ts`](src/core/contexts/orchestration/flow-store.ts).
+- [ ] Criar a suite de testes de regressão de DAG em `tests/unit/core/flow-dag.test.ts`.
+- [ ] Adicionar `"join": "any"` nos nós condicionais de fluxos complexos.
+- [ ] Rodar o pautador para gerar roteiros e validar a renderização completa de mídia.
 
 #### 🟡 Onda 2: Modularização do Domínio e Streaming na CLI
 - [ ] Extrair o módulo puro de grafo para `src/core/domain/flow/dag.ts`, removendo lógica de I/O de disco da avaliação do DAG.
 - [ ] Implementar `src/cli/ui/stream-renderer.ts` para consumo de SSE e isolamento de tags `<think>` no terminal.
-- [ ] Desacoplar [`src/cli/commands/secretario.ts`](file:///home/j/Documentos/GitHub/opencorp/src/cli/commands/secretario.ts) adicionando `--agent <id>`, `--model <model>`, `--json` e o subcomando `historico <id>`.
+- [ ] Desacoplar [`src/cli/commands/secretario.ts`](src/cli/commands/secretario.ts) adicionando `--agent <id>`, `--model <model>`, `--json` e o subcomando `historico <id>`.
 - [ ] Implementar middleware RFC 7807 para respostas de erro uniformes na API HTTP.
 
 #### 🔵 Onda 3: Criação do Core Client SDK e Saneamento da CLI
 - [ ] Construir o módulo `src/sdk/` com recursos `SecretaryResource`, `TaskResource`, `FlowResource` e `AgentResource`.
-- [ ] Refatorar os 42 comandos de `src/cli/commands/` para consumirem a API HTTP através do SDK, eliminando a instanciação de classes de storage e banco in-process no terminal.
-- [ ] Atualizar [`docs/08-cli-referencia.md`](file:///home/j/Documentos/GitHub/opencorp/docs/08-cli-referencia.md) e [`README.md`](file:///home/j/Documentos/GitHub/opencorp/README.md) com a totalidade dos comandos e modelos recomendados por [`AGENTS.md`](file:///home/j/Documentos/GitHub/opencorp/.agents/AGENTS.md).
+- [ ] Refatorar os comandos de `src/cli/commands/` para consumirem a API HTTP através do SDK, eliminando a instanciação de classes de storage e banco in-process no terminal.
+- [ ] Atualizar [`docs/08-cli-referencia.md`](docs/08-cli-referencia.md) e [`README.md`](README.md) com a totalidade dos comandos e modelos recomendados por [`AGENTS.md`](.agents/AGENTS.md).
 
 #### 🟣 Onda 4: Persistência Unificada e Observatório Central
-- [ ] Consolidar os esquemas de `tasks.db`, `corp.db` e `scheduler.db` no banco unificado `opencorp.db`.
-- [ ] Implementar o runner transacional de migrações em `src/infra/database/migrator.ts` com tabela `_schema_migrations`.
+- [ ] Consolidar os esquemas de `tasks.db`, `corp.db` e `scheduler.db` no banco unificado.
+- [ ] Implementar o runner transacional de migrações em `src/core/db/` com tabela `_schema_migrations`.
 - [ ] Substituir o armazenamento de execuções em pastas de arquivos `.json` pelas tabelas normalizadas em 1NF (`agent_conversations`, `agent_turns`, `agent_tool_calls`).
-- [ ] Integrar no [`src/server/routes/secretario/context-builder.ts`](file:///home/j/Documentos/GitHub/opencorp/src/server/routes/secretario/context-builder.ts) a consulta ao histórico unificado de sub-agentes, tornando o Secretário o verdadeiro observatório corporativo.
+- [ ] Integrar no [`src/server/routes/secretario/context-builder.ts`](src/server/routes/secretario/context-builder.ts) a consulta ao histórico unificado de sub-agentes, tornando o Secretário o verdadeiro observatório corporativo.

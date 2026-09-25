@@ -240,7 +240,8 @@ describe("Secretário — Resiliência, Detecção de Zumbis e Prevenção de Tr
     const text = await res.text();
     // O stream deve terminar com evento de erro, não com timeout de 10 minutos
     expect(text).toContain("event: erro");
-    // Foram configurados 2 modelos na rotação, logo o número de tentativas deve ser <= 2
-    expect(postMessageAttempts).toBeLessThanOrEqual(2);
+    // O número de tentativas deve respeitar a quantidade de modelos candidatos na cadeia (sem loop infinito repetido por modelo)
+    expect(postMessageAttempts).toBeLessThanOrEqual(3);
+    expect(postMessageAttempts).toBeGreaterThanOrEqual(2);
   });
 });

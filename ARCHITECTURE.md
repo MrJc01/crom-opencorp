@@ -21,7 +21,7 @@ O **OpenCorp** é um Sistema Operacional para Empresas Autônomas dirigidas por 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                          CAMADA WEB FRONTEND                           │
-│  React 19 + TypeScript 7 + Vite v7 + TailwindCSS v4 + DaisyUI v5        │
+│  React 19 + TypeScript 5.x + Vite v7 + TailwindCSS v4 + DaisyUI v5     │
 │  @assistant-ui/react (Runtime SSE) · @xyflow/react v12 (Studio DAG)     │
 ├────────────────────────────────────────────────────────────────────────┤
 │                          CAMADA DE CLIENTE / SDK                       │
@@ -42,15 +42,51 @@ O **OpenCorp** é um Sistema Operacional para Empresas Autônomas dirigidas por 
 - **`@xyflow/react` (React Flow v12)**: Motor visual de nós e arestas magnéticas Bézier para modelagem e depuração de fluxos DAG.
 - **`@opencorp/sdk`**: Cliente oficial fortemente tipado que encapsula chamadas para `/tasks`, `/agents`, `/flows`, `/settings`, `/engines` e `/files`.
 - **TailwindCSS v4 & DaisyUI v5**: Paleta ultra-dark pura (`#09090b` / `zinc-950`) sem vazamentos de bordas ou cores não-curadas.
+- **Arquitetura de Rotas Canônicas**: Isolamento contextual por workspace através de `/w/:workspaceId/*`.
 
 ---
 
-## 3. Os 7 Módulos Funcionais do OpenCorp
+## 3. Bounded Contexts DDD no Backend (`src/core/`)
+
+O backend é modularizado em **Bounded Contexts** bem delineados sob `src/core/contexts/` e `src/core/domain/`, com separação estrita de responsabilidades:
+
+1. **`agents` (`src/core/contexts/agents/`)**:
+   - `AgentStore`: Catálogo, ciclo de vida e persistência de agentes em Markdown/Frontmatter.
+   - `ModelResolver`: Resolução de cadeias de contingência de modelos xB (14B, 35B, >70B).
+2. **`execution` (`src/core/contexts/execution/`)**:
+   - `OpencodeServer`: Gerenciamento de ciclo de vida e proxies para instâncias de motores de inferência.
+   - `ExecutionDriver`: Execução de turnos, ferramentas, parsing de saídas e normalização de streaming.
+3. **`meetings` (`src/core/contexts/meetings/`)**:
+   - `MeetingManager`: Orquestração de reuniões deliberativas colegiadas, moderação e geração de atas oficiais com conversão automática para tasks.
+4. **`orchestration` (`src/core/contexts/orchestration/` e `src/core/domain/flow/`)**:
+   - `FlowStore`: Manipulação de grafos DAG n8n-style em JSON.
+   - `DagEngine`: Validação de adjacência, detecção de ciclos e avaliação de nós de fluxo.
+   - `TeamStore` & `TeamOrchestrator`: Padrões multi-agente (pipeline, fan-out, review, debate).
+5. **`platform` (`src/core/contexts/platform/`)**:
+   - `TelemetryCollector`: Coleta em memória (ring-buffer) de spans OpenTelemetry, cálculo de tokens e custos.
+6. **`scheduling` (`src/core/contexts/scheduling/` e `src/core/domain/scheduling/`)**:
+   - `SchedulerEngine`: Daemon contínuo de agendamentos temporais (cron e intervalos), com recarga atômica sem downtime.
+7. **`storage` (`src/core/contexts/storage/`)**:
+   - `SecretsStore`: Gerenciamento seguro de credenciais em disco com permissões `chmod 600`.
+   - `RegistryStore`: Repositório de documentos, decisões e registros corporativos.
+   - `OpencorpDb` / `CorpDb`: Camada de persistência em SQLite operando em modo WAL de alta performance.
+8. **`workspace` (`src/core/contexts/workspace/`)**:
+   - `WorkspaceManager`: Governança de workspaces isolados, templates de empresas (`.corp`) e sub-workspaces (`subcorp`).
+   - `WorkspaceGit`: Checkpoints automáticos, versionamento e reversão pontual de código.
+
+### Núcleo Compartilhado e Tratamento de Erros:
+- **Hierarquia de Exceções (`src/core/shared/errors.ts`)**: Baseada na classe raiz `OpencorpError`, com subclasses especializadas (`WorkspaceError`, `TaskError`, `FlowError`, etc.).
+- **Barramento de Eventos (`src/core/shared/event-bus.ts`)**: Comunicação desacoplada entre subsistemas.
+- **Padronização RFC 7807 (`src/server/http/problem-details.ts`)**: Respostas de erro da API serializadas em formato canônico `ProblemDetails`.
+
+---
+
+## 4. Os 7 Módulos Funcionais do OpenCorp
 
 A interface é organizada sob a pasta canônica `src/web/features/` em 7 módulos de missão crítica:
 
 ### Módulo 1: Tasks / Kanban Operacional (`src/web/features/tasks/`)
-- **Quadro de 4 Colunas**: `a_fazer` (todo), `fazendo` (in_progress), `revisao` (review / human-in-the-loop) e `feito` (done).
+- **Quadro de 4 Colunas Canônicas**: `backlog`, `fazendo`, `bloqueado` (review / HITL) e `feito`.
 - **Gaveta de Detalhes (`TaskDetailsDrawer`)**: Exibe histórico de interações, mensagens entre agentes, sub-tarefas filhas e execuções vinculadas com tempo de CPU e modelo utilizado.
 - **Human-In-The-Loop (HITL)**: Tarefas sensíveis permanecem bloqueadas até aprovação manual do operador, disparando o desbloqueio atômico.
 - **Agendador Cron Embutido**: Suporte a repetições periódicas configuradas diretamente no modal de criação.
@@ -65,7 +101,7 @@ A interface é organizada sob a pasta canônica `src/web/features/` em 7 módulo
 - **Governança de Modelos xB**: Dimensionamento de parâmetros conforme o porte da tarefa (mini-agentes determinísticos, redatores 14-35B e raciocínio >70B).
 
 ### Módulo 3: Workspace IDE (`src/web/features/workspace/`)
-- **Explorador de Arquivos (`FileTree`)**: Visualização em árvore com suporte à raiz completa do projeto (18+ pastas e arquivos) ou filtro seletivo de escopo.
+- **Explorador de Arquivos (`FileTree`)**: Visualização em árvore com suporte à raiz completa do projeto ou filtro seletivo de escopo.
 - **Editor Multi-Tab (`CodeEditorTabs`)**: Alternância dinâmica de abas com syntax highlighting, split-preview Markdown e suporte a visualização de mídia.
 - **Terminais Integrados (`WorkspaceTerminals`)**: 4 instâncias de shell interativo isolado para diagnósticos rápidos sem sair do navegador.
 
@@ -102,17 +138,17 @@ A interface é organizada sob a pasta canônica `src/web/features/` em 7 módulo
 
 ---
 
-## 4. App Shell & Secretário Executivo Residente
+## 5. App Shell & Secretário Executivo Residente
 
-O aplicativo é envolvido por [`AppLayout.tsx`](file:///home/j/Documentos/GitHub/opencorp/src/web/shared/layout/AppLayout.tsx), que provê:
+O aplicativo é envolvido por [`AppLayout.tsx`](src/web/shared/layout/AppLayout.tsx), que provê:
 - **Sidebar Fixa com 14 Rotas Oficiais**: Acesso imediato a todas as ferramentas corporativas com indicação de workspace ativo.
 - **Secretário Dock (`Ctrl+J`)**: O supervisor residente acessível de qualquer ponto do sistema via teclado ou botão de cabeçalho, com streaming contínuo sem bloquear o fluxo de trabalho principal.
 
 ---
 
-## 5. Diretrizes de Governança e Manutenibilidade
+## 6. Diretrizes de Governança e Manutenibilidade
 
-1. **Inviolabilidade dos 1.184 Testes**: Qualquer evolução arquitetural deve preservar 100% de sucesso nas 122 suítes de teste Vitest.
+1. **Inviolabilidade dos 1.203 Testes**: Qualquer evolução arquitetural deve preservar 100% de sucesso nos 126 arquivos de teste Vitest.
 2. **Zero Dependências Mortas**: O sistema não tolera pacotes órfãos ou frameworks paralelos descontinuados no bundle final.
 3. **Escrita Atômica em Disco**: Toda persistência em arquivo utiliza `writeFileAtomic` para evitar corrupção em falhas inesperadas.
 4. **Isolamento de Workspaces**: Um workspace jamais acessa credenciais, variáveis de ambiente ou diretórios físicos de outro workspace.

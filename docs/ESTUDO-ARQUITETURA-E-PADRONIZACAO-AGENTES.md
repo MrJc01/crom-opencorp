@@ -13,7 +13,7 @@ O **OpenCorp** é um Sistema Operacional para Empresas Autônomas (CLI-first com
 
 ```mermaid
 graph TD
-    User["Usuário / Operador Humano"] --> WebUI["Web UI (SolidJS / DaisyUI)"]
+    User["Usuário / Operador Humano"] --> WebUI["Web UI (React 19 / DaisyUI)"]
     User --> CLI["CLI (bin/opencorp.mjs)"]
     
     WebUI --> API["Servidor API REST + SSE (Porta 4100)"]

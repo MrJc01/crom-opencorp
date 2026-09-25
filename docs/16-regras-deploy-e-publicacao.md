@@ -16,7 +16,7 @@ Este documento estabelece as diretrizes de governança, ciclo de release e regra
 ## 📦 2. O que publicar em cada repositório?
 
 ### 🛠️ A. No Repositório Pessoal (`MrJc01/crom-opencorp`)
-* **Commits frequentes e incrementais:** Novas rotas, correções de bugs, ajustes de layout ou componentes SolidJS.
+* **Commits frequentes e incrementais:** Novas rotas, correções de bugs, ajustes de layout ou componentes React 19.
 * **Branches experimentais:** Novas integrações de motores (harnesses), provas de conceito e spikes.
 * **Rascunhos de documentação:** Planos técnicos (`PLANO-*.md`), handoffs de sessão e anotações arquiteturais.
 * **Testes exploratórios:** Testes de carga, validação de provedores LLM ou modelos novos.
@@ -46,7 +46,7 @@ npm test
 # 3. Executar testes ponta a ponta (E2E) com Playwright
 npx playwright test
 
-# 4. Compilar Backend (TypeScript) e Frontend Web (SolidJS/Vite)
+# 4. Compilar Backend (TypeScript) e Frontend Web (React 19 / Vite)
 npm run build
 ```
 
@@ -101,7 +101,7 @@ git push origin main
 git push crom main
 
 # 3. Se for uma nova versão de release, criar e enviar a tag:
-git tag -a v0.7.0 -m "Release v0.7.0: Suporte unificado a retry de execucoes, painel SolidJS e catalogo"
+git tag -a v0.7.0 -m "Release v0.7.0: Suporte unificado a retry de execucoes, painel React 19 e catalogo"
 git push crom v0.7.0
 ```
 
@@ -114,7 +114,7 @@ No servidor onde o OpenCorp roda como serviço de background (ex.: `systemd` use
 ### 1. Atualização do Servidor
 ```bash
 # Entrar no diretório do projeto
-cd /home/j/Documentos/GitHub/crom-worker-opencode
+cd /caminho/para/opencorp
 
 # Puxar as atualizações da branch principal oficial
 git pull crom main

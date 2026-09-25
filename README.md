@@ -5,7 +5,7 @@
 
   <p>
     <a href="LICENSE"><img src="https://img.shields.io/badge/licen%C3%A7a-MIT-blue.svg" alt="Licença MIT" /></a>
-    <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D20.0.0-green.svg" alt="Node.js" /></a>
+    <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D22.0.0-green.svg" alt="Node.js" /></a>
     <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/typescript-5.x-blue.svg" alt="TypeScript" /></a>
     <a href="https://opencode.ai"><img src="https://img.shields.io/badge/engine-OpenCode%20%7C%20Claude%20Code%20%7C%20Antigravity-orange.svg" alt="OpenCode" /></a>
   </p>
@@ -13,9 +13,9 @@
 
 O **OpenCorp** é um sistema operacional distribuído para governar empresas autônomas movidas por agentes de IA. Ele orquestra sessões de modelos de linguagem sobre múltiplos harnesses ([OpenCode](https://opencode.ai), [Claude Code](https://claude.ai), [Antigravity](https://github.com)), mantendo cada empresa (workspace) isolada com seu próprio banco de dados SQLite, sistema de segredos, arquivos de tarefas, registros e auditoria.
 
-> **Filosofia Core:** Tudo vive no sistema de arquivos em formatos legíveis e versionáveis (`.md`, `.json`, `.db`). O painel web reativo (React 19 + Assistant-UI + @xyflow/react + TailwindCSS v4 + DaisyUI 5) espelha 100% dos comandos do terminal.
+> **Filosofia Core:** Tudo vive no sistema de arquivos em formatos legíveis e versionáveis (`.md`, `.json`, `.db`). O painel web reativo (React 19, Tailwind CSS, @xyflow/react para Workflows, @assistant-ui/react para o Secretário) espelha 100% dos comandos do terminal através da arquitetura de rotas canônicas `/w/:workspaceId/*`.
 > 
-> 📖 Para a documentação técnica aprofundada dos 7 módulos e engenharia, consulte o [ARCHITECTURE.md](file:///home/j/Documentos/GitHub/opencorp/ARCHITECTURE.md).
+> 📖 Para a documentação técnica aprofundada dos 7 módulos e engenharia, consulte o [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
@@ -23,7 +23,7 @@ O **OpenCorp** é um sistema operacional distribuído para governar empresas aut
 
 * 🏛️ **Repositório Oficial (Organização):** [crom-org/opencorp](https://github.com/crom-org/opencorp) · Org: [crom-org](https://github.com/crom-org)
 * 🛠️ **Repositório de Desenvolvimento Ativo:** [MrJc01/crom-opencorp](https://github.com/MrJc01/crom-opencorp) · Mantenedor: [@MrJc01](https://github.com/MrJc01)
-* 📐 **Arquitetura Oficial:** [ARCHITECTURE.md](file:///home/j/Documentos/GitHub/opencorp/ARCHITECTURE.md)
+* 📐 **Arquitetura Oficial:** [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ---
 
@@ -60,7 +60,7 @@ flowchart TD
 
 ### Os 5 Pilares de uma Empresa no OpenCorp:
 1. **🤖 Secretário Executivo (`/secretario`)**: Seu braço direito com chat em tempo real via SSE. Ele tem permissões executivas completas (`@secretario-exec`) para investigar logs, rodar comandos no terminal, criar tarefas e resolver problemas de ponta a ponta.
-2. **📋 Tasks & Kanban (`/tasks`)**: O quadro de governança transparente baseado em SQLite (`tasks.db`). Funciona como a camada de persistência e consulta/auditoria de trabalho para operadores e agentes: tarefas fluem por `aguardando` → `fazendo` → `revisão/HITL` → `feito`. Ações sensíveis exigem aprovação humana (*Human-In-The-Loop*).
+2. **📋 Tasks & Kanban (`/tasks`)**: O quadro de governança transparente baseado em SQLite (`tasks.db`). Funciona como a camada de persistência e consulta/auditoria de trabalho para operadores e agentes: tarefas fluem por `backlog` → `fazendo` → `bloqueado` → `feito`. Ações sensíveis exigem aprovação humana (*Human-In-The-Loop*).
 3. **⚡ Fluxos & Studio Visual (`/fluxos`)**: O cérebro orquestrador das esteiras em grafo (estilo n8n). Conecte nós de gatilho (*Cron/Webhook*), nós de agentes especialistas (com seus respectivos prompts e contextos), nós de tarefas (*task_create*), decisões e scripts. Salvos em `.opencorp/flows/<id>.json`.
 4. **👥 Reuniões Multi-Agente (`/reunioes`)**: Mesa redonda onde agentes de diferentes papéis (CEO, Especialista SEO, Dev, Redator) debatem um desafio, geram uma ATA oficial e transformam deliberações automaticamente em novas Tasks no Kanban.
 5. **⏰ Scheduler & Daemon 24/7 (`opencorp scheduler`)**: O relógio do sistema que roda em background (tick a cada 15-30s), disparando gatilhos temporais para os Fluxos e rotinas com claim atômico e recarga instantânea de novos jobs sem downtime.
@@ -69,7 +69,7 @@ flowchart TD
 
 ## 📋 Pré-requisitos
 
-* **Node.js**: `>= 20.0.0` (recomendado Node 22+)
+* **Node.js**: `>= 22.0.0` (alinhado com `package.json`)
 * **npm** ou **pnpm**
 * **Git**
 * *(Opcional)* Runner do [OpenCode](https://opencode.ai) instalado no PATH para execução local (`opencode`).
@@ -111,7 +111,7 @@ Inicie o serviço de plataforma em background com o comando `opencorp serve` ou 
 opencorp serve --port 4100
 
 # Ou em foreground com logs ao vivo
-opencorp serve start --foreground --port 4100
+opencorp serve --foreground --port 4100
 
 # Ou instale como serviço permanente systemd à prova de reboot
 opencorp daemon install
@@ -204,14 +204,14 @@ O ecossistema OpenCorp adota uma arquitetura em duas camadas operacionais:
 > **Como escolher o comando certo:**
 > - **`oc <comando>`**: CLI ágil voltada para o trabalho cotidiano em workspaces e para agentes de IA autônomos.
 >   - **Detecção Automática por Pasta (`cwd`):** Se executado dentro da pasta de qualquer workspace (ou suas subpastas), o `oc` detecta e opera nele automaticamente, sem necessidade de passar parâmetros.
->   - **Alvo Explícito:** Se executado de fora, use `-t, --target <workspace>` (ou `-w, --workspace <workspace>`) para direcionar o comando (ex: `oc -t yt-factory-01 status`).
+>   - **Alvo Explícito:** Se executado de fora, use `-t, --target <workspace>` (ou `-w, --workspace <workspace>`) para direcionar o comando (ex: `oc -t meu-projeto status`).
 >   - **Guardrails de Proteção:** Comandos de infraestrutura global (`daemon`, `serve`, `init`) são bloqueados no `oc` com mensagens instrutivas para impedir que agentes de IA interfiram no host do sistema operacional.
 > - **`opencorp <comando>`**: CLI administrativa global da plataforma. Deve ser usada para gerenciar o supervisor de processos em segundo plano, subir o servidor central e governar o host.
 
 ### 1. ⚡ Execução & Interação com Agentes
 | Comando Operacional (`oc`) | Comando Global (`opencorp`) | Descrição | Exemplo de Uso |
 |---|---|---|---|
-| `oc run <ordem>` | `opencorp run <ordem>` | Dispara uma ordem para o agente executor padrão (ou especificado) | `oc run "Auditar rascunhos" -t yt-factory-01` |
+| `oc run <ordem>` | `opencorp run <ordem>` | Dispara uma ordem para o agente executor padrão (ou especificado) | `oc run "Auditar rascunhos" -t meu-projeto` |
 | `oc open [workspace]` | `opencorp open [workspace]` | Abre a TUI interativa do OpenCode com o ambiente isolado | `oc open` *(digite `/quit` para sair)* |
 | `oc secretario "<msg>"` | `opencorp secretario "<msg>"` | Conversa com o Secretário Executivo direto pelo terminal | `oc secretario "Como está a saúde das tarefas de hoje?"` |
 | `oc session list` | `opencorp session list` | Lista as sessões ativas e recentes dos agentes | `oc session list` |
@@ -253,7 +253,7 @@ O ecossistema OpenCorp adota uma arquitetura em duas camadas operacionais:
 | `opencorp task list` | `oc task list` | Lista as tarefas do Kanban com filtros opcionais | `oc task list --coluna backlog` |
 | `opencorp task create` | `oc task create` | Cria uma nova tarefa atribuível a humanos ou agentes | `opencorp task create --titulo "Configurar GA4" --prioridade alta` |
 | `opencorp task show <id>` | `oc task show <id>` | Exibe detalhes, histórico e mensagens de uma tarefa | `oc task show tsk-123` |
-| `opencorp task move <id> --coluna <coluna>` | `oc task move <id> --coluna <coluna>` | Move uma tarefa entre colunas (`backlog`, `fazendo`, `feito`) — coluna é flag obrigatória | `oc task move tsk-123 --coluna "fazendo"` |
+| `opencorp task move <id> --coluna <coluna>` | `oc task move <id> --coluna <coluna>` | Move uma tarefa entre colunas (`backlog`, `fazendo`, `bloqueado`, `feito`) — coluna é flag obrigatória | `oc task move tsk-123 --coluna "fazendo"` |
 | `opencorp task run <id>` | `oc task run <id>` | Despacha a task agora com o agente responsável | `oc task run tsk-123` |
 | `opencorp task assign <id> <agente>` | `oc task assign <id> <agente>` | Atribui a tarefa para um agente autônomo resolver | `oc task assign tsk-123 corretor-site` |
 | `opencorp task chat <id> --msg` | `oc task chat <id> --msg` | Adiciona comentário ou instrução no chat da tarefa | `oc task chat tsk-123 --msg "@corretor-site execute agora"` |
