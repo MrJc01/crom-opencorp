@@ -588,6 +588,13 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
   const wsId = options?.workspaceId ?? workspaceId ?? "default";
   const idSessaoAtiva = sessaoId ?? options?.sessaoId;
 
+  // Guarda se este componente montou originalmente como um draft (nova conversa)
+  const iniciouComoDraftRef = React.useRef<boolean>(
+    !idSessaoAtiva ||
+      idSessaoAtiva.startsWith("sessao-") ||
+      idSessaoAtiva.startsWith("draft-"),
+  );
+
   // Carregamento de mensagens iniciais persistidas (hidratação no F5 ou troca de aba)
   const [mensagensIniciais, setMensagensIniciais] = useState<
     ThreadMessageLike[] | undefined
@@ -604,6 +611,13 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
     if (options?.initialMessages) {
       setMensagensIniciais(options.initialMessages);
       setCarregandoHistorico(false);
+      return;
+    }
+
+    // Se este componente montou como um draft na aba ativa, as mensagens estão
+    // vivas no runtime local em memória. A promoção para o ID definitivo gerado
+    // pelo backend NÃO deve fazer fetch no servidor nem zerar a conversa.
+    if (iniciouComoDraftRef.current) {
       return;
     }
 
@@ -659,9 +673,15 @@ export const SecretarioChat: FC<SecretarioChatProps> = ({
     );
   }
 
+  // Se iniciou como draft, mantemos uma key interna imutável "chat-ativo" para que a
+  // promoção de ID não desmonte o runtime interno em voo.
+  const chaveInterna = iniciouComoDraftRef.current
+    ? "chat-ativo"
+    : `${idSessaoAtiva || "draft"}-${mensagensIniciais ? mensagensIniciais.length : 0}`;
+
   return (
     <SecretarioChatInterno
-      key={`${idSessaoAtiva || "draft"}-${mensagensIniciais ? mensagensIniciais.length : 0}`}
+      key={chaveInterna}
       runtimeProp={runtimeProp}
       workspaceId={wsId}
       sessaoId={idSessaoAtiva}

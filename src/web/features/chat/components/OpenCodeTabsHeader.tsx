@@ -15,6 +15,7 @@ import {
 
 export interface ChatTab {
   id: string;
+  tabKey?: string;
   titulo: string;
   criadoEm: number;
   ativa?: boolean;

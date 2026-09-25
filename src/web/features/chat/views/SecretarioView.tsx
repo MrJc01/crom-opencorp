@@ -10,6 +10,10 @@ import { SecretarioChat } from "../components/SecretarioChat.js";
 import { SecretarioSettingsDrawer } from "../components/SecretarioSettingsDrawer.js";
 import { obterAuthHeaders } from "../runtime/secretary-runtime-adapter.js";
 
+export function gerarTabKey(): string {
+  return `tab_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
 /**
  * Lê as abas salvas do workspace no localStorage.
  */
@@ -20,7 +24,12 @@ export function carregarAbasWorkspace(workspaceId: string): ChatTab[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.filter((t) => t && typeof t.id === "string");
+        return parsed
+          .filter((t) => t && typeof t.id === "string")
+          .map((t) => ({
+            ...t,
+            tabKey: t.tabKey || `tab_${t.id}`,
+          }));
       }
     }
   } catch {}
@@ -53,6 +62,7 @@ export const SecretarioView: FC = () => {
     const novoId = `sessao-${Date.now()}`;
     const inicial: ChatTab = {
       id: novoId,
+      tabKey: gerarTabKey(),
       titulo: "Nova conversa",
       criadoEm: Date.now(),
     };
@@ -91,6 +101,7 @@ export const SecretarioView: FC = () => {
       const novoId = `sessao-${Date.now()}`;
       const inicial: ChatTab = {
         id: novoId,
+        tabKey: gerarTabKey(),
         titulo: "Nova conversa",
         criadoEm: Date.now(),
       };
@@ -105,6 +116,7 @@ export const SecretarioView: FC = () => {
       if (!existe) {
         const novaAba: ChatTab = {
           id: sessaoParam,
+          tabKey: `tab_${sessaoParam}`,
           titulo: "Conversa",
           criadoEm: Date.now(),
         };
@@ -135,6 +147,7 @@ export const SecretarioView: FC = () => {
       if (prev.some((a) => a.id === sessaoParam)) return prev;
       const nova: ChatTab = {
         id: sessaoParam,
+        tabKey: `tab_${sessaoParam}`,
         titulo: "Conversa",
         criadoEm: Date.now(),
       };
@@ -163,6 +176,7 @@ export const SecretarioView: FC = () => {
     const novoId = `sessao-${Date.now()}`;
     const novaAba: ChatTab = {
       id: novoId,
+      tabKey: gerarTabKey(),
       titulo: "Nova conversa",
       criadoEm: Date.now(),
     };
@@ -194,6 +208,7 @@ export const SecretarioView: FC = () => {
           const novoId = `sessao-${Date.now()}`;
           const inicial: ChatTab = {
             id: novoId,
+            tabKey: gerarTabKey(),
             titulo: "Nova conversa",
             criadoEm: Date.now(),
           };
@@ -260,9 +275,21 @@ export const SecretarioView: FC = () => {
         let copia: ChatTab[];
         if (idx >= 0) {
           copia = [...prev];
-          copia[idx] = { ...copia[idx]!, id: realId };
+          copia[idx] = {
+            ...copia[idx]!,
+            id: realId,
+            tabKey: copia[idx]!.tabKey || `tab_${realId}`,
+          };
         } else {
-          copia = [...prev, { id: realId, titulo: "Conversa", criadoEm: Date.now() }];
+          copia = [
+            ...prev,
+            {
+              id: realId,
+              tabKey: `tab_${realId}`,
+              titulo: "Conversa",
+              criadoEm: Date.now(),
+            },
+          ];
         }
         salvarAbasWorkspace(wsId, copia);
         return copia;
@@ -281,6 +308,9 @@ export const SecretarioView: FC = () => {
     [sessaoAtivaId, setSearchParams, wsId],
   );
 
+  const abaAtiva = abas.find((a) => a.id === sessaoAtivaId) || abas[0];
+  const chatKey = abaAtiva?.tabKey || abaAtiva?.id || "default";
+
   return (
     <div className="flex flex-col h-full w-full bg-zinc-950 overflow-hidden relative">
       <OpenCodeTabsHeader
@@ -297,7 +327,7 @@ export const SecretarioView: FC = () => {
       />
       <div className="flex-1 min-h-0 overflow-hidden relative">
         <SecretarioChat
-          key={sessaoAtivaId || "default"}
+          key={chatKey}
           sessaoId={sessaoAtivaId || undefined}
           aoAtualizarTitulo={aoAtualizarTitulo}
           aoSessaoCriada={aoSessaoCriada}

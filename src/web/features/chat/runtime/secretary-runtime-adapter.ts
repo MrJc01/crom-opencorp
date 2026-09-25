@@ -416,13 +416,16 @@ export function useOpenCorpSecretarioRuntime(
   options: SecretaryRuntimeOptions = {},
 ): AssistantRuntime {
   const sessaoIdRef = useRef<string | undefined>(options.sessaoId);
-  sessaoIdRef.current = options.sessaoId;
+  if (options.sessaoId) {
+    sessaoIdRef.current = options.sessaoId;
+  }
 
-  // Adapter gerador com streaming contínuo
+  // Adapter gerador com streaming contínuo. Mantém a mesma instância mesmo se o sessaoId
+  // for promovido durante a conversa, lendo o ID atualizado diretamente via sessaoIdRef.
   const chatModelAdapter = useMemo(
     () => criarSecretarioModelAdapter(options, sessaoIdRef),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [options.sessaoId, options.workspaceId, options.agente, options.modelo],
+    [options.workspaceId, options.agente, options.modelo],
   );
 
   return useLocalRuntime(chatModelAdapter, {
