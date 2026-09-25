@@ -98,7 +98,7 @@ describe("obterListaRotacaoCompleta", () => {
     expect(lista[1]).toBe("meu-provider/fallback-1");
     expect(lista[2]).toBe("meu-provider/fallback-2");
     // Deve incluir contingência/workspace no final
-    expect(lista).toContain("opencode/nemotron-3-ultra-free");
+    expect(lista).toContain("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free");
   });
 
   it("não inclui rotação do workspace quando workspace_rotation_fallback é false", async () => {
@@ -125,4 +125,3 @@ describe("obterListaRotacaoCompleta", () => {
     expect(lista[1]).toBe("estrito/modelo-2");
   });
 });
-

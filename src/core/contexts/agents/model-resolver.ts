@@ -42,31 +42,14 @@ export function parsearModelo(modelo: string): ModeloParsed {
 }
 
 /**
- * Converte modelos legados conhecidos para seus equivalentes atuais e funcionais.
+ * Preserva o identificador canônico informado pelo catálogo atual.
+ *
+ * O OpenCode resolve provider/model diretamente. Reescrever modelos OpenRouter
+ * válidos para aliases de outro provedor pode trocar uma rota saudável por uma
+ * conta sem cota ou por um ID removido do catálogo.
  */
 export function normalizarModelo(modelo: string): string {
   const m = (modelo ?? "").trim();
-  if (!m) return m;
-
-  if (
-    m === "openrouter/nvidia/nemotron-3.5-lightning:free" ||
-    m === "nvidia/nemotron-3.5-lightning:free"
-  ) {
-    return "meta-llama/llama-3.3-70b-instruct:free";
-  }
-
-  if (
-    m === "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free" ||
-    m === "nvidia/nemotron-3-ultra-550b-a55b:free" ||
-    m === "opencode/nemotron-3-ultra-free"
-  ) {
-    return "deepseek/deepseek-r1:free";
-  }
-
-  if (m === "openrouter/z-ai/glm-5.2:free") {
-    return "opencode-go/glm-5.3-flash";
-  }
-
   return m;
 }
 

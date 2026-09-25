@@ -204,12 +204,12 @@ export const PADRAO_ERRO_CREDITOS =
   /requires more credits|can only afford|insufficient balance|payment_required|402|credit balance|billing_not_active|exceeded.*quota|insufficient.?credits|add (?:more )?credits|exceed.*credits/i;
 
 export const MODELOS_ROTACAO_PADRAO = [
-  "openrouter/minimax/minimax-m3:free",
-  "opencode/nemotron-3-ultra-free",
-  "openrouter/google/gemini-2.5-flash",
-  "openrouter/deepseek/deepseek-chat",
-  "opencode-go/glm-5.3-flash",
-  "openrouter/meta-llama/llama-3.3-70b-instruct",
+  "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+  "openrouter/thinkingmachines/inkling:free",
+  "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+  "openrouter/qwen/qwen3.8-27b:free",
+  "openrouter/cohere/north-mini-code:free",
+  "openrouter/nvidia/nemotron-3.5-lightning:free",
 ];
 
 const TETO_RUN_PADRAO_MIN = 20;
@@ -303,9 +303,11 @@ export const MODELOS_ROTACAO_POR_HARNESS: Record<string, string[]> = {
     "github/gpt-4o-mini",
   ],
   opencode: [
-    "opencode/nemotron-3-ultra-free",
-    "opencode/nemotron-3.5-lightning-free",
-    "opencode/big-pickle",
+    "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+    "openrouter/thinkingmachines/inkling:free",
+    "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+    "openrouter/qwen/qwen3.8-27b:free",
+    "openrouter/cohere/north-mini-code:free",
   ],
   "claude-code": [
     "claude-3-7-sonnet-20250219",
@@ -955,26 +957,9 @@ export class SessionManager {
     let execCwd = ws.path;
 
     if (driver.id === "opencode") {
-      // Normalização automática de modelos legados openrouter/ para modelos suportados pelo binário opencode
-      if (
-        modeloEfetivo === "openrouter/nvidia/nemotron-3.5-lightning:free" ||
-        modeloEfetivo === "nvidia/nemotron-3.5-lightning:free"
-      ) {
-        modeloEfetivo = "opencode-go/glm-5.3-flash";
-      } else if (
-        modeloEfetivo === "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free" ||
-        modeloEfetivo === "nvidia/nemotron-3-ultra-550b-a55b:free"
-      ) {
-        modeloEfetivo = "opencode/nemotron-3-ultra-free";
-      } else if (
-        modeloEfetivo === "openrouter/minimax/minimax-m3:free" ||
-        modeloEfetivo === "minimax/minimax-m3:free"
-      ) {
-        modeloEfetivo = "opencode-go/minimax-m3";
-      } else if (modeloEfetivo === "openrouter/z-ai/glm-5.2:free") {
-        modeloEfetivo = "opencode-go/glm-5.3-flash";
-      }
-
+      // Mantém o provider/model escolhido. O catálogo do OpenCode aceita
+      // OpenRouter diretamente e a troca silenciosa entre provedores quebrava
+      // a rota quando a conta OpenCode Go estava sem cota.
       args = [
         "run",
         "--auto",

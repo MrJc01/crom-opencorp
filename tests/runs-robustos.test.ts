@@ -336,9 +336,9 @@ describe("Rotação de modelo no retry (execa mockado)", () => {
     });
     expect(execaMock).toHaveBeenCalledTimes(2);
     expect(r.status).toBe("concluido");
-    expect(r.modelo).toBe("openrouter/meta-llama/llama-3.3-70b-instruct");
+    expect(r.modelo).toBe("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free");
     const [, args2] = execaMock.mock.calls[1]!;
-    expect(args2).toContain("openrouter/meta-llama/llama-3.3-70b-instruct");
+    expect(args2).toContain("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free");
 
     const registros = new RegistryStore();
     const metas = await registros.listar(ws.path, "execucoes");
@@ -351,7 +351,7 @@ describe("Rotação de modelo no retry (execa mockado)", () => {
     });
     expect(metaRetry.tags).toContain("retry");
     expect((metaRetry.extras!.gatilho as any).origem).toBe(
-      "sch-ciclo-1 · retry:openrouter/meta-llama/llama-3.3-70b-instruct",
+      "sch-ciclo-1 · retry:openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
     );
     expect(await lerJournal(ws.path, metaOriginal.id)).toContain("retry_modelo");
 
@@ -360,7 +360,7 @@ describe("Rotação de modelo no retry (execa mockado)", () => {
     expect(linhas).toHaveLength(2);
     const linhaRetry = linhas.find((l) => l.gatilho_origem.includes("retry"))!;
     expect(linhaRetry.gatilho_origem).toBe(
-      "sch-ciclo-1 · retry:openrouter/meta-llama/llama-3.3-70b-instruct",
+      "sch-ciclo-1 · retry:openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
     );
     expect(linhaRetry.status).toBe("concluido");
     db.fechar();

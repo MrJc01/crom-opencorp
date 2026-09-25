@@ -47,8 +47,10 @@ describe("helpers de modelos do Secretário", () => {
 
     expect(obterModelosDefensivos(home).modelos).toEqual([
       "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "openrouter/thinkingmachines/inkling:free",
       "openrouter/nvidia/nemotron-3.5-lightning:free",
       "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+      "openrouter/qwen/qwen3.8-27b:free",
     ]);
   });
 });

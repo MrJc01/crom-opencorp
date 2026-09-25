@@ -68,10 +68,10 @@ describe("Módulo Central de Resolução de Modelos e Isolamento de Workspace (4
   });
 
   describe("2. normalizarModelo & ehModeloGratuito", () => {
-    it("normaliza modelos legados para versões estáveis", () => {
-      expect(normalizarModelo("openrouter/nvidia/nemotron-3.5-lightning:free")).toBe("meta-llama/llama-3.3-70b-instruct:free");
-      expect(normalizarModelo("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free")).toBe("deepseek/deepseek-r1:free");
-      expect(normalizarModelo("openrouter/z-ai/glm-5.2:free")).toBe("opencode-go/glm-5.3-flash");
+    it("preserva IDs canônicos sem trocar silenciosamente de provedor", () => {
+      expect(normalizarModelo("openrouter/nvidia/nemotron-3.5-lightning:free")).toBe("openrouter/nvidia/nemotron-3.5-lightning:free");
+      expect(normalizarModelo("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free")).toBe("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free");
+      expect(normalizarModelo("openrouter/z-ai/glm-5.2:free")).toBe("openrouter/z-ai/glm-5.2:free");
     });
 
     it("identifica corretamente modelos gratuitos", () => {
