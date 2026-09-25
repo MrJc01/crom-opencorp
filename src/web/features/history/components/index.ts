@@ -9,3 +9,5 @@ export * from "./tabs/HistoryDiffTab.js";
 export * from "./tabs/HistoryFlowTab.js";
 export * from "./tabs/HistoryResultTab.js";
 export * from "./HistoryTaskDrawer.js";
+export * from "./HistoryRoutineDrawer.js";
+export * from "./HistoryConversationDrawer.js";

@@ -9,6 +9,8 @@ import {
   HistoryTable,
   HistoryInspectionDrawer,
   HistoryTaskDrawer,
+  HistoryRoutineDrawer,
+  HistoryConversationDrawer,
 } from "../components/index.js";
 
 export const HistoricoView: FC = () => {
@@ -17,6 +19,8 @@ export const HistoricoView: FC = () => {
 
   const runParam = searchParams.get("run");
   const taskParam = searchParams.get("task");
+  const rotinaParam = searchParams.get("rotina");
+  const conversaParam = searchParams.get("conversa");
   const tipoParam = searchParams.get("tipo") || "todos";
   const statusParam = searchParams.get("status") || "todos";
   const agenteParam = searchParams.get("agente") || "todos";
@@ -45,6 +49,8 @@ export const HistoricoView: FC = () => {
   // Estado do Item Selecionado e Detalhes da Gaveta Forense
   const [itemSelecionado, setItemSelecionado] = useState<ItemHistorico | null>(null);
   const [taskInspecaoId, setTaskInspecaoId] = useState<string | null>(null);
+  const [routineInspecaoId, setRoutineInspecaoId] = useState<string | null>(null);
+  const [conversaInspecaoId, setConversaInspecaoId] = useState<string | null>(null);
   const [logRun, setLogRun] = useState<string>("");
   const [acoesRun, setAcoesRun] = useState<AcaoAgente[]>([]);
   const [diffRun, setDiffRun] = useState<string>("");
@@ -324,6 +330,24 @@ export const HistoricoView: FC = () => {
     }
   }, [taskParam]);
 
+  // Sincroniza deep-link ?rotina=<id>
+  useEffect(() => {
+    if (rotinaParam) {
+      setRoutineInspecaoId(rotinaParam.replace(/^(job-|rotina-)/, ""));
+    } else {
+      setRoutineInspecaoId(null);
+    }
+  }, [rotinaParam]);
+
+  // Sincroniza deep-link ?conversa=<id>
+  useEffect(() => {
+    if (conversaParam) {
+      setConversaInspecaoId(conversaParam.replace(/^(conv-|conversa-|sessao-)/, ""));
+    } else {
+      setConversaInspecaoId(null);
+    }
+  }, [conversaParam]);
+
   const fecharInspecao = () => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -340,6 +364,39 @@ export const HistoricoView: FC = () => {
       return next;
     });
     setTaskInspecaoId(null);
+  };
+
+  const fecharInspecaoRoutine = () => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("rotina");
+      return next;
+    });
+    setRoutineInspecaoId(null);
+  };
+
+  const fecharInspecaoConversa = () => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("conversa");
+      return next;
+    });
+    setConversaInspecaoId(null);
+  };
+
+  const fecharTodosDrawers = () => {
+    setItemSelecionado(null);
+    setTaskInspecaoId(null);
+    setRoutineInspecaoId(null);
+    setConversaInspecaoId(null);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("run");
+      next.delete("task");
+      next.delete("rotina");
+      next.delete("conversa");
+      return next;
+    });
   };
 
   // ── Controles Operacionais Ativos ─────────────────────────────────────
@@ -436,25 +493,51 @@ export const HistoricoView: FC = () => {
         itemSelecionadoId={
           itemSelecionado?.id ||
           (taskInspecaoId ? `task-${taskInspecaoId}` : null) ||
-          taskInspecaoId
+          taskInspecaoId ||
+          (routineInspecaoId ? `job-${routineInspecaoId}` : null) ||
+          routineInspecaoId ||
+          (conversaInspecaoId ? `conv-${conversaInspecaoId}` : null) ||
+          conversaInspecaoId
         }
         onSelecionarItem={(it) => {
           if (it.tipo === "task") {
-            if (itemSelecionado) fecharInspecao();
+            fecharTodosDrawers();
             const idLimpo = it.id.replace(/^task-/, "");
             setTaskInspecaoId(idLimpo);
             setSearchParams((prev) => {
               const next = new URLSearchParams(prev);
               next.delete("run");
+              next.delete("rotina");
+              next.delete("conversa");
               next.set("task", idLimpo);
               return next;
             });
           } else if (it.tipo === "rotina") {
-            showToast("Inspeção de rotinas/scheduler será liberada no próximo micro-passo", "info");
+            fecharTodosDrawers();
+            const idLimpo = it.id.replace(/^(job-|rotina-)/, "");
+            setRoutineInspecaoId(idLimpo);
+            setSearchParams((prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete("run");
+              next.delete("task");
+              next.delete("conversa");
+              next.set("rotina", idLimpo);
+              return next;
+            });
           } else if (it.tipo === "conversa") {
-            showToast("Histórico de conversas da Secretária em breve", "info");
+            fecharTodosDrawers();
+            const idLimpo = it.id.replace(/^(conv-|conversa-|sessao-)/, "");
+            setConversaInspecaoId(idLimpo);
+            setSearchParams((prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete("run");
+              next.delete("task");
+              next.delete("rotina");
+              next.set("conversa", idLimpo);
+              return next;
+            });
           } else {
-            if (taskInspecaoId) fecharInspecaoTask();
+            fecharTodosDrawers();
             void abrirInspecao(it.id);
           }
         }}
@@ -489,6 +572,24 @@ export const HistoricoView: FC = () => {
           fecharInspecaoTask();
           void abrirInspecao(execId);
         }}
+      />
+
+      {/* Gaveta Lateral de Inspeção de Rotinas (Scheduler) */}
+      <HistoryRoutineDrawer
+        aberto={Boolean(routineInspecaoId)}
+        rotinaId={routineInspecaoId}
+        aoFechar={fecharInspecaoRoutine}
+        aoAbrirExecucao={(execId) => {
+          fecharInspecaoRoutine();
+          void abrirInspecao(execId);
+        }}
+      />
+
+      {/* Gaveta Lateral de Conversas (Secretário) */}
+      <HistoryConversationDrawer
+        aberto={Boolean(conversaInspecaoId)}
+        sessaoId={conversaInspecaoId}
+        aoFechar={fecharInspecaoConversa}
       />
     </div>
   );
