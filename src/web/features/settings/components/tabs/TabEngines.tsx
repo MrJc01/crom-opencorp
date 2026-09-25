@@ -23,6 +23,7 @@ import {
   Edit3,
   X,
   Star,
+  Copy,
 } from "lucide-react";
 import { showToast } from "../../../../shared/ui/Toast.js";
 import { useOpenCorp } from "../../../../providers/OpenCorpProvider.js";
@@ -53,6 +54,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
   const [salvandoLimites, setSalvandoLimites] = useState(false);
   const [testandoMotor, setTestandoMotor] = useState<string | null>(null);
   const [resultadoTeste, setResultadoTeste] = useState<Record<string, any>>({});
+  const [comandoMimoCopiado, setComandoMimoCopiado] = useState(false);
 
   // Controle de abertura do EngineAuthModal
   const [modalAuthAberto, setModalAuthAberto] = useState(false);
@@ -111,6 +113,18 @@ export const TabEngines: FC<TabEnginesProps> = ({
   }, [carregarDados]);
 
   const motores: MotorInfo[] = statusMotores?.motores || [];
+  const comandoInstalacaoMimo = "curl -fsSL https://mimo.xiaomi.com/install | bash";
+
+  const copiarComandoMimo = async () => {
+    if (!navigator.clipboard) {
+      showToast("Área de transferência indisponível neste navegador.", "aviso");
+      return;
+    }
+    await navigator.clipboard.writeText(comandoInstalacaoMimo);
+    setComandoMimoCopiado(true);
+    showToast("Comando de instalação do MiMo copiado!", "sucesso");
+    setTimeout(() => setComandoMimoCopiado(false), 2000);
+  };
 
   const motorAtual = motores.find((m) => m.id === motorSelecionado) || motores[0];
   const contasDoMotor: ContaMotor[] = (statusMotores?.contas || []).filter(
@@ -365,7 +379,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {motores.map((m) => {
               const isSel = m.id === motorAtual?.id;
-              const isAutenticado = m.authStatus?.authenticated || m.contaAtiva || m.id === "opencode";
+              const isAutenticado = m.authStatus?.authenticated || m.contaAtiva || m.id === "opencode" || (m.id === "mimo" && m.installed);
 
               return (
                 <div
@@ -438,6 +452,11 @@ export const TabEngines: FC<TabEnginesProps> = ({
                           {motorAtual.category}
                         </span>
                       )}
+                      {motorAtual.id === "mimo" && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full border border-sky-800/60 bg-sky-950/40 text-sky-300 font-semibold">
+                          Tier Gratuito Oficial / Sem Login
+                        </span>
+                      )}
                       {motorAtual.installed ? (
                         motorAtual.ativo ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 font-semibold">
@@ -478,7 +497,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
                       ) : (
                         <Download size={13} />
                       )}
-                      <span>Instalar Motor</span>
+                      <span>{motorAtual.id === "mimo" ? "Instalar via Script" : "Instalar Motor"}</span>
                     </button>
                   )}
 
@@ -571,6 +590,30 @@ export const TabEngines: FC<TabEnginesProps> = ({
                     )}
                     <span>Instalar Agora</span>
                   </button>
+                </div>
+              )}
+
+              {motorAtual.id === "mimo" && !motorAtual.installed && (
+                <div className="flex flex-col gap-2 p-3 rounded-xl border border-sky-800/40 bg-sky-950/20 text-xs text-sky-200">
+                  <span className="font-semibold">Instalação oficial do Xiaomi MiMo Code</span>
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-[11px] text-emerald-400">
+                    <code className="select-all overflow-x-auto">$ {comandoInstalacaoMimo}</code>
+                    <button
+                      type="button"
+                      onClick={() => void copiarComandoMimo()}
+                      className="shrink-0 rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                      title="Copiar comando de instalação"
+                    >
+                      {comandoMimoCopiado ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {motorAtual.id === "mimo" && motorAtual.installed && (
+                <div className="flex items-center gap-2 p-3 rounded-xl border border-emerald-800/40 bg-emerald-950/20 text-xs text-emerald-200">
+                  <Check size={15} className="shrink-0 text-emerald-400" />
+                  <span><strong>Pronto para executar</strong> — versão {motorAtual.version || "detectada"}</span>
                 </div>
               )}
 

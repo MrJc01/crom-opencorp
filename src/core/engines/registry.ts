@@ -7,6 +7,7 @@ import { CursorDriver } from "./drivers/cursor-driver.js";
 import { CopilotDriver } from "./drivers/copilot-driver.js";
 import { CodexDriver } from "./drivers/codex-driver.js";
 import { AiderDriver } from "./drivers/aider-driver.js";
+import { MimoDriver } from "./drivers/mimo-driver.js";
 
 export interface EngineSummary {
   id: string;
@@ -35,6 +36,7 @@ export class EngineRegistry {
     this.register(new CopilotDriver());
     this.register(new CodexDriver());
     this.register(new AiderDriver());
+    this.register(new MimoDriver());
   }
 
   public static getInstance(): EngineRegistry {

@@ -195,7 +195,9 @@ export const EngineAuthModal: FC<EngineAuthModalProps> = ({
       setMostrarToken(false);
 
       // Define aba inicial: web se suportado, senão chave
-      if (isWebSupported) {
+      if (motorId === "mimo") {
+        setAbaModal("cli");
+      } else if (isWebSupported) {
         setAbaModal("web");
       } else {
         setAbaModal("chave");
@@ -244,6 +246,18 @@ export const EngineAuthModal: FC<EngineAuthModalProps> = ({
 
   // Obter instruções estáticas ou dinâmicas
   const obterInstrucoes = () => {
+    if (motorId === "mimo") {
+      return {
+        title: "Xiaomi MiMo Code",
+        cliCommand: "curl -fsSL https://mimo.xiaomi.com/install | bash",
+        envVar: "Nenhuma chave necessária",
+        url: "https://mimo.xiaomi.com/coder",
+        urlText: "MiMo Code",
+        desc: "O Xiaomi MiMo Code não exige chave de API nem login obrigatório no plano gratuito padrão. Execute o comando oficial para provisionar o binário e teste a prontidão em seguida.",
+        webPrompt: "Instale o MiMo Code pelo script oficial; nenhuma autenticação é obrigatória no tier gratuito.",
+      };
+    }
+
     if (instrucoesBackend) {
       return {
         title: instrucoesBackend.title || motorNome || motorId,
@@ -635,18 +649,20 @@ export const EngineAuthModal: FC<EngineAuthModalProps> = ({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={() => setAbaModal("chave")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-              abaModal === "chave"
-                ? "bg-zinc-800 text-zinc-100 border border-zinc-700/60 shadow-xs"
-                : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
-            }`}
-          >
-            <KeyRound size={13} />
-            <span>Token / Chave Manual</span>
-          </button>
+          {motorId !== "mimo" && (
+            <button
+              type="button"
+              onClick={() => setAbaModal("chave")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                abaModal === "chave"
+                  ? "bg-zinc-800 text-zinc-100 border border-zinc-700/60 shadow-xs"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+              }`}
+            >
+              <KeyRound size={13} />
+              <span>Token / Chave Manual</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -1046,10 +1062,12 @@ export const EngineAuthModal: FC<EngineAuthModalProps> = ({
                   <span className="font-bold block">
                     {testResult?.healthy
                       ? "Motor Autenticado e Pronto para Execução"
-                      : "Autenticação Necessária"}
+                      : motorId === "mimo" ? "Instalação Necessária" : "Autenticação Necessária"}
                   </span>
                   <span className="text-[11px] opacity-90 block">
-                    {testResult?.statusText || "Execute o comando de autenticação no terminal ou conecte uma conta direta."}
+                    {testResult?.statusText || (motorId === "mimo"
+                      ? "Execute o script oficial de instalação e teste a prontidão novamente."
+                      : "Execute o comando de autenticação no terminal ou conecte uma conta direta.")}
                   </span>
                 </div>
               </div>

@@ -1,0 +1,198 @@
+import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { delimiter, join } from "node:path";
+import {
+  safeExecFile as execFileAsync,
+  type EngineDriver,
+  type EngineExecutionOptions,
+  type EngineHealth,
+  type EngineInstallStatus,
+  type EngineTokenUsage,
+} from "../types.js";
+
+const INSTALL_COMMAND = "curl -fsSL https://mimo.xiaomi.com/install | bash";
+
+export class MimoDriver implements EngineDriver {
+  id = "mimo";
+  name = "Xiaomi MiMo Code";
+  description = "Assistente de código e agente de execução autônomo da Xiaomi com modelos multimodais de contexto ilimitado";
+  category = "cli" as const;
+  maintainer = "Xiaomi";
+  supportedModelsHint = ["xiaomi/mimo-v2.6-pro", "xiaomi/mimo-v2.5"];
+  comandoPadrao = "mimo";
+
+  private candidatePaths(homeDir: string): string[] {
+    const pathCandidates = (process.env.PATH || "")
+      .split(delimiter)
+      .filter(Boolean)
+      .map((dir) => join(dir, "mimo"));
+
+    return [
+      ...pathCandidates,
+      join(homeDir, ".mimo", "bin", "mimo"),
+      // O instalador oficial atual usa ~/.mimocode; mantemos também o caminho
+      // solicitado/legado ~/.mimo para compatibilidade entre versões.
+      join(homeDir, ".mimocode", "bin", "mimo"),
+    ];
+  }
+
+  async isInstalled(homeDir: string): Promise<EngineInstallStatus> {
+    for (const candidate of [...new Set(this.candidatePaths(homeDir))]) {
+      if (!existsSync(candidate)) continue;
+
+      try {
+        const { stdout } = await execFileAsync(candidate, ["--version"], { timeout: 3000 });
+        return {
+          installed: true,
+          isManaged: candidate.startsWith(join(homeDir, ".mimo")) || candidate.startsWith(join(homeDir, ".mimocode")),
+          path: candidate,
+          version: stdout.trim() || "detectado",
+        };
+      } catch {
+        return {
+          installed: true,
+          isManaged: candidate.startsWith(join(homeDir, ".mimo")) || candidate.startsWith(join(homeDir, ".mimocode")),
+          path: candidate,
+          version: "detectado",
+        };
+      }
+    }
+
+    return {
+      installed: false,
+      isManaged: false,
+      path: null,
+      version: null,
+      details: "Binário mimo não encontrado no sistema",
+    };
+  }
+
+  async install(
+    homeDir: string,
+    onProgress?: (msg: string) => void,
+  ): Promise<{ success: boolean; path: string; version: string; log: string }> {
+    onProgress?.("Instalando Xiaomi MiMo Code com o script oficial...");
+
+    const logParts: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn("bash", ["-c", INSTALL_COMMAND], {
+        env: { ...process.env, HOME: homeDir },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const timeout = setTimeout(() => {
+        child.kill("SIGTERM");
+        reject(new Error("A instalação do MiMo excedeu o limite de 120 segundos"));
+      }, 120000);
+
+      const capture = (chunk: Buffer) => {
+        const text = chunk.toString();
+        logParts.push(text);
+        onProgress?.(text.trimEnd());
+      };
+      child.stdout.on("data", capture);
+      child.stderr.on("data", capture);
+      child.once("error", (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+      child.once("close", (code) => {
+        clearTimeout(timeout);
+        if (code === 0) resolve();
+        else reject(new Error(`O instalador oficial do MiMo encerrou com código ${code ?? "desconhecido"}\n${logParts.join("")}`));
+      });
+    });
+
+    const status = await this.isInstalled(homeDir);
+    if (!status.installed || !status.path) {
+      throw new Error("Instalação concluída, mas o binário mimo não foi encontrado no PATH, em ~/.mimo/bin ou em ~/.mimocode/bin");
+    }
+
+    return {
+      success: true,
+      path: status.path,
+      version: status.version || "detectado",
+      log: `Xiaomi MiMo Code instalado com sucesso em ${status.path}\n${logParts.join("")}`,
+    };
+  }
+
+  async checkHealth(homeDir: string): Promise<EngineHealth & {
+    installed: boolean;
+    version?: string | null;
+    message?: string;
+  }> {
+    const status = await this.isInstalled(homeDir);
+    if (!status.installed || !status.path) {
+      return {
+        healthy: false,
+        installed: false,
+        version: null,
+        message: "Binário mimo não encontrado no sistema",
+        statusText: "Binário mimo não encontrado no sistema",
+        details: { installed: false },
+      };
+    }
+
+    const startedAt = Date.now();
+    try {
+      const { stdout } = await execFileAsync(status.path, ["--version"], { timeout: 3000 });
+      const version = stdout.trim() || status.version || "detectado";
+      return {
+        healthy: true,
+        installed: true,
+        version,
+        statusText: `OK — Xiaomi MiMo Code ${version}`,
+        latencyMs: Date.now() - startedAt,
+        details: { installed: true, path: status.path, version, isManaged: status.isManaged },
+      };
+    } catch (error: any) {
+      return {
+        healthy: false,
+        installed: true,
+        version: status.version,
+        message: `Falha ao executar ${status.path}: ${error?.message || error}`,
+        statusText: `Falha ao executar ${status.path}: ${error?.message || error}`,
+        latencyMs: Date.now() - startedAt,
+        details: { installed: true, path: status.path },
+      };
+    }
+  }
+
+  getAuthInstructions(): string {
+    return "O Xiaomi MiMo Code não exige chave de API nem login obrigatório no plano gratuito padrão. Execute curl -fsSL https://mimo.xiaomi.com/install | bash no terminal para provisionar o binário.";
+  }
+
+  async prepareExecution(opts: EngineExecutionOptions): Promise<{
+    binary: string;
+    args: string[];
+    env: Record<string, string>;
+    cwd: string;
+  }> {
+    const status = await this.isInstalled(opts.homeDir);
+    return {
+      binary: status.path || this.comandoPadrao,
+      args: ["run", "--dangerously-skip-permissions", opts.prompt],
+      env: {
+        ...(process.env as Record<string, string>),
+        ...(opts.envOverrides || {}),
+      },
+      cwd: opts.workspacePath,
+    };
+  }
+
+  async fetchLiveTokens(homeDir: string): Promise<EngineTokenUsage> {
+    const status = await this.isInstalled(homeDir);
+    return {
+      motorId: this.id,
+      motorName: this.name,
+      source: status.installed ? "cli_live" : "unconfigured",
+      provedor: "Xiaomi MiMo Code",
+      tokensDisponiveis: status.installed ? "ilimitado" : 0,
+      statusCota: status.installed ? "normal" : "desconhecido",
+      mensagem: status.installed
+        ? `MiMo Code ${status.version || "detectado"} pronto no tier gratuito oficial`
+        : "Binário mimo não encontrado no sistema",
+      consultadoEm: new Date().toISOString(),
+      detalhes: { path: status.path, installed: status.installed },
+    };
+  }
+}
