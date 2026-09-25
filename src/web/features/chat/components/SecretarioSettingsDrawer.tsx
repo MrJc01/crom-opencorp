@@ -181,7 +181,7 @@ export const SecretarioSettingsDrawer: FC<SecretarioSettingsDrawerProps> = ({
         }),
         fetch(`${origin}/settings/modelos?workspace=${encodeURIComponent(workspaceId)}`, {
           ...opcoes,
-          body: JSON.stringify({ default_model: modeloPrincipal, rotation: listaRotacao, escopo: "workspace" }),
+          body: JSON.stringify({ rotation: listaRotacao, escopo: "workspace" }),
         }),
       ]);
       if (respostas.some((res) => !res.ok)) throw new Error("Falha ao persistir configurações do Secretário");
