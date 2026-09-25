@@ -108,12 +108,38 @@ describe("EngineRegistry & Multi-Engine Drivers", () => {
     const res = await fetch(`http://127.0.0.1:${serverPort}/api/motores/opencode/test`, {
       method: "POST",
     });
-    expect(res.status).toBe(200);
-
     const data = (await res.json()) as any;
-    expect(data.ok).toBe(true);
     expect(data.motorId).toBe("opencode");
     expect(data.health).toBeDefined();
+    expect(data.ok).toBe(data.health.healthy);
+    expect(res.status).toBe(data.health.healthy ? 200 : 503);
+    expect(typeof data.ms).toBe("number");
+  });
+
+  it("nunca deve expor tokenOuChave nos DTOs públicos de contas", async () => {
+    const token = "sk-segredo-que-nao-pode-vazar";
+    const createRes = await fetch(`http://127.0.0.1:${serverPort}/api/motores/opencode/contas`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nome: "Conta sanitizada", tokenOuChave: token }),
+    });
+    expect(createRes.status).toBe(201);
+    const criada = (await createRes.json()) as any;
+    expect(criada.conta.tokenOuChave).toBeUndefined();
+    expect(criada.conta.possuiToken).toBe(true);
+    expect(JSON.stringify(criada)).not.toContain(token);
+
+    const listRes = await fetch(`http://127.0.0.1:${serverPort}/engine-accounts`);
+    expect(listRes.status).toBe(200);
+    const listada = (await listRes.json()) as any;
+    expect(listada.contas[0].tokenOuChave).toBeUndefined();
+    expect(listada.contas[0].possuiToken).toBe(true);
+    expect(JSON.stringify(listada)).not.toContain(token);
+
+    const statusRes = await fetch(`http://127.0.0.1:${serverPort}/api/motores`);
+    expect(statusRes.status).toBe(200);
+    const status = (await statusRes.json()) as any;
+    expect(JSON.stringify(status)).not.toContain(token);
   });
 
   it("cada módulo adaptador de motor deve implementar fetchLiveTokens sem cálculos cegos", async () => {

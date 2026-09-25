@@ -38,6 +38,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
   const { client, tratarErro } = useOpenCorp();
   const [statusMotores, setStatusMotores] = useState<any>(null);
   const [carregando, setCarregando] = useState(false);
+  const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
   const [motorSelecionado, setMotorSelecionado] = useState<string>("opencode");
   const [limites, setLimites] = useState<Record<string, any>>({});
   const [salvandoLimites, setSalvandoLimites] = useState(false);
@@ -46,25 +47,27 @@ export const TabEngines: FC<TabEnginesProps> = ({
 
   const carregarDados = useCallback(async () => {
     setCarregando(true);
+    setErroCarregamento(null);
     try {
       const [resMotores, resLimites] = await Promise.all([
-        client.http.get<any>("/api/motores").catch(async () => {
-          return client.http.get<any>("/motores").catch(() => null);
-        }),
-        client.http.get<any>("/api/motores/limites").catch(() => null),
+        client.http.get<any>("/api/motores"),
+        client.http.get<any>("/api/motores/limites"),
       ]);
 
-      if (resMotores) {
-        setStatusMotores(resMotores);
-        if (resMotores.limits) {
-          setLimites(resMotores.limits);
-        }
+      if (!resMotores || !Array.isArray(resMotores.motores)) {
+        throw new Error("Resposta inválida ao carregar os motores");
       }
-      if (resLimites && typeof resLimites === "object") {
-        setLimites((prev) => ({ ...prev, ...resLimites }));
+      setStatusMotores(resMotores);
+      if (resMotores.limits) {
+        setLimites(resMotores.limits);
       }
-    } catch {
-      // Falha silenciosa com fallback
+      if (resLimites?.limites && typeof resLimites.limites === "object") {
+        setLimites((prev) => ({ ...prev, ...resLimites.limites }));
+      }
+    } catch (err: unknown) {
+      setStatusMotores(null);
+      setLimites({});
+      setErroCarregamento(err instanceof Error ? err.message : String(err));
     } finally {
       setCarregando(false);
     }
@@ -74,40 +77,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
     void carregarDados();
   }, [carregarDados]);
 
-  const motores: MotorInfo[] = statusMotores?.motores || [
-    {
-      id: "opencode",
-      name: "OpenCode Engine",
-      description: "Runtime nativo de execução com sandbox e suporte multi-modelo",
-      installed: true,
-      ativo: true,
-      authStatus: { authenticated: true, method: "Nativo" },
-    },
-    {
-      id: "crom-agente",
-      name: "Crom-Agente Engine (Go)",
-      description: "Runtime Go nativo compilado para raciocínio em alta velocidade e loops ReAct",
-      installed: true,
-      ativo: false,
-      authStatus: { authenticated: true, method: "Binário Isolado" },
-    },
-    {
-      id: "antigravity",
-      name: "Google Antigravity Engine (AGY)",
-      description: "Plataforma de orquestração agêntica avançada com sidecars e MCP integrado",
-      installed: true,
-      ativo: false,
-      authStatus: { authenticated: true, method: "AGY SDK" },
-    },
-    {
-      id: "claude-code",
-      name: "Claude Code CLI",
-      description: "Agente oficial da Anthropic para engenharia de software no terminal",
-      installed: true,
-      ativo: false,
-      authStatus: { authenticated: true, method: "Claude OAuth" },
-    },
-  ];
+  const motores: MotorInfo[] = statusMotores?.motores || [];
 
   const motorAtual = motores.find((m) => m.id === motorSelecionado) || motores[0];
   const contasDoMotor: ContaMotor[] = (statusMotores?.contas || []).filter(
@@ -117,21 +87,28 @@ export const TabEngines: FC<TabEnginesProps> = ({
   const testarMotor = async (motorId: string) => {
     setTestandoMotor(motorId);
     try {
-      const res = await client.http.post<any>(`/api/motores/${encodeURIComponent(motorId)}/test`, {})
-        .catch(async () => {
-          return client.http.post<any>("/llm/test", { model: motorId });
-        });
+      const res = await client.http.post<any>(
+        `/api/motores/${encodeURIComponent(motorId)}/test`,
+        {},
+      );
 
       setResultadoTeste((prev) => ({ ...prev, [motorId]: res }));
-      if (res?.ok) {
-        showToast(`Motor ${motorId} respondendo (${res.ms || 0}ms)!`, "sucesso");
+      if (res?.ok && res?.health?.healthy) {
+        const latencia = res.ms ?? res.health?.latencyMs ?? 0;
+        showToast(`Motor ${motorId} respondendo (${latencia}ms)!`, "sucesso");
       } else {
-        showToast(`Motor respondeu: ${res?.error || res?.mensagem || "OK"}`, "sucesso");
+        const causa = res?.health?.message || res?.health?.statusText || res?.error || "Diagnóstico sem causa informada";
+        setResultadoTeste((prev) => ({
+          ...prev,
+          [motorId]: { ...res, ok: false, error: causa },
+        }));
+        showToast(`Falha no motor ${motorId}: ${causa}`, "erro");
       }
     } catch (err: unknown) {
+      const causa = err instanceof Error ? err.message : String(err);
       setResultadoTeste((prev) => ({
         ...prev,
-        [motorId]: { ok: false, error: String(err) },
+        [motorId]: { ok: false, error: causa },
       }));
       tratarErro(err, `Falha ao testar motor ${motorId}`);
     } finally {
@@ -201,6 +178,27 @@ export const TabEngines: FC<TabEnginesProps> = ({
               </button>
             </div>
           </div>
+
+          {erroCarregamento && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-rose-800/60 bg-rose-950/30 p-4 text-xs text-rose-200">
+              <div className="flex items-start gap-2">
+                <AlertCircle size={16} className="mt-0.5 shrink-0 text-rose-400" />
+                <div>
+                  <p className="font-semibold">Falha ao carregar motores</p>
+                  <p className="mt-0.5 text-rose-300/80">{erroCarregamento}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={carregando}
+                onClick={carregarDados}
+                className="flex items-center justify-center gap-1.5 rounded-lg border border-rose-700/60 bg-rose-900/40 px-3 py-1.5 font-semibold text-rose-100 transition-colors hover:bg-rose-900/70 disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={carregando ? "animate-spin" : ""} />
+                Tentar novamente
+              </button>
+            </div>
+          )}
 
           {/* Grid de Motores Cadastrados */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -283,6 +281,28 @@ export const TabEngines: FC<TabEnginesProps> = ({
                   </button>
                 </div>
               </div>
+
+              {resultadoTeste[motorAtual.id] && (
+                <div
+                  className={`flex items-start gap-2 rounded-xl border p-3 text-xs ${
+                    resultadoTeste[motorAtual.id]?.ok && resultadoTeste[motorAtual.id]?.health?.healthy
+                      ? "border-emerald-800/60 bg-emerald-950/30 text-emerald-300"
+                      : "border-rose-800/60 bg-rose-950/30 text-rose-300"
+                  }`}
+                >
+                  {resultadoTeste[motorAtual.id]?.ok && resultadoTeste[motorAtual.id]?.health?.healthy ? (
+                    <Check size={14} className="mt-0.5 shrink-0" />
+                  ) : (
+                    <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                  )}
+                  <span>
+                    {resultadoTeste[motorAtual.id]?.health?.statusText ||
+                      resultadoTeste[motorAtual.id]?.health?.message ||
+                      resultadoTeste[motorAtual.id]?.error ||
+                      "Diagnóstico do motor indisponível"}
+                  </span>
+                </div>
+              )}
 
               {/* Contas / Perfis de Execução do Motor */}
               <div className="space-y-2">

@@ -13,6 +13,7 @@ import {
   EngineAccountStore,
   WebLoginOrchestrator,
 } from "../../core/engines/index.js";
+import type { EngineAccount } from "../../core/engines/engine-account-store.js";
 import { listarProvedoresStatus, testarModeloDirect, completarChatDirect } from "../../core/contexts/execution/llm-client.js";
 import type { SecretOrigem } from "../../core/contexts/storage/secrets-store.js";
 import type { RouteContext } from "./types.js";
@@ -58,6 +59,15 @@ export async function detectarOpencodeInfo(homeDir: string) {
     versao: versao || "1.18.x (detectado)",
     home_isolado: dirOpencodeHome(homeDir),
     data_dir: dirOpencodeData(homeDir),
+  };
+}
+
+/** Projeção segura para respostas HTTP. Credenciais cruas ficam restritas ao backend. */
+function sanitizarContaEngine(conta: EngineAccount) {
+  const { tokenOuChave, ...contaPublica } = conta;
+  return {
+    ...contaPublica,
+    possuiToken: Boolean(tokenOuChave?.trim()),
   };
 }
 
@@ -385,13 +395,14 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
     }
 
     const todasContas = await accts.listar();
+    const contasPublicas = todasContas.map(sanitizarContaEngine);
     const limitesMotores = await accts.obterLimitesMotores();
     const incluirTokens = rota.includes("/status") || url.searchParams.get("tokens") === "true" || url.searchParams.get("liveTokens") === "true";
     const tokensAoVivo: Record<string, any> = incluirTokens
       ? await engineRegistry.fetchAllLiveTokens(home).catch(() => ({}))
       : {};
     const motoresComDetalhes = motores.map((m) => {
-      const contasMotor = todasContas.filter((c) => c.motorId === m.id);
+      const contasMotor = contasPublicas.filter((c) => c.motorId === m.id);
       const contaAtiva = contasMotor.find((c) => c.ativa) || contasMotor[0] || null;
       return {
         ...m,
@@ -422,7 +433,7 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
         data_workspace: join(home, ".opencorp", "opencode-data", ws.id),
       },
       motores: motoresComDetalhes,
-      contas: todasContas,
+      contas: contasPublicas,
       limits: limitesMotores,
       tokens: tokensAoVivo,
       provedores,
@@ -485,7 +496,7 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
   // GET /engine-accounts ou /api/motores/contas
   if ((rota === "/engine-accounts" || rota === "/api/motores/contas") && req.method === "GET") {
     const lista = await accts.listar();
-    enviar(res, 200, { ok: true, contas: lista });
+    enviar(res, 200, { ok: true, contas: lista.map(sanitizarContaEngine) });
     return true;
   }
 
@@ -521,7 +532,7 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
     const motorId = decodeURIComponent(mContasMotor[1]!);
     if (req.method === "GET") {
       const contas = await accts.listar(motorId);
-      enviar(res, 200, { ok: true, motorId, contas });
+      enviar(res, 200, { ok: true, motorId, contas: contas.map(sanitizarContaEngine) });
       return true;
     }
     if (req.method === "POST") {
@@ -539,7 +550,7 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
         return true;
       }
       const novaConta = await accts.adicionarConta(motorId, corpo);
-      enviar(res, 201, { ok: true, motorId, conta: novaConta });
+      enviar(res, 201, { ok: true, motorId, conta: sanitizarContaEngine(novaConta) });
       return true;
     }
   }
@@ -560,7 +571,7 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
     const contaId = decodeURIComponent(mLimitesConta[2]!);
     const corpo = (await lerCorpo(req)) as any;
     const atualizada = await accts.atualizarLimitesConta(contaId, corpo);
-    enviar(res, 200, { ok: true, conta: atualizada });
+    enviar(res, 200, { ok: true, conta: sanitizarContaEngine(atualizada) });
     return true;
   }
 
@@ -666,7 +677,14 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
       return true;
     }
     const health = await driver.checkHealth(home);
-    enviar(res, 200, { ok: true, motorId, health });
+    const mensagemErro = health.statusText || "Motor indisponível ou não autenticado";
+    enviar(res, health.healthy ? 200 : 503, {
+      ok: health.healthy,
+      motorId,
+      health,
+      ms: health.latencyMs ?? 0,
+      ...(health.healthy ? {} : { erro: mensagemErro }),
+    });
     return true;
   }
 

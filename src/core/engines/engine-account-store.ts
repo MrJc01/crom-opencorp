@@ -121,7 +121,7 @@ export class EngineAccountStore {
   }
 
   private async salvarArquivoContas(contas: EngineAccount[]): Promise<void> {
-    await writeFileAtomic(this.filePath, `${JSON.stringify(contas, null, 2)}\n`);
+    await writeFileAtomic(this.filePath, `${JSON.stringify(contas, null, 2)}\n`, { mode: 0o600 });
   }
 
   public async listar(motorId?: string): Promise<EngineAccount[]> {
@@ -211,7 +211,7 @@ export class EngineAccountStore {
       if (existsSync(authPath)) {
         const auth = JSON.parse(readFileSync(authPath, "utf8"));
         aplicarEmAuth(auth);
-        await writeFileAtomic(authPath, `${JSON.stringify(auth, null, 2)}\n`);
+        await writeFileAtomic(authPath, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
       }
       const wsBase = join(this.homeDir, ".opencorp", "opencode-data", "workspaces");
       if (existsSync(wsBase)) {
@@ -223,7 +223,7 @@ export class EngineAccountStore {
               try {
                 const wsAuth = JSON.parse(readFileSync(wsAuthPath, "utf8"));
                 aplicarEmAuth(wsAuth);
-                await writeFileAtomic(wsAuthPath, `${JSON.stringify(wsAuth, null, 2)}\n`);
+                await writeFileAtomic(wsAuthPath, `${JSON.stringify(wsAuth, null, 2)}\n`, { mode: 0o600 });
               } catch {}
             }
           }

@@ -137,7 +137,10 @@ export async function handleKeysRoutes(ctx: RouteContext): Promise<boolean> {
       : authOpencodePath(h);
     const { auth } = lerAuth(authPath);
     try {
-      await writeFileAtomic(authPath, `${JSON.stringify(fundirAuth(auth, provider, key), null, 2)}\n`, { encoding: "utf8" });
+      await writeFileAtomic(authPath, `${JSON.stringify(fundirAuth(auth, provider, key), null, 2)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
     } catch (erro) {
       enviar(res, 500, { erro: `falha ao gravar auth.json: ${erro instanceof Error ? erro.message : String(erro)}` });
       return true;
@@ -166,7 +169,12 @@ export async function handleKeysRoutes(ctx: RouteContext): Promise<boolean> {
     const { [provider]: _removida, ...resto } = auth;
     try {
       if (Object.keys(resto).length === 0) rmSync(authPath, { force: true });
-      else await writeFileAtomic(authPath, `${JSON.stringify(resto, null, 2)}\n`, { encoding: "utf8" });
+      else {
+        await writeFileAtomic(authPath, `${JSON.stringify(resto, null, 2)}\n`, {
+          encoding: "utf8",
+          mode: 0o600,
+        });
+      }
     } catch (erro) {
       enviar(res, 500, { erro: `falha ao gravar auth.json: ${erro instanceof Error ? erro.message : String(erro)}` });
       return true;
