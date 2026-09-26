@@ -130,6 +130,10 @@ export class EngineRegistry {
   }
 
   public resolveAdapter(harness?: string): EngineAdapter {
+    const id = (harness || "opencode").trim().toLowerCase();
+    const direct = this.adapters.get(id);
+    if (direct) return direct;
+
     const driver = this.resolveDriver(harness);
     const adapter = this.adapters.get(driver.id);
     if (adapter) return adapter;

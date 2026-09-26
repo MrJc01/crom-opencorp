@@ -65,6 +65,19 @@ export const SecretarioSettingsDrawer: FC<SecretarioSettingsDrawerProps> = ({
 
   // Estados de teste de conectividade
   const [testando, setTestando] = useState<boolean>(false);
+  const [motorInfo, setMotorInfo] = useState<{
+    engineId: string;
+    nome?: string;
+    origem: string;
+    suportaConversa: boolean;
+    preflight?: {
+      ok: boolean;
+      installed: boolean;
+      authenticated: boolean;
+      issues: string[];
+      recommendation?: string;
+    };
+  } | null>(null);
   const [resultadoTeste, setResultadoTeste] = useState<{
     ok: boolean;
     msg: string;
@@ -90,6 +103,16 @@ export const SecretarioSettingsDrawer: FC<SecretarioSettingsDrawerProps> = ({
       .then((data) => {
         if (Array.isArray(data)) {
           setAgentes(data);
+        }
+      })
+      .catch(() => {});
+
+    // Carrega status e motor do Secretário
+    fetch(`${origin}/secretario/status?workspace=${encodeURIComponent(workspaceId)}`, { headers })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.motor) {
+          setMotorInfo(data.motor);
         }
       })
       .catch(() => {});
@@ -132,11 +155,34 @@ export const SecretarioSettingsDrawer: FC<SecretarioSettingsDrawerProps> = ({
       const latencia = Date.now() - inicio;
 
       if (res.ok) {
-        setResultadoTeste({
-          ok: true,
-          msg: `Conexão estabelecida com sucesso. Motor operacional.`,
-          latencyMs: latencia,
-        });
+        const data = await res.json().catch(() => null);
+        const m = data?.motor;
+        if (m) {
+          setMotorInfo(m);
+          const nomeMotor = m.nome || m.engineId || "padrão";
+          const origemStr = m.origem === "workspace_override" ? "override do workspace" : "padrão global";
+          if (m.preflight && !m.preflight.ok) {
+            const motivos = m.preflight.issues?.join("; ") || "preflight reprovado";
+            const dica = m.preflight.recommendation ? ` Dica: ${m.preflight.recommendation}` : "";
+            setResultadoTeste({
+              ok: false,
+              msg: `Motor [${nomeMotor}] (${origemStr}): ${motivos}.${dica}`,
+              latencyMs: latencia,
+            });
+          } else {
+            setResultadoTeste({
+              ok: true,
+              msg: `Motor [${nomeMotor}] (${origemStr}) operacional e pronto para conversação.`,
+              latencyMs: latencia,
+            });
+          }
+        } else {
+          setResultadoTeste({
+            ok: true,
+            msg: `Conexão estabelecida com sucesso. Motor operacional.`,
+            latencyMs: latencia,
+          });
+        }
       } else {
         setResultadoTeste({
           ok: false,
@@ -273,6 +319,42 @@ export const SecretarioSettingsDrawer: FC<SecretarioSettingsDrawerProps> = ({
               <p className="text-[11px] text-zinc-400 leading-snug">
                 Informe 1 modelo por linha na ordem de prioridade. Em caso de esgotamento de cotas, rate limit ou timeout, o motor rotaciona automaticamente.
               </p>
+            </div>
+          </div>
+
+          {/* Motor Conversacional Efetivo */}
+          <div className="space-y-1.5 pt-1 border-t border-zinc-800/80">
+            <div className="flex items-center justify-between">
+              <label className="font-medium text-zinc-300 block">Motor Conversacional Ativo</label>
+              {motorInfo && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/60 font-mono">
+                  {motorInfo.origem === "workspace_override" ? "Override do Workspace" : "Padrão Global"}
+                </span>
+              )}
+            </div>
+            <div className="p-2.5 rounded-lg bg-zinc-900/60 border border-zinc-800/90 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${motorInfo?.preflight?.ok ? "bg-emerald-400 animate-pulse" : motorInfo ? "bg-amber-400" : "bg-zinc-500"}`} />
+                <div>
+                  <span className="font-semibold text-zinc-200">
+                    {motorInfo?.nome || motorInfo?.engineId || "OpenCode Engine"}
+                  </span>
+                  <p className="text-[10px] text-zinc-400">
+                    {motorInfo?.suportaConversa
+                      ? "Suporte nativo a sessões contínuas"
+                      : "Sem suporte conversacional interativo"}
+                  </p>
+                </div>
+              </div>
+              <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${
+                motorInfo?.preflight?.ok
+                  ? "bg-emerald-950/40 text-emerald-300 border border-emerald-800/50"
+                  : motorInfo
+                  ? "bg-amber-950/40 text-amber-300 border border-amber-800/50"
+                  : "bg-zinc-800 text-zinc-400"
+              }`}>
+                {motorInfo?.preflight?.ok ? "Pronto" : motorInfo ? "Atenção" : "Pendente"}
+              </span>
             </div>
           </div>
 

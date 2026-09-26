@@ -9,11 +9,33 @@ import type { HttpClient } from "../http-client.js";
 
 // ── Tipos de resposta ───────────────────────────────────────────────
 
+export interface SecretarioMotorPreflight {
+  ok: boolean;
+  installed: boolean;
+  binaryPath?: string | null;
+  authenticated: boolean;
+  authMethod?: string;
+  supportsConversation: boolean;
+  issues: string[];
+  recommendation?: string;
+}
+
+export interface SecretarioMotorInfo {
+  engineId: string;
+  nome?: string;
+  origem: "workspace_override" | "global_default" | "legacy_default";
+  suportaConversa: boolean;
+  preflight?: SecretarioMotorPreflight;
+  erro?: string | null;
+}
+
 export interface SecretarioStatus {
   rodando: boolean;
-  porta?: number;
-  pid?: number;
+  configurado?: boolean;
+  porta?: number | null;
+  pid?: number | null;
   iniciado_em?: string;
+  motor?: SecretarioMotorInfo;
   [key: string]: unknown;
 }
 

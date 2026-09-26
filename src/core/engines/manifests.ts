@@ -25,6 +25,7 @@ export interface EngineCapabilityManifest {
   name: string;
   transport: EngineTransport;
   features: Record<FeatureKey, FeatureCapability>;
+  supportsConversation?: boolean;
   details?: Record<string, unknown>;
 }
 
@@ -35,6 +36,13 @@ export function isCapabilityAvailable(
   const cap = manifest?.features?.[feature];
   if (!cap) return false;
   return cap.level === "integrated" || cap.level === "verified";
+}
+
+export function manifestSupportsConversation(manifest: EngineCapabilityManifest): boolean {
+  if (typeof manifest.supportsConversation === "boolean") {
+    return manifest.supportsConversation;
+  }
+  return manifest.features?.continuation?.level !== "unsupported";
 }
 
 export class InvalidEngineManifestError extends EngineError {
@@ -100,6 +108,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     engineId: "opencode",
     name: "OpenCode Engine",
     transport: "http_server",
+    supportsConversation: true,
     features: {
       streaming: { level: "integrated", notes: "Via SSE do servidor HTTP" },
       continuation: { level: "integrated", flags: ["--session", "--continue"] },
@@ -115,6 +124,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     engineId: "codex",
     name: "OpenAI Codex CLI",
     transport: "spawn_cli",
+    supportsConversation: true,
     features: {
       streaming: { level: "declared", flags: ["--jsonl"] },
       continuation: { level: "declared", flags: ["resume"] },
@@ -130,6 +140,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     engineId: "claude-code",
     name: "Anthropic Claude Code",
     transport: "spawn_cli",
+    supportsConversation: true,
     features: {
       streaming: { level: "declared", flags: ["--verbose"] },
       continuation: { level: "declared", flags: ["--resume", "--continue"] },
@@ -145,6 +156,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     engineId: "antigravity",
     name: "Google Antigravity (AGY)",
     transport: "spawn_cli",
+    supportsConversation: true,
     features: {
       streaming: { level: "declared" },
       continuation: { level: "declared", flags: ["--conversation", "--continue"] },
@@ -160,6 +172,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     engineId: "copilot",
     name: "GitHub Copilot CLI",
     transport: "spawn_cli",
+    supportsConversation: true,
     features: {
       streaming: { level: "declared" },
       continuation: { level: "declared", flags: ["--resume", "--continue", "--session-id"] },
@@ -175,6 +188,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     engineId: "cursor",
     name: "Cursor Agent CLI",
     transport: "spawn_cli",
+    supportsConversation: true,
     features: {
       streaming: { level: "declared" },
       continuation: { level: "declared", flags: ["--resume", "--continue"] },
@@ -190,6 +204,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     engineId: "crom-agente",
     name: "Crom-Agente (Go)",
     transport: "spawn_cli",
+    supportsConversation: true,
     features: {
       streaming: { level: "integrated", notes: "Streaming de chunks no stdout" },
       continuation: { level: "integrated", flags: ["--session"] },
@@ -205,6 +220,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     engineId: "aider",
     name: "Aider CLI",
     transport: "spawn_cli",
+    supportsConversation: false,
     features: {
       streaming: { level: "unsupported" },
       continuation: { level: "unsupported", notes: "Sem resume/continue nativo por flag" },
@@ -220,6 +236,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     engineId: "mimo",
     name: "Xiaomi MiMo Code",
     transport: "spawn_cli",
+    supportsConversation: false,
     features: {
       streaming: { level: "unsupported" },
       continuation: { level: "unsupported", notes: "Sem continuação nativa por flag de sessão" },

@@ -203,7 +203,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 2 | `RuntimeConfig`, erros e tradutor legado | ✅ Concluída | `feat(config): isolate legacy runtime configuration translation` | 4 arquivos focados (64 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 3 | Contratos e eventos canônicos | ✅ Concluída | `refactor(engines): introduce runtime ports and canonical agent events` | 6 arquivos focados (87 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 4 | `ProcessRegistry` | ✅ Concluída | `feat(runtime): add workspace-isolated process registry and idle shutdown` | 7 arquivos focados (96 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
-| 5 | Resolução do runtime conversacional | ⬜ Pendente | — | — |
+| 5 | Resolução do runtime conversacional | ✅ Concluída | `feat(secretary): resolve configurable conversation runtime explicitly` | 8 arquivos focados (106 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 6 | Adaptador OpenCode completo | ⬜ Pendente | — | — |
 | 7 | Secretário independente de OpenCode | ⬜ Pendente | — | — |
 | 8 | Codex como segundo runtime | ⬜ Pendente | — | — |
@@ -598,31 +598,52 @@ EngineUnavailableError
 
 ### Tarefas
 
-- [ ] Criar `ConversationRuntimeResolver`.
-- [ ] Consultar override do workspace.
-- [ ] Consultar default global.
-- [ ] Validar registro do motor.
-- [ ] Validar `ConversationRuntime` no manifesto.
-- [ ] Executar preflight de binário/SDK.
-- [ ] Verificar autenticação sem inferência destrutiva.
-- [ ] Retornar diagnóstico acionável.
-- [ ] Proibir fallback implícito.
-- [ ] Expor motor efetivo e origem da configuração na API.
-- [ ] Expor estado na UI sem chamar todo runtime de OpenCode.
+- [x] Criar `ConversationRuntimeResolver`.
+- [x] Consultar override do workspace.
+- [x] Consultar default global.
+- [x] Validar registro do motor.
+- [x] Validar `ConversationRuntime` no manifesto.
+- [x] Executar preflight de binário/SDK.
+- [x] Verificar autenticação sem inferência destrutiva.
+- [x] Retornar diagnóstico acionável.
+- [x] Proibir fallback implícito.
+- [x] Expor motor efetivo e origem da configuração na API.
+- [x] Expor estado na UI sem chamar todo runtime de OpenCode.
 
 ### Testes
 
-- [ ] Herança global.
-- [ ] Override por workspace.
-- [ ] Motor inexistente.
-- [ ] Motor instalado, mas sem runtime conversacional.
-- [ ] Motor não autenticado.
-- [ ] Nenhum caso troca para OpenCode silenciosamente.
+- [x] Herança global.
+- [x] Override por workspace.
+- [x] Motor inexistente.
+- [x] Motor instalado, mas sem runtime conversacional.
+- [x] Motor não autenticado.
+- [x] Nenhum caso troca para OpenCode silenciosamente.
 
 ### Critérios de aceite
 
-- [ ] O runtime do Secretário pode ser resolvido sem importar OpenCode.
-- [ ] Erros orientam seleção, instalação ou login corretos.
+- [x] O runtime do Secretário pode ser resolvido sem importar OpenCode.
+- [x] Erros orientam seleção, instalação ou login corretos.
+
+### Registro de execução
+
+- **Limite / baseline da etapa:** worktree limpo no commit `18e52c6`, zero processos órfãos (`fake-opencode` = 0; PID 7238 preservado), `git fsck --connectivity-only` íntegro.
+- **Implementações realizadas:**
+  - `src/core/engines/conversation-resolver.ts`: `ConversationRuntimeResolver` com resolução rigorosa seguindo a ordem de precedência: `workspace.conversationEngineOverride` -> `settings.default_conversation_engine` -> `EngineUnavailableError`. Preflight funcional sem inferência destrutiva (validação de binário via installer, autenticação via authenticator/credentials bridge e manifesto de conversação via `manifestSupportsConversation`).
+  - `src/core/engines/manifests.ts`: adição de `supportsConversation` na interface `EngineCapabilityManifest`, declaração explícita nos 9 manifestos canônicos e função helper `manifestSupportsConversation`.
+  - `src/core/engines/registry.ts`: `resolveAdapter` atualizado para checar o mapa de adaptadores diretos antes do lookup legado de drivers.
+  - `src/core/engines/index.ts`: exportação canônica de `./conversation-resolver.js`.
+  - `src/server/routes/secretario/daemon.ts`: integração de `ConversationRuntimeResolver` em `GET /secretario/status` (expondo objeto estruturado `motor` com `engineId`, `origem`, `preflight`) e `GET /secretario/contexto` (utilizando o motor conversacional real ativo).
+  - `src/sdk/resources/secretary.ts`: tipagem de `SecretarioMotorInfo` e `SecretarioMotorPreflight` em `SecretarioStatus`.
+  - `src/web/features/chat/components/SecretarioSettingsDrawer.tsx`: exibição visual do motor conversacional ativo do workspace, origem da configuração e diagnóstico acionável de preflight com feedback em tempo real.
+  - `tests/conversation-engine-resolver.test.ts`: 10 testes cobrindo herança global, override do workspace, override pontual, motor inexistente, motor sem capacidade conversacional, motor não autenticado, ausência de binário, helper standalone, erro de configuração e proibição absoluta de fallback silencioso.
+- **Validação de qualidade:**
+  - `npx vitest run tests/conversation-engine-resolver.test.ts` (10 testes PASS);
+  - 8 arquivos focados da migração (106 testes PASS);
+  - `npx tsc --noEmit` (backend) PASS;
+  - `npx tsc --noEmit -p tsconfig.web.json` (frontend) PASS;
+  - `npm run build` PASS (9.41s);
+  - Auditoria de processos: zero `fake-opencode` órfãos (0→0); processo 7238 escutando na porta 4096 intacto;
+  - Integridade git: `git fsck --connectivity-only` aprovado sem erros.
 
 ### Commit sugerido
 
