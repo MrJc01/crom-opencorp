@@ -1,6 +1,11 @@
 import { resolverModelos } from "./helpers.js";
 import type { RouteContext } from "../types.js";
-import { ConversationRuntimeResolver, type ConversationResolutionResult } from "../../../core/engines/index.js";
+import { ConversationRuntimeResolver } from "../../../core/engines/conversation-resolver.js";
+import { formatProcessKey, ProcessRegistry } from "../../../core/runtime/index.js";
+import {
+  obterRuntimeSecretario,
+  statusRuntimeSecretario,
+} from "./runtime-service.js";
 
 export async function handleDaemonRoutes(ctx: RouteContext): Promise<boolean> {
   const { req, res, url, rota, resolverWs, enviar, tasks, agentes, opencodeServer } = ctx;
@@ -14,62 +19,56 @@ export async function handleDaemonRoutes(ctx: RouteContext): Promise<boolean> {
       wsPath = ws?.path;
     } catch {}
 
-    const resolver = new ConversationRuntimeResolver({ homeDir: ctx.homeDir });
-    let resolucao: ConversationResolutionResult | null = null;
-    let erroResolucao: string | null = null;
-    try {
-      resolucao = await resolver.resolve({
-        workspaceId: wsId,
-        workspaceDir: wsPath,
-        strict: false,
-      });
-    } catch (err) {
-      erroResolucao = err instanceof Error ? err.message : String(err);
-    }
-
-    let statusTradicional = {
-      rodando: false,
-      configurado: false,
-      porta: null as number | null,
-      pid: null as number | null,
-    };
-
-    if (opencodeServer && (!resolucao || resolucao.engineId === "opencode")) {
-      try {
-        const st = await opencodeServer.status();
-        const conf = await opencodeServer.configurado();
-        statusTradicional = { ...st, configurado: conf };
-      } catch {}
-    }
-
-    enviar(res, 200, {
-      ...statusTradicional,
-      configurado: resolucao ? resolucao.preflight.ok : statusTradicional.configurado,
-      motor: resolucao
-        ? {
-            engineId: resolucao.engineId,
-            nome: resolucao.adapter.name,
-            origem: resolucao.source,
-            suportaConversa: resolucao.preflight.supportsConversation,
-            preflight: resolucao.preflight,
-          }
-        : {
-            engineId: "unknown",
-            erro: erroResolucao,
-          },
-    });
+    const status = await statusRuntimeSecretario(ctx, wsId, wsPath);
+    enviar(res, 200, status);
     return true;
   }
 
   if (rota === "/secretario/start" && req.method === "POST") {
-    if (!opencodeServer) {
-      enviar(res, 500, { erro: "servidor do motor de IA não configurado" });
+    let ws: { id: string; path: string } | undefined;
+    try {
+      ws = await resolverWs(url);
+    } catch {}
+
+    const resolver = ctx.conversationRuntimeResolver ?? new ConversationRuntimeResolver({ homeDir: ctx.homeDir });
+    let resolucao = ws
+      ? await resolver.resolve({ workspaceId: ws.id, workspaceDir: ws.path, strict: false }).catch(() => null)
+      : null;
+    const motor = resolucao?.engineId ?? "opencode";
+
+    // 1. Se o motor resolvido for OpenCode e houver opencodeServer, usa o servidor legado
+    if (motor === "opencode" && opencodeServer) {
+      try {
+        const { pid, porta } = await opencodeServer.iniciar();
+        const status = await opencodeServer.status();
+        enviar(res, 200, { pid, porta, agentes: status.rodando ? "configurados" : 0, motor: "opencode" });
+        return true;
+      } catch (erro) {
+        if (!ws) {
+          const mensagem = erro instanceof Error ? erro.message : String(erro);
+          enviar(res, 500, { erro: `falha ao iniciar secretário: ${mensagem}` });
+          return true;
+        }
+      }
+    }
+
+    // 2. Se for outro motor ou não houver opencodeServer, resolve via runtime conversacional genérico
+    if (!ws) {
+      enviar(res, 500, { erro: "servidor do motor de IA não configurado e workspace não resolvido" });
       return true;
     }
+
     try {
-      const { pid, porta } = await opencodeServer.iniciar();
-      const status = await opencodeServer.status();
-      enviar(res, 200, { pid, porta, agentes: status.rodando ? "configurados" : 0 });
+      const { resolution, engineId } = await obterRuntimeSecretario(ctx, ws, false);
+      const key = formatProcessKey({ engineId, workspaceId: ws.id });
+      const proc = ProcessRegistry.getInstance().get(key);
+
+      enviar(res, 200, {
+        pid: proc?.pid ?? null,
+        porta: proc?.port ?? null,
+        agentes: resolution.preflight.ok ? "configurados" : 0,
+        motor: engineId,
+      });
     } catch (erro) {
       const mensagem = erro instanceof Error ? erro.message : String(erro);
       enviar(res, 500, { erro: `falha ao iniciar secretário: ${mensagem}` });
@@ -78,11 +77,30 @@ export async function handleDaemonRoutes(ctx: RouteContext): Promise<boolean> {
   }
 
   if (rota === "/secretario/stop" && req.method === "POST") {
-    if (!opencodeServer) {
-      enviar(res, 200, { ok: true });
-      return true;
+    let ws: { id: string; path: string } | undefined;
+    try {
+      ws = await resolverWs(url);
+    } catch {}
+
+    if (opencodeServer) {
+      try {
+        await opencodeServer.parar();
+      } catch {}
     }
-    await opencodeServer.parar();
+
+    if (ws) {
+      try {
+        const resolver = ctx.conversationRuntimeResolver ?? new ConversationRuntimeResolver({ homeDir: ctx.homeDir });
+        const resolucao = await resolver.resolve({ workspaceId: ws.id, workspaceDir: ws.path, strict: false });
+        if (resolucao?.engineId) {
+          await ProcessRegistry.getInstance().terminate(
+            { engineId: resolucao.engineId, workspaceId: ws.id },
+            "stop"
+          );
+        }
+      } catch {}
+    }
+
     enviar(res, 200, { ok: true });
     return true;
   }
@@ -95,7 +113,7 @@ export async function handleDaemonRoutes(ctx: RouteContext): Promise<boolean> {
 
     let motorAtivo = motorPadrao;
     try {
-      const resolver = new ConversationRuntimeResolver({ homeDir: ctx.homeDir });
+      const resolver = ctx.conversationRuntimeResolver ?? new ConversationRuntimeResolver({ homeDir: ctx.homeDir });
       const resCtx = await resolver.resolve({ workspaceId: ws.id, workspaceDir: ws.path, strict: false });
       if (resCtx?.engineId) {
         motorAtivo = resCtx.engineId;

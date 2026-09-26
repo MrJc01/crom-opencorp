@@ -15,6 +15,8 @@ import {
 import { construirContextoWorkspace } from "./context-builder.js";
 import { resolverMencoes } from "./mentions.js";
 import { processarSlash, textoAjudaSlash } from "./slash.js";
+import { obterRuntimeSecretario } from "./runtime-service.js";
+import { opencorpHome } from "../../../utils/paths.js";
 import type { RouteContext } from "../types.js";
 
 export async function handleConversaRoutes(ctx: RouteContext): Promise<boolean> {
@@ -112,7 +114,45 @@ export async function handleConversaRoutes(ctx: RouteContext): Promise<boolean> 
         return true;
       }
 
-      const porta = await obterPorta(ctx);
+      const runtimeCtx = await obterRuntimeSecretario(ctx, ws, false);
+      if (runtimeCtx.engineId !== "opencode") {
+        const contextoWs = await construirContextoWorkspace(ws);
+        const mensagemComWs = `${contextoWs}\n${mensagem}`;
+        const home = ctx.homeDir ?? opencorpHome();
+
+        const ref = await runtimeCtx.runtime.create({
+          conversationId: corpo.sessao_id,
+          workspaceId: ws.id,
+          workspacePath: ws.path,
+          model: corpo.modelo || corpo.model || "default",
+          homeDir: home,
+          title: mensagem.slice(0, 60),
+        });
+
+        let respostaTexto = "";
+        for await (const event of runtimeCtx.runtime.send(ref, { text: mensagemComWs })) {
+          if (event.type === "message.delta") {
+            respostaTexto += event.text;
+          } else if (event.type === "run.completed") {
+            if (event.result.output && !respostaTexto) {
+              respostaTexto = event.result.output;
+            }
+          }
+        }
+
+        enviar(res, 200, {
+          ok: true,
+          sessao_id: ref.id,
+          resposta: respostaTexto,
+          content: respostaTexto,
+          agente: agenteResolvido,
+          modelo: corpo.modelo || corpo.model || "default",
+          motor: runtimeCtx.engineId,
+        });
+        return true;
+      }
+
+      const porta = await obterPorta(ctx, true, ws.id);
       let sessaoId = corpo.sessao_id;
       const baseUrl = `http://127.0.0.1:${porta}`;
 

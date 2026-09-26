@@ -22,6 +22,7 @@ import {
 import { construirContextoWorkspace } from "./context-builder.js";
 import { resolverMencoes } from "./mentions.js";
 import { processarSlash, textoAjudaSlash } from "./slash.js";
+import { obterRuntimeSecretario } from "./runtime-service.js";
 import type { RouteContext } from "../types.js";
 
 /** Streams `/secretario/conversa/stream` em voo por sessão. */
@@ -268,7 +269,84 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
             return;
           }
 
-          const porta = await obterPorta(ctx, true);
+          const runtimeCtx = await obterRuntimeSecretario(ctx, ws, false);
+          if (runtimeCtx.engineId !== "opencode") {
+            const contextoWs = await construirContextoWorkspace(ws);
+            const mensagemStreamComWs = `${contextoWs}\n${mensagem}`;
+            const sId = corpo.sessao_id || url.searchParams.get("sessao") || `sessao-${Date.now()}`;
+            const agente = resolvido.agente ?? "secretario-exec";
+            const modelo = corpo.modelo || corpo.model || "default";
+
+            const ref = await runtimeCtx.runtime.create({
+              conversationId: sId,
+              workspaceId: ws.id,
+              workspacePath: ws.path,
+              model: modelo,
+              homeDir: home,
+              title: mensagem.slice(0, 60),
+            });
+
+            if (chaveStreamRegistrada && chaveStreamRegistrada !== ref.id) {
+              streamsSecretarioAtivos.delete(chaveStreamRegistrada);
+              streamsSecretarioAtivos.set(ref.id, { res });
+              chaveStreamRegistrada = ref.id;
+            } else if (!chaveStreamRegistrada) {
+              streamsSecretarioAtivos.set(ref.id, { res });
+              chaveStreamRegistrada = ref.id;
+            }
+
+            sse("inicio", {
+              sessao_id: ref.id,
+              agente,
+              modelo,
+              motor: runtimeCtx.engineId,
+            });
+
+            let fullOutput = "";
+            const ac = new AbortController();
+            onClientClose = () => {
+              if (!res.writableEnded) ac.abort();
+            };
+            res.on("close", onClientClose);
+
+            try {
+              for await (const ev of runtimeCtx.runtime.send(ref, { text: mensagemStreamComWs }, ac.signal)) {
+                if (ev.type === "message.delta") {
+                  fullOutput += ev.text;
+                  sse("delta", { delta: ev.text });
+                } else if (ev.type === "tool.requested") {
+                  sse("passo", {
+                    tipo: "ferramenta",
+                    ferramenta: ev.call.name,
+                    input: ev.call.arguments,
+                  });
+                } else if (ev.type === "tool.completed") {
+                  sse("passo", {
+                    tipo: "ferramenta_fim",
+                    ferramenta: ev.result.name,
+                    resultado: ev.result.result,
+                  });
+                } else if (ev.type === "run.completed") {
+                  sse("fim", {
+                    content: fullOutput || ev.result.output,
+                    resposta: fullOutput || ev.result.output,
+                    stopReason: ev.result.stopReason,
+                  });
+                } else if (ev.type === "run.failed") {
+                  sse("erro", { erro: ev.error.message });
+                }
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              sse("erro", { erro: msg });
+            } finally {
+              if (chaveStreamRegistrada) liberarStreamSecretario(chaveStreamRegistrada, res);
+              if (!res.writableEnded) res.end();
+            }
+            return;
+          }
+
+          const porta = await obterPorta(ctx, true, ws.id);
           const baseUrl = `http://127.0.0.1:${porta}`;
           const agente = resolvido.agente ?? "secretario-exec";
           let sessaoId = corpo.sessao_id || url.searchParams.get("sessao") || undefined;

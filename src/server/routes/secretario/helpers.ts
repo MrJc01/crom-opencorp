@@ -8,6 +8,7 @@ import {
   extrairPassosMensagens,
   type MensagemOc,
 } from "../../../core/contexts/execution/opencode-server.js";
+import { formatProcessKey, ProcessRegistry } from "../../../core/runtime/index.js";
 import { resolverCadeiaModelosAgente } from "../../../core/contexts/agents/model-resolver.js";
 import type { RouteContext } from "../types.js";
 
@@ -88,9 +89,18 @@ export async function resolverCaminhoLocal(wsPath: string, pathParam: string): P
   return alvo;
 }
 
-export async function obterPorta(ctx: RouteContext, autoIniciar = false): Promise<number> {
+export async function obterPorta(ctx: RouteContext, autoIniciar = false, wsId?: string): Promise<number> {
   const { portaOpencodeOuErro, opencodeServer } = ctx;
   if (portaOpencodeOuErro) return portaOpencodeOuErro(autoIniciar);
+
+  if (wsId) {
+    const key = formatProcessKey({ engineId: "opencode", workspaceId: wsId });
+    const proc = ProcessRegistry.getInstance().get(key);
+    if (proc && proc.port && proc.state !== "stopped" && proc.state !== "crashed") {
+      return proc.port;
+    }
+  }
+
   if (!opencodeServer) throw new SecretarioError("servidor do motor de IA não configurado", { status: 500 });
   let st = await opencodeServer.status();
   if (autoIniciar && (!st.rodando || !st.porta)) {

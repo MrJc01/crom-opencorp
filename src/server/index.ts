@@ -44,6 +44,7 @@ import {
 import { OpencodeServerManager, SecretarioError } from "../core/contexts/execution/opencode-server.js";
 import { SecretsStore } from "../core/contexts/storage/secrets-store.js";
 import { EngineAccountStore } from "../core/engines/index.js";
+import { ConversationRuntimeResolver } from "../core/engines/conversation-resolver.js";
 import { processarCors, verificarAutenticacao, type OpcoesCors } from "./middleware/index.js";
 import { criarHandlerEstatico, servirEstatico } from "./static.js";
 import { enviarProblema } from "./http/problem-details.js";
@@ -92,6 +93,7 @@ export interface ApiServerOptions {
   workspace?: string;
   instalarMencoes?: boolean;
   opencodeServer?: OpencodeServerManager;
+  conversationRuntimeResolver?: ConversationRuntimeResolver;
   cors?: OpcoesCors;
 }
 
@@ -222,6 +224,8 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
   const semAuth = opcoes.token === "";
   const token = opcoes.token === undefined ? randomBytes(24).toString("hex") : opcoes.token;
   const opencodeServer = opcoes.opencodeServer ?? new OpencodeServerManager({ homeDir: opcoes.homeDir });
+  const conversationRuntimeResolver =
+    opcoes.conversationRuntimeResolver ?? new ConversationRuntimeResolver({ homeDir: opcoes.homeDir });
   const handlerEstatico = criarHandlerEstatico();
 
   async function resolverWs(url: URL, req?: IncomingMessage): Promise<{ id: string; path: string }> {
@@ -272,6 +276,7 @@ export function createApiServer(opcoes: ApiServerOptions = {}): {
           teams,
           templates,
           opencodeServer,
+          conversationRuntimeResolver,
           hooks,
           settings,
           secretsStore,

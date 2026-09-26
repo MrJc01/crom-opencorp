@@ -21,6 +21,7 @@ import type { SkillStore } from "../../core/contexts/agents/skill-store.js";
 import type { SecretsStore } from "../../core/contexts/storage/secrets-store.js";
 import type { AppStore } from "../../core/contexts/platform/app-store.js";
 import type { EngineAccountStore } from "../../core/engines/index.js";
+import type { ConversationRuntimeResolver } from "../../core/engines/conversation-resolver.js";
 
 import type { PromptStore } from "../../core/contexts/agents/prompt-store.js";
 import type { ApprovalsStore } from "../../core/contexts/platform/approvals-store.js";
@@ -49,6 +50,7 @@ export interface RouteContext {
   teams?: TeamStore;
   templates?: TemplateStore;
   opencodeServer?: OpencodeServerManager;
+  conversationRuntimeResolver?: ConversationRuntimeResolver;
   hooks?: HookStore;
   settings?: SettingsStore;
   skillStore?: SkillStore;

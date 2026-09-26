@@ -1,0 +1,186 @@
+import { opencorpHome } from "../../../utils/paths.js";
+import { formatProcessKey, ProcessRegistry } from "../../../core/runtime/index.js";
+import {
+  ConversationRuntimeResolver,
+  type ConversationResolutionResult,
+  type ConversationPreflightResult,
+} from "../../../core/engines/conversation-resolver.js";
+import type {
+  ConversationRef,
+  ConversationRuntime,
+} from "../../../core/engines/ports.js";
+import type { AgentEvent } from "../../../core/engines/events.js";
+import { SecretarioError } from "../../../core/contexts/execution/opencode-server.js";
+import type { RouteContext } from "../types.js";
+
+export interface SecretaryRuntimeContext {
+  resolution: ConversationResolutionResult;
+  runtime: ConversationRuntime;
+  engineId: string;
+}
+
+/**
+ * Resolve o runtime conversacional configurado para o workspace do Secretário.
+ */
+export async function obterRuntimeSecretario(
+  ctx: RouteContext,
+  ws: { id: string; path: string },
+  strict = false
+): Promise<SecretaryRuntimeContext> {
+  const resolver = ctx.conversationRuntimeResolver ?? new ConversationRuntimeResolver({ homeDir: ctx.homeDir });
+
+  let resolution: ConversationResolutionResult;
+  try {
+    resolution = await resolver.resolve({
+      workspaceId: ws.id,
+      workspaceDir: ws.path,
+      strict,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new SecretarioError(`Falha ao resolver motor conversacional do Secretário: ${msg}`, { status: 409 });
+  }
+
+  const runtime = resolution.adapter.conversationRuntime;
+  if (!runtime) {
+    throw new SecretarioError(
+      `O motor "${resolution.engineId}" selecionado para o Secretário não oferece runtime conversacional.`,
+      { status: 409 }
+    );
+  }
+
+  return {
+    resolution,
+    runtime,
+    engineId: resolution.engineId,
+  };
+}
+
+/**
+ * Cria ou recupera uma referência de sessão conversacional através da porta ConversationRuntime
+ */
+export async function adquirirSessaoSecretario(
+  ctx: RouteContext,
+  ws: { id: string; path: string },
+  options: {
+    conversationId?: string;
+    title?: string;
+    model?: string;
+  } = {}
+): Promise<{ ref: ConversationRef; runtime: ConversationRuntime; engineId: string }> {
+  const { runtime, engineId } = await obterRuntimeSecretario(ctx, ws, false);
+  const home = ctx.homeDir ?? opencorpHome();
+
+  const ref = await runtime.create({
+    conversationId: options.conversationId,
+    workspaceId: ws.id,
+    workspacePath: ws.path,
+    model: options.model || "default",
+    homeDir: home,
+    title: options.title || "Conversa com Secretário",
+  });
+
+  return { ref, runtime, engineId };
+}
+
+/**
+ * Envia uma mensagem através da porta canônica ConversationRuntime e gera eventos AgentEvent
+ */
+export function enviarMensagemSecretario(
+  runtime: ConversationRuntime,
+  ref: ConversationRef,
+  mensagem: string,
+  signal?: AbortSignal
+): AsyncIterable<AgentEvent> {
+  return runtime.send(ref, { text: mensagem }, signal);
+}
+
+/**
+ * Encerra uma sessão conversacional liberando os recursos associados
+ */
+export async function encerrarSessaoSecretario(
+  runtime: ConversationRuntime,
+  ref: ConversationRef
+): Promise<void> {
+  try {
+    await runtime.close(ref);
+  } catch (err) {
+    console.error(`[secretario] erro ao fechar sessão ${ref.id} no motor ${ref.engineId}:`, err);
+  }
+}
+
+/**
+ * Diagnostica o status de execução do motor do Secretário para o workspace
+ */
+export async function statusRuntimeSecretario(
+  ctx: RouteContext,
+  wsId?: string,
+  wsPath?: string
+): Promise<{
+  rodando: boolean;
+  configurado: boolean;
+  porta: number | null;
+  pid: number | null;
+  motor: {
+    engineId: string;
+    nome?: string;
+    origem?: string;
+    suportaConversa?: boolean;
+    preflight?: ConversationPreflightResult | Record<string, unknown>;
+    erro?: string;
+  };
+}> {
+  const resolver = ctx.conversationRuntimeResolver ?? new ConversationRuntimeResolver({ homeDir: ctx.homeDir });
+
+  let resolution: ConversationResolutionResult | null = null;
+  let erroResolucao: string | null = null;
+
+  try {
+    resolution = await resolver.resolve({
+      workspaceId: wsId,
+      workspaceDir: wsPath,
+      strict: false,
+    });
+  } catch (err) {
+    erroResolucao = err instanceof Error ? err.message : String(err);
+  }
+
+  const engineId = resolution?.engineId ?? "opencode";
+  const processKey = wsId ? formatProcessKey({ engineId, workspaceId: wsId }) : null;
+  const proc = processKey ? ProcessRegistry.getInstance().get(processKey) : undefined;
+
+  let rodando = Boolean(proc && proc.state !== "stopped" && proc.state !== "crashed");
+  let pid: number | null = proc?.pid ?? null;
+  let porta: number | null = proc?.port ?? null;
+
+  // Fallback para servidor OpenCode legado caso o motor resolvido seja OpenCode e opencodeServer esteja ativo
+  if (!rodando && ctx.opencodeServer && engineId === "opencode") {
+    try {
+      const st = await ctx.opencodeServer.status();
+      if (st.rodando) {
+        rodando = true;
+        pid = st.pid ?? null;
+        porta = st.porta ?? null;
+      }
+    } catch {}
+  }
+
+  return {
+    rodando,
+    configurado: resolution ? resolution.preflight.ok : false,
+    porta,
+    pid,
+    motor: resolution
+      ? {
+          engineId: resolution.engineId,
+          nome: resolution.adapter.name,
+          origem: resolution.source,
+          suportaConversa: resolution.preflight.supportsConversation,
+          preflight: resolution.preflight,
+        }
+      : {
+          engineId: "unknown",
+          erro: erroResolucao ?? undefined,
+        },
+  };
+}
