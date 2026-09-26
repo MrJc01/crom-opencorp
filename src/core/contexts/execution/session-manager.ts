@@ -1,4 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
+import { classifyFailure, decideFallback, formatFallbackAudit } from "../../models/fallback-router.js";
+import { explicitEngineOfModel, modelIdForEngine, providerOfModel } from "../../models/catalog.js";
+import { ModelIncompatibleError } from "../../engines/errors.js";
 import { KNOWN_SECRET_ENV_VARS, redactSecrets } from "../../credentials/credentials-store.js";
 import { readFile } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
@@ -905,43 +908,29 @@ export class SessionManager {
       }
     } catch {}
 
-    let harnessEscolhido =
-      opcoes.engine ||
-      opcoes.harness ||
-      ag.frontmatter.harness ||
-      (ag.frontmatter as any).engine ||
-      runnerConfigEngine ||
-      "opencode";
-    let modeloEfetivo = modelo;
-
-    if (modeloEfetivo.startsWith("opencode/")) {
-      harnessEscolhido = "opencode";
-    } else if (modeloEfetivo.startsWith("opencode-go/")) {
-      harnessEscolhido = "opencode";
-    } else if (modeloEfetivo.startsWith("claude-code/")) {
-      harnessEscolhido = "claude-code";
-      modeloEfetivo = modeloEfetivo.slice("claude-code/".length);
-    } else if (modeloEfetivo.startsWith("antigravity/")) {
-      harnessEscolhido = "antigravity";
-      modeloEfetivo = modeloEfetivo.slice("antigravity/".length);
-    } else if (modeloEfetivo.startsWith("crom-agente/") || modeloEfetivo.startsWith("crom/")) {
-      harnessEscolhido = "crom-agente";
-      modeloEfetivo = modeloEfetivo.replace(/^(crom-agente|crom)\//, "");
-    } else if (modeloEfetivo.startsWith("cursor/")) {
-      harnessEscolhido = "cursor";
-      modeloEfetivo = modeloEfetivo.slice("cursor/".length);
-    } else if (modeloEfetivo.startsWith("copilot/")) {
-      harnessEscolhido = "copilot";
-      modeloEfetivo = modeloEfetivo.slice("copilot/".length);
-    } else if (modeloEfetivo.startsWith("codex/")) {
-      harnessEscolhido = "codex";
-      modeloEfetivo = modeloEfetivo.slice("codex/".length);
-    } else if (modeloEfetivo.startsWith("aider/")) {
-      harnessEscolhido = "aider";
-      modeloEfetivo = modeloEfetivo.slice("aider/".length);
+    // Motor explícito (execução ou agente) nunca é trocado pelo prefixo do
+    // modelo (D1). O prefixo só escolhe o motor quando não há motor explícito
+    // (compatibilidade com o formato legado `codex/<modelo>`), sobre o padrão.
+    const motorExplicito = opcoes.engine || opcoes.harness || ag.frontmatter.harness || (ag.frontmatter as any).engine;
+    let harnessEscolhido = motorExplicito || runnerConfigEngine || "opencode";
+    const motorDoPrefixo = explicitEngineOfModel(modelo);
+    if (motorDoPrefixo) {
+      const explicitoCanonico = motorExplicito ? engineRegistry.resolveDriver(motorExplicito).id : undefined;
+      if (explicitoCanonico && explicitoCanonico !== motorDoPrefixo) {
+        const falha = new ModelIncompatibleError(explicitoCanonico, modelo, {
+          details: { reason: `o prefixo do modelo nomeia o motor "${motorDoPrefixo}"; o motor explícito não é trocado` },
+        }).message;
+        (registro as any).erro = falha;
+        await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, "", null);
+        throw new SessionError(falha);
+      }
+      harnessEscolhido = motorDoPrefixo;
     }
+    const modeloEfetivo = modelIdForEngine(modelo);
 
     const driver = engineRegistry.resolveDriver(harnessEscolhido);
+    // Motor que efetivamente executa: base da rotação de conta/modelo no retry.
+    (registro as any).motor = driver.id;
     // F1-T02: marca o harness efetivo nos extras (base para continuar/duplicar;
     // best-effort — quando ausente, continuar/duplicar inferem do modelo).
     try {
@@ -1597,97 +1586,122 @@ export class SessionManager {
       return null;
     }
 
+    // Motor que executou (nunca inferido do prefixo do modelo — `openrouter/*`
+    // não implica OpenCode). Registros antigos sem o campo usam o motor do agente.
+    const motorId = String((registro as any).motor || opcoes.engine || opcoes.harness || "opencode");
     const falhaCreditos = PADRAO_ERRO_CREDITOS.test(textoValidar);
-    const falhaCota =
-      falhaCreditos ||
-      /usage limit|rate limit|quota|429|resource exhausted|status_cota|Weekly usage|Monthly usage/i.test(textoValidar);
+    const failure = falhaCreditos ? "credits" : classifyFailure(textoValidar, { inactivity: ehInatividadeModelo });
 
-    // 1. Rotação de Contas (se houver conta alternativa com cota disponível)
-    if (falhaCota) {
-      let motorId = "";
-      const mLow = registro.modelo.trim().toLowerCase();
-      if (mLow.startsWith("opencode-go/")) motorId = "opencode-go";
-      else if (mLow.startsWith("codex/")) motorId = "codex";
-      else if (mLow.startsWith("copilot/")) motorId = "copilot";
-      else if (mLow.startsWith("claude-code/") || mLow.startsWith("claude/")) motorId = "claude-code";
-      else if (mLow.startsWith("opencode/")) motorId = "opencode";
-      else if (mLow.startsWith("openrouter/")) motorId = "opencode";
-
-      if (motorId) {
-        try {
-          const acctStore = new EngineAccountStore({ homeDir: this.homeDir });
-          const ativa = await acctStore.obterContaAtiva(motorId);
-          if (ativa) {
-            await acctStore.atualizarLimitesConta(ativa.id, { status_cota: "esgotado" });
-          }
-
-          const proxConta = await acctStore.rotacionarProximaConta(motorId, ws.id);
-          if (proxConta && proxConta.limits.status_cota !== "esgotado") {
-            await acctStore.sincronizarAuth(motorId);
-            const idRetry = gerarId("exec");
-            try {
-              await this.registros.anexarEvento(ws.path, "execucoes", registro.id, {
-                ts: new Date().toISOString(),
-                por: "opencorp",
-                evento: "rotacao_conta",
-                resumo: `cota esgotada no motor "${motorId}" — rotacionado para conta "${proxConta.nome}" → ${idRetry}`,
-              });
-            } catch {}
-
-            return this.rodar({
-              ...opcoes,
-              execId: idRetry,
-              retryDe: {
-                de_modelo: registro.modelo,
-                de_exec: registro.id,
-              },
-              gatilho: opcoes.gatilho
-                ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, `conta:${proxConta.nome}`) }
-                : undefined,
-            });
-          }
-        } catch (erroRotacao) {
-          console.warn(`[session-manager] falha ao rotacionar conta para motor "${motorId}":`, erroRotacao);
-        }
+    // Rotação de conta: contas do provedor do modelo (ex.: `opencode-go` no
+    // OpenCode) ou, na falta delas, do próprio motor. Nunca troca o motor.
+    const acctStore = new EngineAccountStore({ homeDir: this.homeDir });
+    let contaDono = motorId;
+    let contaDisponivel = false;
+    if (failure === "quota" || failure === "credits") {
+      try {
+        const provedor = providerOfModel(registro.modelo);
+        const doProvedor = provedor !== motorId ? await acctStore.listar(provedor) : [];
+        contaDono = doProvedor.length > 0 ? provedor : motorId;
+        const contas = doProvedor.length > 0 ? doProvedor : await acctStore.listar(motorId);
+        contaDisponivel = contas.some((c) => !c.ativa && c.limits.status_cota !== "esgotado" && (!c.workspaces?.length || c.workspaces.includes(ws.id)));
+      } catch {
+        contaDisponivel = false;
       }
     }
 
-    // 2. Rotação de Modelo
-    const proximoModelo = await this.proximoModeloDaRotacao(
-      registro.modelo,
-      ws.path,
-      opcoes.agente,
-      [registro.modelo],
-      falhaCreditos,
-    );
-    if (!proximoModelo || proximoModelo === registro.modelo) {
+    const decisao = decideFallback({
+      engineId: motorId,
+      failedModel: registro.modelo,
+      failure,
+      modelChain: await this.cadeiaExplicitaDeFallback(ws.path, opcoes.agente),
+      accountAvailable: contaDisponivel,
+      // Troca de motor exige cadeia explícita; o SessionManager ainda não a recebe.
+      engineChain: [],
+    });
+    const auditoria = formatFallbackAudit(decisao);
+    const registrar = async (evento: string, resumo: string) => {
+      try {
+        await this.registros.anexarEvento(ws.path, "execucoes", registro.id, { ts: new Date().toISOString(), por: "opencorp", evento, resumo });
+      } catch {
+        /* journal best-effort */
+      }
+    };
+
+    const acao = decisao.result;
+    if (acao.action === "stop") {
+      await registrar("fallback_interrompido", `${decisao.reason} — ${auditoria}`);
       return null;
     }
 
     const idRetry = gerarId("exec");
-    try {
-      await this.registros.anexarEvento(ws.path, "execucoes", registro.id, {
-        ts: new Date().toISOString(),
-        por: "opencorp",
-        evento: "retry_modelo",
-        resumo: `falha de modelo/API (${registro.modelo}) — 1 retry com ${proximoModelo}${falhaCreditos ? " (filtrando apenas gratuitos)" : ""} → ${idRetry}`,
-      });
-    } catch {
-      /* journal best-effort */
+    if (acao.action === "rotate_account") {
+      try {
+        const ativa = await acctStore.obterContaAtiva(contaDono);
+        if (ativa) await acctStore.atualizarLimitesConta(ativa.id, { status_cota: "esgotado" });
+        const proxConta = await acctStore.rotacionarProximaConta(contaDono, ws.id);
+        if (!proxConta) return null;
+        await acctStore.sincronizarAuth(contaDono);
+        await registrar("rotacao_conta", `cota esgotada no motor "${motorId}" (contas de "${contaDono}") — rotacionado para conta "${proxConta.nome}" → ${idRetry} (${auditoria})`);
+        return this.rodar({
+          ...opcoes,
+          execId: idRetry,
+          retryDe: { de_modelo: registro.modelo, de_exec: registro.id },
+          gatilho: opcoes.gatilho
+            ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, `conta:${proxConta.nome}`) }
+            : undefined,
+        });
+      } catch (erroRotacao) {
+        console.warn(`[session-manager] falha ao rotacionar conta para motor "${motorId}":`, erroRotacao);
+        return null;
+      }
     }
 
+    // next_model (next_engine só ocorre com cadeia explícita de motores)
+    await registrar(
+      acao.action === "next_engine" ? "retry_motor" : "retry_modelo",
+      `falha de modelo/API (${registro.modelo}) — 1 retry com ${acao.model} no motor "${acao.engineId}"${falhaCreditos ? " (filtrando apenas gratuitos)" : ""} → ${idRetry} (${auditoria})`,
+    );
     return this.rodar({
       ...opcoes,
-      model: proximoModelo,
+      model: acao.model,
+      // Fixa o motor: o prefixo do próximo modelo nunca troca o motor em silêncio.
+      engine: acao.engineId,
       execId: idRetry,
-      retryDe: {
-        de_modelo: registro.modelo,
-        de_exec: registro.id,
-      },
+      retryDe: { de_modelo: registro.modelo, de_exec: registro.id },
       gatilho: opcoes.gatilho
-        ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, proximoModelo) }
+        ? { ...opcoes.gatilho, origem: sufixarRetry(opcoes.gatilho.origem, acao.model) }
         : undefined,
     });
+  }
+
+  /**
+   * Cadeia EXPLÍCITA de fallback: `settings.tests.rotation` configurada, ou a
+   * rotação do agente seguida da rotação do workspace (se herdada). Nunca usa
+   * listas embutidas — sem cadeia configurada não há retry (Etapa 13).
+   */
+  public async cadeiaExplicitaDeFallback(wsPath: string, agenteId?: string): Promise<string[]> {
+    try {
+      const r = await new SettingsStore({ homeDir: this.homeDir, cwd: wsPath }).resolve();
+      const configurada = [...r.origens.entries()].some(([chave, origem]) => chave.startsWith("tests.rotation") && origem !== "default");
+      if (configurada && Array.isArray(r.settings?.tests?.rotation) && r.settings.tests.rotation.length > 0) {
+        return [...r.settings.tests.rotation];
+      }
+    } catch {
+      /* settings indisponível */
+    }
+    let frontmatter: any;
+    if (this.agentes && agenteId) {
+      try {
+        frontmatter = (await this.agentes.carregar(wsPath, agenteId)).frontmatter;
+      } catch {
+        frontmatter = undefined;
+      }
+    }
+    try {
+      return resolverCadeiaModelosAgente({ agente: frontmatter, wsPath }).cadeia;
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -1782,12 +1796,8 @@ export class SessionManager {
       }
     }
 
-    // 3. Fallback: MODELOS_ROTACAO_PADRAO
-    let lista = MODELOS_ROTACAO_PADRAO;
-    if (apenasGratuitos) {
-      lista = lista.filter((m) => ehModeloGratuito(m));
-    }
-    return proximoModeloRotacao(lista, modeloFalho);
+    // 3. Sem cadeia explícita não há próximo modelo (Etapa 13: nada de listas embutidas).
+    return null;
   }
 
   async listarExecucoes(wsPath: string, filtro?: { agente?: string }): Promise<ResumoExecucao[]> {

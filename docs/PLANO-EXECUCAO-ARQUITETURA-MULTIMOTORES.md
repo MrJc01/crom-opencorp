@@ -211,7 +211,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 10 | Instalador gerenciado e preflight | ✅ Concluída | `feat(engines): add deterministic binary resolution and verified managed installs` | 13 testes de instalação; 141 arquivos/1.352 testes; 2 TS e build PASS |
 | 11 | Saúde funcional e conformidade | ✅ Concluída | `feat(engines): add multi-level health and conformance probes` | conformidade OpenCode+Codex; 143 arquivos/1.398 testes; 2 TS e build PASS |
 | 12 | `AcpClientAdapter` | ✅ Concluída | `feat(acp): add ACP v1 adapter and connect Copilot and MiMo` | Copilot e MiMo via ACP; handshakes reais PASS; 145 arquivos/1.450 testes |
-| 13 | Catálogo e rotação soberanos | ⬜ Pendente | — | — |
+| 13 | Catálogo e rotação soberanos | ✅ Concluída | `refactor(models): make catalog and fallback routing engine-agnostic` | catálogo com proveniência; fallback auditável sem troca silenciosa de motor; 1.470 testes |
 | 14 | Migração CLI/UI e depreciação | ⬜ Pendente | — | — |
 | 15 | Validação final e liberação | ⬜ Pendente | — | — |
 
@@ -1148,32 +1148,45 @@ governance status
 
 ### Tarefas
 
-- [ ] Criar `ModelCatalogSource` por origem.
-- [ ] Agregar e deduplicar modelos sem apagar proveniência.
-- [ ] Representar compatibilidade motor-modelo.
-- [ ] Separar disponibilidade catalogada de probe aprovado.
-- [ ] Integrar governança por tamanho/capacidade/custo.
-- [ ] Bloquear modelos proibidos em agentes autônomos.
-- [ ] Implementar pesquisa e seleção na UI.
-- [ ] Separar rotações de modelo, provedor, conta e motor.
-- [ ] Registrar o motivo de cada fallback.
-- [ ] Exigir cadeia explícita de fallback.
-- [ ] Remover inferência `openrouter/* → opencode` do domínio novo.
-- [ ] Preservar formato legado somente no tradutor.
+- [x] Criar `ModelCatalogSource` por origem (`src/core/models/sources.ts`: `opencode-cli`, dicas por motor, lista curada, settings).
+- [x] Agregar e deduplicar modelos sem apagar proveniência (`aggregateCatalog`: todas as origens ficam em `sources`).
+- [x] Representar compatibilidade motor-modelo (`compatibleEngineIds`, só por evidência; `checkModelEngineCompatibility`).
+- [x] Separar disponibilidade catalogada de probe aprovado (`catalogedAt` × `probes`; `ModelProbeStore` alimentado pelo `/api/motores/:id/test`).
+- [x] Integrar governança por tamanho/capacidade/custo (`governanceOf` sobre `classificarQualidadeModelo`).
+- [x] Bloquear modelos proibidos em agentes autônomos (`allowedAutonomous`; o retry pula e registra o motivo).
+- [x] Implementar pesquisa e seleção na UI (`searchCatalog`; `ModelPicker` com proveniência, "VERIFICADO/FALHOU", "BLOQUEADO P/ AUTÔNOMOS").
+- [x] Separar rotações de modelo, provedor, conta e motor (`decideFallback`).
+- [x] Registrar o motivo de cada fallback (journal: `retry_modelo`, `rotacao_conta`, `fallback_interrompido`, com candidatos descartados).
+- [x] Exigir cadeia explícita de fallback (a lista embutida `MODELOS_ROTACAO_PADRAO` saiu do retry; sem cadeia configurada não há retry).
+- [x] Remover inferência `openrouter/* → opencode` do domínio novo (rotação de conta usava o prefixo do modelo; agora usa o motor que executou).
+- [x] Preservar formato legado somente no tradutor (prefixos que nomeiam motor — `codex/…`, `claude-code/…` — só escolhem o motor quando não há motor explícito).
 
 ### Testes
 
-- [ ] Mesmo modelo por duas origens mantém ambas as rotas.
-- [ ] Modelo incompatível com motor falha no preflight.
-- [ ] Conta sem cota gira conta, não motor, conforme política.
-- [ ] Falha de provedor não troca motor sem autorização.
-- [ ] Modelo bloqueado não entra em rotação autônoma.
-- [ ] Toda decisão de fallback fica auditável.
+- [x] Mesmo modelo por duas origens mantém ambas as rotas.
+- [x] Modelo incompatível com motor falha no preflight (motor explícito + prefixo de outro motor → `MODEL_INCOMPATIBLE` antes do spawn).
+- [x] Conta sem cota gira conta, não motor, conforme política.
+- [x] Falha de provedor não troca motor sem autorização.
+- [x] Modelo bloqueado não entra em rotação autônoma.
+- [x] Toda decisão de fallback fica auditável.
 
 ### Critérios de aceite
 
-- [ ] Escolher modelo nunca altera motor silenciosamente.
-- [ ] OpenCode é apenas uma das fontes/adaptações possíveis.
+- [x] Escolher modelo nunca altera motor silenciosamente.
+- [x] OpenCode é apenas uma das fontes/adaptações possíveis.
+
+### Registro da Etapa 13 — 26/09/2026
+
+- Executor: Claude Code (Opus 5.5).
+- **Defeitos corrigidos:**
+  - motor explícito (execução/agente) era trocado silenciosamente pelo prefixo do modelo (`codex/…`, `opencode/…`) — agora falha no preflight;
+  - o retry passava o próximo modelo para `rodar()`, que reinferia o motor pelo prefixo — um modelo de outro motor na rotação trocava o motor; agora o retry fixa o motor e o roteador pula modelos de outro motor;
+  - a rotação de conta inferia o motor pelo prefixo (`openrouter/* → opencode`); agora usa o motor que executou e as contas do provedor do modelo (ex.: `opencode-go`) ou do motor;
+  - o retry caía numa lista embutida quando não havia rotação configurada;
+  - o "testar modelo" do seletor verificava só o motor para motores ≠ OpenCode (P-07); agora executa inferência real com o modelo, após confirmação de custo, e o resultado vira probe no catálogo.
+- **Mudança de comportamento:** modelos sem metadados de capacidade (tier `NAO_RECOMENDADO`, ex.: `free/model-a`) não entram mais em rotação automática; a execução para com o motivo registrado. Troca automática de motor exige cadeia explícita de motores (`engineChain`), que o SessionManager ainda não recebe — por ora o fallback nunca troca de motor.
+- `/modelos/catalogo` mantém o formato por [motor, modelo] e acrescenta `origens`, `motores`, `autonomo`, `probe` e `erros` por origem.
+- Validações: `model-catalog` 17, `runs-robustos` 22 (inclui preflight e fallback auditável), `sre-resilience-e2e` PASS; suíte completa 146 arquivos — 1.470 PASS, 8 skipped, 1 todo; TypeScript backend/frontend PASS; build PASS.
 
 ### Commit sugerido
 
@@ -1467,7 +1480,8 @@ Registrar aqui apenas itens novos, com etapa de origem, impacto e decisão. Não
 | P-03 | 9 | `POST /api/motores/:id/desconectar` reescreve `runner.json` com `engine: "opencode"` | Fallback silencioso para OpenCode (viola D1) | Corrigir na Etapa 13/14, junto com a seleção de motor padrão |
 | P-04 | 9 | Etapa 6 declarou autenticação local do OpenCode que não funcionava | Servidor OpenCode acessível sem senha por qualquer processo local | Corrigido na Etapa 9 (HTTP Basic verificado contra o binário real) |
 | P-05 | 10 | `tests/modelos-governance-e2e.test.ts` falhou 1× na suíte completa | Causa: `oc modelos` lia o catálogo do `opencode` instalado na máquina | Corrigido na Etapa 11 (`OPENCORP_HOME` + catálogo determinístico) |
-| P-07 | 11 | `ModelPicker` "testar modelo" chama `/api/motores/:id/test` para motores ≠ OpenCode | O teste do modelo verifica só o motor (instalação/autenticação), não o modelo | Ajustar na Etapa 13 (seleção de motor/modelo) |
+| P-07 | 11 | `ModelPicker` "testar modelo" chama `/api/motores/:id/test` para motores ≠ OpenCode | O teste do modelo verificava só o motor | Corrigido na Etapa 13 (inferência real com o modelo, com confirmação de custo) |
+| P-10 | 13 | SessionManager não recebe cadeia explícita de motores | Fallback automático nunca troca de motor (seguro, mas sem failover entre motores) | Expor `engineChain` na configuração do agente/workspace quando houver demanda |
 | P-06 | 10 | Artefatos aprovados limitados a Codex e OpenCode | Demais motores dependem de instalação manual | Adicionar entradas apenas com SHA-256 publicado pelo fornecedor |
 | P-08 | 12 | Conversa real ACP não executada (Copilot e MiMo sem login no ambiente de verificação) | Streaming/ferramentas reais verificados só com fake fiel ao esquema | `OPENCORP_REAL_PROBES=copilot,mimo OPENCORP_PROBE_<MOTOR>_MODEL=<modelo> npm run test:real` com as contas autenticadas |
 | P-09 | 12 | Seleção de modelo do Copilot por `configOptions` não verificada | Conversa com modelo explícito no Copilot falha com `MODEL_INCOMPATIBLE` se o agente não expuser o seletor | Verificar com login; se necessário, iniciar o processo com `--model` |

@@ -323,8 +323,17 @@ describe("proximoModeloRotacao", () => {
 });
 
 describe("Rotação de modelo no retry (execa mockado)", () => {
-  it("falha de cota/conexão → 1 retry com o próximo modelo da rotação padrão", async () => {
+  /** Define a cadeia explícita de modelos do workspace (Etapa 13: sem listas embutidas). */
+  async function rotacaoWorkspace(wsPath: string, rotacao: string[]) {
+    const cfgPath = join(wsPath, ".opencorp", "config.json");
+    const cfg = JSON.parse(await readFile(cfgPath, "utf8").catch(() => "{}"));
+    cfg.modelos = { rotacao }; // sem `padrao`: a cadeia é só agente → esta rotação
+    await writeFile(cfgPath, JSON.stringify(cfg), "utf8");
+  }
+
+  it("falha de cota/conexão → 1 retry com o próximo modelo da cadeia explícita, no mesmo motor", async () => {
     const { ws, sessoes } = await ambiente();
+    await rotacaoWorkspace(ws.path, ["openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"]);
     execaMock.mockImplementationOnce(() =>
       fakeChild(["AI_APICallError: Weekly usage limit reached\n"], 1),
     );
@@ -353,7 +362,10 @@ describe("Rotação de modelo no retry (execa mockado)", () => {
     expect((metaRetry.extras!.gatilho as any).origem).toBe(
       "sch-ciclo-1 · retry:openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
     );
-    expect(await lerJournal(ws.path, metaOriginal.id)).toContain("retry_modelo");
+    const journal = await lerJournal(ws.path, metaOriginal.id);
+    expect(journal).toContain("retry_modelo");
+    // Motivo auditável da decisão.
+    expect(journal).toContain('no motor \\"opencode\\"');
 
     const db = new CorpDb(join(ws.path, ".opencorp", "corp.db"));
     const linhas = db.listarExecucoes({ gatilho_tipo: "cron" });
@@ -371,16 +383,48 @@ describe("Rotação de modelo no retry (execa mockado)", () => {
     await mkdir(join(home, ".opencorp"), { recursive: true });
     await writeFile(
       join(home, ".opencorp", "settings.json"),
-      JSON.stringify({ version: 1, tests: { rotation: ["free/model-a", "free/model-b"] } }),
+      JSON.stringify({ version: 1, tests: { rotation: ["openrouter/qwen/qwen3.8-27b:free", "openrouter/z-ai/glm-5.2:free"] } }),
       "utf8",
     );
     execaMock.mockImplementationOnce(() => fakeChild(["Cannot connect to API\n"], 1));
     execaMock.mockImplementationOnce(() => fakeChild(["ok\n"], 0));
     const r = await sessoes.rodar({ agente: "executor-padrao", ordem: "roda" });
     expect(execaMock).toHaveBeenCalledTimes(2);
-    expect(r.modelo).toBe("free/model-a");
+    expect(r.modelo).toBe("openrouter/qwen/qwen3.8-27b:free");
     const [, args2] = execaMock.mock.calls[1]!;
-    expect(args2).toContain("free/model-a");
+    expect(args2).toContain("openrouter/qwen/qwen3.8-27b:free");
+  });
+
+  it("modelo bloqueado pela governança e modelo de outro motor não entram na rotação; sem candidato, para com motivo", async () => {
+    const { ws, sessoes } = await ambiente();
+    await rotacaoWorkspace(ws.path, ["free/sem-metadados", "codex/gpt-x", "openrouter/meta/llama-3.2-1b:free"]);
+    execaMock.mockImplementation(() => fakeChild(["AI_APICallError: Weekly usage limit reached\n"], 1));
+    const r = await sessoes.rodar({ agente: "executor-padrao", ordem: "falha sem alternativa" });
+    expect(execaMock).toHaveBeenCalledTimes(1);
+    expect(r.status).toBe("falhou");
+    const journal = await lerJournal(ws.path, r.id);
+    expect(journal).toContain("fallback_interrompido");
+    expect(journal).toContain("bloqueado para rotação autônoma");
+    expect(journal).toContain('pertence ao motor \\"codex\\"');
+    expect(journal).toContain("troca de motor não autorizada");
+  });
+
+  it("motor explícito não é trocado pelo prefixo do modelo: falha antes do spawn", async () => {
+    const { sessoes } = await ambiente();
+    execaMock.mockImplementation(() => fakeChild(["não deveria rodar\n"], 0));
+    await expect(
+      sessoes.rodar({ agente: "executor-padrao", ordem: "conflito", engine: "opencode", model: "codex/gpt-x" }),
+    ).rejects.toThrow(/não é compatível com o motor "opencode"/);
+    expect(execaMock).not.toHaveBeenCalled();
+  });
+
+  it("sem cadeia explícita não há retry (nada de listas embutidas)", async () => {
+    const { ws, sessoes } = await ambiente();
+    await rotacaoWorkspace(ws.path, []);
+    execaMock.mockImplementation(() => fakeChild(["AI_APICallError: Weekly usage limit reached\n"], 1));
+    const r = await sessoes.rodar({ agente: "executor-padrao", ordem: "sem cadeia", model: "opencode-go/glm-5.3-flash" });
+    expect(execaMock).toHaveBeenCalledTimes(1);
+    expect(r.status).toBe("falhou");
   });
 
   it("nunca retenta além de 1 (retry que falha de novo não gera 3º run)", async () => {

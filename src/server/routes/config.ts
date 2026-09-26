@@ -24,12 +24,12 @@ import {
   WebLoginOrchestrator,
 } from "../../core/engines/index.js";
 import { ProcessRegistry } from "../../core/runtime/index.js";
+import { collectCatalog, curatedSource, engineHintSource, ModelProbeStore, openCodeLiveSource, settingsSource } from "../../core/models/index.js";
 import type { EngineAccount } from "../../core/engines/engine-account-store.js";
 import { listarProvedoresStatus, testarModeloDirect, completarChatDirect } from "../../core/contexts/execution/llm-client.js";
 import type { SecretOrigem } from "../../core/contexts/storage/secrets-store.js";
 import type { RouteContext } from "./types.js";
 import { ROTACAO_AGENTES_RECOMENDADA } from "../../core/contexts/agents/recommended-models.js";
-import { classificarQualidadeModelo } from "../../core/contexts/agents/model-resolver.js";
 
 export async function detectarOpencodeInfo(homeDir: string) {
   let pathEncontrado: string | null = null;
@@ -108,55 +108,52 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
   // 1. SETTINGS & CONFIG
   // ─────────────────────────────────────────────────────────────────────
   if (settings) {
-    // GET /modelos/catalogo — descoberta ao vivo de modelos por motor/provedor.
+    // GET /modelos/catalogo — catálogo soberano (Etapa 13): agrega origens sem
+    // apagar proveniência; compatibilidade motor-modelo só por evidência; probe
+    // aprovado separado da presença no catálogo; governança por modelo.
     if (rota === "/modelos/catalogo" && req.method === "GET") {
       const motores = await engineRegistry.listSummaries(home, false);
-      const modelos: Array<Record<string, unknown>> = [];
-      const vistos = new Set<string>();
-      const adicionar = (id: string, motor: string, origem: "live" | "hint") => {
-        const limpo = id.trim();
-        const chave = `${motor}:${limpo}`;
-        if (!limpo || vistos.has(chave)) return;
-        vistos.add(chave);
-        const qualidade = classificarQualidadeModelo(limpo);
-        modelos.push({
-          id: limpo,
-          motor,
-          provedor: limpo.includes("/") ? limpo.split("/")[0] : motor,
-          origem,
-          gratuito: qualidade.gratuito || /(?:free|gratuito)/i.test(limpo),
-          recomendado: motor !== "opencode" || qualidade.recomendado,
-          tier: qualidade.tier,
-          motivo: qualidade.motivo,
-        });
-      };
-
       const opencode = motores.find((motor) => motor.id === "opencode");
-      if (opencode?.installed && opencode.path) {
-        try {
-          const { stdout } = await promisify(execFile)(opencode.path, ["models"], {
-            timeout: 15_000,
-            maxBuffer: 8 * 1024 * 1024,
-          });
-          for (const linha of stdout.split("\n")) {
-            if (linha.trim() && !linha.includes(" ")) adicionar(linha, "opencode", "live");
-          }
-        } catch {}
-      }
-
-      for (const motor of motores) {
-        for (const modelo of motor.supportedModelsHint) adicionar(modelo, motor.id, "hint");
-      }
-      for (const modelo of ROTACAO_AGENTES_RECOMENDADA) adicionar(modelo, "opencode", "hint");
-
-      modelos.sort((a, b) =>
-        Number(Boolean(b.recomendado)) - Number(Boolean(a.recomendado)) ||
-        Number(Boolean(b.gratuito)) - Number(Boolean(a.gratuito)) ||
-        String(a.id).localeCompare(String(b.id)),
+      const wsCatalogo = await resolverWs(url).catch(() => null);
+      const { models, errors } = await collectCatalog(
+        [
+          openCodeLiveSource(opencode?.installed ? opencode.path : null),
+          engineHintSource(motores.map((m) => ({ id: m.id, supportedModelsHint: m.supportedModelsHint }))),
+          curatedSource(),
+          settingsSource(home, wsCatalogo?.path),
+        ],
+        new ModelProbeStore(home).list()
       );
+      // Formato por [motor, modelo] (compatível com clientes anteriores) + campos novos.
+      const modelos: Array<Record<string, unknown>> = [];
+      for (const m of models) {
+        const kinds = new Set(m.sources.map((s) => s.kind));
+        const base = {
+          id: m.modelId,
+          provedor: m.providerId,
+          origem: kinds.has("live") ? "live" : "hint",
+          origens: m.sources.map((s) => s.sourceId),
+          motores: m.compatibleEngineIds,
+          gratuito: m.free,
+          recomendado: m.governance.recommended,
+          autonomo: m.governance.allowedAutonomous,
+          tier: m.governance.tier,
+          motivo: m.governance.reason,
+          parametrosB: m.parametersB,
+        };
+        if (m.compatibleEngineIds.length === 0) {
+          modelos.push({ ...base, motor: null, probe: null });
+          continue;
+        }
+        for (const engineId of m.compatibleEngineIds) {
+          const probe = m.probes.find((p) => p.engineId === engineId);
+          modelos.push({ ...base, motor: engineId, probe: probe ? { status: probe.status, em: probe.at, nivel: probe.level } : null });
+        }
+      }
       enviar(res, 200, {
         total: modelos.length,
         modelos,
+        erros: errors,
         motores: motores.map(({ id, name, installed, version }) => ({ id, nome: name, instalado: installed, versao: version })),
       });
       return true;
@@ -890,6 +887,13 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
       return true;
     }
     const relatorio = await runEngineHealth(opcoes);
+    // Probe real com modelo explícito vira evidência no catálogo (aprovado ≠ catalogado).
+    const inferencia = relatorio.results.find((r) => r.level === "inference");
+    if (relatorio.model && inferencia && (inferencia.status === "passed" || inferencia.status === "failed")) {
+      await new ModelProbeStore(home)
+        .record({ engineId: motorId, modelId: relatorio.model, status: inferencia.status, at: new Date().toISOString(), level: relatorio.highestPassed ?? "installed" })
+        .catch(() => {});
+    }
     const falha = relatorio.results.find((r) => r.status === "failed");
     const resumo = relatorio.ok
       ? `Nível "${relatorio.highestPassed}" verificado${relatorio.version ? ` · ${relatorio.version}` : ""}`

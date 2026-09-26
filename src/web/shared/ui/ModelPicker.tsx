@@ -4,13 +4,20 @@ import { useOpenCorp } from "../../providers/OpenCorpProvider.js";
 
 export interface ModeloCatalogo {
   id: string;
-  motor: string;
+  /** Motor compatível desta linha; `null` quando nenhuma origem vinculou um motor. */
+  motor: string | null;
   provedor: string;
   origem: "live" | "hint";
+  /** Origens que listaram o modelo (proveniência preservada). */
+  origens?: string[];
   gratuito: boolean;
   recomendado: boolean;
+  /** Pode entrar em rotação de agentes autônomos. */
+  autonomo?: boolean;
   tier: "S" | "A" | "B" | "NAO_RECOMENDADO";
   motivo?: string;
+  /** Probe real com este motor (catalogado ≠ verificado). */
+  probe?: { status: "passed" | "failed"; em: string; nivel?: string } | null;
 }
 
 let cacheCatalogo: ModeloCatalogo[] | null = null;
@@ -86,11 +93,14 @@ export const ModelPicker: FC<ModelPickerProps> = ({
   };
 
   const testar = async (modelo: ModeloCatalogo) => {
+    if (!modelo.motor) return;
+    // Motores ≠ OpenCode: inferência real com este modelo (consome cota), não só o motor.
+    if (modelo.motor !== "opencode" && !confirm(`Testar "${modelo.id}" no motor "${modelo.motor}" executa uma inferência real e consome cota. Continuar?`)) return;
     setTestando(modelo.id);
     try {
       const resposta = modelo.motor === "opencode"
         ? await client.http.post<any>("/llm/test", { model: modelo.id })
-        : await client.http.post<any>(`/api/motores/${encodeURIComponent(modelo.motor)}/test`, {});
+        : await client.http.post<any>(`/api/motores/${encodeURIComponent(modelo.motor)}/test`, { nivel: "inference", modelo: modelo.id, confirmarCusto: true });
       setResultados((atuais) => ({ ...atuais, [modelo.id]: Boolean(resposta?.ok) }));
     } catch {
       setResultados((atuais) => ({ ...atuais, [modelo.id]: false }));
@@ -153,19 +163,23 @@ export const ModelPicker: FC<ModelPickerProps> = ({
             ) : opcoes.map((modelo) => {
               const marcado = selecionados.includes(modelo.id);
               return (
-                <div key={`${modelo.motor}:${modelo.id}`} className={`group flex items-center gap-2 rounded-lg border px-2 py-1.5 ${marcado ? "border-emerald-800/70 bg-emerald-950/30" : "border-transparent hover:border-zinc-800 hover:bg-zinc-900"}`}>
+                <div key={`${modelo.motor ?? "-"}:${modelo.id}`} className={`group flex items-center gap-2 rounded-lg border px-2 py-1.5 ${marcado ? "border-emerald-800/70 bg-emerald-950/30" : "border-transparent hover:border-zinc-800 hover:bg-zinc-900"}`}>
                   <button type="button" onClick={() => alternar(modelo.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                     <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${marcado ? "border-emerald-500 bg-emerald-600 text-white" : "border-zinc-700"}`}>{marcado && <Check size={10} />}</span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-mono text-[11px] text-zinc-200">{modelo.id}</span>
                       <span className="flex gap-1.5 text-[9px] text-zinc-500">
-                        <span>{modelo.motor}</span><span>·</span><span>{modelo.origem === "live" ? "catálogo ao vivo" : "suportado"}</span>
+                        <span>{modelo.motor ?? "motor não identificado"}</span><span>·</span>
+                        <span title={modelo.origens?.join(", ")}>{modelo.origem === "live" ? "catálogo ao vivo" : "catalogado"}</span>
+                        {modelo.probe?.status === "passed" && <span className="text-emerald-300" title={`Probe aprovado em ${modelo.probe.em}`}>VERIFICADO</span>}
+                        {modelo.probe?.status === "failed" && <span className="text-rose-400" title={`Probe reprovado em ${modelo.probe.em}`}>FALHOU</span>}
                         {modelo.gratuito && <span className="text-emerald-400">FREE</span>}
                         {modelo.recomendado && <span className="text-cyan-400">AGENTE</span>}
+                        {modelo.autonomo === false && <span className="text-amber-400" title={modelo.motivo}>BLOQUEADO P/ AUTÔNOMOS</span>}
                       </span>
                     </span>
                   </button>
-                  <button type="button" onClick={() => void testar(modelo)} title="Testar motor/provedor" className={`rounded-md p-1.5 ${resultados[modelo.id] === true ? "text-emerald-400" : resultados[modelo.id] === false ? "text-rose-400" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"}`}>
+                  <button type="button" disabled={!modelo.motor} onClick={() => void testar(modelo)} title={modelo.motor === "opencode" ? "Testar modelo" : "Testar modelo (inferência real, consome cota)"} className={`rounded-md p-1.5 ${resultados[modelo.id] === true ? "text-emerald-400" : resultados[modelo.id] === false ? "text-rose-400" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"}`}>
                     {testando === modelo.id ? <Loader2 size={12} className="animate-spin" /> : <TestTube2 size={12} />}
                   </button>
                 </div>
