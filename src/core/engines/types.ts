@@ -27,6 +27,9 @@ export interface EngineExecutionOptions {
   model: string;
   prompt: string;
   homeDir: string;
+  title?: string;
+  auto?: boolean;
+  extraArgs?: string[];
   envOverrides?: Record<string, string>;
   timeoutMs?: number;
 }

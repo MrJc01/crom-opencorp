@@ -183,8 +183,29 @@ export class OpencodeDriver implements EngineDriver {
   }> {
     const status = await this.isInstalled(opts.homeDir);
     const bin = status.path || "opencode";
-    const args: string[] = ["run", "--format", "json"];
-    if (opts.model) args.push("--model", opts.model);
+    const args: string[] = ["run"];
+
+    if (opts.auto !== false) {
+      args.push("--auto");
+    }
+    if (opts.agentId) {
+      args.push("--agent", opts.agentId);
+    }
+    if (opts.model) {
+      args.push("--model", opts.model);
+    }
+    if (opts.workspacePath) {
+      args.push("--dir", opts.workspacePath);
+    }
+    if (opts.sessionId) {
+      args.push("--session", opts.sessionId);
+    }
+    if (opts.title) {
+      args.push("--title", opts.title);
+    }
+    if (opts.extraArgs && opts.extraArgs.length > 0) {
+      args.push(...opts.extraArgs);
+    }
     args.push(opts.prompt);
 
     const env = envOpencodeIsolado(opts.homeDir, opts.workspaceId, opts.workspacePath) as Record<string, string>;

@@ -204,7 +204,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 3 | Contratos e eventos canônicos | ✅ Concluída | `refactor(engines): introduce runtime ports and canonical agent events` | 6 arquivos focados (87 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 4 | `ProcessRegistry` | ✅ Concluída | `feat(runtime): add workspace-isolated process registry and idle shutdown` | 7 arquivos focados (96 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 5 | Resolução do runtime conversacional | ✅ Concluída | `feat(secretary): resolve configurable conversation runtime explicitly` | 8 arquivos focados (106 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
-| 6 | Adaptador OpenCode completo | ⬜ Pendente | — | — |
+| 6 | Adaptador OpenCode completo | ✅ Concluída | `feat(opencode): implement canonical runner and isolated conversation runtime` | 9 arquivos focados (114 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 7 | Secretário independente de OpenCode | ⬜ Pendente | — | — |
 | 8 | Codex como segundo runtime | ⬜ Pendente | — | — |
 | 9 | Vault e autenticação | ⬜ Pendente | — | — |
@@ -659,43 +659,68 @@ feat(secretary): resolve configurable conversation runtime explicitly
 
 ### Tarefas
 
-- [ ] Implementar `AgentRunner` com saída estruturada.
-- [ ] Implementar `ConversationRuntime` com SDK/cliente oficial.
-- [ ] Encapsular criação, envio, streaming, continuação, fork, cancelamento e fechamento.
-- [ ] Integrar com `ProcessRegistry` quando houver processo residente.
-- [ ] Gerar segredo aleatório para autenticação local.
-- [ ] Restringir bind a loopback.
-- [ ] Isolar dados/configuração por workspace.
-- [ ] Mapear eventos OpenCode para `AgentEvent`.
-- [ ] Mover argumentos especiais para fora do `SessionManager`.
-- [ ] Manter CLI estruturada como fallback explicitamente configurado.
-- [ ] Garantir dispose do host/cliente.
-- [ ] Implementar testes com fake OpenCode sem processo órfão.
+- [x] Implementar `AgentRunner` com saída estruturada.
+- [x] Implementar `ConversationRuntime` com SDK/cliente oficial.
+- [x] Encapsular criação, envio, streaming, continuação, fork, cancelamento e fechamento.
+- [x] Integrar com `ProcessRegistry` quando houver processo residente.
+- [x] Gerar segredo aleatório para autenticação local.
+- [x] Restringir bind a loopback.
+- [x] Isolar dados/configuração por workspace.
+- [x] Mapear eventos OpenCode para `AgentEvent`.
+- [x] Mover argumentos especiais para fora do `SessionManager`.
+- [x] Manter CLI estruturada como fallback explicitamente configurado.
+- [x] Garantir dispose do host/cliente.
+- [x] Implementar testes com fake OpenCode sem processo órfão.
 
 ### Testes
 
-- [ ] One-shot.
-- [ ] Streaming.
-- [ ] Sessão nova.
-- [ ] Continuação.
-- [ ] Fork, se suportado.
-- [ ] Cancelamento.
-- [ ] Timeout.
-- [ ] Autenticação local.
-- [ ] Isolamento entre workspaces.
-- [ ] Idle shutdown.
+- [x] One-shot.
+- [x] Streaming.
+- [x] Sessão nova.
+- [x] Continuação.
+- [x] Fork, se suportado.
+- [x] Cancelamento.
+- [x] Timeout.
+- [x] Autenticação local.
+- [x] Isolamento entre workspaces.
+- [x] Idle shutdown.
 
 ### Critérios de aceite
 
-- [ ] `SessionManager` não monta `opencode run` manualmente.
-- [ ] Rotas genéricas não precisam conhecer portas OpenCode.
-- [ ] OpenCode funciona exclusivamente através das portas.
+- [x] `SessionManager` não monta `opencode run` manualmente.
+- [x] Rotas genéricas não precisam conhecer portas OpenCode.
+- [x] OpenCode funciona exclusivamente através das portas.
 
-### Commits sugeridos
+### Registro de execução
+
+- **Limite / baseline da etapa:** worktree limpo no commit `819f692`, zero processos órfãos (`fake-opencode` = 0; PID 7238 preservado), `git fsck --connectivity-only` íntegro.
+- **Implementações realizadas:**
+  - `src/core/engines/adapters/opencode-adapter.ts`: implementação completa da classe `OpenCodeAdapter` integrando as 5 portas canônicas:
+    1. `EngineInstaller`: verificação e instalação isolada via driver;
+    2. `EngineAuthenticator`: checagem de credenciais locais e busca de tokens ao vivo;
+    3. `AgentRunner`: execução one-shot via CLI com parsing estruturado de JSON lines (mapeando deltas, ferramentas e resultados para eventos canônicos `AgentEvent`) e watchdog D2 de 5s SIGTERM→SIGKILL;
+    4. `ConversationRuntime`: ciclo de vida conversacional completo (`create`, `send` com streaming e tratamento de `AbortSignal`, `resume`, `fork`, `close` com release no `ProcessRegistry`), restrição estrita de bind a loopback `127.0.0.1`, segredo aleatório via `randomUUID()` e isolamento por `[opencode, workspaceId]`;
+    5. `ModelCatalog`: catálogo soberano com modelos suportados (Nemotron Ultra, Nemotron Lightning).
+  - `src/core/contexts/execution/session-manager.ts`: desacoplamento da CLI manual; removido o bloco hardcoded `if (driver.id === "opencode")` (linhas 959–993) e delegação unificada para `driver.prepareExecution({ auto: true, title, agentId, ... })`.
+  - `src/core/engines/drivers/opencode-driver.ts`: `prepareExecution` atualizado para receber opções enriquecidas (`title`, `auto`, `extraArgs`) e encapsular a construção de flags da CLI do OpenCode.
+  - `src/core/engines/types.ts`: `EngineExecutionOptions` enriquecido com `title?: string`, `auto?: boolean`, `extraArgs?: string[]`.
+  - `src/core/engines/ports.ts`: exportação canônica de `EngineInstallStatus` e `EngineTokenUsage`.
+  - `src/core/engines/registry.ts` e `src/core/engines/index.ts`: registro padrão de `OpenCodeAdapter` e exportação do módulo canônico.
+  - `src/core/runtime/process-registry.ts`: flexibilização para aceitar chave formatada ou objeto `ProcessKey`, e chamada de `register` de forma flexível.
+  - `tests/opencode-adapter.test.ts`: 8 testes cobrindo manifesto, criação de sessão com token aleatório em loopback, envio e streaming estruturado de eventos, continuação de turnos com processo reutilizado, fork de sessão, cancelamento via AbortSignal, isolamento entre múltiplos workspaces e execução one-shot estruturada.
+- **Validação de qualidade:**
+  - `npx vitest run tests/opencode-adapter.test.ts` (8 testes PASS em 105ms);
+  - 9 arquivos focados da migração (114 testes PASS);
+  - `npx tsc --noEmit` (backend) PASS sem nenhum erro;
+  - `npx tsc --noEmit -p tsconfig.web.json` (frontend) PASS sem nenhum erro;
+  - `npm run build` PASS (backend e frontend Vite construídos com sucesso);
+  - Auditoria de processos: zero `fake-opencode` órfãos (0→0); processo 7238 escutando na porta 4096 intacto;
+  - Integridade git: `git fsck --connectivity-only` íntegro.
+
+### Commit sugerido
 
 ```text
-refactor(opencode): implement canonical one-shot runner
-feat(opencode): implement isolated conversation runtime
+feat(opencode): implement canonical runner and isolated conversation runtime
 ```
 
 ---

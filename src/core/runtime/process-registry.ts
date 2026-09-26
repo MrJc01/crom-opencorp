@@ -181,8 +181,23 @@ export class ProcessRegistry {
   }
 
   public register(
-    key: ProcessKey,
-    params: {
+    keyOrParams:
+      | ProcessKey
+      | {
+          key: ProcessKey;
+          pid: number;
+          pgid?: number;
+          version?: string;
+          cwd: string;
+          transport: ProcessTransport;
+          port?: number;
+          owner?: string;
+          authVerified?: boolean;
+          expectedExecutableName?: string;
+          metadata?: Record<string, unknown>;
+          initialRefCount?: number;
+        },
+    params?: {
       pid: number;
       pgid?: number;
       version?: string;
@@ -196,6 +211,11 @@ export class ProcessRegistry {
       initialRefCount?: number;
     }
   ): ManagedProcessRecord {
+    const isSingleArg =
+      typeof keyOrParams === "object" && keyOrParams !== null && "pid" in keyOrParams && "key" in keyOrParams;
+    const key: ProcessKey = isSingleArg ? (keyOrParams as any).key : (keyOrParams as ProcessKey);
+    const p = isSingleArg ? (keyOrParams as any) : params!;
+
     const keyString = formatProcessKey(key);
     const existing = this.records.get(keyString);
     if (existing && this.isPidRunning(existing.pid)) {
@@ -205,25 +225,25 @@ export class ProcessRegistry {
     }
 
     const nowIso = new Date(this.clock()).toISOString();
-    const initialRefCount = params.initialRefCount ?? 1;
+    const initialRefCount = p.initialRefCount ?? 1;
 
     const record: ManagedProcessRecord = {
       key: { engineId: key.engineId.trim().toLowerCase(), workspaceId: key.workspaceId.trim() },
       keyString,
-      pid: params.pid,
-      pgid: params.pgid,
-      version: params.version,
-      cwd: params.cwd,
-      transport: params.transport,
-      port: params.port,
+      pid: p.pid,
+      pgid: p.pgid,
+      version: p.version,
+      cwd: p.cwd,
+      transport: p.transport,
+      port: p.port,
       startedAt: nowIso,
       lastActiveAt: nowIso,
       state: initialRefCount > 0 ? "busy" : "idle",
       referenceCount: initialRefCount,
-      owner: params.owner,
-      authVerified: params.authVerified ?? true,
-      expectedExecutableName: params.expectedExecutableName,
-      metadata: params.metadata,
+      owner: p.owner,
+      authVerified: p.authVerified ?? true,
+      expectedExecutableName: p.expectedExecutableName,
+      metadata: p.metadata,
     };
 
     this.records.set(keyString, record);
@@ -237,16 +257,21 @@ export class ProcessRegistry {
     return record;
   }
 
-  public get(key: ProcessKey): ManagedProcessRecord | undefined {
-    return this.records.get(formatProcessKey(key));
+  private toKeyString(key: ProcessKey | string): string {
+    if (typeof key === "string") return key;
+    return formatProcessKey(key);
+  }
+
+  public get(key: ProcessKey | string): ManagedProcessRecord | undefined {
+    return this.records.get(this.toKeyString(key));
   }
 
   public list(): ManagedProcessRecord[] {
     return Array.from(this.records.values());
   }
 
-  public acquire(key: ProcessKey): ManagedProcessRecord | undefined {
-    const keyString = formatProcessKey(key);
+  public acquire(key: ProcessKey | string): ManagedProcessRecord | undefined {
+    const keyString = this.toKeyString(key);
     const record = this.records.get(keyString);
     if (!record) return undefined;
 
@@ -271,8 +296,8 @@ export class ProcessRegistry {
     return record;
   }
 
-  public release(key: ProcessKey): ManagedProcessRecord | undefined {
-    const keyString = formatProcessKey(key);
+  public release(key: ProcessKey | string): ManagedProcessRecord | undefined {
+    const keyString = this.toKeyString(key);
     const record = this.records.get(keyString);
     if (!record) return undefined;
 
@@ -290,8 +315,8 @@ export class ProcessRegistry {
     return record;
   }
 
-  public touch(key: ProcessKey): void {
-    const keyString = formatProcessKey(key);
+  public touch(key: ProcessKey | string): void {
+    const keyString = this.toKeyString(key);
     const record = this.records.get(keyString);
     if (!record) return;
 

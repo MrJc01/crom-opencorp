@@ -3,7 +3,7 @@ import type { EngineCapabilityManifest } from "./manifests.js";
 import type { EngineInstallStatus, EngineTokenUsage } from "./types.js";
 import type { EngineAuthStatus } from "./credentials-bridge.js";
 
-export type { EngineAuthStatus };
+export type { EngineAuthStatus, EngineInstallStatus, EngineTokenUsage };
 
 export interface EngineInstallResult {
   success: boolean;

@@ -19,3 +19,4 @@ export * from "./ports.js";
 export * from "./error-normalizer.js";
 export * from "./adapter-compat.js";
 export * from "./conversation-resolver.js";
+export * from "./adapters/opencode-adapter.js";

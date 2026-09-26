@@ -20,7 +20,6 @@ import { parseSecurityPolicyTexto } from "../../../schemas/security-policy.js";
 import { gatilhoSchema, type Gatilho } from "../../../schemas/gatilho.js";
 import { mkdirRecursive } from "../../../utils/fs-safe.js";
 import { opencorpHome, resolvePath } from "../../../utils/paths.js";
-import { envOpencodeIsolado } from "./opencode-server.js";
 import { SettingsStore } from "../workspace/settings-store.js";
 import { engineRegistry } from "../../engines/index.js";
 import { CapabilitiesPara } from "../../engines/capabilities.js";
@@ -956,57 +955,21 @@ export class SessionManager {
     let execEnv: Record<string, string>;
     let execCwd = ws.path;
 
-    if (driver.id === "opencode") {
-      // Mantém o provider/model escolhido. O catálogo do OpenCode aceita
-      // OpenRouter diretamente e a troca silenciosa entre provedores quebrava
-      // a rota quando a conta OpenCode Go estava sem cota.
-      args = [
-        "run",
-        "--auto",
-        "--agent",
-        ag.frontmatter.id,
-        "--model",
-        modeloEfetivo,
-        "--dir",
-        ws.path,
-      ];
-      if (opcoes.session) args.push("--session", opcoes.session);
-      if (opcoes.title) args.push("--title", opcoes.title);
-      args.push(ordem);
-
-      runnerBin = "opencode";
-      const managedBin = join(this.homeDir, ".opencorp", "bin", "opencode");
-      if (existsSync(managedBin)) {
-        runnerBin = managedBin;
-      } else {
-        try {
-          const rPath = join(this.homeDir, ".opencorp", "runner.json");
-          if (existsSync(rPath)) {
-            const rJson = JSON.parse(readFileSync(rPath, "utf8")) as { binary_path?: string };
-            if (typeof rJson.binary_path === "string" && rJson.binary_path.trim().length > 0) {
-              runnerBin = rJson.binary_path.trim();
-            }
-          }
-        } catch {}
-      }
-      execEnv = envOpencodeIsolado(this.homeDir, ws.id, ws.path) as Record<string, string>;
-    } else {
-      const prep = await driver.prepareExecution({
-        workspaceId: ws.id,
-        workspacePath: ws.path,
-        // F1-T02: repassa a sessão a continuar aos drivers que aceitam
-        // (ex.: crom-agente usa sessionId como --session); demais ignoram.
-        sessionId: opcoes.session ?? id,
-        agentId: ag.frontmatter.id,
-        model: modeloEfetivo,
-        prompt: ordem,
-        homeDir: this.homeDir,
-      });
-      runnerBin = prep.binary;
-      args = prep.args;
-      execEnv = prep.env;
-      execCwd = prep.cwd;
-    }
+    const prep = await driver.prepareExecution({
+      workspaceId: ws.id,
+      workspacePath: ws.path,
+      sessionId: opcoes.session ?? id,
+      agentId: ag.frontmatter.id,
+      model: modeloEfetivo,
+      prompt: ordem,
+      homeDir: this.homeDir,
+      title: opcoes.title,
+      auto: true,
+    });
+    runnerBin = prep.binary;
+    args = prep.args;
+    execEnv = prep.env;
+    execCwd = prep.cwd;
 
     try {
       const { WorkspaceGit } = await import("../workspace/workspace-git.js");
