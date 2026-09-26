@@ -111,6 +111,7 @@ export class LegacyDriverAdapter implements EngineAdapter {
             homeDir: input.homeDir,
             envOverrides: input.envOverrides,
             timeoutMs: input.timeoutMs,
+            accountId: input.accountId,
           });
         } catch (err: any) {
           const error = normalizeEngineError(err, { engineId: driver.id, modelId: input.model });
