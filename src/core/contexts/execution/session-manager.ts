@@ -964,7 +964,29 @@ export class SessionManager {
       /* best-effort checkpoint */
     }
 
+    const logStream = createWriteStream(logPath, { flags: "a" });
+    logStream.write(
+      `# sessão ${id}\n# agente: ${registro.agente} · modelo: ${modelo} · workspace: ${ws.id}\n# ordem: ${ordem}\n\n`,
+    );
+    const captura: string[] = [];
+    let watchdog: WatchdogRun | null = null;
+    const teeing = async (stream: AsyncIterable<unknown> | null | undefined) => {
+      if (!stream) return;
+      for await (const chunk of stream) {
+        watchdog?.registrarAtividade();
+        const bruto = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+        const texto = segredosRun.length > 0 ? redactSecrets(bruto, segredosRun) : bruto;
+        captura.push(texto);
+        logStream.write(texto);
+        process.stdout.write(texto);
+      }
+    };
+
     let child: ReturnType<typeof execa>;
+    // Consumo de stdout/stderr começa junto com o processo: com `buffer: false`,
+    // a saída de um processo rápido se perdia se a leitura só começasse depois
+    // das gravações em disco abaixo.
+    let consumoSaida: Promise<unknown> = Promise.resolve();
     // Valores das credenciais injetadas: nunca vão para captura, log ou stdout.
     let segredosRun: string[] = [];
     try {
@@ -1068,7 +1090,10 @@ export class SessionManager {
         reject: false,
         stdin: "ignore",
       });
+      consumoSaida = Promise.all([teeing(child.stdout), teeing(child.stderr)]);
+      consumoSaida.catch(() => {}); // tratado no await abaixo; evita rejeição não tratada enquanto isso
     } catch (erro) {
+      logStream.end();
       const falha = `não foi possível iniciar o runner (${runnerBin}): ${msg(erro)} — ele está no PATH? (rode "opencorp doctor")`;
       (registro as any).erro = falha;
       await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, "", null);
@@ -1080,24 +1105,6 @@ export class SessionManager {
       const meta = await this.registros.lerMeta(ws.path, "execucoes", id);
       await this.salvarExtras(ws.path, meta, registro);
     }
-
-    const logStream = createWriteStream(logPath, { flags: "a" });
-    logStream.write(
-      `# sessão ${id}\n# agente: ${registro.agente} · modelo: ${modelo} · workspace: ${ws.id}\n# ordem: ${ordem}\n\n`,
-    );
-    const captura: string[] = [];
-    let watchdog: WatchdogRun | null = null;
-    const teeing = async (stream: AsyncIterable<unknown> | null | undefined) => {
-      if (!stream) return;
-      for await (const chunk of stream) {
-        watchdog?.registrarAtividade();
-        const bruto = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
-        const texto = segredosRun.length > 0 ? redactSecrets(bruto, segredosRun) : bruto;
-        captura.push(texto);
-        logStream.write(texto);
-        process.stdout.write(texto);
-      }
-    };
 
     let mortePorTimeout = false;
     let motivoTimeout = "";
@@ -1153,7 +1160,7 @@ export class SessionManager {
 
     let resultado;
     try {
-      await Promise.all([teeing(child.stdout), teeing(child.stderr)]);
+      await consumoSaida;
       resultado = await child;
     } catch (erro) {
       logStream.end();
