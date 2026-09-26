@@ -12,3 +12,4 @@ export * from "./drivers/aider-driver.js";
 export * from "./credentials-bridge.js";
 export * from "./engine-account-store.js";
 export * from "./web-login-orchestrator.js";
+export * from "./legacy-config-translator.js";

@@ -200,7 +200,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 |---:|---|---|---|---|
 | 0 | Baseline e plano congelado | ✅ Concluída | pendente neste checkpoint | 2 compilações TS, 128 arquivos/1.216 testes e build PASS |
 | 1 | Higiene de processos e identidades | ✅ Concluída | `fix(engines): prevent orphan runtimes and engine impersonation` | 44 testes focados; 128 arquivos/1.217 testes; órfãos 0→0 |
-| 2 | `RuntimeConfig`, erros e tradutor legado | 🟨 Em andamento | `feat(config): add typed runtime configuration and engine errors` | Etapa 2A: 41 testes e 2 compilações TS PASS; tradutor pendente |
+| 2 | `RuntimeConfig`, erros e tradutor legado | ✅ Concluída | `feat(config): isolate legacy runtime configuration translation` | 4 arquivos focados (64 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 3 | Contratos e eventos canônicos | ⬜ Pendente | — | — |
 | 4 | `ProcessRegistry` | ⬜ Pendente | — | — |
 | 5 | Resolução do runtime conversacional | ⬜ Pendente | — | — |
@@ -383,28 +383,28 @@ interface RuntimeConfig {
 - [x] Criar `EngineUnavailableError`.
 - [x] Criar `PREFLIGHT_BINARY_MISSING` como código canônico.
 - [x] Criar erros para autenticação, incompatibilidade de modelo e capacidade ausente.
-- [ ] Criar `LegacyConfigTranslator` puro, sem escrita em disco.
-- [ ] Traduzir `runner.json` para `RuntimeConfig` em memória.
-- [ ] Traduzir prefixos legados sem trocar motor silenciosamente.
-- [ ] Emitir evento/log estruturado `[DEPRECATION NOTICE]` uma vez por origem.
-- [ ] Guardar origem da tradução para auditoria.
-- [ ] Definir datas/versões da depreciação em constantes testáveis.
+- [x] Criar `LegacyConfigTranslator` puro, sem escrita em disco.
+- [x] Traduzir `runner.json` para `RuntimeConfig` em memória.
+- [x] Traduzir prefixos legados sem trocar motor silenciosamente.
+- [x] Emitir evento/log estruturado `[DEPRECATION NOTICE]` uma vez por origem.
+- [x] Guardar origem da tradução para auditoria.
+- [x] Definir datas/versões da depreciação em constantes testáveis.
 
 ### Testes
 
 - [x] Defaults globais.
 - [x] Override por workspace.
 - [x] Configuração inválida com caminho do campo no erro.
-- [ ] Tradução de cada formato legado conhecido.
-- [ ] Tradutor idempotente.
-- [ ] Ausência de escrita durante tradução.
-- [ ] Snapshot dos avisos de depreciação.
+- [x] Tradução de cada formato legado conhecido.
+- [x] Tradutor idempotente.
+- [x] Ausência de escrita durante tradução.
+- [x] Snapshot dos avisos de depreciação.
 
 ### Critérios de aceite
 
 - [x] Modelo não determina motor no domínio novo.
-- [ ] Compatibilidade está isolada em um único módulo.
-- [ ] Configurações novas não dependem de `runner.json`.
+- [x] Compatibilidade está isolada em um único módulo.
+- [x] Configurações novas não dependem de `runner.json`.
 
 ### Registro da Etapa 2A — Fundação tipada
 
@@ -417,11 +417,34 @@ interface RuntimeConfig {
 - Frontend TypeScript: PASS.
 - Próximo passo exato: implementar o tradutor puro e seus testes em uma nova unidade, após nova verificação de limite.
 
+### Registro da Etapa 2B — `LegacyConfigTranslator` e avisos de depreciação
+
+- Limite no início: sessão Antigravity IDE (Gemini 3.8 Flash) sem indicador restritivo exposto pelo cliente; início às 23:19 -03.
+- Limite no encerramento: sessão operacional e íntegra; encerramento às 23:30 -03.
+- Decisão: implementar e validar integralmente a borda de compatibilidade pura e suíte de testes unitários.
+- Entregas:
+  - Módulo `src/core/engines/legacy-config-translator.ts` contendo `translateLegacyRuntimeConfig`, `LegacyConfigTranslationError`, `DeprecationEmitter`, `createDeprecationNotice` e constantes canônicas de depreciação (início `2026-09-25`, remoção não antes de `2026-11-24`, versão `2.0.0`, regra de 60 dias e 2 versões menores).
+  - Exportação de compatibilidade através de `src/core/engines/index.ts`.
+  - Suíte de 23 testes em `tests/legacy-config-translator.test.ts`.
+- Formatos legados suportados e testados:
+  - `runner.json` (mínimo, e com `binary_path`, `timeout_min` e `harness_fallback`);
+  - Campos legados de agentes: `harness`, `engine`, `harness_fallback`, `engine_fallback`, `rotation`, `model_fallback`;
+  - Prefixos de modelo: `opencode/*`, `opencode-go/*`, `claude-code/*`, `claude/*`, `antigravity/*`, `agy/*`, `crom-agente/*`, `crom/*`, `cursor/*`, `copilot/*`, `codex/*`, `aider/*`, `mimo/*`;
+  - Preservação explícita de `openrouter/*` como provedor/modelo, sem conversão forçada para OpenCode;
+  - Prevalência de motor explicitamente configurado sobre inferência de prefixo de modelo, com aviso detalhado de precedência;
+  - Normalização de aliases legados (`agy → antigravity`, `crom → crom-agente`, `claude → claude-code`);
+  - Ausência de escrita em disco e imutabilidade garantida com `Object.freeze`.
+- Validação focada: 4 arquivos, 64 testes PASS (`tests/runtime-config.test.ts`, `tests/legacy-config-translator.test.ts`, `tests/settings-store.test.ts`, `tests/engine-drivers.test.ts`).
+- Compilação: `npx tsc --noEmit` e `npx tsc --noEmit -p tsconfig.web.json` PASS.
+- Build: `npm run build` PASS (backend e frontend Vite).
+- Processos órfãos: 0 processos `fake-opencode` detectados.
+- Próximo passo exato: Iniciar a Etapa 3 — Contratos e eventos canônicos (`EngineInstaller`, `EngineAuthenticator`, `AgentRunner`, `ConversationRuntime`, `ModelCatalogSource`, `EngineCapabilityManifest`, `AgentEvent`).
+
 ### Commits sugeridos
 
 ```text
 feat(config): add typed runtime configuration and explicit engine errors
-feat(config): isolate legacy engine configuration translation
+feat(config): isolate legacy runtime configuration translation
 ```
 
 ---
