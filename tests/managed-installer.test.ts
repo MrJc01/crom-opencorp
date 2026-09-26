@@ -270,6 +270,7 @@ describe("ETAPA 10 — resolução de binário e instalação gerenciada", () =>
       "core/engines/adapter-compat.ts",
       "core/engines/adapters/codex-adapter.ts",
       "core/engines/adapters/opencode-adapter.ts",
+      "core/engines/acp/acp-adapter.ts",
       "core/engines/installer/managed-installer.ts",
     ]);
     for (const file of files) {

@@ -210,7 +210,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 9 | Vault e autenticação | ✅ Concluída | `feat(credentials): add scoped vault facade and ephemeral injection` | 13 testes de credenciais; 140 arquivos/1.340 testes; 2 TS PASS; OpenCode autenticado de fato |
 | 10 | Instalador gerenciado e preflight | ✅ Concluída | `feat(engines): add deterministic binary resolution and verified managed installs` | 13 testes de instalação; 141 arquivos/1.352 testes; 2 TS e build PASS |
 | 11 | Saúde funcional e conformidade | ✅ Concluída | `feat(engines): add multi-level health and conformance probes` | conformidade OpenCode+Codex; 143 arquivos/1.398 testes; 2 TS e build PASS |
-| 12 | `AcpClientAdapter` | ⬜ Pendente | — | — |
+| 12 | `AcpClientAdapter` | ✅ Concluída | `feat(acp): add ACP v1 adapter and connect Copilot and MiMo` | Copilot e MiMo via ACP; handshakes reais PASS; 145 arquivos/1.450 testes |
 | 13 | Catálogo e rotação soberanos | ⬜ Pendente | — | — |
 | 14 | Migração CLI/UI e depreciação | ⬜ Pendente | — | — |
 | 15 | Validação final e liberação | ⬜ Pendente | — | — |
@@ -1058,48 +1058,66 @@ feat(engines): add multi-level health and conformance probes
 
 ### Preparação
 
-- [ ] Fixar versão da especificação ACP suportada.
-- [ ] Registrar divergências de Copilot/MiMo.
-- [ ] Decidir biblioteca oficial versus implementação interna mínima.
-- [ ] Definir transporte stdio e política de framing.
+- [x] Fixar versão da especificação ACP suportada — **ACP v1** (`PROTOCOL_VERSION = 1` do esquema oficial `@agentclientprotocol/sdk` 1.5.0, lido do pacote publicado).
+- [x] Registrar divergências de Copilot/MiMo (handshakes reais sem prompt, abaixo).
+- [x] Decidir biblioteca oficial versus implementação interna mínima — **implementação interna** (`src/core/engines/acp/`): o protocolo usado é pequeno, o repositório já segue esse padrão no Codex, e o SDK traz servidor HTTP/WS/SSE e APIs instáveis que não usamos. Tipos conferidos contra `schema/schema.json` do SDK.
+- [x] Definir transporte stdio e política de framing — NDJSON (um JSON-RPC por linha), frame máximo 16 MiB, escrita serializada respeitando `drain`.
+
+Divergências observadas (26/09/2026):
+
+| Agente | Comando | Capacidades anunciadas | Observações |
+|---|---|---|---|
+| Copilot CLI 1.0.88 | `copilot --acp` | `loadSession`, `session/close`, `session/list` | Sem `fork`/`resume`. `session/new` sem login → `-32000 "Authentication required"`. Modelo por `--model` na inicialização (seleção por `configOptions` não verificada: exige login). |
+| MiMo 0.1.15 | `mimo acp` | `loadSession`, `session/fork`, `session/resume`, `session/list` | Derivado do OpenCode. Modelo por `configOptions` (`model`). **O tier gratuito foi encerrado**: o turno termina com `end_turn` vazio e o erro só aparece no stderr (`error: MiMo free API service has ended. Sign in or configure a third-party API.`). |
 
 ### Implementação
 
-- [ ] Inicialização e negociação de capacidades.
-- [ ] Correlação de requisições JSON-RPC.
-- [ ] Notificações/eventos assíncronos.
-- [ ] Sessão nova.
-- [ ] Envio de mensagem.
-- [ ] Streaming.
-- [ ] Cancelamento.
-- [ ] Continuação.
-- [ ] Aprovações HITL.
-- [ ] Encerramento e dispose.
-- [ ] Backpressure e limites de buffer.
-- [ ] Timeout por operação.
-- [ ] Normalização em `AgentEvent`.
-- [ ] Implementação de `AgentRunner`.
-- [ ] Implementação de `ConversationRuntime`.
+- [x] Inicialização e negociação de capacidades (versão diferente de 1 é recusada).
+- [x] Correlação de requisições JSON-RPC.
+- [x] Notificações/eventos assíncronos.
+- [x] Sessão nova.
+- [x] Envio de mensagem.
+- [x] Streaming.
+- [x] Cancelamento (`session/cancel` + resposta `cancelled` a permissões pendentes, como exige a spec).
+- [x] Continuação (`session/resume` se anunciado, senão `session/load`; histórico reenviado é ignorado).
+- [x] Aprovações HITL (`session/request_permission` → `approval.requested` com ID local, escopo por workspace; expiração rejeita).
+- [x] Encerramento e dispose (`session/close` quando anunciado; processo no ProcessRegistry).
+- [x] Backpressure e limites de buffer.
+- [x] Timeout por operação (60 s padrão; `session/prompt` sem limite, controlado pelo `AbortSignal`).
+- [x] Normalização em `AgentEvent`.
+- [x] Implementação de `AgentRunner` (processo próprio por execução; recusa aprovações; `--model` no Copilot).
+- [x] Implementação de `ConversationRuntime` (um processo por [motor, workspace]).
 
 ### Testes
 
-- [ ] Fake ACP server determinístico.
-- [ ] Frames parciais e múltiplos frames.
-- [ ] Resposta fora de ordem.
-- [ ] Notificação sem request.
-- [ ] Erro JSON-RPC.
-- [ ] Processo encerra inesperadamente.
-- [ ] Cancelamento concorrente.
-- [ ] HITL aceito, rejeitado e expirado.
-- [ ] Zero órfãos.
-- [ ] Contrato real opt-in com Copilot.
-- [ ] Contrato real opt-in com MiMo.
+- [x] Fake ACP server determinístico (`tests/fixtures/fake-acp-agent.ts`, perfis Copilot e MiMo).
+- [x] Frames parciais e múltiplos frames.
+- [x] Resposta fora de ordem.
+- [x] Notificação sem request.
+- [x] Erro JSON-RPC.
+- [x] Processo encerra inesperadamente.
+- [x] Cancelamento concorrente.
+- [x] HITL aceito, rejeitado e expirado.
+- [x] Zero órfãos (suíte de conformidade).
+- [x] Contrato real opt-in com Copilot — handshake real PASS (sem login: `ENGINE_AUTH_REQUIRED` correto). Conversa real pendente de login (P-08).
+- [x] Contrato real opt-in com MiMo — handshake real PASS; conversa real com `mimo/mimo-auto` agora falha corretamente com `ENGINE_AUTH_REQUIRED` (tier gratuito encerrado). Conversa real pendente de login (P-08).
 
 ### Critérios de aceite
 
-- [ ] Copilot e MiMo reutilizam a infraestrutura comum quando conformes.
-- [ ] Diferenças de fornecedor ficam em configuração/subclasse pequena.
-- [ ] Nenhum parser proprietário duplicado nas rotas ou no núcleo.
+- [x] Copilot e MiMo reutilizam a infraestrutura comum quando conformes (`AcpAdapter` + `AcpAgentClient`; conformidade 13 × 2 motores).
+- [x] Diferenças de fornecedor ficam em configuração/subclasse pequena (`acp/vendors.ts`).
+- [x] Nenhum parser proprietário duplicado nas rotas ou no núcleo.
+
+### Registro da Etapa 12 — 26/09/2026
+
+- Executor: Claude Code (Opus 5.5).
+- Arquivos: `src/core/engines/acp/{json-rpc-connection,acp-client,acp-adapter,vendors,index}.ts`; manifestos de Copilot e MiMo atualizados para `stdio_jsonrpc` com as capacidades verificadas; `EngineRegistry` registra os dois como `AcpAdapter`.
+- Binários oficiais usados na verificação: `@github/copilot-linux-x64` 1.0.88 (npm) e `mimocode-linux-x64` 0.1.15 (FDS oficial da Xiaomi, o mesmo do instalador). Nenhum prompt foi enviado a serviços pagos.
+- **Correções encontradas no teste real:**
+  - O OpenCorp afirmava que o MiMo "não exige login" e marcava o motor como autenticado. Agora a verificação usa `mimo auth whoami` (sai com 0 mesmo sem login; o texto "Not logged in" é o sinal), com logout oficial `mimo auth logout`; textos da UI e instruções corrigidos.
+  - Turno ACP vazio com `error:` no stderr vira `run.failed` (`ENGINE_AUTH_REQUIRED` quando a mensagem indica login), em vez de uma resposta vazia tratada como sucesso.
+- **Defeito de manifesto corrigido:** Claude Code, Antigravity, Cursor e Crom Agente declaravam `supportsConversation: true` sem `ConversationRuntime`; o resolvedor aceitaria esses motores para o Secretário e a conversa quebraria depois. Agora declaram `false`.
+- Validações: `acp-adapter` 27, `engine-conformance` 52 (13 × 4 motores; fork do Copilot pulado pelo manifesto); suíte completa 145 arquivos — 1.450 PASS, 8 skipped (probes reais), 1 todo; TypeScript backend/frontend PASS; build PASS; órfãos 0.
 
 ### Commits sugeridos
 
@@ -1451,6 +1469,8 @@ Registrar aqui apenas itens novos, com etapa de origem, impacto e decisão. Não
 | P-05 | 10 | `tests/modelos-governance-e2e.test.ts` falhou 1× na suíte completa | Causa: `oc modelos` lia o catálogo do `opencode` instalado na máquina | Corrigido na Etapa 11 (`OPENCORP_HOME` + catálogo determinístico) |
 | P-07 | 11 | `ModelPicker` "testar modelo" chama `/api/motores/:id/test` para motores ≠ OpenCode | O teste do modelo verifica só o motor (instalação/autenticação), não o modelo | Ajustar na Etapa 13 (seleção de motor/modelo) |
 | P-06 | 10 | Artefatos aprovados limitados a Codex e OpenCode | Demais motores dependem de instalação manual | Adicionar entradas apenas com SHA-256 publicado pelo fornecedor |
+| P-08 | 12 | Conversa real ACP não executada (Copilot e MiMo sem login no ambiente de verificação) | Streaming/ferramentas reais verificados só com fake fiel ao esquema | `OPENCORP_REAL_PROBES=copilot,mimo OPENCORP_PROBE_<MOTOR>_MODEL=<modelo> npm run test:real` com as contas autenticadas |
+| P-09 | 12 | Seleção de modelo do Copilot por `configOptions` não verificada | Conversa com modelo explícito no Copilot falha com `MODEL_INCOMPATIBLE` se o agente não expuser o seletor | Verificar com login; se necessário, iniciar o processo com `--model` |
 | P-02 | 8 | Sessões do adaptador Codex ficam em memória | Após reinício, a conversa é retomada via `thread/resume` pelo UUID; título/modelo da sessão se perdem | Aceito; persistência de metadados fica para a Etapa 13/14 se necessária |
 
 ---

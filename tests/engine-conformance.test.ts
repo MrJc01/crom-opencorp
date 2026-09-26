@@ -14,6 +14,11 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AcpAdapter,
+  COPILOT_ACP,
+  MIMO_ACP,
+  engineRegistry,
+  type AcpVendorConfig,
   CodexAdapter,
   OpenCodeAdapter,
   isCapabilityAvailable,
@@ -24,6 +29,7 @@ import {
 import { ProcessRegistry } from "../src/core/runtime/index.js";
 import { startFakeOpenCode, type FakeOpenCode } from "./fixtures/fake-opencode-server.js";
 import { createFakeCodex } from "./fixtures/fake-codex-app-server.js";
+import { createFakeAcpAgent, type FakeAcpProcess } from "./fixtures/fake-acp-agent.js";
 
 interface Workspace { id: string; path: string }
 
@@ -117,7 +123,37 @@ const codexHarness: HarnessFactory = async (home, registry, dead) => {
   };
 };
 
+const acpHarness = (vendor: AcpVendorConfig): HarnessFactory => async (home, registry, dead) => {
+  const procs: FakeAcpProcess[] = [];
+  let residents = 0;
+  const adapter = new AcpAdapter({
+    vendor,
+    driver: engineRegistry.get(vendor.engineId)!,
+    homeDir: home,
+    processRegistry: registry,
+    launcher: async ({ args }) => {
+      const p = createFakeAcpAgent(args, { profile: vendor.engineId as "copilot" | "mimo" });
+      procs.push(p);
+      return p;
+    },
+    installStatusProbe: async () => ({ installed: true, isManaged: false, path: `/fake/${vendor.binaryName}`, version: "fake 1.0" }),
+    authStatusProbe: async () => ({ authenticated: true, method: "teste" }),
+  });
+  registry.addListener((event) => { if (event.type === "process.registered") residents += 1; });
+  return {
+    adapter,
+    registry,
+    workspaces: await workspaces(home),
+    model: "default",
+    liveProcesses: () => procs.filter((p) => p.alive && !dead.has(p.pid)).length,
+    launches: () => residents,
+    teardown: async () => { for (const p of procs) p.kill(); },
+  };
+};
+
 const ADAPTERS: Array<[string, HarnessFactory]> = [
+  ["copilot", acpHarness(COPILOT_ACP)],
+  ["mimo", acpHarness(MIMO_ACP)],
   ["opencode", openCodeHarness],
   ["codex", codexHarness],
 ];

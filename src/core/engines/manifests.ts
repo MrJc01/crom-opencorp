@@ -140,7 +140,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     engineId: "claude-code",
     name: "Anthropic Claude Code",
     transport: "spawn_cli",
-    supportsConversation: true,
+    supportsConversation: false, // sem ConversationRuntime integrado (só execução one-shot via driver)
     features: {
       streaming: { level: "declared", flags: ["--verbose"] },
       continuation: { level: "declared", flags: ["--resume", "--continue"] },
@@ -156,7 +156,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     engineId: "antigravity",
     name: "Google Antigravity (AGY)",
     transport: "spawn_cli",
-    supportsConversation: true,
+    supportsConversation: false, // sem ConversationRuntime integrado (só execução one-shot via driver)
     features: {
       streaming: { level: "declared" },
       continuation: { level: "declared", flags: ["--conversation", "--continue"] },
@@ -171,24 +171,25 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
   "copilot": {
     engineId: "copilot",
     name: "GitHub Copilot CLI",
-    transport: "spawn_cli",
+    transport: "stdio_jsonrpc",
     supportsConversation: true,
+    details: { protocol: "acp", protocolVersion: 1, command: "copilot --acp", verifiedHandshake: "1.0.88" },
     features: {
-      streaming: { level: "declared" },
-      continuation: { level: "declared", flags: ["--resume", "--continue", "--session-id"] },
-      fork: { level: "unsupported" },
-      hitl: { level: "declared" },
-      tools: { level: "declared" },
-      mcp: { level: "unsupported" },
-      images: { level: "unsupported" },
-      cancellation: { level: "integrated" },
+      streaming: { level: "integrated", notes: "ACP session/update agent_message_chunk" },
+      continuation: { level: "integrated", notes: "ACP session/load (loadSession: true)" },
+      fork: { level: "unsupported", notes: "Não anuncia sessionCapabilities.fork (1.0.88)" },
+      hitl: { level: "integrated", notes: "ACP session/request_permission" },
+      tools: { level: "integrated", notes: "ACP tool_call/tool_call_update" },
+      mcp: { level: "declared", notes: "mcpCapabilities http/sse anunciadas; OpenCorp ainda não repassa servidores" },
+      images: { level: "declared", notes: "promptCapabilities.image anunciada; OpenCorp envia só texto" },
+      cancellation: { level: "integrated", notes: "ACP session/cancel" },
     },
   },
   "cursor": {
     engineId: "cursor",
     name: "Cursor Agent CLI",
     transport: "spawn_cli",
-    supportsConversation: true,
+    supportsConversation: false, // sem ConversationRuntime integrado (só execução one-shot via driver)
     features: {
       streaming: { level: "declared" },
       continuation: { level: "declared", flags: ["--resume", "--continue"] },
@@ -204,7 +205,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     engineId: "crom-agente",
     name: "Crom-Agente (Go)",
     transport: "spawn_cli",
-    supportsConversation: true,
+    supportsConversation: false, // sem ConversationRuntime integrado (só execução one-shot via driver)
     features: {
       streaming: { level: "integrated", notes: "Streaming de chunks no stdout" },
       continuation: { level: "integrated", flags: ["--session"] },
@@ -235,17 +236,18 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
   "mimo": {
     engineId: "mimo",
     name: "Xiaomi MiMo Code",
-    transport: "spawn_cli",
-    supportsConversation: false,
+    transport: "stdio_jsonrpc",
+    supportsConversation: true,
+    details: { protocol: "acp", protocolVersion: 1, command: "mimo acp", verifiedHandshake: "0.1.15" },
     features: {
-      streaming: { level: "unsupported" },
-      continuation: { level: "unsupported", notes: "Sem continuação nativa por flag de sessão" },
-      fork: { level: "unsupported" },
-      hitl: { level: "unsupported" },
-      tools: { level: "declared", notes: "Execução direta via run" },
-      mcp: { level: "unsupported" },
-      images: { level: "declared", notes: "Modelos multimodais MiMo" },
-      cancellation: { level: "integrated", notes: "Encerramento via SIGTERM do processo" },
+      streaming: { level: "integrated", notes: "ACP session/update agent_message_chunk" },
+      continuation: { level: "integrated", notes: "ACP session/resume (sessionCapabilities.resume)" },
+      fork: { level: "integrated", notes: "ACP session/fork (sessionCapabilities.fork, instável na spec)" },
+      hitl: { level: "integrated", notes: "ACP session/request_permission" },
+      tools: { level: "integrated", notes: "ACP tool_call/tool_call_update" },
+      mcp: { level: "declared", notes: "mcpCapabilities http/sse anunciadas; OpenCorp ainda não repassa servidores" },
+      images: { level: "declared", notes: "Modelos multimodais MiMo; OpenCorp envia só texto" },
+      cancellation: { level: "integrated", notes: "ACP session/cancel" },
     },
   },
 };

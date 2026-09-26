@@ -127,6 +127,13 @@ function runCliLoginProbe(engineId: string, homeDir: string): CliLoginResult | u
         return { loggedIn: false, method: "agent status", details: "comando indisponível" };
       }
     }
+    case "mimo": {
+      // `mimo auth whoami` sai com 0 mesmo sem login; o texto é o sinal (0.1.15).
+      const mimoBin = [join(homeDir, ".mimocode", "bin", "mimo"), join(homeDir, ".mimo", "bin", "mimo")].find((p) => existsSync(p)) ?? "mimo";
+      const { code, stdout } = commandRunner(mimoBin, ["auth", "whoami"], 8000);
+      const loggedIn = code === 0 && stdout.trim().length > 0 && !/not logged in/i.test(stdout);
+      return { loggedIn, method: "mimo auth whoami", details: loggedIn ? undefined : "Execute 'mimo auth login' ou configure um provedor terceiro" };
+    }
     case "copilot": {
       const { code } = commandRunner("gh", ["auth", "status"], 5000);
       return { loggedIn: code === 0, method: "gh auth status", details: code === 0 ? "GitHub CLI autenticado" : "Execute 'gh auth login' ou 'copilot login'" };
@@ -195,8 +202,14 @@ export function checkEngineAuthStatus(engineId: string, homeDir: string): Engine
         ? { authenticated: true, method: "GEMINI_API_KEY", details: "Google AI Studio autenticado" }
         : { authenticated: false, method: "Não verificável", details: "O agy não oferece comando de status de login. Configure GEMINI_API_KEY ou use o teste funcional do motor." };
 
-    case "mimo":
-      return { authenticated: true, method: "Sem login obrigatório", details: "O tier gratuito oficial não exige conta ou chave de API" };
+    case "mimo": {
+      // O serviço gratuito do MiMo foi encerrado (erro do próprio CLI 0.1.15:
+      // "MiMo free API service has ended. Sign in or configure a third-party API.").
+      const probe = probeCliLogin(engineId, homeDir)!;
+      return probe.loggedIn
+        ? { authenticated: true, method: probe.method }
+        : { authenticated: false, method: "Login MiMo ausente", details: "O tier gratuito foi encerrado pela Xiaomi. Execute 'mimo auth login' ou configure um provedor terceiro no MiMo." };
+    }
 
     default:
       return { authenticated: false, method: "Motor desconhecido", details: `Sem regra de autenticação para "${engineId}"` };
@@ -265,6 +278,15 @@ export function getEngineAuthInstructions(engineId: string): EngineAuthInstructi
         urlLabel: "Google AI Studio",
         guideText: "O Antigravity funciona com sua chave do Google AI Studio ($0 custo com Gemini 2.5/3.8 Flash) ou via login de desenvolvedor agy.",
       };
+    case "mimo":
+      return {
+        engineId,
+        engineName: "Xiaomi MiMo Code",
+        terminalCommand: "mimo auth login",
+        webUrl: "https://mimo.xiaomi.com/coder",
+        urlLabel: "MiMo Code",
+        guideText: "O tier gratuito do MiMo foi encerrado. Execute 'mimo auth login' no terminal ou configure um provedor terceiro no MiMo.",
+      };
     case "crom-agente":
       return {
         engineId,
@@ -294,6 +316,7 @@ const CLI_LOGOUT_COMMANDS: Readonly<Record<string, { bin: string; args: string[]
   "claude-code": { bin: "claude", args: ["auth", "logout"] },
   codex: { bin: "codex", args: ["logout"] },
   cursor: { bin: "agent", args: ["logout"] },
+  mimo: { bin: "mimo", args: ["auth", "logout"] },
 });
 
 /**

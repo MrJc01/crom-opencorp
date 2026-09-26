@@ -139,7 +139,8 @@ export const TabEngines: FC<TabEnginesProps> = ({
   };
 
   const motorAtual = motores.find((m) => m.id === motorSelecionado) || motores[0];
-  const motorSemAutenticacao = (motor: MotorInfo) => motor.id === "mimo";
+  // Todos os motores exigem autenticação (o tier gratuito sem login do MiMo foi encerrado).
+  const motorSemAutenticacao = (_motor: MotorInfo) => false;
   const motorPronto = (motor: MotorInfo) =>
     motor.installed && (motorSemAutenticacao(motor) || Boolean(motor.authStatus?.authenticated || motor.contaAtiva));
   const contasDoMotor: ContaMotor[] = (statusMotores?.contas || []).filter(

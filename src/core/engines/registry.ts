@@ -1,4 +1,6 @@
 import type { EngineDriver, EngineInstallStatus, EngineHealth, EngineTokenUsage } from "./types.js";
+import { AcpAdapter } from "./acp/acp-adapter.js";
+import { COPILOT_ACP, MIMO_ACP } from "./acp/vendors.js";
 import { OpencodeDriver } from "./drivers/opencode-driver.js";
 import { CromAgenteDriver } from "./drivers/crom-agente-driver.js";
 import { ClaudeCodeDriver } from "./drivers/claude-code-driver.js";
@@ -53,6 +55,9 @@ export class EngineRegistry {
     // Registra adaptadores canônicos com AgentRunner e ConversationRuntime
     this.registerAdapter(new OpenCodeAdapter());
     this.registerAdapter(new CodexAdapter());
+    // Copilot e MiMo via ACP (D5): mesma infraestrutura, diferença só na configuração.
+    this.registerAdapter(new AcpAdapter({ vendor: COPILOT_ACP, driver: this.get("copilot")! }));
+    this.registerAdapter(new AcpAdapter({ vendor: MIMO_ACP, driver: this.get("mimo")! }));
   }
 
   public static getInstance(): EngineRegistry {

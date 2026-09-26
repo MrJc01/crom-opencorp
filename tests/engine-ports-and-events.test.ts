@@ -67,9 +67,10 @@ describe("ETAPA 3 — Manifestos e Domínio de Capacidades", () => {
 
     const mimoManifest = engineRegistry.getManifest("mimo");
     expect(mimoManifest).toBeDefined();
-    expect(mimoManifest?.transport).toBe("spawn_cli");
+    // Etapa 12: MiMo passou a usar ACP (`mimo acp`), com continuação por session/resume.
+    expect(mimoManifest?.transport).toBe("stdio_jsonrpc");
     expect(isCapabilityAvailable(mimoManifest!, "cancellation")).toBe(true);
-    expect(isCapabilityAvailable(mimoManifest!, "continuation")).toBe(false);
+    expect(isCapabilityAvailable(mimoManifest!, "continuation")).toBe(true);
   });
 
   it("validador de manifesto rejeita manifesto inválido", () => {

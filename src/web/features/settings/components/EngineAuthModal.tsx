@@ -250,12 +250,12 @@ export const EngineAuthModal: FC<EngineAuthModalProps> = ({
     if (motorId === "mimo") {
       return {
         title: "Xiaomi MiMo Code",
-        cliCommand: "curl -fsSL https://mimo.xiaomi.com/install | bash",
-        envVar: "Nenhuma chave necessária",
+        cliCommand: "mimo auth login",
+        envVar: "Provedor configurado no próprio MiMo",
         url: "https://mimo.xiaomi.com/coder",
         urlText: "MiMo Code",
-        desc: "O Xiaomi MiMo Code não exige chave de API nem login obrigatório no plano gratuito padrão. Execute o comando oficial para provisionar o binário e teste a prontidão em seguida.",
-        webPrompt: "Instale o MiMo Code pelo script oficial; nenhuma autenticação é obrigatória no tier gratuito.",
+        desc: "O tier gratuito sem login do MiMo foi encerrado pela Xiaomi. Instale o binário pelo método oficial, execute 'mimo auth login' no terminal (ou configure um provedor terceiro no MiMo) e teste a prontidão.",
+        webPrompt: "Execute 'mimo auth login' no terminal para autenticar o MiMo Code.",
       };
     }
 

@@ -134,7 +134,7 @@ export class MimoDriver implements EngineDriver {
   }
 
   getAuthInstructions(): string {
-    return "O Xiaomi MiMo Code não exige chave de API nem login obrigatório no plano gratuito padrão. Instale o binário pelo método oficial em https://mimo.xiaomi.com.";
+    return "Instale o binário pelo método oficial em https://mimo.xiaomi.com e execute 'mimo auth login'. O tier gratuito sem login foi encerrado pela Xiaomi.";
   }
 
   async prepareExecution(opts: EngineExecutionOptions): Promise<{
@@ -162,10 +162,10 @@ export class MimoDriver implements EngineDriver {
       motorName: this.name,
       source: status.installed ? "cli_live" : "unconfigured",
       provedor: "Xiaomi MiMo Code",
-      tokensDisponiveis: status.installed ? "ilimitado" : 0,
-      statusCota: status.installed ? "normal" : "desconhecido",
+      tokensDisponiveis: 0,
+      statusCota: "desconhecido",
       mensagem: status.installed
-        ? `MiMo Code ${status.version || "detectado"} pronto no tier gratuito oficial`
+        ? `MiMo Code ${status.version || "detectado"} instalado; cota não consultável pelo CLI`
         : "Binário mimo não encontrado no sistema",
       consultadoEm: new Date().toISOString(),
       detalhes: { path: status.path, installed: status.installed },

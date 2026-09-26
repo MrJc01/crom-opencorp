@@ -287,12 +287,12 @@ describe("ETAPA 7 — Secretário com Runtime Genérico e Multimotor", () => {
   });
 
   it("Rejeição estrita: workspace configurado com motor sem suporte conversacional emite diagnóstico 409", async () => {
-    // Configura workspace com motor sem suporte conversacional (ex: mimo)
+    // Configura workspace com motor sem suporte conversacional (ex: aider)
     await mkdir(join(home, "workspaces", "ws-incompativel", ".opencorp"), { recursive: true });
     await writeFile(
       join(home, "workspaces", "ws-incompativel", ".opencorp", "config.json"),
       JSON.stringify({
-        conversationEngineOverride: "mimo",
+        conversationEngineOverride: "aider",
       })
     );
 

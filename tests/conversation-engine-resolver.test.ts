@@ -133,10 +133,10 @@ describe("ETAPA 5 — Resolução do Runtime Conversacional", () => {
     }
   });
 
-  it("motor sem suporte conversacional (ex: mimo): rejeita em modo strict com EngineCapabilityUnavailableError", async () => {
+  it("motor sem suporte conversacional (ex: aider): rejeita em modo strict com EngineCapabilityUnavailableError", async () => {
     await writeFile(
       join(workspaceDir, ".opencorp", "config.json"),
-      JSON.stringify({ conversationEngineOverride: "mimo" }, null, 2),
+      JSON.stringify({ conversationEngineOverride: "aider" }, null, 2),
       "utf8"
     );
 
@@ -153,11 +153,11 @@ describe("ETAPA 5 — Resolução do Runtime Conversacional", () => {
 
     // Em modo não estrito, retorna diagnóstico estruturado sem trocar para opencode
     const result = await resolver.resolve({ workspaceDir, strict: false });
-    expect(result.engineId).toBe("mimo");
+    expect(result.engineId).toBe("aider");
     expect(result.preflight.supportsConversation).toBe(false);
     expect(result.preflight.ok).toBe(false);
     expect(result.preflight.issues.some((i) => i.includes("capacidade conversacional"))).toBe(true);
-    expect(result.adapter.engineId).toBe("mimo"); // PROIBIDO fallback silencioso
+    expect(result.adapter.engineId).toBe("aider"); // PROIBIDO fallback silencioso
   });
 
   it("motor customizado sem suporte a conversa registrado dinamicamente", async () => {
