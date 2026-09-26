@@ -6,6 +6,7 @@ export interface EngineAuthStatus {
   authenticated: boolean;
   method: string;
   account?: string;
+  accountId?: string;
   details?: string;
 }
 

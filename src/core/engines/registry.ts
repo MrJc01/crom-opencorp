@@ -9,6 +9,14 @@ import { CodexDriver } from "./drivers/codex-driver.js";
 import { AiderDriver } from "./drivers/aider-driver.js";
 import { MimoDriver } from "./drivers/mimo-driver.js";
 import { EngineNotFoundError } from "./errors.js";
+import { LegacyDriverAdapter } from "./adapter-compat.js";
+import type { EngineAdapter } from "./ports.js";
+import {
+  validateEngineCapabilityManifest,
+  InvalidEngineManifestError,
+  CANONICAL_ENGINE_MANIFESTS,
+  type EngineCapabilityManifest,
+} from "./manifests.js";
 
 export interface EngineSummary {
   id: string;
@@ -27,6 +35,7 @@ export interface EngineSummary {
 export class EngineRegistry {
   private static instance: EngineRegistry | null = null;
   private drivers = new Map<string, EngineDriver>();
+  private adapters = new Map<string, EngineAdapter>();
 
   private constructor() {
     this.register(new OpencodeDriver());
@@ -47,16 +56,43 @@ export class EngineRegistry {
     return EngineRegistry.instance;
   }
 
-  public register(driver: EngineDriver): void {
+  public register(driver: EngineDriver, manifest?: EngineCapabilityManifest): void {
     this.drivers.set(driver.id, driver);
+    this.adapters.set(driver.id, new LegacyDriverAdapter(driver, manifest));
+  }
+
+  public registerAdapter(adapter: EngineAdapter): void {
+    if (!adapter.manifest) {
+      throw new InvalidEngineManifestError(adapter.engineId || "unknown", "manifesto ausente");
+    }
+    validateEngineCapabilityManifest(adapter.manifest);
+    this.adapters.set(adapter.engineId, adapter);
   }
 
   public get(id: string): EngineDriver | undefined {
     return this.drivers.get(id);
   }
 
+  public getAdapter(id: string): EngineAdapter | undefined {
+    return this.adapters.get(id);
+  }
+
+  public getManifest(id: string): EngineCapabilityManifest | undefined {
+    const adapter = this.adapters.get(id);
+    if (adapter) return adapter.manifest;
+    return CANONICAL_ENGINE_MANIFESTS[id];
+  }
+
+  public listManifests(): EngineCapabilityManifest[] {
+    return Array.from(this.adapters.values()).map((a) => a.manifest);
+  }
+
   public list(): EngineDriver[] {
     return Array.from(this.drivers.values());
+  }
+
+  public listAdapters(): EngineAdapter[] {
+    return Array.from(this.adapters.values());
   }
 
   public resolveDriver(harness?: string): EngineDriver {
@@ -91,6 +127,15 @@ export class EngineRegistry {
     }
 
     throw new EngineNotFoundError(id);
+  }
+
+  public resolveAdapter(harness?: string): EngineAdapter {
+    const driver = this.resolveDriver(harness);
+    const adapter = this.adapters.get(driver.id);
+    if (adapter) return adapter;
+    const created = new LegacyDriverAdapter(driver);
+    this.adapters.set(driver.id, created);
+    return created;
   }
 
   public async listSummaries(homeDir: string, checkHealth = false): Promise<EngineSummary[]> {

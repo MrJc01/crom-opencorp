@@ -59,12 +59,13 @@ describe("engine capabilities (F1-T01)", () => {
     expect(c.flags).toEqual(["--session"]);
   });
 
-  it("aider e desconhecidos nao tem suporte nativo", () => {
-    for (const id of ["aider", "outro-qualquer", ""]) {
+  it("aider, mimo e desconhecidos nao tem suporte nativo", () => {
+    for (const id of ["aider", "mimo", "outro-qualquer", ""]) {
       const c = CapabilitiesPara(id);
       expect(c.continuaNativo).toBe(false);
       expect(c.duplicaNativo).toBe(false);
     }
     expect(CAPACIDADES["aider"].continuaNativo).toBe(false);
+    expect(CAPACIDADES["mimo"].continuaNativo).toBe(false);
   });
 });

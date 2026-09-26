@@ -201,7 +201,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 0 | Baseline e plano congelado | ✅ Concluída | pendente neste checkpoint | 2 compilações TS, 128 arquivos/1.216 testes e build PASS |
 | 1 | Higiene de processos e identidades | ✅ Concluída | `fix(engines): prevent orphan runtimes and engine impersonation` | 44 testes focados; 128 arquivos/1.217 testes; órfãos 0→0 |
 | 2 | `RuntimeConfig`, erros e tradutor legado | ✅ Concluída | `feat(config): isolate legacy runtime configuration translation` | 4 arquivos focados (64 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
-| 3 | Contratos e eventos canônicos | ⬜ Pendente | — | — |
+| 3 | Contratos e eventos canônicos | ✅ Concluída | `refactor(engines): introduce runtime ports and canonical agent events` | 6 arquivos focados (87 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 4 | `ProcessRegistry` | ⬜ Pendente | — | — |
 | 5 | Resolução do runtime conversacional | ⬜ Pendente | — | — |
 | 6 | Adaptador OpenCode completo | ⬜ Pendente | — | — |
@@ -455,38 +455,59 @@ feat(config): isolate legacy runtime configuration translation
 
 ### Contratos
 
-- [ ] `EngineInstaller`.
-- [ ] `EngineAuthenticator`.
-- [ ] `AgentRunner`.
-- [ ] `ConversationRuntime`.
-- [ ] `ModelCatalogSource`.
-- [ ] `EngineCapabilityManifest`.
-- [ ] Eventos canônicos `AgentEvent`.
-- [ ] Erros canônicos e normalização de erros de fornecedor.
+- [x] `EngineInstaller`.
+- [x] `EngineAuthenticator`.
+- [x] `AgentRunner`.
+- [x] `ConversationRuntime`.
+- [x] `ModelCatalogSource`.
+- [x] `EngineCapabilityManifest`.
+- [x] Eventos canônicos `AgentEvent`.
+- [x] Erros canônicos e normalização de erros de fornecedor.
 
 ### Tarefas
 
-- [ ] Definir tipos sem importar módulos concretos.
-- [ ] Separar capacidade declarada, integrada e verificada.
-- [ ] Representar suporte a streaming, continuação, fork, HITL, ferramentas, MCP, imagens e cancelamento.
-- [ ] Representar transporte: processo pontual, servidor HTTP, stdio JSON-RPC ou embutido.
-- [ ] Criar adaptador de compatibilidade para drivers atuais.
-- [ ] Fazer todo motor registrado fornecer um manifesto compilável.
-- [ ] Adicionar MiMo ao domínio tipado de capacidades.
-- [ ] Definir `unsupported` como resultado válido, nunca como simulação.
+- [x] Definir tipos sem importar módulos concretos.
+- [x] Separar capacidade declarada, integrada e verificada.
+- [x] Representar suporte a streaming, continuação, fork, HITL, ferramentas, MCP, imagens e cancelamento.
+- [x] Representar transporte: processo pontual, servidor HTTP, stdio JSON-RPC ou embutido.
+- [x] Criar adaptador de compatibilidade para drivers atuais.
+- [x] Fazer todo motor registrado fornecer um manifesto compilável.
+- [x] Adicionar MiMo ao domínio tipado de capacidades.
+- [x] Definir `unsupported` como resultado válido, nunca como simulação.
 
 ### Testes
 
-- [ ] Registro rejeita adaptador sem manifesto.
-- [ ] Eventos de drivers legados são normalizados.
-- [ ] Capacidade não integrada não aparece como disponível.
-- [ ] Tipos não dependem de OpenCode.
+- [x] Registro rejeita adaptador sem manifesto.
+- [x] Eventos de drivers legados são normalizados.
+- [x] Capacidade não integrada não aparece como disponível.
+- [x] Tipos não dependem de OpenCode.
 
 ### Critérios de aceite
 
-- [ ] Adicionar um motor não exige editar tipos union manualmente em vários arquivos.
-- [ ] O núcleo conhece portas, não fornecedores.
-- [ ] Drivers atuais continuam funcionando pela camada de compatibilidade.
+- [x] Adicionar um motor não exige editar tipos union manualmente em vários arquivos.
+- [x] O núcleo conhece portas, não fornecedores.
+- [x] Drivers atuais continuam funcionando pela camada de compatibilidade.
+
+### Registro da Etapa 3 — Contratos e eventos canônicos
+
+- Limite no início: sessão Antigravity IDE (Gemini 3.8 Flash) sem indicador restritivo exposto; início às 23:36 -03.
+- Limite no encerramento: sessão operacional e íntegra; encerramento às 23:44 -03.
+- Decisão: implementar as portas desacopladas, eventos canônicos, manifestos compiláveis e adaptador de compatibilidade com cobertura de testes completa.
+- Entregas:
+  - `src/core/engines/events.ts`: Eventos canônicos `AgentEvent` (`run.started`, `message.delta`, `tool.requested`, `tool.completed`, `approval.requested`, `usage.updated`, `run.completed`, `run.failed`) com payloads tipados;
+  - `src/core/engines/manifests.ts`: `EngineCapabilityManifest` separando níveis (`unsupported`, `declared`, `integrated`, `verified`), transportes (`spawn_cli`, `http_server`, `stdio_jsonrpc`, `embedded`), helper `isCapabilityAvailable` e manifestos para os 9 motores;
+  - `src/core/engines/ports.ts`: Contratos canônicos desacoplados (`EngineInstaller`, `EngineAuthenticator`, `AgentRunner`, `ConversationRuntime`, `ModelCatalogSource`, `EngineAdapter`);
+  - `src/core/engines/error-normalizer.ts`: `normalizeEngineError` mapeando erros de fornecedor em erros canônicos (`PreflightBinaryMissingError`, `EngineAuthRequiredError`, `ModelIncompatibleError`, `EngineCapabilityUnavailableError`, etc.);
+  - `src/core/engines/adapter-compat.ts`: `LegacyDriverAdapter` integrando os drivers existentes às novas portas canônicas;
+  - `src/core/engines/capabilities.ts`: `mimo` integrado ao domínio de capacidades e `HarnessId` desacoplado de uniões rígidas;
+  - `src/core/engines/registry.ts`: `EngineRegistry` atualizado com registro e validação de adaptadores (`registerAdapter`, `getAdapter`, `resolveAdapter`, `getManifest`, `listManifests`);
+  - `tests/engine-ports-and-events.test.ts`: 15 testes unitários e de integração das novas portas;
+  - Atualização em `tests/engine-capabilities.test.ts`.
+- Validação consolidada: 6 arquivos focados, 87 testes PASS (`tests/runtime-config.test.ts`, `tests/legacy-config-translator.test.ts`, `tests/engine-ports-and-events.test.ts`, `tests/engine-capabilities.test.ts`, `tests/settings-store.test.ts`, `tests/engine-drivers.test.ts`).
+- Compilação: `npx tsc --noEmit` e `npx tsc --noEmit -p tsconfig.web.json` PASS.
+- Build: `npm run build` PASS (backend e frontend Vite).
+- Processos órfãos: 0 processos `fake-opencode` detectados.
+- Próximo passo exato: Iniciar a Etapa 4 — `ProcessRegistry` (registro de processos isolado por chave `[engineId, workspaceId]`, timeout ocioso de 15 minutos e shutdown gracioso).
 
 ### Commit sugerido
 

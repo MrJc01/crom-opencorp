@@ -13,3 +13,8 @@ export * from "./credentials-bridge.js";
 export * from "./engine-account-store.js";
 export * from "./web-login-orchestrator.js";
 export * from "./legacy-config-translator.js";
+export * from "./events.js";
+export * from "./manifests.js";
+export * from "./ports.js";
+export * from "./error-normalizer.js";
+export * from "./adapter-compat.js";

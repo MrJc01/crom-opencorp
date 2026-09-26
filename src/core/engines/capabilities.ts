@@ -11,7 +11,7 @@ export interface CapacidadeHarness {
   flags?: string[];
 }
 
-export type HarnessId =
+export type KnownHarnessId =
   | "opencode"
   | "claude-code"
   | "antigravity"
@@ -19,7 +19,10 @@ export type HarnessId =
   | "codex"
   | "cursor"
   | "crom-agente"
-  | "aider";
+  | "aider"
+  | "mimo";
+
+export type HarnessId = KnownHarnessId | (string & {});
 
 const SEM_SUPORTE: CapacidadeHarness = {
   continuaNativo: false,
@@ -87,6 +90,9 @@ export const CAPACIDADES: Record<HarnessId, CapacidadeHarness> = {
   // Driver usa `--message --yes-always --no-auto-commits`; binario ausente
   // (~/.opencorp/bin e PATH); sem resume/continue nativo.
   "aider": { ...SEM_SUPORTE },
+  // Driver usa `run --dangerously-skip-permissions`; binario tem modelos multimodais,
+  // mas sem flag nativa de sessao/resume no CLI atual.
+  "mimo": { ...SEM_SUPORTE },
 };
 
 export function CapabilitiesPara(id: string): CapacidadeHarness {
