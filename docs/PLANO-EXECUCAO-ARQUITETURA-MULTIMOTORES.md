@@ -199,7 +199,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | Etapa | Resultado | Status | Commit | Evidência |
 |---:|---|---|---|---|
 | 0 | Baseline e plano congelado | ✅ Concluída | pendente neste checkpoint | 2 compilações TS, 128 arquivos/1.216 testes e build PASS |
-| 1 | Higiene de processos e identidades | ⬜ Pendente | — | — |
+| 1 | Higiene de processos e identidades | ✅ Concluída | `fix(engines): prevent orphan runtimes and engine impersonation` | 44 testes focados; 128 arquivos/1.217 testes; órfãos 0→0 |
 | 2 | `RuntimeConfig`, erros e tradutor legado | ⬜ Pendente | — | — |
 | 3 | Contratos e eventos canônicos | ⬜ Pendente | — | — |
 | 4 | `ProcessRegistry` | ⬜ Pendente | — | — |
@@ -297,30 +297,52 @@ docs(architecture): freeze multi-engine migration baseline and decisions
 
 ### Tarefas
 
-- [ ] Corrigir teardown de `tests/secretario-proxy.test.ts` com `manager.parar()`.
-- [ ] Corrigir teardown de `tests/secretario-erros.test.ts` com `manager.parar()`.
-- [ ] Auditar demais testes que constroem `OpencodeServerManager` real.
-- [ ] Garantir cleanup em `afterEach`/`afterAll` mesmo após assertion rejeitada.
-- [ ] Criar teste de “zero processos órfãos” após a suíte focada.
-- [ ] Remover fallback que cria `agy` executando OpenCode.
-- [ ] Fazer instalação AGY falhar explicitamente quando o AGY real não puder ser provisionado.
-- [ ] Impedir que `resolveDriver(idDesconhecido)` retorne OpenCode silenciosamente.
-- [ ] Criar erro tipado para motor desconhecido.
-- [ ] Preservar alias explícito e documentado, como `agy → antigravity`.
+- [x] Corrigir teardown de `tests/secretario-proxy.test.ts` com `manager.parar()`.
+- [x] Corrigir teardown de `tests/secretario-erros.test.ts` com `manager.parar()`.
+- [x] Auditar demais testes que constroem `OpencodeServerManager` real.
+- [x] Garantir cleanup em `afterEach`/`afterAll` mesmo após assertion rejeitada.
+- [x] Criar teste de “zero processos órfãos” após a suíte focada.
+- [x] Remover fallback que cria `agy` executando OpenCode.
+- [x] Fazer instalação AGY falhar explicitamente quando o AGY real não puder ser provisionado.
+- [x] Impedir que `resolveDriver(idDesconhecido)` retorne OpenCode silenciosamente.
+- [x] Criar erro tipado para motor desconhecido.
+- [x] Preservar alias explícito e documentado, como `agy → antigravity`.
 
 ### Testes
 
-- [ ] Testes de `opencode-server`.
-- [ ] Testes de proxy/erros/resiliência do Secretário.
-- [ ] Testes do registro de motores.
-- [ ] Inspeção de processos antes/depois da suíte.
-- [ ] `npx tsc --noEmit`.
+- [x] Testes de `opencode-server`.
+- [x] Testes de proxy/erros/resiliência do Secretário.
+- [x] Testes do registro de motores.
+- [x] Inspeção de processos antes/depois da suíte.
+- [x] `npx tsc --noEmit`.
 
 ### Critérios de aceite
 
-- [ ] Nenhum fake runtime sobrevive aos testes.
-- [ ] Nenhum binário de um motor mascara outro.
-- [ ] ID desconhecido falha com erro explícito.
+- [x] Nenhum fake runtime sobrevive aos testes.
+- [x] Nenhum binário de um motor mascara outro.
+- [x] ID desconhecido falha com erro explícito.
+
+### Registro de execução
+
+#### Limite Codex — início/fim da Etapa 1
+
+- Fonte: interface do cliente.
+- Indicador no início: não exposto; modelo informado pelo usuário GPT-5.6 Sol, esforço light.
+- Indicador no encerramento: 33% restante, informado pelo usuário.
+- Decisão: concluir suíte e commit da Etapa 1; não iniciar a Etapa 2 com margem insuficiente para schema, testes e rollback.
+
+#### Alterações e evidências
+
+- `EngineNotFoundError` substitui o fallback universal para OpenCode.
+- Alias explícito `agy → antigravity` foi preservado.
+- A instalação AGY não cria mais wrapper que executa OpenCode.
+- Os testes de proxy e erros agora possuem e encerram o `OpencodeServerManager` criado.
+- Seis processos fake antigos, identificados exatamente como fixtures de teste e com PPID 1, foram encerrados; serviços reais foram preservados.
+- Suíte focada: 4 arquivos e 44 testes PASS; contagem de fake runtimes 6→6 antes da limpeza, comprovando que nenhum novo órfão foi criado.
+- Suíte completa após a limpeza: 128 arquivos, 1.217 testes PASS e 1 `todo`; contagem de fake runtimes 0→0.
+- Backend TypeScript: PASS.
+- Frontend TypeScript: PASS.
+- Build backend/Vite: PASS.
 
 ### Commit sugerido
 

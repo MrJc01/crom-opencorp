@@ -23,6 +23,16 @@ export interface EngineSummary {
   health?: EngineHealth;
 }
 
+export class EngineNotFoundError extends Error {
+  readonly engineId: string;
+
+  constructor(engineId: string) {
+    super(`Motor "${engineId}" não está registrado. Selecione um dos motores disponíveis.`);
+    this.name = "EngineNotFoundError";
+    this.engineId = engineId;
+  }
+}
+
 export class EngineRegistry {
   private static instance: EngineRegistry | null = null;
   private drivers = new Map<string, EngineDriver>();
@@ -89,8 +99,7 @@ export class EngineRegistry {
       if (cd) return cd;
     }
 
-    // Default fallback
-    return this.drivers.get("opencode")!;
+    throw new EngineNotFoundError(id);
   }
 
   public async listSummaries(homeDir: string, checkHealth = false): Promise<EngineSummary[]> {

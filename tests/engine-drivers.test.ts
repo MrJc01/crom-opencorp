@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { engineRegistry } from "../src/core/engines/index.js";
+import { engineRegistry, EngineNotFoundError } from "../src/core/engines/index.js";
 import { createApiServer } from "../src/server/index.js";
 
 describe("EngineRegistry & Multi-Engine Drivers", () => {
@@ -51,7 +51,13 @@ describe("EngineRegistry & Multi-Engine Drivers", () => {
     expect(engineRegistry.resolveDriver("crom").id).toBe("crom-agente");
     expect(engineRegistry.resolveDriver("claude").id).toBe("claude-code");
     expect(engineRegistry.resolveDriver("agy").id).toBe("antigravity");
-    expect(engineRegistry.resolveDriver("desconhecido").id).toBe("opencode");
+    expect(() => engineRegistry.resolveDriver("desconhecido")).toThrow(EngineNotFoundError);
+    expect(() => engineRegistry.resolveDriver("desconhecido")).toThrow(/não está registrado/);
+  });
+
+  it("não instala um wrapper AGY que executa outro motor", async () => {
+    const agy = engineRegistry.get("antigravity")!;
+    await expect(agy.install(tempHome)).rejects.toThrow(/não substitui AGY por outro motor/);
   });
 
   it("deve listar summaries com status de instalação e isolamento", async () => {

@@ -41,6 +41,7 @@ describe("Secretário — erros com retorno apropriado + truncar (edição)", ()
   let port: number;
   let fetchApi: ReturnType<typeof makeFetch>;
   let server: ReturnType<typeof createApiServer>["server"];
+  let opencodeServer: OpencodeServerManager;
 
   beforeAll(async () => {
     home = await tmpDir();
@@ -60,12 +61,16 @@ describe("Secretário — erros com retorno apropriado + truncar (edição)", ()
       async logDe() { return "fake log"; },
     };
 
+    opencodeServer = new OpencodeServerManager({
+      homeDir: home,
+      binario: join(__dirname, "fixtures", "fake-opencode.mjs"),
+    });
     const { server: srv, token: tk, porta } = createApiServer({
       homeDir: home,
       token,
       sessoes: fakeSessoes as any,
       instalarMencoes: false,
-      opencodeServer: new OpencodeServerManager({ homeDir: home, binario: join(__dirname, "fixtures", "fake-opencode.mjs") }),
+      opencodeServer,
     } as ApiServerOptions);
     server = srv;
     token = tk;
@@ -77,7 +82,8 @@ describe("Secretário — erros com retorno apropriado + truncar (edição)", ()
   });
 
   afterAll(async () => {
-    if (server) server.close();
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+    await opencodeServer?.parar();
     await Promise.all(raizes.map((r) => rm(r, { recursive: true, force: true })));
   });
 

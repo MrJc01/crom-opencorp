@@ -109,17 +109,10 @@ export class AntigravityDriver implements EngineDriver {
       }
     }
 
-    // Criador de wrapper mock executável se o binário agy ainda não estiver no PATH
-    onProgress?.("Criando runner compatível com Antigravity CLI...");
-    const wrapper = `#!/bin/sh\n# Antigravity CLI Runner\necho "Antigravity 2.0 Engine"\nexec opencode "$@"\n`;
-    await execFileAsync("sh", ["-c", `echo '${wrapper}' > "${target}" && chmod +x "${target}"`]);
-
-    return {
-      success: true,
-      path: target,
-      version: "v2.0 (wrapper)",
-      log: `Antigravity configurado com sucesso em ${target}`,
-    };
+    throw new Error(
+      "Antigravity CLI (agy) não encontrado. Instale o binário oficial e tente novamente; " +
+        "o OpenCorp não substitui AGY por outro motor.",
+    );
   }
 
   async checkHealth(homeDir: string): Promise<EngineHealth> {
