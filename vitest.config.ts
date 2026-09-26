@@ -13,6 +13,7 @@ export default defineConfig({
     maxWorkers: 2,
     minWorkers: 1,
     include: ["tests/**/*.test.ts"],
+    setupFiles: ["tests/setup/engine-stubs.ts"],
     exclude: ["tests/e2e/**", "node_modules/**", "dist/**"],
   },
 });

@@ -73,6 +73,7 @@ async function servirMcp(homeDir: string, workspace: string | undefined): Promis
   const ws = await manager.resolver(workspace);
 
   const rl = createInterface({ input: process.stdin, terminal: false });
+  const pendentes = new Set<Promise<void>>();
   const responder = (msg: Record<string, unknown>): void => {
     process.stdout.write(`${JSON.stringify(msg)}\n`);
   };
@@ -90,7 +91,7 @@ async function servirMcp(homeDir: string, workspace: string | undefined): Promis
     const id = req.id ?? null;
     const metodo = String(req.method ?? "");
     const params = (req.params ?? {}) as Record<string, unknown>;
-    void (async () => {
+    const tarefa = (async () => {
       try {
         if (metodo === "initialize") {
           responder({
@@ -141,9 +142,15 @@ async function servirMcp(homeDir: string, workspace: string | undefined): Promis
         });
       }
     })();
+    pendentes.add(tarefa);
+    void tarefa.finally(() => pendentes.delete(tarefa));
   });
 
-  process.stdin.on("end", () => process.exit(0));
+  // Ao fechar a stdin, responde o que ainda está em andamento antes de sair —
+  // sair na hora descartava respostas de `tools/call` assíncronos.
+  rl.on("close", () => {
+    void Promise.allSettled([...pendentes]).then(() => process.exit(0));
+  });
   console.error(`[opencorp mcp] ativo — workspace "${ws.id}" (${registry.listar(ws.path, true).length} tools)`);
 }
 

@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   HostDriver,
@@ -7,6 +10,14 @@ import {
   escolherPreferenciaDriver,
 } from "../src/core/contexts/execution/execution-driver.js";
 import type { OpcoesPreparacaoDriver } from "../src/core/contexts/execution/execution-driver.js";
+
+
+/** Diretório temporário com um executável `opencode` falso (sem depender da máquina). */
+function binarioFalso(): string {
+  const dir = mkdtempSync(join(tmpdir(), "opencorp-bin-"));
+  writeFileSync(join(dir, "opencode"), "#!/bin/sh\n", { mode: 0o755 });
+  return dir;
+}
 
 describe("ExecutionDriver", () => {
   const mockOpts: OpcoesPreparacaoDriver = {
@@ -158,9 +169,10 @@ describe("ExecutionDriver", () => {
     it("monta o diretório do binário absoluto (regressão: ENOENT do motor)", async () => {
       const driver = new SandboxDriver();
       if (!(await driver.disponivel())) return;
-      const prep = await driver.preparar({ ...mockOpts, binary: "/home/j/.opencorp/bin/opencode" });
-      expect(prep.args).toContain("/home/j/.opencorp/bin");
-      const i = prep.args.indexOf("/home/j/.opencorp/bin");
+      const binDir = binarioFalso();
+      const prep = await driver.preparar({ ...mockOpts, binary: join(binDir, "opencode") });
+      expect(prep.args).toContain(binDir);
+      const i = prep.args.indexOf(binDir);
       expect(prep.args[i - 1]).toBe("--ro-bind");
       expect(prep.args).toContain("--tmpfs");
       expect(prep.args).toContain("/tmp");
@@ -168,7 +180,8 @@ describe("ExecutionDriver", () => {
 
     it("dirsDoBinario resolve nome via PATH e symlink (dir do link + alvo)", async () => {
       const { dirsDoBinario } = await import("../src/core/contexts/execution/execution-driver.js");
-      expect(dirsDoBinario("/home/j/.opencorp/bin/opencode")).toContain("/home/j/.opencorp/bin");
+      const binDir = binarioFalso();
+      expect(dirsDoBinario(join(binDir, "opencode"))).toContain(binDir);
       const viaPath = dirsDoBinario("node");
       expect(viaPath.length).toBeGreaterThan(0);
       expect(dirsDoBinario("/caminho/que/nao/existe/bin")).toEqual([]);

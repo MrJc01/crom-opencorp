@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkspaceManager } from "../src/core/contexts/workspace/workspace-manager.js";
@@ -39,6 +39,13 @@ function runCli(args: string[], env: Record<string, string> = {}): Promise<{ cod
 beforeAll(async () => {
   home = await mkdtemp(join(tmpdir(), "opencorp-modelos-e2e-"));
   raizes.push(home);
+  // Catálogo determinístico: o modelo <4B vem da rotação do settings do home
+  // temporário, não do binário opencode instalado na máquina.
+  await mkdir(join(home, ".opencorp"), { recursive: true });
+  await writeFile(
+    join(home, ".opencorp", "settings.json"),
+    JSON.stringify({ modelos: { rotacao: ["openrouter/liquid/lfm-2.5-2.6b:free"] } })
+  );
   bin = join(process.cwd(), "bin", "opencorp.mjs");
 });
 

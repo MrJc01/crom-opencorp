@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import os from "node:os";
+import { opencorpHome } from "../../utils/paths.js";
 import {
   filtrarModelosQualificados,
   type QualidadeModelo,
@@ -67,7 +67,8 @@ export function registerModelosCommand(program: Command): void {
     .option("--size <spec>", "filtro amigável de tamanho (ex.: '<14b', '>30b', '<4b')")
     .option("--json", "saída em JSON bruto")
     .action(async (opts: { free?: boolean; recommended?: boolean; minB?: number; maxB?: number; size?: string; json?: boolean }) => {
-      const home = os.homedir();
+      // Respeita OPENCORP_HOME (isolamento de testes e instalações alternativas).
+      const home = opencorpHome();
       const todos = coletarModelosDisponiveis(home);
 
       let minB = opts.minB;
