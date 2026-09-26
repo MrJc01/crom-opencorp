@@ -8,6 +8,7 @@ import { CopilotDriver } from "./drivers/copilot-driver.js";
 import { CodexDriver } from "./drivers/codex-driver.js";
 import { AiderDriver } from "./drivers/aider-driver.js";
 import { MimoDriver } from "./drivers/mimo-driver.js";
+import { EngineNotFoundError } from "./errors.js";
 
 export interface EngineSummary {
   id: string;
@@ -21,16 +22,6 @@ export interface EngineSummary {
   path: string | null;
   version: string | null;
   health?: EngineHealth;
-}
-
-export class EngineNotFoundError extends Error {
-  readonly engineId: string;
-
-  constructor(engineId: string) {
-    super(`Motor "${engineId}" não está registrado. Selecione um dos motores disponíveis.`);
-    this.name = "EngineNotFoundError";
-    this.engineId = engineId;
-  }
 }
 
 export class EngineRegistry {

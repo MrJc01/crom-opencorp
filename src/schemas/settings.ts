@@ -4,6 +4,16 @@ import { ROTACAO_AGENTES_RECOMENDADA } from "../core/contexts/agents/recommended
 export const settingsSchema = z.object({
   version: z.number().int().default(1),
   default_model: z.string().min(1).default("opencode/nemotron-3-ultra-free"),
+  default_conversation_engine: z.string().trim().min(1).default("opencode"),
+  conversationEngineOverride: z.string().trim().min(1).optional(),
+  engines: z
+    .record(
+      z.string().trim().min(1),
+      z.object({
+        binary_path: z.string().trim().min(1).optional(),
+      }),
+    )
+    .default({}),
   test_model: z.string().min(1).default("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"),
   secretary: z
     .object({

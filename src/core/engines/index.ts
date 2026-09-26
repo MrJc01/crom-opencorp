@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./errors.js";
 export * from "./registry.js";
 export * from "./drivers/opencode-driver.js";
 export * from "./drivers/crom-agente-driver.js";

@@ -200,7 +200,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 |---:|---|---|---|---|
 | 0 | Baseline e plano congelado | ✅ Concluída | pendente neste checkpoint | 2 compilações TS, 128 arquivos/1.216 testes e build PASS |
 | 1 | Higiene de processos e identidades | ✅ Concluída | `fix(engines): prevent orphan runtimes and engine impersonation` | 44 testes focados; 128 arquivos/1.217 testes; órfãos 0→0 |
-| 2 | `RuntimeConfig`, erros e tradutor legado | ⬜ Pendente | — | — |
+| 2 | `RuntimeConfig`, erros e tradutor legado | 🟨 Em andamento | `feat(config): add typed runtime configuration and engine errors` | Etapa 2A: 41 testes e 2 compilações TS PASS; tradutor pendente |
 | 3 | Contratos e eventos canônicos | ⬜ Pendente | — | — |
 | 4 | `ProcessRegistry` | ⬜ Pendente | — | — |
 | 5 | Resolução do runtime conversacional | ⬜ Pendente | — | — |
@@ -376,13 +376,13 @@ interface RuntimeConfig {
 
 ### Tarefas
 
-- [ ] Criar schema Zod de `RuntimeConfig`.
-- [ ] Adicionar `settings.default_conversation_engine` com default `opencode`.
-- [ ] Adicionar `settings.engines[id].binary_path`.
-- [ ] Adicionar `conversationEngineOverride` ao schema de workspace.
-- [ ] Criar `EngineUnavailableError`.
-- [ ] Criar `PREFLIGHT_BINARY_MISSING` como código canônico.
-- [ ] Criar erros para autenticação, incompatibilidade de modelo e capacidade ausente.
+- [x] Criar schema Zod de `RuntimeConfig`.
+- [x] Adicionar `settings.default_conversation_engine` com default `opencode`.
+- [x] Adicionar `settings.engines[id].binary_path`.
+- [x] Adicionar `conversationEngineOverride` ao schema de workspace.
+- [x] Criar `EngineUnavailableError`.
+- [x] Criar `PREFLIGHT_BINARY_MISSING` como código canônico.
+- [x] Criar erros para autenticação, incompatibilidade de modelo e capacidade ausente.
 - [ ] Criar `LegacyConfigTranslator` puro, sem escrita em disco.
 - [ ] Traduzir `runner.json` para `RuntimeConfig` em memória.
 - [ ] Traduzir prefixos legados sem trocar motor silenciosamente.
@@ -392,9 +392,9 @@ interface RuntimeConfig {
 
 ### Testes
 
-- [ ] Defaults globais.
-- [ ] Override por workspace.
-- [ ] Configuração inválida com caminho do campo no erro.
+- [x] Defaults globais.
+- [x] Override por workspace.
+- [x] Configuração inválida com caminho do campo no erro.
 - [ ] Tradução de cada formato legado conhecido.
 - [ ] Tradutor idempotente.
 - [ ] Ausência de escrita durante tradução.
@@ -402,9 +402,20 @@ interface RuntimeConfig {
 
 ### Critérios de aceite
 
-- [ ] Modelo não determina motor no domínio novo.
+- [x] Modelo não determina motor no domínio novo.
 - [ ] Compatibilidade está isolada em um único módulo.
 - [ ] Configurações novas não dependem de `runner.json`.
+
+### Registro da Etapa 2A — Fundação tipada
+
+- Limite no início: não exposto pelo cliente após o reinício do computador.
+- Limite confirmado durante a execução: 22% restante via `/status`, informado pelo usuário.
+- Decisão: concluir apenas schema, campos e erros; não iniciar o `LegacyConfigTranslator`.
+- Entregas: `RuntimeConfig`, `ModelRef`, configuração global/workspace e hierarquia de erros canônicos.
+- Validação focada: 3 arquivos, 41 testes PASS.
+- Backend TypeScript: PASS.
+- Frontend TypeScript: PASS.
+- Próximo passo exato: implementar o tradutor puro e seus testes em uma nova unidade, após nova verificação de limite.
 
 ### Commits sugeridos
 
