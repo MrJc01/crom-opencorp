@@ -11,6 +11,7 @@ import {
   MarkdownTextPrimitive,
   type CodeHeaderProps,
 } from "@assistant-ui/react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Bot,
   User,
@@ -413,7 +414,10 @@ const SecretarioChatInterno: FC<{
                           <MessagePrimitive.Parts
                             components={{
                               Text: () => (
-                                <MarkdownTextPrimitive className="prose prose-invert prose-emerald text-sm max-w-none text-emerald-100 leading-relaxed break-words" />
+                                <MarkdownTextPrimitive
+                                  className="oc-markdown text-sm text-emerald-100"
+                                  remarkPlugins={[remarkGfm]}
+                                />
                               ),
                             }}
                           />
@@ -489,7 +493,8 @@ const SecretarioChatInterno: FC<{
                               }
                               return (
                                 <MarkdownTextPrimitive
-                                  className="prose prose-invert prose-emerald text-sm max-w-none text-zinc-100 leading-relaxed break-words"
+                                  className="oc-markdown text-sm text-zinc-100"
+                                  remarkPlugins={[remarkGfm]}
                                   components={{
                                     CodeHeader: (props) => (
                                       <CodeHeaderWithHandoff
