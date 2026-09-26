@@ -382,6 +382,7 @@ Configurações antigas (`~/.opencorp/runner.json`, `harness:` em agentes) conti
 Para migrar: `opencorp migrate-configs --apply` (com backup e `--rollback`). Cronograma de remoção em
 [`docs/DEPRECACOES-MULTIMOTORES.md`](docs/DEPRECACOES-MULTIMOTORES.md). Detalhes em
 [`docs/04-motores-e-modelos.md`](docs/04-motores-e-modelos.md).
+Pendências abertas da migração multimotores: [`docs/PENDENCIAS-MULTIMOTORES.md`](docs/PENDENCIAS-MULTIMOTORES.md).
 
 ---
 
