@@ -2,14 +2,34 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { createApiServer } from "../src/server/index.js";
 import {
   CodexAdapter,
   ConversationRuntimeResolver,
   EngineRegistry,
+  type CodexAppServerHandle,
 } from "../src/core/engines/index.js";
+import { ProcessRegistry } from "../src/core/runtime/index.js";
 
 const raizes: string[] = [];
+
+class JsonLineQueue {
+  private values: string[] = [];
+  private waiters: Array<(value: string) => void> = [];
+  push(value: unknown) {
+    const line = `${JSON.stringify(value)}\n`;
+    const waiter = this.waiters.shift();
+    if (waiter) waiter(line);
+    else this.values.push(line);
+  }
+  async *iterate() {
+    while (true) {
+      if (this.values.length) yield this.values.shift()!;
+      else yield await new Promise<string>((resolve) => this.waiters.push(resolve));
+    }
+  }
+}
 
 async function tmpDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "opencorp-secretario-codex-"));
@@ -45,6 +65,8 @@ describe("ETAPA 8 — Prova de Independência do Secretário com Codex Runtime",
   let port: number;
   let fetchApi: ReturnType<typeof makeFetch>;
   let server: ReturnType<typeof createApiServer>["server"];
+  let processRegistry: ProcessRegistry;
+  const decisoesRecebidas: string[] = [];
 
   beforeAll(async () => {
     home = await tmpDir();
@@ -94,25 +116,68 @@ describe("ETAPA 8 — Prova de Independência do Secretário com Codex Runtime",
       })
     );
 
-    // Registra adaptador customizado com mock launcher para isolamento determinístico nos testes
+    const mortos = new Set<number>();
+    processRegistry = new ProcessRegistry({
+      idleTimeoutMs: 60_000,
+      killer: (pid) => { mortos.add(pid); },
+      isPidRunning: (pid) => !mortos.has(pid),
+    });
+    let nextThread = 0;
+    let nextTurn = 0;
+    const turnsByThread = new Map<string, number>();
+    let turnoAguardandoAprovacao: { threadId: string; turnId: string } | undefined;
+
+    // Registra adaptador customizado com app-server fake determinístico.
     const customCodexAdapter = new CodexAdapter({
       homeDir: home,
-      installStatusProbe: async () => ({ installed: true, path: "/fake/codex", version: "test" }),
+      processRegistry,
+      installStatusProbe: async () => ({ installed: true, isManaged: false, path: "/fake/codex", version: "test" }),
       authStatusProbe: async () => ({ authenticated: true, method: "test" }),
-      customProcessLauncher: async (opts) => {
-        const text = opts.args[1] === "resume"
-          ? "Codex continuando o diálogo anterior..."
-          : "Codex: resposta gerada com raciocínio profundo.";
-        async function* stream() {
-          yield JSON.stringify({ type: "thread.started", thread_id: "thread-secretario-test" }) + "\n";
-          yield JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } }) + "\n";
-          yield JSON.stringify({ type: "turn.completed", usage: { input_tokens: 3, output_tokens: 2 } }) + "\n";
-        }
+      appServerLauncher: async (): Promise<CodexAppServerHandle> => {
+        const queue = new JsonLineQueue();
         return {
           pid: 8888,
-          stdout: stream(),
-          exitCode: Promise.resolve(0),
+          stdout: queue.iterate(),
+          exitCode: new Promise(() => {}),
           kill: () => {},
+          write(line) {
+            const message = JSON.parse(line);
+            if (message.method === "initialize") {
+              queue.push({ id: message.id, result: { userAgent: "fake", codexHome: home, platformFamily: "unix", platformOs: "linux" } });
+            } else if (message.method === "thread/start") {
+              nextThread += 1;
+              queue.push({ id: message.id, result: { thread: { id: randomUUID() } } });
+            } else if (message.method === "thread/resume") {
+              queue.push({ id: message.id, result: { thread: { id: message.params.threadId } } });
+            } else if (message.method === "turn/start") {
+              const threadId = message.params.threadId;
+              const count = (turnsByThread.get(threadId) || 0) + 1;
+              turnsByThread.set(threadId, count);
+              const turnId = `turn-secretario-${++nextTurn}`;
+              if (String(message.params.input[0].text).includes("precisa de aprovação")) {
+                turnoAguardandoAprovacao = { threadId, turnId };
+                queue.push({ id: message.id, result: { turn: { id: turnId } } });
+                queue.push({
+                  method: "item/commandExecution/requestApproval",
+                  id: 0,
+                  params: { threadId, turnId, itemId: "cmd", command: "git push origin main", kind: "command" },
+                });
+                return;
+              }
+              const text = count > 1
+                ? "Codex continuando o diálogo anterior..."
+                : "Codex: resposta gerada com raciocínio profundo.";
+              queue.push({ id: message.id, result: { turn: { id: turnId } } });
+              queue.push({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "msg", delta: text } });
+              queue.push({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed" } } });
+            } else if (message.id === 0 && !message.method && turnoAguardandoAprovacao) {
+              decisoesRecebidas.push(message.result?.decision);
+              const { threadId, turnId } = turnoAguardandoAprovacao;
+              turnoAguardandoAprovacao = undefined;
+              queue.push({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "msg", delta: `decisão:${message.result?.decision}` } });
+              queue.push({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed" } } });
+            }
+          },
         };
       },
     });
@@ -145,6 +210,7 @@ describe("ETAPA 8 — Prova de Independência do Secretário com Codex Runtime",
 
   afterAll(async () => {
     await new Promise((r) => server.close(r));
+    await processRegistry.shutdownAll();
     for (const r of raizes) {
       await rm(r, { recursive: true, force: true }).catch(() => {});
     }
@@ -230,5 +296,66 @@ describe("ETAPA 8 — Prova de Independência do Secretário com Codex Runtime",
 
     const stOpencode = await fetchApi("/secretario/status?workspace=ws-opencode");
     expect((stOpencode.json as any).motor.engineId).toBe("opencode");
+  });
+
+  it("6. Stream sem sessao_id abre thread nativa em vez de inventar um ID", async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/secretario/conversa/stream?workspace=ws-codex`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ mensagem: "nova conversa" }),
+    });
+    const text = await res.text();
+    const inicio = /event: inicio\ndata: (.*)\n/.exec(text);
+    expect(inicio).not.toBeNull();
+    expect(JSON.parse(inicio![1]!).sessao_id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("7. HITL: aprovação do Codex chega por SSE e só é respondida pelo workspace dono", async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/secretario/conversa/stream?workspace=ws-codex`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ mensagem: "isso precisa de aprovação" }),
+    });
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let recebido = "";
+    let aprovacao: any;
+    while (!aprovacao) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error(`stream terminou sem aprovação: ${recebido}`);
+      recebido += decoder.decode(value, { stream: true });
+      const m = /event: aprovacao\ndata: (.*)\n/.exec(recebido);
+      if (m) aprovacao = JSON.parse(m[1]!);
+    }
+    expect(aprovacao).toMatchObject({ descricao: "git push origin main", workspace: "ws-codex", motor: "codex" });
+    expect(aprovacao.id).not.toBe("0");
+
+    // Outro workspace não alcança a aprovação do runtime do ws-codex.
+    const intruso = await fetchApi(`/secretario/hitl/${aprovacao.id}/aprovar?workspace=ws-opencode`, { method: "POST", body: "{}" });
+    expect((intruso.json as any)?.runtime).not.toBe(true);
+    expect(decisoesRecebidas).toEqual([]);
+
+    const resposta = await fetchApi(`/secretario/hitl/${aprovacao.id}/aprovar?workspace=ws-codex`, { method: "POST", body: "{}" });
+    expect(resposta.status, JSON.stringify(resposta.json)).toBe(200);
+    expect(resposta.json).toMatchObject({ id: aprovacao.id, status: "aprovado", runtime: true });
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      recebido += decoder.decode(value, { stream: true });
+    }
+    expect(decisoesRecebidas).toEqual(["accept"]);
+    expect(recebido).toContain("decisão:accept");
+    expect(recebido).toContain("event: fim");
+  });
+
+  it("8. Modo síncrono recusa aprovações em vez de bloquear o turno", async () => {
+    const res = await fetchApi("/secretario/conversa?workspace=ws-codex", {
+      method: "POST",
+      body: JSON.stringify({ mensagem: "isso precisa de aprovação" }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ resposta: "decisão:decline", aprovacoes_recusadas: ["git push origin main"] });
   });
 });

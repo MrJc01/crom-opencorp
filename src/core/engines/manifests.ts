@@ -123,17 +123,17 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
   "codex": {
     engineId: "codex",
     name: "OpenAI Codex CLI",
-    transport: "spawn_cli",
+    transport: "stdio_jsonrpc",
     supportsConversation: true,
     features: {
-      streaming: { level: "integrated", flags: ["--json"] },
-      continuation: { level: "integrated", flags: ["exec resume"] },
-      fork: { level: "integrated", flags: ["exec fork"] },
-      hitl: { level: "declared", notes: "Modo sandbox com aprovação" },
+      streaming: { level: "integrated", flags: ["item/agentMessage/delta"] },
+      continuation: { level: "integrated", flags: ["thread/resume"] },
+      fork: { level: "integrated", flags: ["thread/fork"] },
+      hitl: { level: "integrated", notes: "Solicitações JSON-RPC encaminhadas ao HITL do Secretário" },
       tools: { level: "declared", notes: "Execução de shell e código" },
       mcp: { level: "declared", notes: "Suporte MCP do Codex" },
       images: { level: "declared", notes: "Multimodal via modelos OpenAI" },
-      cancellation: { level: "integrated", notes: "Encerramento via SIGTERM/SIGKILL" },
+      cancellation: { level: "integrated", flags: ["turn/interrupt"], notes: "Interrupção do turno via JSON-RPC" },
     },
   },
   "claude-code": {

@@ -88,6 +88,15 @@ export interface ConversationRuntime {
   send(ref: ConversationRef, input: ConversationMessageInput, signal?: AbortSignal): AsyncIterable<AgentEvent>;
   resume(ref: ConversationRef): Promise<ConversationState>;
   fork?(ref: ConversationRef): Promise<ConversationRef>;
+  /**
+   * Responde a um `approval.requested` emitido por `send`. Retorna `false`
+   * quando o ID não pertence ao workspace informado (ou não está pendente).
+   */
+  respondApproval?(
+    approvalId: string,
+    decision: "approve" | "reject",
+    scope: { workspaceId: string }
+  ): Promise<boolean>;
   close(ref: ConversationRef): Promise<void>;
 }
 

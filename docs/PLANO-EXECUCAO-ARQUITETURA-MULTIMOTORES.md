@@ -206,7 +206,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 5 | Resolução do runtime conversacional | ✅ Concluída | `feat(secretary): resolve configurable conversation runtime explicitly` | 8 arquivos focados (106 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 6 | Adaptador OpenCode completo | ✅ Concluída | `feat(opencode): implement canonical runner and isolated conversation runtime` | 9 arquivos focados (114 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 7 | Secretário independente de OpenCode | ✅ Concluída | `refactor(secretary): decouple conversations from opencode server` | 10 arquivos focados (93 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
-| 8 | Codex como segundo runtime | 🟨 Em andamento (checkpoint 8A) | `feat(codex): add canonical runner and native CLI sessions` | JSONL e continuação/fork nativos; 60 testes focados, 137 arquivos/1.308 testes e build PASS |
+| 8 | Codex como segundo runtime | ✅ Concluída | `feat(codex): support persistent secretary conversations via app-server` | app-server + HITL + probe opt-in; 139 arquivos/1.327 testes, 2 TS e build PASS; órfãos 0→0 |
 | 9 | Vault e autenticação | ⬜ Pendente | — | — |
 | 10 | Instalador gerenciado e preflight | ⬜ Pendente | — | — |
 | 11 | Saúde funcional e conformidade | ⬜ Pendente | — | — |
@@ -797,16 +797,16 @@ refactor(secretary): decouple conversations from opencode server
 ### Tarefas
 
 - [x] Implementar one-shot Codex com saída JSON.
-- [ ] Selecionar SDK ou app-server para conversação persistente.
+- [x] Selecionar SDK ou app-server para conversação persistente (`codex app-server` via stdio JSON-RPC).
 - [x] Implementar streaming e eventos canônicos.
 - [x] Implementar continuação real via `codex exec resume <thread_id>`.
 - [x] Implementar cancelamento.
-- [ ] Integrar aprovações conforme a interface suportada.
-- [x] Não registrar processo residente no `ProcessRegistry` enquanto o transporte for CLI por turno.
+- [x] Integrar aprovações conforme a interface suportada (comando, arquivo e permissões → SSE `aprovacao` → `/secretario/hitl/:id`).
+- [x] Registrar o app-server residente no `ProcessRegistry` por `[codex, workspaceId]`; o one-shot `codex exec` continua sem processo residente.
 - [x] Declarar somente capacidades comprovadas.
 - [x] Não acoplar o modelo Codex ao harness pelo prefixo.
 - [x] Criar fake determinístico para CI.
-- [ ] Criar probe real opt-in com orçamento.
+- [x] Criar probe real opt-in com orçamento (`tests/real/codex-conversation.real.test.ts`, `npm run test:real`).
 
 ### Testes
 
@@ -815,10 +815,13 @@ refactor(secretary): decouple conversations from opencode server
 - [x] Workspace A usa Codex e workspace B usa OpenCode sem vazamento no teste de integração.
 - [x] Ausência/login inválido retorna erro explícito no preflight estrito.
 - [x] Transporte CLI por turno não mantém processo residente após a execução.
+- [x] Aprovação de um workspace não é aceita por outro workspace.
+- [x] Morte do app-server no meio do turno gera `run.failed` e libera o registro.
+- [x] Inicializações concorrentes do mesmo workspace não geram processo órfão.
 
 ### Critérios de aceite
 
-- [ ] Dois runtimes conversacionais reais suportados pela mesma porta.
+- [x] Dois runtimes conversacionais (OpenCode e Codex) suportados pela mesma porta — verificação contra o Codex real depende da execução autorizada do probe (P-01).
 - [x] Nenhuma condicional `if codex` adicionada às rotas do Secretário.
 
 ### Checkpoint 8A — 26/09/2026
@@ -829,6 +832,32 @@ refactor(secretary): decouple conversations from opencode server
 - O preflight das rotas é estrito para runtimes novos; o OpenCode legado somente atravessa a borda de compatibilidade quando seu servidor já está rodando.
 - Validações: TypeScript backend/frontend PASS; 60 testes focados PASS; suíte completa com 137 arquivos, 1.308 testes PASS e 1 todo; build PASS.
 - Pendente para concluir a etapa: substituir a conversa CLI transitória por `codex app-server`, integrar aprovações e criar probe real opt-in com orçamento. A escolha do app-server segue a [orientação oficial para conversas persistentes, streaming e aprovações](https://developers.openai.com/pt-BR/blog/codex-as-a-platform).
+
+### Checkpoint 8B — 26/09/2026 (conclusão)
+
+- Executor: Claude Code (Opus 5.5), retomando o trabalho não commitado deixado pelo Codex ao atingir o limite de uso.
+- Limite: não se aplica ao protocolo do Codex; o limite do Codex esgotou no meio da etapa (reset informado para 01/10/2026 08:36).
+- Revisão do trabalho herdado contra o esquema gerado por `codex app-server generate-ts` identificou e corrigiu:
+  - notificação `error` lida no campo errado e encerrando o turno mesmo com `willRetry: true`;
+  - ID de aprovação igual ao ID JSON-RPC (colisão entre workspaces) e `respondApproval` varrendo todos os workspaces — agora UUID local e escopo obrigatório `{ workspaceId }` na porta;
+  - stderr do app-server nunca lido (risco de travamento com buffer cheio) — agora drenado, mantendo os últimos 8 KiB;
+  - escrita em stdin fechado podia derrubar o processo (EPIPE sem listener);
+  - corrida entre inicializações concorrentes gerava processo órfão;
+  - requisições sem tempo limite (padrão agora 60 s);
+  - solicitações `item/permissions/requestApproval` recusadas — agora roteadas como aprovação;
+  - aprovações pendentes não canceladas ao abortar o turno;
+  - morte do processo durante o turno terminava o stream sem evento terminal;
+  - `authVerified` fixo em `true` e versão do cliente fixa em `0.7.0`.
+- Defeitos pré-existentes encontrados na integração e corrigidos:
+  - `system.ts` interceptava `/secretario/hitl/*` antes das rotas do Secretário, tornando `hitl.ts` inalcançável; a consulta ao runtime virou `responderAprovacaoDoRuntime` e é chamada no handler efetivo;
+  - o stream genérico inventava `sessao-<timestamp>` como ID, o que faria o Codex tentar `thread/resume` de uma thread inexistente; agora só UUIDs nativos são retomados;
+  - o stream genérico não repassava `approval.requested` e emitia `passo`, evento que a UI não consome; agora emite `aprovacao` e `acao`;
+  - a UI não tinha como responder aprovações de motor; criado `EngineApprovalCard` (Aprovar/Rejeitar);
+  - o modo síncrono (`/secretario/conversa`) ficaria bloqueado numa aprovação; agora recusa e informa `aprovacoes_recusadas`, e devolve 502 em `run.failed` em vez de 200 vazio.
+- `ProcessRegistry.forget(key, pid)` remove o registro de processo que encerrou sozinho, sem sinalizar PID possivelmente reutilizado.
+- `runConversationProbe` (inferência, streaming, continuação; orçamento de tokens e tempo; recusa aprovações; não expõe prompt/resposta) é reutilizável na Etapa 11.
+- Validações: `npx tsc --noEmit` PASS; `npx tsc --noEmit -p tsconfig.web.json` PASS; focados `codex-adapter` (18), `secretario-codex-runtime` (8), `conversation-probe` (4), `secretario-generic-runtime` (6) PASS; suíte completa 139 arquivos — 1.327 PASS, 2 skipped (probe real), 1 todo; `npm run build` PASS; `git diff --check` PASS; `fake-opencode` órfãos 0→0.
+- Não executado: probe contra o Codex real (consome cota da conta do usuário; requer autorização — P-01).
 
 ### Commits sugeridos
 
@@ -1378,7 +1407,8 @@ Registrar aqui apenas itens novos, com etapa de origem, impacto e decisão. Não
 
 | ID | Etapa de origem | Pendência | Impacto | Decisão |
 |---|---:|---|---|---|
-| — | — | Nenhuma registrada | — | — |
+| P-01 | 8 | Probe real do Codex não executado | Capacidade verificada apenas com fake determinístico | Executar `OPENCORP_REAL_PROBES=codex OPENCORP_PROBE_CODEX_MODEL=<modelo> npm run test:real` quando o usuário autorizar o consumo de cota |
+| P-02 | 8 | Sessões do adaptador Codex ficam em memória | Após reinício, a conversa é retomada via `thread/resume` pelo UUID; título/modelo da sessão se perdem | Aceito; persistência de metadados fica para a Etapa 13/14 se necessária |
 
 ---
 

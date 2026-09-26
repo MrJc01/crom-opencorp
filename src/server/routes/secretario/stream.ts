@@ -273,7 +273,9 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
           if (runtimeCtx.engineId !== "opencode") {
             const contextoWs = await construirContextoWorkspace(ws);
             const mensagemStreamComWs = `${contextoWs}\n${mensagem}`;
-            const sId = corpo.sessao_id || url.searchParams.get("sessao") || `sessao-${Date.now()}`;
+            // Sem ID, o runtime cria a conversa e devolve o ID nativo; inventar um
+            // ID aqui faria motores com threads nativas tentarem retomar algo inexistente.
+            const sId = corpo.sessao_id || url.searchParams.get("sessao") || undefined;
             const agente = resolvido.agente ?? "secretario-exec";
             const modelo = corpo.modelo || corpo.model || "default";
 
@@ -303,6 +305,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
             });
 
             let fullOutput = "";
+            const resumosFerramentas = new Map<string, string>();
             const ac = new AbortController();
             onClientClose = () => {
               if (!res.writableEnded) ac.abort();
@@ -315,16 +318,26 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
                   fullOutput += ev.text;
                   sse("delta", { delta: ev.text });
                 } else if (ev.type === "tool.requested") {
-                  sse("passo", {
-                    tipo: "ferramenta",
-                    ferramenta: ev.call.name,
-                    input: ev.call.arguments,
-                  });
+                  const resumo = resumirFerramenta(ev.call.name, ev.call.arguments);
+                  resumosFerramentas.set(ev.call.id, resumo);
+                  sse("acao", { itens: [{ ferramenta: ev.call.name, resumo, status: "running" }] });
                 } else if (ev.type === "tool.completed") {
-                  sse("passo", {
-                    tipo: "ferramenta_fim",
-                    ferramenta: ev.result.name,
-                    resultado: ev.result.result,
+                  const resumo = resumosFerramentas.get(ev.result.id) ?? ev.result.name;
+                  sse("acao", {
+                    itens: [{
+                      ferramenta: ev.result.name,
+                      resumo,
+                      status: ev.result.isError ? "failed" : "completed",
+                      sucesso: !ev.result.isError,
+                    }],
+                  });
+                } else if (ev.type === "approval.requested") {
+                  sse("aprovacao", {
+                    id: ev.approval.id,
+                    acao: ev.approval.action,
+                    descricao: ev.approval.description,
+                    workspace: ws.id,
+                    motor: runtimeCtx.engineId,
                   });
                 } else if (ev.type === "run.completed") {
                   sse("fim", {
@@ -821,4 +834,10 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
   }
 
   return false;
+}
+
+function resumirFerramenta(nome: string, args: Record<string, unknown>): string {
+  if (typeof args.command === "string" && args.command) return `$ ${args.command}`;
+  if (Array.isArray(args.files) && args.files.length > 0) return `Alterando ${args.files.join(", ")}`;
+  return nome;
 }

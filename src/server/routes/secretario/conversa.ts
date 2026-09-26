@@ -130,9 +130,18 @@ export async function handleConversaRoutes(ctx: RouteContext): Promise<boolean> 
         });
 
         let respostaTexto = "";
+        const aprovacoesRecusadas: string[] = [];
         for await (const event of runtimeCtx.runtime.send(ref, { text: mensagemComWs })) {
           if (event.type === "message.delta") {
             respostaTexto += event.text;
+          } else if (event.type === "approval.requested") {
+            // O modo síncrono não tem canal para o usuário decidir; recusar evita
+            // que o turno fique bloqueado indefinidamente. Use o stream para HITL.
+            aprovacoesRecusadas.push(event.approval.description);
+            await runtimeCtx.runtime.respondApproval?.(event.approval.id, "reject", { workspaceId: ws.id });
+          } else if (event.type === "run.failed") {
+            enviar(res, 502, { ok: false, erro: event.error.message, sessao_id: ref.id, motor: runtimeCtx.engineId });
+            return true;
           } else if (event.type === "run.completed") {
             if (event.result.output && !respostaTexto) {
               respostaTexto = event.result.output;
@@ -148,6 +157,7 @@ export async function handleConversaRoutes(ctx: RouteContext): Promise<boolean> 
           agente: agenteResolvido,
           modelo: corpo.modelo || corpo.model || "default",
           motor: runtimeCtx.engineId,
+          ...(aprovacoesRecusadas.length > 0 ? { aprovacoes_recusadas: aprovacoesRecusadas } : {}),
         });
         return true;
       }

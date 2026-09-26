@@ -60,6 +60,13 @@ export function buildAssistantParts(
     status?: string;
   }>,
   texto: string,
+  aprovacoes: Array<{
+    id: string;
+    acao?: string;
+    descricao?: string;
+    workspace?: string;
+    motor?: string;
+  }> = [],
 ): any[] {
   const partes: any[] = [];
 
@@ -85,6 +92,15 @@ export function buildAssistantParts(
         isError: item.sucesso === false,
       });
     }
+  }
+
+  for (const aprovacao of aprovacoes) {
+    partes.push({
+      type: "tool-call",
+      toolName: "aprovacao_motor",
+      toolCallId: `aprovacao_${aprovacao.id}`,
+      args: aprovacao,
+    });
   }
 
   if (texto && texto.length > 0) {
@@ -330,6 +346,13 @@ export function criarSecretarioModelAdapter(
       let pensamentoAcumulado = "";
       let statusAtual = "";
       const thinkParser = new ThinkParser();
+      const aprovacoes: Array<{
+        id: string;
+        acao?: string;
+        descricao?: string;
+        workspace?: string;
+        motor?: string;
+      }> = [];
       const acoesAcumuladas: Array<{
         ferramenta: string;
         resumo: string;
@@ -419,6 +442,17 @@ export function criarSecretarioModelAdapter(
                       statusAtual = `⚡ Executando ${resumo}`;
                     }
                   }
+                } else if (evento === "aprovacao" && parsed.id) {
+                  if (!aprovacoes.some((a) => a.id === parsed.id)) {
+                    aprovacoes.push({
+                      id: String(parsed.id),
+                      acao: parsed.acao,
+                      descricao: parsed.descricao,
+                      workspace: parsed.workspace ?? wsId,
+                      motor: parsed.motor,
+                    });
+                  }
+                  statusAtual = "⏸ Aguardando sua aprovação...";
                 } else if (evento === "fim") {
                   statusAtual = "";
                   if (parsed.resposta && !textoAcumulado) {
@@ -443,6 +477,7 @@ export function criarSecretarioModelAdapter(
                 pensamentoAcumulado,
                 acoesAcumuladas,
                 textoAcumulado || statusAtual,
+                aprovacoes,
               );
               if (partes.length > 0) {
                 yield { content: partes };
@@ -460,6 +495,7 @@ export function criarSecretarioModelAdapter(
         pensamentoAcumulado,
         acoesAcumuladas,
         textoAcumulado,
+        aprovacoes,
       );
       if (partesFinais.length > 0) {
         yield { content: partesFinais };

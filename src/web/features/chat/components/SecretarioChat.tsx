@@ -39,6 +39,7 @@ import { SUGESTOES_RAPIDAS } from "../../../lib/chat/constants.js";
 import type { SecretaryRuntimeOptions } from "../types.js";
 import { GitStatusCard, parsearSaidaGitStatus } from "./GitStatusCard.js";
 import { HitlOptionsView } from "./HitlOptionsView.js";
+import { EngineApprovalCard } from "./EngineApprovalCard.js";
 import {
   ChatComposer,
   type ContextChip,
@@ -524,6 +525,9 @@ const SecretarioChatInterno: FC<{
                                     />
                                   );
                                 },
+                                aprovacao_motor: ({ args }: any) => (
+                                  <EngineApprovalCard args={args} />
+                                ),
                                 hitl_approval: ({ args }: any) => (
                                   <HitlOptionsView
                                     texto={

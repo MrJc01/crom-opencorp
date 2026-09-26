@@ -315,6 +315,23 @@ export class ProcessRegistry {
     return record;
   }
 
+  /**
+   * Remove o registro de um processo que já encerrou por conta própria, sem
+   * enviar sinais. Só age se o PID registrado for o informado, para nunca
+   * descartar um processo mais novo registrado na mesma chave.
+   */
+  public forget(key: ProcessKey | string, pid: number): boolean {
+    const keyString = this.toKeyString(key);
+    const record = this.records.get(keyString);
+    if (!record || record.pid !== pid) return false;
+    this.clearIdleTimer(keyString);
+    this.records.delete(keyString);
+    this.removePidfile(keyString);
+    record.state = "stopped";
+    this.emit({ type: "process.terminated", record, exitCode: null });
+    return true;
+  }
+
   public touch(key: ProcessKey | string): void {
     const keyString = this.toKeyString(key);
     const record = this.records.get(keyString);

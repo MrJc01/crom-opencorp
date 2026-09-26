@@ -21,3 +21,5 @@ export * from "./adapter-compat.js";
 export * from "./conversation-resolver.js";
 export * from "./adapters/opencode-adapter.js";
 export * from "./adapters/codex-adapter.js";
+export * from "./adapters/codex-app-server-client.js";
+export * from "./conversation-probe.js";

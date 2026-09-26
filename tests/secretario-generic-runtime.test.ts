@@ -282,7 +282,7 @@ describe("ETAPA 7 — Secretário com Runtime Genérico e Multimotor", () => {
     expect(text).toContain("event: inicio");
     expect(text).toContain('"motor":"mock-engine"');
     expect(text).toContain("event: delta");
-    expect(text).toContain("event: passo");
+    expect(text).toContain("event: acao");
     expect(text).toContain("event: fim");
   });
 

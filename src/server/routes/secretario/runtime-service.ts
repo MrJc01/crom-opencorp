@@ -209,3 +209,28 @@ export async function statusRuntimeSecretario(
         },
   };
 }
+
+/**
+ * Entrega uma decisão HITL ao runtime conversacional do workspace, quando a
+ * aprovação foi solicitada pelo motor (ex.: Codex app-server). Retorna `false`
+ * se o runtime não reconhece o ID, para que o chamador use o ApprovalsStore.
+ * O escopo é sempre o workspace da requisição: um workspace nunca responde
+ * aprovações de outro.
+ */
+export async function responderAprovacaoDoRuntime(
+  ctx: RouteContext,
+  ws: { id: string; path: string },
+  id: string,
+  acao: "approve" | "reject"
+): Promise<boolean> {
+  try {
+    const { runtime } = await obterRuntimeSecretario(ctx, ws, false);
+    if (!runtime.respondApproval) return false;
+    return await runtime.respondApproval(id, acao, { workspaceId: ws.id });
+  } catch (erro) {
+    console.warn(
+      `[secretario/hitl] runtime indisponível para a aprovação ${id}; usando o armazenamento HITL: ${erro instanceof Error ? erro.message : String(erro)}`
+    );
+    return false;
+  }
+}

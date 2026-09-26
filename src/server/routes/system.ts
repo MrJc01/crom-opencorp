@@ -15,6 +15,7 @@ import { RegistryStore, type MetaRegistro } from "../../core/contexts/storage/re
 import { registrarBuiltins } from "../../core/contexts/orchestration/builtin-components.js";
 import { COMANDOS_AGENDA } from "./scheduler.js";
 import type { RouteContext } from "./types.js";
+import { responderAprovacaoDoRuntime } from "./secretario/runtime-service.js";
 
 export interface DefinicaoRota {
   method: string;
@@ -407,13 +408,19 @@ export async function handleSystemRoutes(ctx: RouteContext): Promise<boolean> {
 
   const mAprov = /^(?:\/approvals\/([^/]+)\/(approve|reject)|\/secretario\/hitl\/([^/]+)\/(aprovar|rejeitar))$/.exec(rota);
   if (mAprov && req.method === "POST") {
+    const ws = await resolverWs(url);
+    const id = decodeURIComponent(mAprov[1] || mAprov[3]!);
+    const acao = (mAprov[2] || mAprov[4]) === "approve" || (mAprov[2] || mAprov[4]) === "aprovar" ? "approve" : "reject";
+    // Aprovações pedidas pelo motor conversacional do workspace têm precedência;
+    // as demais seguem para o ApprovalsStore.
+    if (await responderAprovacaoDoRuntime(ctx, ws, id, acao)) {
+      enviar(res, 200, { id, status: acao === "approve" ? "aprovado" : "rejeitado", runtime: true });
+      return true;
+    }
     if (!approvals) {
       enviar(res, 500, { erro: "store de approvals não configurada" });
       return true;
     }
-    const ws = await resolverWs(url);
-    const id = decodeURIComponent(mAprov[1] || mAprov[3]!);
-    const acao = (mAprov[2] || mAprov[4]) === "approve" || (mAprov[2] || mAprov[4]) === "aprovar" ? "approve" : "reject";
     if (acao === "approve") {
       const p = await approvals.aprovar(ws.path, id);
       if (p.padrao?.startsWith("hook:")) {

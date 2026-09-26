@@ -25,7 +25,8 @@
     "test": "vitest run --passWithNoTests",
     "test:e2e": "playwright test",
     "dev": "tsx watch src/cli/index.ts",
-    "cleanup-continue": "node src/server/scripts/cleanupContinue.ts"
+    "cleanup-continue": "node src/server/scripts/cleanupContinue.ts",
+    "test:real": "vitest run tests/real"
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.116",
