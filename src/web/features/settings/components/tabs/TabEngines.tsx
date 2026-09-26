@@ -41,6 +41,18 @@ export interface TabEnginesProps {
   onGoToKeysTab?: () => void;
 }
 
+type NivelSaude = "installed" | "authenticated" | "inference" | "streaming" | "tools" | "conversation" | "lifecycle";
+const NIVEIS_REAIS: readonly NivelSaude[] = ["inference", "streaming", "tools", "conversation", "lifecycle"];
+const ROTULO_NIVEL: Record<NivelSaude, string> = {
+  installed: "Instalado",
+  authenticated: "Autenticado",
+  inference: "Inferência",
+  streaming: "Streaming",
+  tools: "Ferramentas",
+  conversation: "Conversa",
+  lifecycle: "Ciclo de vida",
+};
+
 export const TabEngines: FC<TabEnginesProps> = ({
   abaAtiva,
   onGoToKeysTab,
@@ -134,36 +146,39 @@ export const TabEngines: FC<TabEnginesProps> = ({
     (c: any) => c.motorId === motorAtual?.id
   );
 
-  const testarMotor = async (motorId: string) => {
+  /**
+   * Diagnóstico por nível. Sem argumentos: "authenticated" (barato, sem
+   * inferência). Níveis reais consomem cota e exigem modelo e confirmação.
+   */
+  const testarMotor = async (motorId: string, nivel: NivelSaude = "authenticated", modelo?: string) => {
     setTestandoMotor(motorId);
     try {
-      const res = await client.http.post<any>(
-        `/api/motores/${encodeURIComponent(motorId)}/test`,
-        {},
-      );
-
+      const real = NIVEIS_REAIS.includes(nivel);
+      const res = await client.http.post<any>(`/api/motores/${encodeURIComponent(motorId)}/test`, {
+        nivel,
+        ...(real ? { modelo, confirmarCusto: true } : {}),
+      });
       setResultadoTeste((prev) => ({ ...prev, [motorId]: res }));
-      if (res?.ok && res?.health?.healthy) {
-        const latencia = res.ms ?? res.health?.latencyMs ?? 0;
-        showToast(`Motor ${motorId} respondendo (${latencia}ms)!`, "sucesso");
-      } else {
-        const causa = res?.health?.message || res?.health?.statusText || res?.error || "Diagnóstico sem causa informada";
-        setResultadoTeste((prev) => ({
-          ...prev,
-          [motorId]: { ...res, ok: false, error: causa },
-        }));
-        showToast(`Falha no motor ${motorId}: ${causa}`, "erro");
-      }
+      const resumo = res?.health?.statusText || res?.erro || "Diagnóstico sem causa informada";
+      showToast(`${motorId}: ${resumo}`, res?.ok ? "sucesso" : "erro");
     } catch (err: unknown) {
       const causa = err instanceof Error ? err.message : String(err);
-      setResultadoTeste((prev) => ({
-        ...prev,
-        [motorId]: { ok: false, error: causa },
-      }));
+      setResultadoTeste((prev) => ({ ...prev, [motorId]: { ok: false, error: causa } }));
       tratarErro(err, `Falha ao testar motor ${motorId}`);
     } finally {
       setTestandoMotor(null);
     }
+  };
+
+  const testeFuncional = async (motor: MotorInfo) => {
+    const sugestao = (motor as { contaAtiva?: { modeloPadrao?: string } | string }).contaAtiva;
+    const modelo = window.prompt(
+      `Teste funcional de "${motor.name}": executa inferência real, streaming, leitura de arquivo e continuação num workspace temporário e CONSOME COTA da conta ativa.\n\nInforme o modelo exato (provedor/modelo):`,
+      typeof sugestao === "object" && sugestao?.modeloPadrao ? sugestao.modeloPadrao : "",
+    );
+    if (!modelo?.trim()) return;
+    if (!confirm(`Confirmar teste funcional de "${motor.name}" com o modelo "${modelo.trim()}"? Isso consome cota.`)) return;
+    await testarMotor(motor.id, "conversation", modelo.trim());
   };
 
   const salvarTodosLimites = async () => {
@@ -572,6 +587,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
                     type="button"
                     disabled={testandoMotor !== null}
                     onClick={() => testarMotor(motorAtual.id)}
+                    title="Verifica binário e autenticação, sem inferência"
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-850 text-zinc-200 border border-zinc-800 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
                   >
                     {testandoMotor === motorAtual.id ? (
@@ -579,8 +595,21 @@ export const TabEngines: FC<TabEnginesProps> = ({
                     ) : (
                       <Play size={13} className="text-emerald-400" />
                     )}
-                    <span>{motorAtual.id === "mimo" ? "Testar Prontidão" : "Testar Conexão"}</span>
+                    <span>Diagnóstico rápido</span>
                   </button>
+
+                  {motorAtual.installed && (
+                    <button
+                      type="button"
+                      disabled={testandoMotor !== null}
+                      onClick={() => void testeFuncional(motorAtual)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-850 text-amber-200 border border-amber-800/60 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                      title="Executa inferência real num workspace temporário — consome cota"
+                    >
+                      <Activity size={13} className="text-amber-400" />
+                      <span>Teste funcional</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -684,12 +713,39 @@ export const TabEngines: FC<TabEnginesProps> = ({
                   ) : (
                     <AlertCircle size={14} className="mt-0.5 shrink-0" />
                   )}
-                  <span>
-                    {resultadoTeste[motorAtual.id]?.health?.statusText ||
-                      resultadoTeste[motorAtual.id]?.health?.message ||
-                      resultadoTeste[motorAtual.id]?.error ||
-                      "Diagnóstico do motor indisponível"}
-                  </span>
+                  <div className="flex flex-col gap-1.5">
+                    <span>
+                      {resultadoTeste[motorAtual.id]?.health?.statusText ||
+                        resultadoTeste[motorAtual.id]?.health?.message ||
+                        resultadoTeste[motorAtual.id]?.error ||
+                        "Diagnóstico do motor indisponível"}
+                    </span>
+                    {Array.isArray(resultadoTeste[motorAtual.id]?.relatorio?.results) && (
+                      <ul className="flex flex-wrap gap-1.5" aria-label="Resultado por nível">
+                        {resultadoTeste[motorAtual.id].relatorio.results.map((r: { level: NivelSaude; status: string; detail?: string; latencyMs?: number }) => (
+                          <li
+                            key={r.level}
+                            title={[r.detail, r.latencyMs !== undefined ? `${r.latencyMs} ms` : ""].filter(Boolean).join(" · ")}
+                            className={`rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${
+                              r.status === "passed"
+                                ? "border-emerald-700/60 text-emerald-300"
+                                : r.status === "failed"
+                                  ? "border-rose-700/60 text-rose-300"
+                                  : "border-zinc-700 text-zinc-400"
+                            }`}
+                          >
+                            {r.status === "passed" ? "✓" : r.status === "failed" ? "✗" : "–"} {ROTULO_NIVEL[r.level] ?? r.level}
+                            {r.status === "unsupported" ? " (não suportado)" : r.status === "skipped" ? " (não executado)" : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {resultadoTeste[motorAtual.id]?.relatorio && !NIVEIS_REAIS.includes(resultadoTeste[motorAtual.id].relatorio.requestedLevel) && (
+                      <span className="text-[10px] text-zinc-400">
+                        Diagnóstico rápido: não executa inferência. Use “Teste funcional” para verificar respostas reais.
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
 

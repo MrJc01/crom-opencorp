@@ -144,8 +144,39 @@ describe("EngineRegistry & Multi-Engine Drivers", () => {
     expect(data.motorId).toBe("opencode");
     expect(data.health).toBeDefined();
     expect(data.ok).toBe(data.health.healthy);
-    expect(res.status).toBe(data.health.healthy ? 200 : 503);
+    expect(res.status).toBe(200);
+    expect(data.relatorio.results.length).toBeGreaterThan(0);
     expect(typeof data.ms).toBe("number");
+  });
+
+  it("POST /api/motores/:id/test devolve relatório por nível sem inferência por padrão", async () => {
+    const res = await fetch(`http://127.0.0.1:${serverPort}/api/motores/opencode/test`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nivel: "installed" }),
+    });
+    const data = (await res.json()) as any;
+    expect(data.nivel).toBe("installed");
+    expect(data.relatorio.requestedLevel).toBe("installed");
+    expect(data.relatorio.results.map((r: any) => r.level)).toEqual(["installed"]);
+    expect(data.relatorio.model).toBeNull();
+  });
+
+  it("POST /api/motores/:id/test recusa nível inválido e probe real sem confirmação ou modelo", async () => {
+    const post = (body: unknown) =>
+      fetch(`http://127.0.0.1:${serverPort}/api/motores/opencode/test`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const invalido = await post({ nivel: "tudo" });
+    expect(invalido.status).toBe(400);
+    const semConfirmar = await post({ nivel: "inference", modelo: "openrouter/x/y" });
+    expect(semConfirmar.status).toBe(400);
+    expect(((await semConfirmar.json()) as any).requerConfirmacao).toBe(true);
+    const semModelo = await post({ nivel: "inference", confirmarCusto: true });
+    expect(semModelo.status).toBe(400);
+    expect(((await semModelo.json()) as any).erro).toMatch(/modelo explícito/);
   });
 
   it("nunca deve expor tokenOuChave nos DTOs públicos de contas", async () => {

@@ -130,7 +130,7 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
       continuation: { level: "integrated", flags: ["thread/resume"] },
       fork: { level: "integrated", flags: ["thread/fork"] },
       hitl: { level: "integrated", notes: "Solicitações JSON-RPC encaminhadas ao HITL do Secretário" },
-      tools: { level: "declared", notes: "Execução de shell e código" },
+      tools: { level: "integrated", notes: "commandExecution e fileChange do app-server/exec traduzidos em tool.requested/tool.completed" },
       mcp: { level: "declared", notes: "Suporte MCP do Codex" },
       images: { level: "declared", notes: "Multimodal via modelos OpenAI" },
       cancellation: { level: "integrated", flags: ["turn/interrupt"], notes: "Interrupção do turno via JSON-RPC" },

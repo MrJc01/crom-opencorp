@@ -15,9 +15,15 @@ import {
   ManagedInstallUnsupportedError,
   MANUAL_INSTALL_INSTRUCTIONS,
   resolveEngineBinary,
+  runEngineHealth,
+  validateHealthRequest,
+  isHealthLevel,
+  HEALTH_LEVELS,
+  REAL_HEALTH_LEVELS,
   EngineAccountStore,
   WebLoginOrchestrator,
 } from "../../core/engines/index.js";
+import { ProcessRegistry } from "../../core/runtime/index.js";
 import type { EngineAccount } from "../../core/engines/engine-account-store.js";
 import { listarProvedoresStatus, testarModeloDirect, completarChatDirect } from "../../core/contexts/execution/llm-client.js";
 import type { SecretOrigem } from "../../core/contexts/storage/secrets-store.js";
@@ -843,23 +849,63 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
     return true;
   }
 
-  // POST /api/motores/:id/test
+  // POST /api/motores/:id/test — saúde multinível (Etapa 11)
+  // Corpo: { nivel?, modelo?, confirmarCusto?, maxTokens?, timeoutMs? }.
+  // Padrão "authenticated": barato, sem inferência. Níveis a partir de
+  // "inference" consomem cota e exigem confirmarCusto=true e modelo explícito.
   const mTestMotor = /^\/api\/motores\/([^/]+)\/test$/.exec(rota);
   if (mTestMotor && req.method === "POST") {
     const motorId = decodeURIComponent(mTestMotor[1]!);
-    const driver = engineRegistry.get(motorId);
-    if (!driver) {
+    const adapter = engineRegistry.getAdapter(motorId);
+    if (!adapter) {
       enviar(res, 404, { erro: `Motor "${motorId}" não encontrado` });
       return true;
     }
-    const health = await driver.checkHealth(home);
-    const mensagemErro = health.statusText || "Motor indisponível ou não autenticado";
-    enviar(res, health.healthy ? 200 : 503, {
-      ok: health.healthy,
+    const corpo = (await lerCorpo(req).catch(() => ({}))) as {
+      nivel?: unknown;
+      modelo?: unknown;
+      confirmarCusto?: unknown;
+      maxTokens?: unknown;
+      timeoutMs?: unknown;
+    };
+    const nivel = corpo.nivel === undefined ? "authenticated" : corpo.nivel;
+    if (!isHealthLevel(nivel)) {
+      enviar(res, 400, { ok: false, motorId, erro: `nível inválido; use um de: ${HEALTH_LEVELS.join(", ")}` });
+      return true;
+    }
+    const opcoes = {
+      adapter,
+      homeDir: home,
+      level: nivel,
+      model: typeof corpo.modelo === "string" ? corpo.modelo : undefined,
+      allowRealProbe: corpo.confirmarCusto === true,
+      maxTotalTokens: typeof corpo.maxTokens === "number" && corpo.maxTokens > 0 ? Math.min(corpo.maxTokens, 200_000) : undefined,
+      timeoutMs: typeof corpo.timeoutMs === "number" && corpo.timeoutMs > 0 ? Math.min(corpo.timeoutMs, 600_000) : undefined,
+      processRegistry: ProcessRegistry.getInstance(),
+    };
+    try {
+      validateHealthRequest(opcoes);
+    } catch (err) {
+      enviar(res, 400, { ok: false, motorId, nivel, requerConfirmacao: REAL_HEALTH_LEVELS.includes(nivel), erro: err instanceof Error ? err.message : String(err) });
+      return true;
+    }
+    const relatorio = await runEngineHealth(opcoes);
+    const falha = relatorio.results.find((r) => r.status === "failed");
+    const resumo = relatorio.ok
+      ? `Nível "${relatorio.highestPassed}" verificado${relatorio.version ? ` · ${relatorio.version}` : ""}`
+      : `Falhou em "${falha?.level ?? nivel}": ${falha?.detail ?? "não verificado"}`;
+    // 200 sempre que o diagnóstico foi concluído (o resultado está em `ok`):
+    // o cliente HTTP da UI descarta o corpo de respostas não-2xx, e o relatório
+    // por nível é justamente o que a UI precisa mostrar numa falha.
+    enviar(res, 200, {
+      ok: relatorio.ok,
       motorId,
-      health,
-      ms: health.latencyMs ?? 0,
-      ...(health.healthy ? {} : { erro: mensagemErro }),
+      nivel,
+      relatorio,
+      // Compatibilidade com clientes anteriores.
+      health: { healthy: relatorio.ok, statusText: resumo, latencyMs: relatorio.durationMs },
+      ms: relatorio.durationMs,
+      ...(relatorio.ok ? {} : { erro: resumo }),
     });
     return true;
   }

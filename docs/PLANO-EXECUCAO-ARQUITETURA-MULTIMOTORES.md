@@ -209,7 +209,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 8 | Codex como segundo runtime | ✅ Concluída | `feat(codex): support persistent secretary conversations via app-server` | app-server + HITL + probe opt-in; 139 arquivos/1.327 testes, 2 TS e build PASS; órfãos 0→0 |
 | 9 | Vault e autenticação | ✅ Concluída | `feat(credentials): add scoped vault facade and ephemeral injection` | 13 testes de credenciais; 140 arquivos/1.340 testes; 2 TS PASS; OpenCode autenticado de fato |
 | 10 | Instalador gerenciado e preflight | ✅ Concluída | `feat(engines): add deterministic binary resolution and verified managed installs` | 13 testes de instalação; 141 arquivos/1.352 testes; 2 TS e build PASS |
-| 11 | Saúde funcional e conformidade | ⬜ Pendente | — | — |
+| 11 | Saúde funcional e conformidade | ✅ Concluída | `feat(engines): add multi-level health and conformance probes` | conformidade OpenCode+Codex; 143 arquivos/1.398 testes; 2 TS e build PASS |
 | 12 | `AcpClientAdapter` | ⬜ Pendente | — | — |
 | 13 | Catálogo e rotação soberanos | ⬜ Pendente | — | — |
 | 14 | Migração CLI/UI e depreciação | ⬜ Pendente | — | — |
@@ -999,37 +999,50 @@ feat(engines): add pinned verified managed installations
 
 ### Tarefas
 
-- [ ] Criar resultados tipados por nível.
-- [ ] Manter health barato separado de probe real.
-- [ ] Atualizar `/api/motores/:id/test` para receber nível solicitado.
-- [ ] Tornar probes reais opt-in.
-- [ ] Aplicar timeout e orçamento.
-- [ ] Usar workspace temporário.
-- [ ] Proibir modelos aleatórios em testes.
-- [ ] Registrar versão, motor, modelo e latência.
-- [ ] Não salvar prompt/resposta sensível por padrão.
-- [ ] Exibir distinção na UI.
+- [x] Criar resultados tipados por nível (`src/core/engines/conformance/engine-health.ts`: `LevelResult`, `EngineHealthReport`, `highestPassed`).
+- [x] Manter health barato separado de probe real (`installed`/`authenticated` nunca inferem; `REAL_HEALTH_LEVELS`).
+- [x] Atualizar `/api/motores/:id/test` para receber nível solicitado (`{ nivel, modelo, confirmarCusto, maxTokens, timeoutMs }`).
+- [x] Tornar probes reais opt-in (`confirmarCusto: true` obrigatório; 400 `requerConfirmacao` sem ele).
+- [x] Aplicar timeout e orçamento (padrões 120 s e 20.000 tokens; limites máximos na rota).
+- [x] Usar workspace temporário (`opencorp-health-<motor>-*`, removido ao final).
+- [x] Proibir modelos aleatórios em testes (modelo explícito obrigatório; `default` recusado).
+- [x] Registrar versão, motor, modelo e latência (por nível, e duração total e tokens).
+- [x] Não salvar prompt/resposta sensível por padrão (relatório só com marcador verificado/não verificado).
+- [x] Exibir distinção na UI ("Diagnóstico rápido" sem inferência × "Teste funcional" com modelo e confirmação de custo; resultado por nível).
 
 ### Suíte de contrato por adaptador
 
-- [ ] Binário/SDK e versão.
-- [ ] Autenticação.
-- [ ] Inferência mínima.
-- [ ] Parsing estruturado.
-- [ ] Streaming, se declarado.
-- [ ] Leitura por ferramenta, se declarada.
-- [ ] Escrita em sandbox, se declarada.
-- [ ] Timeout.
-- [ ] Cancelamento.
-- [ ] Continuação, se declarada.
-- [ ] Fork, se declarado.
-- [ ] Aprovação HITL, se declarada.
-- [ ] Zero órfãos.
+`tests/engine-conformance.test.ts` roda o mesmo contrato contra OpenCode e Codex, com fakes do protocolo real (`tests/fixtures/`). Feature `integrated` no manifesto precisa passar; as demais são puladas explicitamente.
+
+- [x] Binário/SDK e versão.
+- [x] Autenticação.
+- [x] Inferência mínima.
+- [x] Parsing estruturado.
+- [x] Streaming, se declarado.
+- [x] Leitura por ferramenta, se declarada.
+- [ ] Escrita em sandbox, se declarada — nenhum adaptador declara a capacidade; fica para quando existir.
+- [x] Timeout.
+- [x] Cancelamento.
+- [x] Continuação, se declarada.
+- [x] Fork, se declarado.
+- [x] Aprovação HITL, se declarada.
+- [x] Zero órfãos.
 
 ### Critérios de aceite
 
-- [ ] UI nunca chama um mero `--version` de teste funcional completo.
-- [ ] Capacidade exibida corresponde à capacidade verificada.
+- [x] UI nunca chama um mero `--version` de teste funcional completo.
+- [x] Capacidade exibida corresponde à capacidade verificada (conformidade por manifesto; `tools` do Codex promovido a `integrated` após passar no contrato).
+
+### Registro da Etapa 11 — 26/09/2026
+
+- Executor: Claude Code (Opus 5.5), em sessão na nuvem sobre `MrJc01/crom-opencorp` (`fcc5f2d`).
+- **Defeitos da Etapa 6 encontrados contra o `opencode serve` 1.18.32 real e corrigidos (commit `fcc5f2d`):** o runtime conversacional enviava `{ message }` — o servidor responde 400 "Missing key parts" em toda mensagem; o parser do one-shot lia `parsed.text`/`parsed.tool`, mas o formato real é `{ type, sessionID, part }`; `close()` apagava a sessão (histórico); `create()` ignorava `conversationId`; a porta 4096 era usada como fallback; o `authToken` vazava em `resume()`; `acquire` sem `release` impedia o timeout ocioso. O runtime agora usa `prompt_async` + SSE `/event`, permissões via `/permissions/:id`, senha só em memória. Os testes antigos passavam porque o mock aceitava o formato errado.
+- `tests/opencode-adapter.test.ts` reescrito sobre um fake fiel ao contrato real (`tests/fixtures/fake-opencode-server.ts`).
+- Hermeticidade da suíte (antes dependia da máquina do autor): stubs de motores no `PATH` via `tests/setup/engine-stubs.ts`; `oc modelos` respeita `OPENCORP_HOME`; caminho `/home/j` fixo removido. Isso explica também a intermitência P-05 de `modelos-governance-e2e` (lia o catálogo do `opencode` instalado).
+- **Bug corrigido no MCP:** `mcp serve` saía com `process.exit(0)` ao fechar a stdin e descartava respostas de `tools/call` em andamento; agora aguarda as requisições pendentes.
+- `/api/motores/:id/test` responde 200 sempre que o diagnóstico é concluído (`ok` indica a saúde); o cliente HTTP da UI descarta o corpo de respostas não-2xx, o que esconderia o relatório por nível.
+- Validações: `engine-health` 11, `engine-conformance` 26 (13 × 2 motores), `opencode-adapter` 15, `engine-drivers` 15 PASS; suíte completa 143 arquivos — 1.398 PASS, 3 skipped, 1 todo; TypeScript backend/frontend PASS; build PASS.
+- Não executado: probe real contra os motores (P-01; consome cota). UI não verificada visualmente no navegador.
 
 ### Commit sugerido
 
@@ -1435,7 +1448,8 @@ Registrar aqui apenas itens novos, com etapa de origem, impacto e decisão. Não
 | P-01 | 8 | Probe real do Codex não executado | Capacidade verificada apenas com fake determinístico | Executar `OPENCORP_REAL_PROBES=codex OPENCORP_PROBE_CODEX_MODEL=<modelo> npm run test:real` quando o usuário autorizar o consumo de cota |
 | P-03 | 9 | `POST /api/motores/:id/desconectar` reescreve `runner.json` com `engine: "opencode"` | Fallback silencioso para OpenCode (viola D1) | Corrigir na Etapa 13/14, junto com a seleção de motor padrão |
 | P-04 | 9 | Etapa 6 declarou autenticação local do OpenCode que não funcionava | Servidor OpenCode acessível sem senha por qualquer processo local | Corrigido na Etapa 9 (HTTP Basic verificado contra o binário real) |
-| P-05 | 10 | `tests/modelos-governance-e2e.test.ts` falhou 1× na suíte completa | Intermitente sob carga (passou 2/2 isolado) | Observar na Etapa 15; investigar se repetir |
+| P-05 | 10 | `tests/modelos-governance-e2e.test.ts` falhou 1× na suíte completa | Causa: `oc modelos` lia o catálogo do `opencode` instalado na máquina | Corrigido na Etapa 11 (`OPENCORP_HOME` + catálogo determinístico) |
+| P-07 | 11 | `ModelPicker` "testar modelo" chama `/api/motores/:id/test` para motores ≠ OpenCode | O teste do modelo verifica só o motor (instalação/autenticação), não o modelo | Ajustar na Etapa 13 (seleção de motor/modelo) |
 | P-06 | 10 | Artefatos aprovados limitados a Codex e OpenCode | Demais motores dependem de instalação manual | Adicionar entradas apenas com SHA-256 publicado pelo fornecedor |
 | P-02 | 8 | Sessões do adaptador Codex ficam em memória | Após reinício, a conversa é retomada via `thread/resume` pelo UUID; título/modelo da sessão se perdem | Aceito; persistência de metadados fica para a Etapa 13/14 se necessária |
 
