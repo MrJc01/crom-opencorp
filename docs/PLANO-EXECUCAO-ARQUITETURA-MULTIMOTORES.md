@@ -202,7 +202,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 1 | Higiene de processos e identidades | ✅ Concluída | `fix(engines): prevent orphan runtimes and engine impersonation` | 44 testes focados; 128 arquivos/1.217 testes; órfãos 0→0 |
 | 2 | `RuntimeConfig`, erros e tradutor legado | ✅ Concluída | `feat(config): isolate legacy runtime configuration translation` | 4 arquivos focados (64 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 3 | Contratos e eventos canônicos | ✅ Concluída | `refactor(engines): introduce runtime ports and canonical agent events` | 6 arquivos focados (87 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
-| 4 | `ProcessRegistry` | ⬜ Pendente | — | — |
+| 4 | `ProcessRegistry` | ✅ Concluída | `feat(runtime): add workspace-isolated process registry and idle shutdown` | 7 arquivos focados (96 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 5 | Resolução do runtime conversacional | ⬜ Pendente | — | — |
 | 6 | Adaptador OpenCode completo | ⬜ Pendente | — | — |
 | 7 | Secretário independente de OpenCode | ⬜ Pendente | — | — |
@@ -523,37 +523,56 @@ refactor(engines): introduce runtime ports and canonical agent events
 
 ### Tarefas
 
-- [ ] Criar chave tipada `{ engineId, workspaceId }`.
-- [ ] Registrar PID, PGID, versão, cwd, transporte e porta.
-- [ ] Registrar início, último uso e estado.
-- [ ] Implementar referência/adopção/liberação.
-- [ ] Implementar timer ocioso de 15 minutos.
-- [ ] Implementar `SIGTERM` e espera de 5 segundos.
-- [ ] Implementar `SIGKILL` apenas após timeout.
-- [ ] Implementar encerramento global no shutdown.
-- [ ] Implementar reconciliação de pidfiles/processos no boot.
-- [ ] Não adotar processo cuja identidade não possa ser confirmada.
-- [ ] Emitir eventos de lifecycle.
-- [ ] Usar relógio e sinais injetáveis nos testes.
-- [ ] Impedir compartilhamento acidental entre workspaces.
+- [x] Criar chave tipada `{ engineId, workspaceId }`.
+- [x] Registrar PID, PGID, versão, cwd, transporte e porta.
+- [x] Registrar início, último uso e estado.
+- [x] Implementar referência/adopção/liberação.
+- [x] Implementar timer ocioso de 15 minutos.
+- [x] Implementar `SIGTERM` e espera de 5 segundos.
+- [x] Implementar `SIGKILL` apenas após timeout.
+- [x] Implementar encerramento global no shutdown.
+- [x] Implementar reconciliação de pidfiles/processos no boot.
+- [x] Não adotar processo cuja identidade não possa ser confirmada.
+- [x] Emitir eventos de lifecycle.
+- [x] Usar relógio e sinais injetáveis nos testes.
+- [x] Impedir compartilhamento acidental entre workspaces.
 
 ### Testes
 
-- [ ] Dois workspaces do mesmo motor recebem processos isolados.
-- [ ] Reuso ocorre apenas para a mesma chave.
-- [ ] Atividade renova o timeout.
-- [ ] Inatividade encerra após 15 minutos simulados.
-- [ ] Processo cooperativo encerra com `SIGTERM`.
-- [ ] Processo travado recebe `SIGKILL` após 5 segundos simulados.
-- [ ] Shutdown encerra todos os recursos possuídos.
-- [ ] Boot reconcilia órfãos conhecidos.
-- [ ] Porta/PID obsoletos não são adotados.
+- [x] Dois workspaces do mesmo motor recebem processos isolados.
+- [x] Reuso ocorre apenas para a mesma chave.
+- [x] Atividade renova o timeout.
+- [x] Inatividade encerra após 15 minutos simulados.
+- [x] Processo cooperativo encerra com `SIGTERM`.
+- [x] Processo travado recebe `SIGKILL` após 5 segundos simulados.
+- [x] Shutdown encerra todos os recursos possuídos.
+- [x] Boot reconcilia órfãos conhecidos.
+- [x] Porta/PID obsoletos não são adotados.
 
 ### Critérios de aceite
 
-- [ ] Zero processos órfãos em sucesso, erro, timeout e cancelamento.
-- [ ] Nenhum estado global do OpenCode dentro do registro.
-- [ ] Isolamento `[engineId, workspaceId]` comprovado.
+- [x] Zero processos órfãos em sucesso, erro, timeout e cancelamento.
+- [x] Nenhum estado global do OpenCode dentro do registro.
+- [x] Isolamento `[engineId, workspaceId]` comprovado.
+
+### Registro da Etapa 4 — `ProcessRegistry`
+
+- Limite no início: sessão Antigravity IDE (Gemini 3.8 Flash) sem indicador restritivo exposto; início às 23:44 -03.
+- Limite no encerramento: sessão operacional e íntegra; encerramento às 23:51 -03.
+- Decisão: implementar `ProcessRegistry` com isolamento estrito por `[engineId, workspaceId]`, ciclo de vida desacoplado, timer ocioso e encerramento gracioso testado com injeção de sinais.
+- Entregas:
+  - Módulo `src/core/runtime/process-registry.ts` e exportação canônica em `src/core/runtime/index.ts`;
+  - Chave tipada `ProcessKey` (`formatProcessKey` e `parseProcessKey`);
+  - Registro de metadados: PID, PGID, versão, cwd, transporte, porta, startedAt, lastActiveAt, referenceCount, expectedExecutableName e estado (`starting`, `ready`, `busy`, `idle`, `stopping`, `stopped`, `crashed`);
+  - Métodos `acquire()`, `release()` e `touch()` gerenciando contagem de referências e disparando timer ocioso de 15 minutos padrão (D2);
+  - Encerramento gracioso com `SIGTERM` e 5 segundos de espera antes de `SIGKILL` (D2);
+  - Reconciliação no boot (`reconcileBoot`) que descarta PIDs obsoletos, checa a identidade do processo via cmdline e rejeita processos desconhecidos;
+  - Suíte de 9 testes focados em `tests/process-registry.test.ts`.
+- Validação consolidada: 7 arquivos focados, 96 testes PASS (`tests/runtime-config.test.ts`, `tests/legacy-config-translator.test.ts`, `tests/engine-ports-and-events.test.ts`, `tests/engine-capabilities.test.ts`, `tests/process-registry.test.ts`, `tests/settings-store.test.ts`, `tests/engine-drivers.test.ts`).
+- Compilação: `npx tsc --noEmit` e `npx tsc --noEmit -p tsconfig.web.json` PASS.
+- Build: `npm run build` PASS (backend e frontend Vite).
+- Processos órfãos: 0 processos `fake-opencode` detectados.
+- Próximo passo exato: Iniciar a Etapa 5 — Resolução do runtime conversacional (preflight multinível, preenchimento de `conversationEngineOverride` e eliminação de fallback silencioso).
 
 ### Commit sugerido
 
