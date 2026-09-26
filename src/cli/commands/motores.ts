@@ -1,7 +1,6 @@
 import type { Command } from "commander";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import os from "node:os";
+import { readRunEngineConfig, writeRunEngineConfig } from "../../core/config/run-engine-config.js";
+import { opencorpHome } from "../../utils/paths.js";
 import { engineRegistry, EngineAccountStore } from "../../core/engines/index.js";
 
 function colorize(text: string, color: "green" | "red" | "yellow" | "cyan" | "magenta" | "gray" | "bold"): string {
@@ -19,23 +18,13 @@ function colorize(text: string, color: "green" | "red" | "yellow" | "cyan" | "ma
 }
 
 function obterRunnerConfig(home: string): { engine: string; timeout_min: number; harness_fallback: string[] } {
-  const rPath = join(home, ".opencorp", "runner.json");
-  let runner: any = {
-    engine: "opencode",
-    timeout_min: 20,
-    harness_fallback: ["antigravity", "copilot", "opencode"],
-  };
-  if (existsSync(rPath)) {
-    try {
-      runner = JSON.parse(readFileSync(rPath, "utf8"));
-    } catch {}
-  }
-  return runner;
+  const cfg = readRunEngineConfig(home);
+  return { engine: cfg.engine, timeout_min: cfg.timeoutMin ?? 20, harness_fallback: cfg.fallbackEngines };
 }
 
-function salvarRunnerConfig(home: string, cfg: any): void {
-  const rPath = join(home, ".opencorp", "runner.json");
-  writeFileSync(rPath, JSON.stringify(cfg, null, 2), "utf8");
+async function salvarRunnerConfig(home: string, cfg: { engine?: string; timeout_min?: number; harness_fallback?: string[] }): Promise<void> {
+  // Formato novo (settings.run_engine); runner.json não é mais gravado.
+  await writeRunEngineConfig(home, { engine: cfg.engine, timeoutMin: cfg.timeout_min, fallbackEngines: cfg.harness_fallback });
 }
 
 export function registerMotoresCommand(program: Command): void {
@@ -50,7 +39,7 @@ export function registerMotoresCommand(program: Command): void {
     .description("lista todos os motores, status de instalação, contas e motor padrão")
     .option("--json", "saída em JSON bruto")
     .action(async (opts: { json?: boolean }) => {
-      const home = os.homedir();
+      const home = opencorpHome();
       const summaries = await engineRegistry.listSummaries(home, false);
       const accStore = new EngineAccountStore({ homeDir: home });
       const runner = obterRunnerConfig(home);
@@ -106,12 +95,12 @@ export function registerMotoresCommand(program: Command): void {
     .command("set <id>")
     .description("define o motor padrão do sistema (ex: opencode, copilot, antigravity, crom-agente)")
     .action(async (id: string) => {
-      const home = os.homedir();
+      const home = opencorpHome();
       try {
         const driver = engineRegistry.resolveDriver(id.toLowerCase().trim());
         const runner = obterRunnerConfig(home);
         runner.engine = driver.id;
-        salvarRunnerConfig(home, runner);
+        await salvarRunnerConfig(home, runner);
         console.log(colorize(`✓ Motor padrão atualizado para "${driver.name}" (${driver.id})`, "green"));
       } catch (err: any) {
         console.error(`erro: ${err.message}`);
@@ -123,7 +112,7 @@ export function registerMotoresCommand(program: Command): void {
     .command("test <id>")
     .description("executa verificação de saúde e conectividade do motor")
     .action(async (id: string) => {
-      const home = os.homedir();
+      const home = opencorpHome();
       try {
         const driver = engineRegistry.resolveDriver(id.toLowerCase().trim());
         console.log(`Testando saúde do motor "${driver.name}" (${driver.id})...`);
@@ -141,7 +130,7 @@ export function registerMotoresCommand(program: Command): void {
 
   // Se o usuário digitar apenas "opencorp motores" sem subcomando, roda a listagem
   motoresCmd.action(async () => {
-    const home = os.homedir();
+    const home = opencorpHome();
     const summaries = await engineRegistry.listSummaries(home, false);
     const accStore = new EngineAccountStore({ homeDir: home });
     const runner = obterRunnerConfig(home);

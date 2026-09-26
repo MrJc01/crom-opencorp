@@ -14,7 +14,7 @@ import { RegistryStore } from "../storage/registry-store.js";
 import { SkillStore } from "./skill-store.js";
 import { unlink } from "node:fs/promises";
 import { writeFileAtomic } from "../../../utils/fs-safe.js";
-import { agentSchema } from "../../../schemas/agent.js";
+import { agentSchema, canonicalizarAgente } from "../../../schemas/agent.js";
 
 export interface AgenteResumo {
   id: string;
@@ -56,10 +56,11 @@ export function serializarFrontmatter(ag: Agente): string {
   saida += linhaFrontmatter("category", ag.category);
   saida += linhaFrontmatter("ativo", String(ag.ativo));
   saida += linhaFrontmatter("model", ag.model);
-  if (ag.harness) saida += linhaFrontmatter("harness", ag.harness);
-  if (ag.harness_fallback && ag.harness_fallback.length > 0) saida += linhaFrontmatter("harness_fallback", listaInline(ag.harness_fallback));
-  if (ag.rotation && ag.rotation.length > 0) saida += linhaFrontmatter("rotation", listaInline(ag.rotation));
-  if (ag.model_fallback && ag.model_fallback.length > 0) saida += linhaFrontmatter("model_fallback", listaInline(ag.model_fallback));
+  // Formato canônico (Etapa 14): `engine`, `engine_fallback`, `rotation`.
+  const canon = canonicalizarAgente(ag);
+  if (canon.engine) saida += linhaFrontmatter("engine", canon.engine);
+  if (canon.engine_fallback && canon.engine_fallback.length > 0) saida += linhaFrontmatter("engine_fallback", listaInline(canon.engine_fallback));
+  if (canon.rotation && canon.rotation.length > 0) saida += linhaFrontmatter("rotation", listaInline(canon.rotation));
   if (ag.workspace_rotation_fallback !== undefined) saida += linhaFrontmatter("workspace_rotation_fallback", String(ag.workspace_rotation_fallback));
   if (ag.skills && ag.skills.length > 0) saida += linhaFrontmatter("skills", listaInline(ag.skills));
   if (ag.inherits) saida += linhaFrontmatter("inherits", ag.inherits);
@@ -259,7 +260,9 @@ export class AgentStore {
       tools: mudancas.tools && mudancas.tools.length ? mudancas.tools : carregado.frontmatter.tools,
       ativo: mudancas.ativo ?? carregado.frontmatter.ativo,
       harness: mudancas.harness !== undefined ? (mudancas.harness || undefined) : carregado.frontmatter.harness,
+      engine: mudancas.harness !== undefined ? (mudancas.harness || undefined) : carregado.frontmatter.engine,
       harness_fallback: mudancas.harness_fallback !== undefined ? mudancas.harness_fallback : carregado.frontmatter.harness_fallback,
+      engine_fallback: mudancas.harness_fallback !== undefined ? mudancas.harness_fallback : carregado.frontmatter.engine_fallback,
       rotation: mudancas.rotation !== undefined ? mudancas.rotation : carregado.frontmatter.rotation,
       model_fallback: mudancas.model_fallback !== undefined ? mudancas.model_fallback : carregado.frontmatter.model_fallback,
       skills: mudancas.skills !== undefined ? mudancas.skills : carregado.frontmatter.skills,

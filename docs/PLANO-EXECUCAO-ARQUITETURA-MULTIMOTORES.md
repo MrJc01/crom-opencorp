@@ -212,7 +212,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 11 | Saúde funcional e conformidade | ✅ Concluída | `feat(engines): add multi-level health and conformance probes` | conformidade OpenCode+Codex; 143 arquivos/1.398 testes; 2 TS e build PASS |
 | 12 | `AcpClientAdapter` | ✅ Concluída | `feat(acp): add ACP v1 adapter and connect Copilot and MiMo` | Copilot e MiMo via ACP; handshakes reais PASS; 145 arquivos/1.450 testes |
 | 13 | Catálogo e rotação soberanos | ✅ Concluída | `refactor(models): make catalog and fallback routing engine-agnostic` | catálogo com proveniência; fallback auditável sem troca silenciosa de motor; 1.470 testes |
-| 14 | Migração CLI/UI e depreciação | ⬜ Pendente | — | — |
+| 14 | Migração CLI/UI e depreciação | ✅ Concluída | `feat(config): add safe legacy runtime configuration migration` | `migrate-configs` com backup/rollback; UI com prévia; runner.json só leitura legada |
 | 15 | Validação final e liberação | ⬜ Pendente | — | — |
 
 Estados válidos: `⬜ Pendente`, `🟨 Em andamento`, `🟥 Bloqueada`, `✅ Concluída`.
@@ -1202,45 +1202,54 @@ refactor(models): make catalog and fallback routing engine-agnostic
 
 ### CLI
 
-- [ ] Implementar `opencorp migrate-configs --dry-run`.
-- [ ] Mostrar arquivos, campos, transformações e avisos.
-- [ ] Implementar backup timestampado.
-- [ ] Implementar aplicação explícita.
-- [ ] Validar resultado antes de substituir arquivos.
-- [ ] Implementar rollback do backup.
-- [ ] Retornar códigos de saída documentados.
+- [x] Implementar `opencorp migrate-configs --dry-run` (padrão; também `--check`, `--json`, `--workspace`).
+- [x] Mostrar arquivos, campos, transformações e avisos.
+- [x] Implementar backup timestampado (`~/.opencorp/backups/migrate-configs-<ts>/`, manifesto com SHA-256).
+- [x] Implementar aplicação explícita (`--apply`).
+- [x] Validar resultado antes de substituir arquivos (schema do settings e parser de agentes, antes e depois da escrita; falha pós-escrita restaura o backup).
+- [x] Implementar rollback do backup (`--rollback [id]`, `--list-backups`).
+- [x] Retornar códigos de saída documentados (0 ok, 1 erro, 2 resultado inválido, 3 pendente, 4 rollback falhou).
 
 ### UI
 
-- [ ] Detectar configuração legada.
-- [ ] Exibir aviso não bloqueante na fase inicial.
-- [ ] Mostrar preview da migração.
-- [ ] Exigir confirmação.
-- [ ] Mostrar backup e resultado.
-- [ ] Não migrar automaticamente ao abrir configurações.
+- [x] Detectar configuração legada (`GET /api/config/migracao`).
+- [x] Exibir aviso não bloqueante na fase inicial (`LegacyConfigBanner` em Configurações → Motores).
+- [x] Mostrar preview da migração.
+- [x] Exigir confirmação (diálogo + `{ confirmar: true }` na API).
+- [x] Mostrar backup e resultado (com "Desfazer").
+- [x] Não migrar automaticamente ao abrir configurações.
 
 ### Cronograma
 
-- [ ] Persistir data do primeiro aviso.
-- [ ] Publicar primeira versão menor com tradutor.
-- [ ] Publicar segunda versão menor com tradutor.
-- [ ] Manter suporte por pelo menos 60 dias.
-- [ ] Preparar rejeição somente para `2.0.0` ou posterior.
-- [ ] Documentar remoção em release notes.
+- [x] Persistir data do primeiro aviso (`~/.opencorp/deprecation-state.json`).
+- [ ] Publicar primeira versão menor com tradutor — depende de release do mantenedor (P-11).
+- [ ] Publicar segunda versão menor com tradutor — depende de release do mantenedor (P-11).
+- [x] Manter suporte por pelo menos 60 dias (`runner.json` e campos antigos continuam lidos; remoção não antes de 2026-11-24).
+- [x] Preparar rejeição somente para `2.0.0` ou posterior (constantes do tradutor; nada foi removido).
+- [x] Documentar remoção em release notes (`docs/DEPRECACOES-MULTIMOTORES.md`).
 
 ### Testes
 
-- [ ] Dry-run não escreve.
-- [ ] Backup é íntegro.
-- [ ] Migração é idempotente.
-- [ ] Configuração inválida não substitui original.
-- [ ] Rollback restaura byte a byte.
-- [ ] Aviso não é duplicado excessivamente.
+- [x] Dry-run não escreve.
+- [x] Backup é íntegro.
+- [x] Migração é idempotente.
+- [x] Configuração inválida não substitui original.
+- [x] Rollback restaura byte a byte.
+- [x] Aviso não é duplicado excessivamente.
 
 ### Critérios de aceite
 
-- [ ] Usuário consegue migrar sem editar JSON manualmente.
-- [ ] Nenhum legado é removido antes das três condições aprovadas.
+- [x] Usuário consegue migrar sem editar JSON manualmente.
+- [x] Nenhum legado é removido antes das três condições aprovadas.
+
+### Registro da Etapa 14 — 26/09/2026
+
+- Executor: Claude Code (Opus 5.5).
+- Formato novo no `settings.json`: `run_engine { default, timeout_min, fallback }` e `engines[id] { binary_path, limits }`. Leitor/gravador central em `src/core/config/run-engine-config.ts`; todos os leitores e gravadores de `runner.json` (SessionManager, limites de conta, rotas de configuração/motores/sistema, `oc status`, `oc motores`) passaram por ele. `runner.json` só é lido como fallback, com aviso.
+- **Defeito corrigido:** o serializador de agentes gravava os próprios campos legados (`harness`, `harness_fallback`, `model_fallback`); agora grava `engine`, `engine_fallback`, `rotation` e aliases canônicos. O carregamento mantém `harness` em memória igual a `engine` para leitores antigos e para a UI.
+- **Defeitos corrigidos:** `oc status`, `oc motores` e `GET /status` exibiam uma cadeia de fallback fictícia (`antigravity → copilot → opencode`) que nada usava — agora exibem a cadeia real; `oc motores` ignorava `OPENCORP_HOME`; conectar motor fixava `binary_path`, contornando a precedência da Etapa 10; desconectar trocava o padrão mesmo quando o motor desconectado não era o padrão.
+- P-10 resolvida: `settings.run_engine.fallback` alimenta a cadeia explícita de motores do fallback, que exige compatibilidade comprovada do modelo com o motor seguinte.
+- Validações: `config-migration` 8 (inclui CLI `--check`/`--apply`/`--rollback` com códigos de saída); suíte completa 147 arquivos — 1.479 PASS, 8 skipped, 1 todo; TypeScript backend/frontend PASS.
 
 ### Commit sugerido
 
@@ -1481,7 +1490,8 @@ Registrar aqui apenas itens novos, com etapa de origem, impacto e decisão. Não
 | P-04 | 9 | Etapa 6 declarou autenticação local do OpenCode que não funcionava | Servidor OpenCode acessível sem senha por qualquer processo local | Corrigido na Etapa 9 (HTTP Basic verificado contra o binário real) |
 | P-05 | 10 | `tests/modelos-governance-e2e.test.ts` falhou 1× na suíte completa | Causa: `oc modelos` lia o catálogo do `opencode` instalado na máquina | Corrigido na Etapa 11 (`OPENCORP_HOME` + catálogo determinístico) |
 | P-07 | 11 | `ModelPicker` "testar modelo" chama `/api/motores/:id/test` para motores ≠ OpenCode | O teste do modelo verificava só o motor | Corrigido na Etapa 13 (inferência real com o modelo, com confirmação de custo) |
-| P-10 | 13 | SessionManager não recebe cadeia explícita de motores | Fallback automático nunca troca de motor (seguro, mas sem failover entre motores) | Expor `engineChain` na configuração do agente/workspace quando houver demanda |
+| P-10 | 13 | SessionManager não recebia cadeia explícita de motores | Fallback nunca trocava de motor | Resolvida na Etapa 14 (`settings.run_engine.fallback`) |
+| P-11 | 14 | Duas versões menores com o tradutor ainda não publicadas | Condição 2 da remoção do legado pendente | Publicar as releases (texto em `docs/DEPRECACOES-MULTIMOTORES.md`) |
 | P-06 | 10 | Artefatos aprovados limitados a Codex e OpenCode | Demais motores dependem de instalação manual | Adicionar entradas apenas com SHA-256 publicado pelo fornecedor |
 | P-08 | 12 | Conversa real ACP não executada (Copilot e MiMo sem login no ambiente de verificação) | Streaming/ferramentas reais verificados só com fake fiel ao esquema | `OPENCORP_REAL_PROBES=copilot,mimo OPENCORP_PROBE_<MOTOR>_MODEL=<modelo> npm run test:real` com as contas autenticadas |
 | P-09 | 12 | Seleção de modelo do Copilot por `configOptions` não verificada | Conversa com modelo explícito no Copilot falha com `MODEL_INCOMPATIBLE` se o agente não expuser o seletor | Verificar com login; se necessário, iniciar o processo com `--model` |

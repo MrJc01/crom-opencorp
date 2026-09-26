@@ -141,6 +141,12 @@ describe("ETAPA 13 — roteador de fallback", () => {
     expect(d.result).toEqual({ action: "next_engine", engineId: "claude-code", model: "claude-code/sonnet" });
   });
 
+  it("troca de motor não usa modelo sem compatibilidade comprovada com o motor novo", () => {
+    const d = decideFallback({ engineId: "opencode", failedModel: GLM, failure: "provider", modelChain: [OR], engineChain: ["opencode", "codex"], tried: [OR] });
+    expect(d.result).toEqual({ action: "stop" });
+    expect(d.reason).toContain("compatibilidade comprovada");
+  });
+
   it("modelo bloqueado não entra em rotação autônoma; sem créditos só gratuitos", () => {
     const blocked = decideFallback({ engineId: "opencode", failedModel: GLM, failure: "model", modelChain: ["openrouter/meta/llama-3.2-1b:free"] });
     expect(blocked.result).toEqual({ action: "stop" });

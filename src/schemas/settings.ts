@@ -11,9 +11,29 @@ export const settingsSchema = z.object({
       z.string().trim().min(1),
       z.object({
         binary_path: z.string().trim().min(1).optional(),
+        /** Limites operacionais do motor (antes em runner.json `limits`). */
+        limits: z
+          .object({
+            timeout_min: z.number().nonnegative().optional(),
+            max_turns: z.number().int().nonnegative().optional(),
+            rate_limit_rpm: z.number().nonnegative().optional(),
+            daily_cost_usd: z.number().nonnegative().optional(),
+            status_cota: z.enum(["normal", "alerta_80", "esgotado"]).optional(),
+            fallback_action: z.enum(["rotate", "stop"]).optional(),
+          })
+          .optional(),
       }),
     )
     .default({}),
+  /** Execuções one-shot (antes em runner.json). */
+  run_engine: z
+    .object({
+      default: z.string().trim().min(1).optional(),
+      timeout_min: z.number().positive().optional(),
+      /** Cadeia explícita de motores para fallback; vazia = nunca trocar de motor. */
+      fallback: z.array(z.string().trim().min(1)).default([]),
+    })
+    .optional(),
   test_model: z.string().min(1).default("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"),
   secretary: z
     .object({

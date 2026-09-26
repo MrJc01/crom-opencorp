@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { readRunEngineConfig, writeRunEngineConfig } from "../config/run-engine-config.js";
 import { join } from "node:path";
 import { writeFileAtomic } from "../../utils/fs-safe.js";
 import { opencorpHome } from "../../utils/paths.js";
@@ -114,12 +115,10 @@ function contaAutorizada(conta: EngineAccount, workspaceId: string): boolean {
 export class EngineAccountStore {
   private readonly homeDir: string;
   private readonly filePath: string;
-  private readonly runnerPath: string;
 
   constructor(opts: { homeDir?: string } = {}) {
     this.homeDir = opts.homeDir ?? opencorpHome();
     this.filePath = join(this.homeDir, ".opencorp", "engine-accounts.json");
-    this.runnerPath = join(this.homeDir, ".opencorp", "runner.json");
   }
 
   private lerArquivoContas(): EngineAccount[] {
@@ -334,41 +333,19 @@ export class EngineAccountStore {
     return contas.find((c) => c.motorId === motorId && c.ativa);
   }
 
+  /** Limites por motor: settings.engines[id].limits (runner.json legado como fallback). */
   public async obterLimitesMotores(): Promise<Record<string, EngineLimitsConfig>> {
-    let runnerLimits: Record<string, EngineLimitsConfig> = {};
-    if (existsSync(this.runnerPath)) {
-      try {
-        const rJson = JSON.parse(readFileSync(this.runnerPath, "utf8"));
-        if (rJson.limits && typeof rJson.limits === "object") {
-          runnerLimits = rJson.limits;
-        }
-      } catch {}
-    }
-
+    const configurados = readRunEngineConfig(this.homeDir).limits as Record<string, Partial<EngineLimitsConfig>>;
     const resultado: Record<string, EngineLimitsConfig> = {};
     for (const [id, padrao] of Object.entries(LIMITES_PADRAO_MOTORES)) {
-      resultado[id] = {
-        ...padrao,
-        ...(runnerLimits[id] || {}),
-      };
+      resultado[id] = { ...padrao, ...(configurados[id] || {}) };
     }
     return resultado;
   }
 
+  /** Grava limites no formato novo (settings.engines[id].limits); nunca em runner.json. */
   public async salvarLimitesMotores(limites: Record<string, Partial<EngineLimitsConfig>>): Promise<void> {
-    let rJson: any = { engine: "opencode", timeout_min: 20 };
-    if (existsSync(this.runnerPath)) {
-      try {
-        rJson = JSON.parse(readFileSync(this.runnerPath, "utf8"));
-      } catch {}
-    }
-
-    rJson.limits = {
-      ...(rJson.limits || {}),
-      ...limites,
-    };
-
-    await writeFileAtomic(this.runnerPath, `${JSON.stringify(rJson, null, 2)}\n`);
+    await writeRunEngineConfig(this.homeDir, { limits: limites });
   }
 
   public async obterAmbienteExecucao(motorId: string): Promise<Record<string, string>> {

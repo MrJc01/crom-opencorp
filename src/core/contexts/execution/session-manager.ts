@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { readRunEngineConfig } from "../../config/run-engine-config.js";
 import { classifyFailure, decideFallback, formatFallbackAudit } from "../../models/fallback-router.js";
 import { explicitEngineOfModel, modelIdForEngine, providerOfModel } from "../../models/catalog.js";
 import { ModelIncompatibleError } from "../../engines/errors.js";
@@ -351,20 +352,11 @@ export async function obterCadeiaHarness(
     } catch {}
   }
 
-  // Fallback padrão do sistema e runner.json
+  // Motor padrão e cadeia explícita (settings.run_engine; runner.json legado como fallback)
   try {
-    const rPath = join(homeDir || process.env.HOME || "", ".opencorp", "runner.json");
-    if (existsSync(rPath)) {
-      const rJson = JSON.parse(readFileSync(rPath, "utf8")) as { engine?: string; harness_fallback?: string[] };
-      if (rJson.engine && !cadeia.includes(rJson.engine.trim())) {
-        cadeia.push(rJson.engine.trim());
-      }
-      if (Array.isArray(rJson.harness_fallback)) {
-        for (const h of rJson.harness_fallback) {
-          const s = String(h).trim();
-          if (s && !cadeia.includes(s)) cadeia.push(s);
-        }
-      }
+    const cfg = readRunEngineConfig(homeDir || opencorpHome(), { emitNotice: false });
+    for (const h of [cfg.engine, ...cfg.fallbackEngines]) {
+      if (h && !cadeia.includes(h)) cadeia.push(h);
     }
   } catch {}
 
@@ -896,17 +888,8 @@ export class SessionManager {
 
     await this.bridge.sincronizarAgente(ws.path, ag.frontmatter, ag.corpo);
 
-    // Resolução do Harness Ativo (prioridade: frontmatter do agente > runner.json ativo > padrão opencode)
-    let runnerConfigEngine = "opencode";
-    try {
-      const rPath = join(this.homeDir, ".opencorp", "runner.json");
-      if (existsSync(rPath)) {
-        const rJson = JSON.parse(readFileSync(rPath, "utf8")) as { engine?: string };
-        if (rJson.engine && typeof rJson.engine === "string") {
-          runnerConfigEngine = rJson.engine.trim();
-        }
-      }
-    } catch {}
+    // Motor padrão das execuções: settings.run_engine.default (runner.json legado como fallback).
+    const runnerConfigEngine = readRunEngineConfig(this.homeDir).engine;
 
     // Motor explícito (execução ou agente) nunca é trocado pelo prefixo do
     // modelo (D1). O prefixo só escolhe o motor quando não há motor explícito
@@ -1615,8 +1598,11 @@ export class SessionManager {
       failure,
       modelChain: await this.cadeiaExplicitaDeFallback(ws.path, opcoes.agente),
       accountAvailable: contaDisponivel,
-      // Troca de motor exige cadeia explícita; o SessionManager ainda não a recebe.
-      engineChain: [],
+      // Troca de motor só pela cadeia explícita do usuário (settings.run_engine.fallback).
+      engineChain: (() => {
+        const chain = readRunEngineConfig(this.homeDir, { emitNotice: false }).fallbackEngines;
+        return chain.length ? [motorId, ...chain.filter((e) => e !== motorId)] : [];
+      })(),
     });
     const auditoria = formatFallbackAudit(decisao);
     const registrar = async (evento: string, resumo: string) => {

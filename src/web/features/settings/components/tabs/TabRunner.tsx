@@ -107,7 +107,7 @@ export const TabRunner: FC = () => {
             disabled={salvando}
             onClick={salvarRunner}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-            title="Gravar novas regras em runner.json"
+            title="Gravar novas regras nas configurações (settings.run_engine)"
           >
             {salvando ? (
               <Loader2 size={13} className="animate-spin" />

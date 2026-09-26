@@ -1,6 +1,6 @@
 import type { Command } from "commander";
+import { readRunEngineConfig } from "../../core/config/run-engine-config.js";
 import { join } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
 import { TaskStore, type Task } from "../../core/contexts/storage/task-store.js";
@@ -203,15 +203,12 @@ export async function coletarStatus(wsId?: string): Promise<StatusInfo> {
     const contas = await accts.listar();
     const rawMotores = await engineRegistry.listSummaries(home, false);
     const tokensAoVivo: Record<string, any> = await engineRegistry.fetchAllLiveTokens(home).catch(() => ({}));
-    const rPath = join(home, ".opencorp", "runner.json");
-    let runner: any = { engine: "opencode", timeout_min: 20 };
-    if (existsSync(rPath)) {
-      try { runner = JSON.parse(readFileSync(rPath, "utf8")); } catch {}
-    }
+    const runCfg = readRunEngineConfig(home);
 
     infoMotores = {
-      motor_ativo: runner.engine || "opencode",
-      harness_fallback: runner.harness_fallback || ["antigravity", "copilot", "opencode"],
+      motor_ativo: runCfg.engine,
+      // Cadeia explícita real (vazia = o fallback nunca troca de motor).
+      harness_fallback: runCfg.fallbackEngines,
       lista: rawMotores.map((m) => {
         const lim = limitesMotores[m.id] || {
           timeout_min: 20,
@@ -227,7 +224,7 @@ export async function coletarStatus(wsId?: string): Promise<StatusInfo> {
           id: m.id,
           nome: m.name,
           instalado: m.installed,
-          ativo: m.id === (runner.engine || "opencode"),
+          ativo: m.id === runCfg.engine,
           timeout_min: lim.timeout_min,
           max_turns: lim.max_turns,
           rate_limit_rpm: lim.rate_limit_rpm,

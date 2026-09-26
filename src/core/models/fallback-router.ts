@@ -12,7 +12,7 @@
  *   3. Troca de motor somente se o motor seguinte estiver na cadeia explícita
  *      de motores (`engineChain`). Sem ela, o fallback para — nunca troca em silêncio.
  */
-import { checkModelEngineCompatibility, governanceOf, providerOfModel, type CatalogModel } from "./catalog.js";
+import { checkModelEngineCompatibility, explicitEngineOfModel, governanceOf, providerOfModel, type CatalogModel } from "./catalog.js";
 import { ehModeloGratuito } from "../contexts/agents/model-resolver.js";
 
 export type FailureKind = "quota" | "credits" | "provider" | "model" | "inactivity" | "auth" | "other";
@@ -118,7 +118,13 @@ export function decideFallback(req: FallbackRequest): FallbackDecision {
   const index = chain.indexOf(req.engineId);
   const nextEngine = chain.slice(index + 1)[0];
   if (nextEngine) {
-    const model = req.modelChain.find((m) => checkModelEngineCompatibility(nextEngine, m.trim(), req.catalog).compatible && governanceOf(m).allowedAutonomous);
+    // Trocar de motor exige evidência positiva de compatibilidade (prefixo do
+    // motor ou catálogo) — "modelo desconhecido" não basta.
+    const model = req.modelChain.find((m) => {
+      const verdict = checkModelEngineCompatibility(nextEngine, m.trim(), req.catalog);
+      const evidence = explicitEngineOfModel(m.trim()) === nextEngine || (verdict.compatible && verdict.basis === "catalog");
+      return verdict.compatible && evidence && governanceOf(m).allowedAutonomous;
+    });
     if (model) {
       const reason = `cadeia de modelos esgotada em "${req.engineId}": motor seguinte autorizado explicitamente ("${nextEngine}")`;
       audit.push({ candidate: model, decision: "chosen", reason });
@@ -127,7 +133,9 @@ export function decideFallback(req: FallbackRequest): FallbackDecision {
   }
   const reason = chain.length === 0
     ? `cadeia de modelos compatíveis com "${req.engineId}" esgotada; troca de motor não autorizada (sem cadeia explícita de motores)`
-    : `cadeias de modelos e motores esgotadas`;
+    : nextEngine
+      ? `cadeia de modelos esgotada em "${req.engineId}"; nenhum modelo da cadeia tem compatibilidade comprovada com "${nextEngine}"`
+      : `cadeias de modelos e motores esgotadas`;
   audit.push({ decision: "stop", reason });
   return { result: { action: "stop" }, reason, audit };
 }

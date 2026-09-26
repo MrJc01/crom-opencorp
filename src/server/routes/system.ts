@@ -17,6 +17,7 @@ import { COMANDOS_AGENDA } from "./scheduler.js";
 import type { RouteContext } from "./types.js";
 import { fetchOpencode } from "../../core/contexts/execution/opencode-server.js";
 import { responderAprovacaoDoRuntime } from "./secretario/runtime-service.js";
+import { readRunEngineConfig } from "../../core/config/run-engine-config.js";
 
 export interface DefinicaoRota {
   method: string;
@@ -300,14 +301,11 @@ export async function handleSystemRoutes(ctx: RouteContext): Promise<boolean> {
       const limitesMotores = await accts.obterLimitesMotores();
       const contas = await accts.listar();
       const tokensAoVivo: Record<string, any> = await engineRegistry.fetchAllLiveTokens(home).catch(() => ({}));
-      let rJson: any = { engine: "opencode", harness_fallback: ["antigravity", "copilot", "opencode"] };
-      const rPath = join(home, ".opencorp", "runner.json");
-      if (existsSync(rPath)) {
-        try { rJson = JSON.parse(readFileSync(rPath, "utf8")); } catch {}
-      }
+      const runCfg = readRunEngineConfig(home);
       infoMotores = {
-        motor_ativo: rJson.engine || "opencode",
-        harness_fallback: rJson.harness_fallback || ["antigravity", "copilot", "opencode"],
+        motor_ativo: runCfg.engine,
+        // Cadeia explícita real (vazia = o fallback nunca troca de motor).
+        harness_fallback: runCfg.fallbackEngines,
         motores: rawMotores.map((m) => {
           const lim = limitesMotores[m.id];
           const contasMotor = contas.filter((c) => c.motorId === m.id);
@@ -316,7 +314,7 @@ export async function handleSystemRoutes(ctx: RouteContext): Promise<boolean> {
             id: m.id,
             nome: m.name,
             instalado: m.installed,
-            ativo: m.id === (rJson.engine || "opencode"),
+            ativo: m.id === runCfg.engine,
             contas: contasMotor.length,
             conta_ativa: contasMotor.find((c) => c.ativa)?.nome || null,
             limits: lim,

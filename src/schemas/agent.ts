@@ -141,7 +141,55 @@ export function parseAgenteMd(conteudo: string): AgenteArquivo {
     const campo = iss.path.join(".") || "(raiz)";
     throw new AgentSchemaError(`campo inválido "${campo}": ${iss.message}`);
   }
-  return { frontmatter: parsed.data, corpo: m[2]!.replace(/^\r?\n/, "") };
+  return { frontmatter: canonicalizarAgente(parsed.data), corpo: m[2]!.replace(/^\r?\n/, "") };
+}
+
+/** Aliases de motor aceitos em frontmatters antigos (mesmo mapa do tradutor legado). */
+const ALIAS_MOTOR: Record<string, string> = {
+  crom: "crom-agente",
+  cromagente: "crom-agente",
+  claude: "claude-code",
+  claudecode: "claude-code",
+  agy: "antigravity",
+  "cursor-agent": "cursor",
+  cursorcli: "cursor",
+  "github-copilot": "copilot",
+  "gh-copilot": "copilot",
+  "copilot-cli": "copilot",
+  "openai-codex": "codex",
+  openai: "codex",
+};
+
+export function motorCanonico(id: string): string {
+  const k = id.trim().toLowerCase();
+  return ALIAS_MOTOR[k] ?? k;
+}
+
+/**
+ * Forma canônica em memória (Etapa 14): `engine` é o campo oficial; `harness`
+ * e `harness_fallback` são mantidos iguais só para leitores antigos;
+ * `model_fallback` é unido a `rotation`. Idempotente.
+ */
+export function canonicalizarAgente(ag: Agente): Agente {
+  const motor = ag.engine ?? ag.harness;
+  const fallback = ag.engine_fallback ?? ag.harness_fallback;
+  const rotacao = [...new Set([...(ag.rotation ?? []), ...(ag.model_fallback ?? [])])];
+  const out: Agente = { ...ag };
+  if (motor) { out.engine = motorCanonico(motor); out.harness = out.engine; }
+  if (fallback) { out.engine_fallback = [...new Set(fallback.map(motorCanonico))]; out.harness_fallback = out.engine_fallback; }
+  if (rotacao.length > 0) { out.rotation = rotacao; out.model_fallback = undefined; }
+  return out;
+}
+
+/** Campos legados presentes no YAML bruto de um agente (para a migração). */
+export function camposLegadosAgente(dados: Record<string, unknown>): string[] {
+  const legados: string[] = [];
+  for (const campo of ["harness", "harness_fallback", "model_fallback"]) if (campo in dados) legados.push(campo);
+  for (const campo of ["engine", "harness"]) {
+    const v = dados[campo];
+    if (typeof v === "string" && motorCanonico(v) !== v.trim()) legados.push(`${campo}:alias`);
+  }
+  return legados;
 }
 
 export function normalizarIdAgente(id: string): string {

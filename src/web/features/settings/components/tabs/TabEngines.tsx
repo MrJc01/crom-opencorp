@@ -28,6 +28,7 @@ import {
 import { showToast } from "../../../../shared/ui/Toast.js";
 import { useOpenCorp } from "../../../../providers/OpenCorpProvider.js";
 import { EngineAuthModal } from "../EngineAuthModal.js";
+import { LegacyConfigBanner } from "../LegacyConfigBanner.js";
 import type {
   TabConfigId,
   MotorInfo,
@@ -234,7 +235,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
     }
   };
 
-  // Ciclo de vida: Ativar Motor como padrão no runner.json
+  // Ciclo de vida: Ativar Motor como padrão (settings.run_engine)
   const ativarMotorComoPadrao = async (motorId: string) => {
     setConectandoPadraoMotor(motorId);
     try {
@@ -340,6 +341,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
          ───────────────────────────────────────────────────────────── */}
       {abaAtiva === "motores" && (
         <div className="space-y-6 bg-transparent">
+          <LegacyConfigBanner />
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-zinc-800 gap-3">
             <div>
               <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">

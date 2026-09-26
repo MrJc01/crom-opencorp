@@ -24,6 +24,15 @@ import {
   WebLoginOrchestrator,
 } from "../../core/engines/index.js";
 import { ProcessRegistry } from "../../core/runtime/index.js";
+import { mergeSettings, readFirstDeprecationNotice, readRunEngineConfig, translateRunnerJson, writeRunEngineConfig } from "../../core/config/run-engine-config.js";
+import { applyMigration, listBackups, MigrationValidationError, planMigration, rollbackMigration } from "../../core/config/config-migrator.js";
+import { DEPRECATION_NOT_BEFORE_REMOVAL_AT, DEPRECATION_REMOVE_IN_VERSION } from "../../core/engines/legacy-config-translator.js";
+import { WorkspaceManager } from "../../core/contexts/workspace/workspace-manager.js";
+
+async function caminhosDeWorkspaces(homeDir: string): Promise<string[]> {
+  const lista = await new WorkspaceManager({ homeDir }).listar().catch(() => []);
+  return lista.map((w) => w.path).filter((p): p is string => Boolean(p));
+}
 import { collectCatalog, curatedSource, engineHintSource, ModelProbeStore, openCodeLiveSource, settingsSource } from "../../core/models/index.js";
 import type { EngineAccount } from "../../core/engines/engine-account-store.js";
 import { listarProvedoresStatus, testarModeloDirect, completarChatDirect } from "../../core/contexts/execution/llm-client.js";
@@ -35,13 +44,8 @@ export async function detectarOpencodeInfo(homeDir: string) {
   let pathEncontrado: string | null = null;
   let versao: string | null = null;
 
-  const rPath = join(homeDir, ".opencorp", "runner.json");
-  if (existsSync(rPath)) {
-    try {
-      const r = JSON.parse(readFileSync(rPath, "utf8"));
-      if (r.binary_path) pathEncontrado = String(r.binary_path).trim();
-    } catch {}
-  }
+  const caminhoConfigurado = readRunEngineConfig(homeDir, { emitNotice: false }).binaryPaths.opencode;
+  if (caminhoConfigurado) pathEncontrado = caminhoConfigurado;
 
   const locais = [
     pathEncontrado,
@@ -367,32 +371,32 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
-    // GET /settings/runner
+    // GET /settings/runner — formato de runner.json mantido para a UI, mas lido
+    // de settings.run_engine (runner.json legado só como fallback).
     if (rota === "/settings/runner" && req.method === "GET") {
-      const rPath = join(home, ".opencorp", "runner.json");
-      let runner = { engine: "opencode", binary_path: "opencode", timeout_min: 20 };
-      if (existsSync(rPath)) {
-        try {
-          runner = JSON.parse(readFileSync(rPath, "utf8"));
-        } catch {}
-      }
-      enviar(res, 200, runner);
+      const cfg = readRunEngineConfig(home);
+      enviar(res, 200, {
+        engine: cfg.engine,
+        timeout_min: cfg.timeoutMin ?? 20,
+        harness_fallback: cfg.fallbackEngines,
+        ...(cfg.binaryPaths[cfg.engine] ? { binary_path: cfg.binaryPaths[cfg.engine] } : {}),
+        limits: cfg.limits,
+        origem: cfg.source,
+      });
       return true;
     }
 
     // PUT / PATCH /settings ou /settings/runner ou /config
     if ((rota === "/settings/runner" || rota === "/settings" || rota === "/config") && (req.method === "PUT" || req.method === "PATCH")) {
       const corpo = (await lerCorpo(req)) as { chave?: string; valor?: unknown; scope?: string; runner?: unknown };
-      if (corpo.runner && typeof corpo.runner === "object") {
-        const rPath = join(home, ".opencorp", "runner.json");
-        await writeFileAtomic(rPath, `${JSON.stringify(corpo.runner, null, 2)}\n`);
-        enviar(res, 200, { ok: true, runner: corpo.runner });
-        return true;
-      }
-      if (rota === "/settings/runner") {
-        const rPath = join(home, ".opencorp", "runner.json");
-        await writeFileAtomic(rPath, `${JSON.stringify(corpo, null, 2)}\n`);
-        enviar(res, 200, { ok: true, runner: corpo });
+      const runnerCorpo = corpo.runner && typeof corpo.runner === "object" ? (corpo.runner as Record<string, unknown>) : rota === "/settings/runner" ? (corpo as Record<string, unknown>) : null;
+      if (runnerCorpo) {
+        // Aceita o formato antigo e grava no formato novo (settings.json).
+        const { settingsPatch, warnings } = translateRunnerJson(runnerCorpo);
+        const sPath = join(home, ".opencorp", "settings.json");
+        const atualSettings = existsSync(sPath) ? JSON.parse(readFileSync(sPath, "utf8")) : {};
+        await writeFileAtomic(sPath, `${JSON.stringify(mergeSettings(atualSettings, settingsPatch), null, 2)}\n`);
+        enviar(res, 200, { ok: true, runner: runnerCorpo, avisos: warnings, gravadoEm: "settings.json" });
         return true;
       }
       const chave = String(corpo.chave ?? "").trim();
@@ -457,13 +461,7 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
     const ocInfo = await detectarOpencodeInfo(home);
     const provedores = listarProvedoresStatus(home);
 
-    const rPath = join(home, ".opencorp", "runner.json");
-    let runnerAtual = { engine: "opencode", binary_path: "opencode", timeout_min: 20 };
-    if (existsSync(rPath)) {
-      try {
-        runnerAtual = JSON.parse(readFileSync(rPath, "utf8"));
-      } catch {}
-    }
+    const runnerAtual = { engine: readRunEngineConfig(home).engine };
 
     const checkHealth = rota.includes("/status") || url.searchParams.get("checkHealth") === "true";
     const rawMotores = await engineRegistry.listSummaries(home, checkHealth);
@@ -728,6 +726,47 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
     return true;
   }
 
+  // ── Migração de configurações legadas (Etapa 14) ──
+  // Nunca migra sozinho: a UI mostra a prévia e só aplica com confirmação.
+  if (rota === "/api/config/migracao" && req.method === "GET") {
+    const workspacePaths = await caminhosDeWorkspaces(home);
+    const plano = planMigration(home, { workspacePaths });
+    enviar(res, 200, {
+      pendente: plano.pending,
+      primeiroAviso: readFirstDeprecationNotice(home) ?? null,
+      removidoNaoAntesDe: DEPRECATION_NOT_BEFORE_REMOVAL_AT,
+      versaoRemocao: DEPRECATION_REMOVE_IN_VERSION,
+      mudancas: plano.changes.map((c) => ({ caminho: c.path, tipo: c.kind, acao: c.action, campos: c.fields, transformacoes: c.transformations, avisos: c.warnings, depois: c.after })),
+      avisos: plano.warnings,
+      backups: listBackups(home).map((b) => ({ id: b.id, criadoEm: b.createdAt, arquivos: b.entries.length })),
+    });
+    return true;
+  }
+  if (rota === "/api/config/migracao/aplicar" && req.method === "POST") {
+    const corpo = (await lerCorpo(req).catch(() => ({}))) as { confirmar?: boolean };
+    if (corpo.confirmar !== true) {
+      enviar(res, 400, { ok: false, erro: "confirmação obrigatória: envie { confirmar: true }" });
+      return true;
+    }
+    try {
+      const r = await applyMigration(home, { workspacePaths: await caminhosDeWorkspaces(home) });
+      enviar(res, 200, { ok: true, backup: r.backup?.id ?? null, aplicados: r.applied.map((c) => c.path), avisos: r.warnings });
+    } catch (err) {
+      enviar(res, err instanceof MigrationValidationError ? 422 : 500, { ok: false, erro: err instanceof Error ? err.message : String(err) });
+    }
+    return true;
+  }
+  if (rota === "/api/config/migracao/rollback" && req.method === "POST") {
+    const corpo = (await lerCorpo(req).catch(() => ({}))) as { backup?: string };
+    try {
+      const m = await rollbackMigration(home, corpo.backup);
+      enviar(res, 200, { ok: true, backup: m.id, restaurados: m.entries.length });
+    } catch (err) {
+      enviar(res, 409, { ok: false, erro: err instanceof Error ? err.message : String(err) });
+    }
+    return true;
+  }
+
   // GET /api/motores/:id/instalacao — origem do binário e proveniência
   const mInstalacao = /^\/api\/motores\/([^/]+)\/instalacao$/.exec(rota);
   if (mInstalacao && req.method === "GET") {
@@ -792,13 +831,10 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
-    const rPath = join(home, ".opencorp", "runner.json");
-    const novoRunner = {
-      engine: motorId,
-      binary_path: status.path || motorId,
-      timeout_min: 20,
-    };
-    await writeFileAtomic(rPath, `${JSON.stringify(novoRunner, null, 2)}\n`);
+    // Motor padrão das execuções no formato novo. O binário não é fixado aqui:
+    // a resolução (settings → PATH → gerenciada) continua valendo.
+    await writeRunEngineConfig(home, { engine: motorId });
+    const novoRunner = { engine: motorId };
     enviar(res, 200, { ok: true, motorId, runner: novoRunner, health });
     return true;
   }
@@ -828,13 +864,12 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
         return true;
       }
     }
-    const rPath = join(home, ".opencorp", "runner.json");
-    const novoRunner = {
-      engine: "opencode",
-      binary_path: "opencode",
-      timeout_min: 20,
-    };
-    await writeFileAtomic(rPath, `${JSON.stringify(novoRunner, null, 2)}\n`);
+    // Só troca o padrão quando o motor desconectado ERA o padrão, e a troca é
+    // informada na resposta (a UI pede confirmação antes).
+    const padraoAtual = readRunEngineConfig(home, { emitNotice: false }).engine;
+    const padraoRestaurado = padraoAtual === motorId ? "opencode" : padraoAtual;
+    if (padraoAtual === motorId) await writeRunEngineConfig(home, { engine: padraoRestaurado });
+    const novoRunner = { engine: padraoRestaurado };
     enviar(res, 200, {
       ok: true,
       motorId,
