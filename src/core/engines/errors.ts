@@ -27,9 +27,11 @@ export class EngineError extends Error {
 }
 
 export class EngineNotFoundError extends EngineError {
-  constructor(engineId: string) {
-    super("ENGINE_NOT_FOUND", `Motor "${engineId}" não está registrado. Selecione um dos motores disponíveis.`, {
+  constructor(engineId: string, availableEngineIds: string[] = []) {
+    const available = availableEngineIds.length > 0 ? ` Disponíveis: [${availableEngineIds.join(", ")}].` : "";
+    super("ENGINE_NOT_FOUND", `Motor "${engineId}" não está registrado.${available} Selecione um motor disponível.`, {
       engineId,
+      details: availableEngineIds.length > 0 ? { availableEngineIds } : undefined,
     });
   }
 }

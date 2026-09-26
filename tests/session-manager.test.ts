@@ -72,7 +72,7 @@ describe("SessionManager.rodar (execa mockado — nunca roda opencode real)", ()
     const r = await sessoes.rodar({ agente: "executor-padrao", ordem: "crie o probe.txt" });
     expect(execaMock).toHaveBeenCalledTimes(1);
     const [cmd, args, opts] = execaMock.mock.calls[0]!;
-    expect(cmd).toBe("opencode");
+    expect(cmd).toMatch(/(?:^|\/)opencode$/);
     expect(args).toContain("--auto");
     expect(args).toContain("--agent");
     expect(args[args.indexOf("--agent") + 1]).toBe("executor-padrao");

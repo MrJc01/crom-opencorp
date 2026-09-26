@@ -25,7 +25,7 @@ export interface SecretaryRuntimeContext {
 export async function obterRuntimeSecretario(
   ctx: RouteContext,
   ws: { id: string; path: string },
-  strict = false
+  strict = true
 ): Promise<SecretaryRuntimeContext> {
   const resolver = ctx.conversationRuntimeResolver ?? new ConversationRuntimeResolver({ homeDir: ctx.homeDir });
 
@@ -34,11 +34,36 @@ export async function obterRuntimeSecretario(
     resolution = await resolver.resolve({
       workspaceId: ws.id,
       workspaceDir: ws.path,
-      strict,
+      strict: false,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    if ((err as { code?: string })?.code === "ENGINE_CAPABILITY_UNAVAILABLE") {
+      throw new SecretarioError(`O motor selecionado não oferece runtime conversacional: ${msg}`, { status: 409 });
+    }
     throw new SecretarioError(`Falha ao resolver motor conversacional do Secretário: ${msg}`, { status: 409 });
+  }
+
+  let legacyOpenCodeGerenciado = false;
+  if (resolution.engineId === "opencode" && ctx.opencodeServer) {
+    try {
+      legacyOpenCodeGerenciado = Boolean((await ctx.opencodeServer.status()).rodando);
+    } catch {
+      legacyOpenCodeGerenciado = false;
+    }
+  }
+  if (strict && !resolution.preflight.ok && !legacyOpenCodeGerenciado) {
+    if (!resolution.preflight.supportsConversation) {
+      throw new SecretarioError(
+        `O motor "${resolution.engineId}" não oferece runtime conversacional.`,
+        { status: 409 }
+      );
+    }
+    const detalhes = resolution.preflight.issues.join(" ") || "preflight indisponível";
+    throw new SecretarioError(
+      `Motor conversacional "${resolution.engineId}" indisponível: ${detalhes}`,
+      { status: 409 }
+    );
   }
 
   const runtime = resolution.adapter.conversationRuntime;
@@ -68,7 +93,7 @@ export async function adquirirSessaoSecretario(
     model?: string;
   } = {}
 ): Promise<{ ref: ConversationRef; runtime: ConversationRuntime; engineId: string }> {
-  const { runtime, engineId } = await obterRuntimeSecretario(ctx, ws, false);
+  const { runtime, engineId } = await obterRuntimeSecretario(ctx, ws, true);
   const home = ctx.homeDir ?? opencorpHome();
 
   const ref = await runtime.create({
@@ -167,7 +192,7 @@ export async function statusRuntimeSecretario(
 
   return {
     rodando,
-    configurado: resolution ? resolution.preflight.ok : false,
+    configurado: resolution ? resolution.preflight.ok || (resolution.engineId === "opencode" && rodando) : false,
     porta,
     pid,
     motor: resolution

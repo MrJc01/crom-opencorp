@@ -126,9 +126,9 @@ export const CANONICAL_ENGINE_MANIFESTS: Record<string, EngineCapabilityManifest
     transport: "spawn_cli",
     supportsConversation: true,
     features: {
-      streaming: { level: "declared", flags: ["--jsonl"] },
-      continuation: { level: "declared", flags: ["resume"] },
-      fork: { level: "declared", flags: ["fork"] },
+      streaming: { level: "integrated", flags: ["--json"] },
+      continuation: { level: "integrated", flags: ["exec resume"] },
+      fork: { level: "integrated", flags: ["exec fork"] },
       hitl: { level: "declared", notes: "Modo sandbox com aprovação" },
       tools: { level: "declared", notes: "Execução de shell e código" },
       mcp: { level: "declared", notes: "Suporte MCP do Codex" },

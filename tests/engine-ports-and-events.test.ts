@@ -37,9 +37,13 @@ describe("ETAPA 3 — Manifestos e Domínio de Capacidades", () => {
     expect(isCapabilityAvailable(aiderManifest, "continuation")).toBe(false);
     expect(isCapabilityAvailable(aiderManifest, "fork")).toBe(false);
 
-    // Codex possui streaming: declared (não integrado nem verificado ainda no adapter)
+    // Claude Code possui streaming: declared (não integrado nem verificado ainda no adapter)
+    const claudeManifest = CANONICAL_ENGINE_MANIFESTS["claude-code"];
+    expect(isCapabilityAvailable(claudeManifest, "streaming")).toBe(false);
+
+    // Codex possui streaming e cancelamento integrados na Etapa 8
     const codexManifest = CANONICAL_ENGINE_MANIFESTS["codex"];
-    expect(isCapabilityAvailable(codexManifest, "streaming")).toBe(false);
+    expect(isCapabilityAvailable(codexManifest, "streaming")).toBe(true);
     expect(isCapabilityAvailable(codexManifest, "cancellation")).toBe(true);
 
     // OpenCode possui streaming e fork integrados

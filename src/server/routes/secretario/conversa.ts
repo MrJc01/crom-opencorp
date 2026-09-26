@@ -114,7 +114,7 @@ export async function handleConversaRoutes(ctx: RouteContext): Promise<boolean> 
         return true;
       }
 
-      const runtimeCtx = await obterRuntimeSecretario(ctx, ws, false);
+      const runtimeCtx = await obterRuntimeSecretario(ctx, ws, true);
       if (runtimeCtx.engineId !== "opencode") {
         const contextoWs = await construirContextoWorkspace(ws);
         const mensagemComWs = `${contextoWs}\n${mensagem}`;

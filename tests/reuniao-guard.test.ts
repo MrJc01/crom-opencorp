@@ -190,7 +190,7 @@ ${corpo}
     expect(agentesChamados).toEqual(["secretario", "analista"]);
 
     for (const call of chamadasParticipantes) {
-      expect(call[0]).toBe("opencode");
+      expect(call[0]).toMatch(/(?:^|\/)opencode$/);
       const args = call[1] as unknown[];
       expect(args).toContain("--auto");
       const ordem = args[args.length - 1] as string;

@@ -11,6 +11,7 @@ import { MimoDriver } from "./drivers/mimo-driver.js";
 import { EngineNotFoundError } from "./errors.js";
 import { LegacyDriverAdapter } from "./adapter-compat.js";
 import { OpenCodeAdapter } from "./adapters/opencode-adapter.js";
+import { CodexAdapter } from "./adapters/codex-adapter.js";
 import type { EngineAdapter } from "./ports.js";
 import {
   validateEngineCapabilityManifest,
@@ -49,8 +50,9 @@ export class EngineRegistry {
     this.register(new AiderDriver());
     this.register(new MimoDriver());
 
-    // Registra adaptador canônico do OpenCode com AgentRunner e ConversationRuntime
+    // Registra adaptadores canônicos com AgentRunner e ConversationRuntime
     this.registerAdapter(new OpenCodeAdapter());
+    this.registerAdapter(new CodexAdapter());
   }
 
   public static getInstance(): EngineRegistry {

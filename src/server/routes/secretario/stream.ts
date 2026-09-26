@@ -269,7 +269,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
             return;
           }
 
-          const runtimeCtx = await obterRuntimeSecretario(ctx, ws, false);
+          const runtimeCtx = await obterRuntimeSecretario(ctx, ws, true);
           if (runtimeCtx.engineId !== "opencode") {
             const contextoWs = await construirContextoWorkspace(ws);
             const mensagemStreamComWs = `${contextoWs}\n${mensagem}`;

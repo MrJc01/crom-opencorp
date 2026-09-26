@@ -206,7 +206,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 5 | Resolução do runtime conversacional | ✅ Concluída | `feat(secretary): resolve configurable conversation runtime explicitly` | 8 arquivos focados (106 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 6 | Adaptador OpenCode completo | ✅ Concluída | `feat(opencode): implement canonical runner and isolated conversation runtime` | 9 arquivos focados (114 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 7 | Secretário independente de OpenCode | ✅ Concluída | `refactor(secretary): decouple conversations from opencode server` | 10 arquivos focados (93 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
-| 8 | Codex como segundo runtime | ⬜ Pendente | — | — |
+| 8 | Codex como segundo runtime | 🟨 Em andamento (checkpoint 8A) | `feat(codex): add canonical runner and native CLI sessions` | JSONL e continuação/fork nativos; 60 testes focados, 137 arquivos/1.308 testes e build PASS |
 | 9 | Vault e autenticação | ⬜ Pendente | — | — |
 | 10 | Instalador gerenciado e preflight | ⬜ Pendente | — | — |
 | 11 | Saúde funcional e conformidade | ⬜ Pendente | — | — |
@@ -796,30 +796,39 @@ refactor(secretary): decouple conversations from opencode server
 
 ### Tarefas
 
-- [ ] Implementar one-shot Codex com saída JSON.
+- [x] Implementar one-shot Codex com saída JSON.
 - [ ] Selecionar SDK ou app-server para conversação persistente.
-- [ ] Implementar streaming e eventos canônicos.
-- [ ] Implementar continuação real.
-- [ ] Implementar cancelamento.
+- [x] Implementar streaming e eventos canônicos.
+- [x] Implementar continuação real via `codex exec resume <thread_id>`.
+- [x] Implementar cancelamento.
 - [ ] Integrar aprovações conforme a interface suportada.
-- [ ] Integrar `ProcessRegistry` quando necessário.
-- [ ] Declarar somente capacidades comprovadas.
-- [ ] Não acoplar o modelo Codex ao harness pelo prefixo.
-- [ ] Criar fake determinístico para CI.
+- [x] Não registrar processo residente no `ProcessRegistry` enquanto o transporte for CLI por turno.
+- [x] Declarar somente capacidades comprovadas.
+- [x] Não acoplar o modelo Codex ao harness pelo prefixo.
+- [x] Criar fake determinístico para CI.
 - [ ] Criar probe real opt-in com orçamento.
 
 ### Testes
 
-- [ ] Mesmo contrato de conversa usado pelo OpenCode.
-- [ ] Secretário inicia com `default_conversation_engine: codex`.
-- [ ] Workspace A usa Codex e workspace B usa OpenCode sem vazamento.
-- [ ] Ausência/login inválido retorna erro explícito.
-- [ ] Nenhuma sessão fica órfã.
+- [x] Mesmo contrato de conversa usado pelo OpenCode.
+- [x] Secretário inicia com `default_conversation_engine: codex` em fake determinístico.
+- [x] Workspace A usa Codex e workspace B usa OpenCode sem vazamento no teste de integração.
+- [x] Ausência/login inválido retorna erro explícito no preflight estrito.
+- [x] Transporte CLI por turno não mantém processo residente após a execução.
 
 ### Critérios de aceite
 
 - [ ] Dois runtimes conversacionais reais suportados pela mesma porta.
-- [ ] Nenhuma condicional `if codex` adicionada às rotas do Secretário.
+- [x] Nenhuma condicional `if codex` adicionada às rotas do Secretário.
+
+### Checkpoint 8A — 26/09/2026
+
+- Implementado `CodexAdapter` com `codex exec --json`, tradução de eventos JSONL, cancelamento e erro explícito em saída não zero.
+- A continuação usa o ID real emitido por `thread.started` e chama `codex exec resume`; o fork usa `codex exec fork`.
+- Removido o catálogo estático de modelos não comprovados e evitado registrar o PID do OpenCorp como processo Codex.
+- O preflight das rotas é estrito para runtimes novos; o OpenCode legado somente atravessa a borda de compatibilidade quando seu servidor já está rodando.
+- Validações: TypeScript backend/frontend PASS; 60 testes focados PASS; suíte completa com 137 arquivos, 1.308 testes PASS e 1 todo; build PASS.
+- Pendente para concluir a etapa: substituir a conversa CLI transitória por `codex app-server`, integrar aprovações e criar probe real opt-in com orçamento. A escolha do app-server segue a [orientação oficial para conversas persistentes, streaming e aprovações](https://developers.openai.com/pt-BR/blog/codex-as-a-platform).
 
 ### Commits sugeridos
 

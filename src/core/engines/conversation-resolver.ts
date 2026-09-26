@@ -128,10 +128,8 @@ export class ConversationRuntimeResolver {
       adapter = this.registry.resolveAdapter(engineId);
     } catch (err) {
       if (err instanceof EngineNotFoundError) {
-        const disponiveis = this.registry.list().map((d) => d.id).join(", ");
-        throw new EngineNotFoundError(
-          `${engineId}. Motores registrados disponíveis: [${disponiveis}]`
-        );
+        const disponiveis = this.registry.list().map((d) => d.id);
+        throw new EngineNotFoundError(engineId, disponiveis);
       }
       throw err;
     }
@@ -171,7 +169,7 @@ export class ConversationRuntimeResolver {
         issues.push(`Binário do motor "${engineId}" não está instalado no ambiente.`);
         recommendation =
           recommendation ||
-          `Execute a instalação com 'opencorp engine install ${engineId}' ou configure o caminho em ~/.opencorp/settings.json.`;
+          `Instale o motor pela tela Configurações > Motores ou via POST /api/motores/${engineId}/install.`;
         if (strict) {
           throw new PreflightBinaryMissingError(engineId, {
             details: {
