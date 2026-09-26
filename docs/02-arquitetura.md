@@ -1,4 +1,4 @@
-# 02 — Arquitetura do OpenCorp (v0.7.0)
+# 02 — Arquitetura do OpenCorp
 
 ## Visão Geral em Camadas
 
@@ -7,7 +7,7 @@ flowchart TB
     subgraph SupervisorGlobal ["Supervisor Global OpenCorp (Daemon / Scheduler Central)"]
         TickLoop["Loop Global de Ticks (Verifica crons a cada 15s/1m)"]
         WebhookRouter["Servidor de Webhooks HTTP (/api/webhooks/:ws/:flow)"]
-        EngineHub["Hub de Motores (AGY / Gemini, Codex, Copilot, OpenCode)"]
+        EngineHub["Hub de Motores (OpenCode, Codex, Copilot/MiMo via ACP, CLIs one-shot)"]
     end
 
     subgraph WorkspaceLayer ["Camada de Workspace (~/.opencorp/workspaces/<id>/)"]
@@ -101,11 +101,42 @@ O CRUD de tarefas (`oc task`) cumpre um papel operacional fundamental:
 
 ## 5. O Hub de Motores (Engine Registry)
 
-O OpenCorp desacopla a lógica dos agentes do runtime da LLM através de drivers de motor padronizados:
+O OpenCorp desacopla a lógica dos agentes do runtime de IA por meio de **portas canônicas**
+(`src/core/engines/ports.ts`) e adaptadores por motor. Detalhes, tabela de motores e configuração:
+[`04-motores-e-modelos.md`](04-motores-e-modelos.md).
 
-| Motor | ID | Mantenedor | Modelo Recomendado | Casos de Uso |
-| :--- | :--- | :--- | :--- | :--- |
-| **Google Antigravity** | `antigravity` | Google DeepMind | `google/gemini-2.5-flash`, `google/gemini-3.8-flash` | Secretário, pesquisa complexa, análise de código, raciocínio avançado |
-| **OpenCode Engine** | `opencode` | OpenCode | `nemotron-3-ultra-free`, `glm-5.3-flash`, `qwen3.8-27b` | Rotação de cota zero, mini-agentes, esteiras de texto |
-| **OpenAI Codex** | `codex` | OpenAI | Modelos de geração e edição de código | Refatoração de scripts, manutenção automatizada |
-| **GitHub Copilot** | `copilot` | GitHub / Microsoft | CLI herdado | Auxílio em tarefas de repositório e git |
+```mermaid
+flowchart LR
+    Sec[Secretário] --> Res[ConversationRuntimeResolver]
+    Jobs[Fluxos / Scheduler / agent run] --> SM[SessionManager]
+    Res --> CR[(ConversationRuntime)]
+    SM --> AR[(AgentRunner)]
+    CR --> OC[OpenCode<br/>HTTP+SSE]
+    CR --> CX[Codex<br/>app-server]
+    CR --> ACP[ACP v1<br/>Copilot · MiMo]
+    AR --> CLI[CLIs one-shot<br/>Claude Code · AGY · Cursor · Aider · Crom]
+    OC & CX & ACP --> PR[ProcessRegistry<br/>engineId × workspaceId]
+```
+
+| Componente | Responsabilidade |
+| :--- | :--- |
+| `EngineRegistry` / manifestos | Capacidades declaradas por motor (transporte, conversa, ferramentas) |
+| `ConversationRuntimeResolver` | Resolve o motor do Secretário: override do workspace → `default_conversation_engine`; recusa motor sem conversa ou indisponível, sem trocar de motor |
+| `SessionManager` | Execuções one-shot; preflight do binário, `MODEL_INCOMPATIBLE` antes do spawn, fallback auditável |
+| `ProcessRegistry` | Dono de todo processo residente; isolamento por `[engineId, workspaceId]`; idle 15 min; `SIGTERM → 5 s → SIGKILL` |
+| Resolução de binário / instalador | `binary_path` → `PATH` → instalação gerenciada com SHA-256; nunca instala durante execução |
+| Fachada de credenciais | Injeção efêmera por processo, escopada por workspace |
+| Catálogo de modelos / roteador de fallback | Proveniência dos modelos e decisões de rotação registradas |
+| Tradutor legado / `migrate-configs` | Lê `runner.json` e campos antigos com aviso; migração com backup e rollback |
+
+### O Secretário
+
+O Secretário conversa por meio de qualquer motor com `ConversationRuntime` (OpenCode, Codex, Copilot, MiMo).
+O motor é escolhido por workspace (`conversationEngineOverride` em `.opencorp/config.json`) ou globalmente
+(`default_conversation_engine`). `GET /secretario/status?workspace=<id>` informa o motor resolvido, a origem da
+escolha e o resultado do preflight. Se o motor configurado estiver indisponível, a conversa falha com erro
+explícito; o Secretário **não** é redirecionado a outro motor. Aprovações de ferramentas (HITL) são respondidas
+pelo mesmo runtime e só valem dentro do workspace de origem.
+
+**Garantia arquitetural** (`tests/architecture-opencode-down.test.ts`): com o OpenCode ausente, apenas o que foi
+configurado para OpenCode falha; Secretário com Codex e jobs de outros motores continuam funcionando.

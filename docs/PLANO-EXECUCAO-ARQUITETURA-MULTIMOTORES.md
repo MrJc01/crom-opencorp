@@ -213,7 +213,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 12 | `AcpClientAdapter` | ✅ Concluída | `feat(acp): add ACP v1 adapter and connect Copilot and MiMo` | Copilot e MiMo via ACP; handshakes reais PASS; 145 arquivos/1.450 testes |
 | 13 | Catálogo e rotação soberanos | ✅ Concluída | `refactor(models): make catalog and fallback routing engine-agnostic` | catálogo com proveniência; fallback auditável sem troca silenciosa de motor; 1.470 testes |
 | 14 | Migração CLI/UI e depreciação | ✅ Concluída | `feat(config): add safe legacy runtime configuration migration` | `migrate-configs` com backup/rollback; UI com prévia; runner.json só leitura legada |
-| 15 | Validação final e liberação | ⬜ Pendente | — | — |
+| 15 | Validação final e liberação | ✅ Concluída | `docs(release): finalize multi-engine runtime architecture rollout` | teste arquitetural PASS; 148 arquivos/1.484 testes; 2 TS e build PASS; 15 falhas E2E preexistentes registradas (P-12) |
 
 Estados válidos: `⬜ Pendente`, `🟨 Em andamento`, `🟥 Bloqueada`, `✅ Concluída`.
 
@@ -1265,71 +1265,80 @@ feat(config): add safe legacy runtime configuration migration
 
 ### Validação estática e build
 
-- [ ] `npx tsc --noEmit`.
-- [ ] `npx tsc --noEmit -p tsconfig.web.json`.
-- [ ] `npm run build`.
-- [ ] `git diff --check`.
+- [x] `npx tsc --noEmit`.
+- [x] `npx tsc --noEmit -p tsconfig.web.json`.
+- [x] `npm run build`.
+- [x] `git diff --check`.
 
 ### Testes automatizados
 
-- [ ] `npm test` 100% aprovado, respeitando todos conhecidos.
-- [ ] Suítes focadas de motores.
-- [ ] Suítes focadas do Secretário.
-- [ ] Suítes de configuração/migração.
-- [ ] Suítes de processos e isolamento.
-- [ ] Playwright das telas afetadas.
-- [ ] Testes de acessibilidade das seleções/erros novos.
+- [x] `npm test` 100% aprovado — 146 arquivos aprovados + 2 opt-in pulados; 1.484 testes PASS, 8 skip, 1 todo.
+- [x] Suítes focadas de motores — `engine-conformance`, `engine-health`, `opencode-adapter`, `acp-adapter`, `managed-installer`.
+- [x] Suítes focadas do Secretário — resolver conversacional, Codex app-server, teste arquitetural.
+- [x] Suítes de configuração/migração — `config-migration` (8), tradutor legado.
+- [x] Suítes de processos e isolamento — `ProcessRegistry`, isolamento `[engineId, workspaceId]`.
+- [x] Playwright das telas afetadas — banner de migração, prévia e "Diagnóstico rápido" verificados no navegador sem erros de console. Suíte E2E completa: 15 falhas, todas reproduzidas também na base `fcc5f2d` (P-12).
+- [ ] Testes de acessibilidade das seleções/erros novos — não há suíte de acessibilidade no projeto; fica em P-13.
 
 ### Matriz funcional mínima
 
-- [ ] Secretário com OpenCode.
-- [ ] Secretário com Codex.
-- [ ] Workspace A e B usando runtimes diferentes.
-- [ ] Runtime configurado indisponível produz erro explícito.
-- [ ] Job one-shot não inicia servidor desnecessário.
-- [ ] Instalação nunca ocorre durante job/chat.
-- [ ] Credencial restrita não atravessa workspace.
-- [ ] Timeout ocioso encerra processo residente.
-- [ ] Cancelamento encerra árvore de processos.
-- [ ] OpenCode desabilitado não derruba funcionalidades independentes.
-- [ ] Tradução legada funciona e emite aviso.
-- [ ] Configuração nova não emite aviso legado.
+- [x] Secretário com OpenCode — `opencode-adapter.test.ts` + conformidade (fake fiel ao `opencode serve` 1.18.32).
+- [x] Secretário com Codex — `architecture-opencode-down.test.ts` e conformidade.
+- [x] Workspace A e B usando runtimes diferentes — teste arquitetural (ws-codex × ws-opencode).
+- [x] Runtime configurado indisponível produz erro explícito — teste arquitetural (preflight `ok: false`, conversa ≥ 400).
+- [x] Job one-shot não inicia servidor desnecessário — teste arquitetural (registro sem processo OpenCode).
+- [x] Instalação nunca ocorre durante job/chat — teste arquitetural + varredura de chamadas a `install()` (Etapa 10).
+- [x] Credencial restrita não atravessa workspace — testes de credenciais (Etapa 9).
+- [x] Timeout ocioso encerra processo residente — testes do `ProcessRegistry` (Etapa 4).
+- [x] Cancelamento encerra árvore de processos — `SIGTERM → 5s → SIGKILL` testado (Etapa 4).
+- [x] OpenCode desabilitado não derruba funcionalidades independentes — `tests/architecture-opencode-down.test.ts` (5 PASS).
+- [x] Tradução legada funciona e emite aviso — `config-migration.test.ts`.
+- [x] Configuração nova não emite aviso legado — `config-migration.test.ts`.
 
 ### Segurança e operação
 
-- [ ] Nenhum segredo em logs, snapshots ou journal.
-- [ ] Servidores locais autenticados.
-- [ ] Portas restritas a loopback por padrão.
-- [ ] Nenhum processo órfão após suíte completa.
-- [ ] Nenhum pidfile obsoleto adotado.
-- [ ] Instalações têm proveniência e checksum.
-- [ ] Rollback testado.
+- [x] Nenhum segredo em logs, snapshots ou journal — redação testada nas Etapas 9 e 12 (stderr ACP, credenciais efêmeras).
+- [x] Servidores locais autenticados — OpenCode com HTTP Basic verificado contra o binário real (Etapa 9); ACP/Codex por stdio.
+- [x] Portas restritas a loopback por padrão — `127.0.0.1`.
+- [x] Nenhum processo órfão após suíte completa — contagem de processos de motores igual antes/depois.
+- [x] Nenhum pidfile obsoleto adotado — identidade comprovada antes de adotar (Etapa 1).
+- [x] Instalações têm proveniência e checksum — `provenance.json` + SHA-256 (Etapa 10).
+- [x] Rollback testado — instalação gerenciada (Etapa 10) e `migrate-configs --rollback` byte a byte (Etapa 14).
 
 ### Documentação
 
-- [ ] Atualizar `README.md`.
-- [ ] Atualizar `docs/02-arquitetura.md`.
-- [ ] Reescrever `docs/04-motores-e-modelos.md`.
-- [ ] Atualizar referência CLI/API.
-- [ ] Atualizar documentação do Secretário.
-- [ ] Registrar breaking changes e depreciações.
-- [ ] Marcar este checklist com evidências finais.
+- [x] Atualizar `README.md`.
+- [x] Atualizar `docs/02-arquitetura.md`.
+- [x] Reescrever `docs/04-motores-e-modelos.md`.
+- [x] Atualizar referência CLI/API (`docs/08-cli-referencia.md`).
+- [x] Atualizar documentação do Secretário (`docs/02-arquitetura.md`, seção "O Secretário").
+- [x] Registrar breaking changes e depreciações (`docs/DEPRECACOES-MULTIMOTORES.md`).
+- [x] Marcar este checklist com evidências finais.
 
 ### Operação final
 
-- [ ] Reiniciar apenas os serviços autorizados pelo usuário.
-- [ ] Validar porta/API do OpenCorp.
-- [ ] Validar runtime selecionado por workspace.
-- [ ] Registrar PIDs/portas sem expor segredos.
-- [ ] Fazer smoke test web de todas as páginas relacionadas.
-- [ ] Criar relatório final.
+- [x] Reiniciar apenas os serviços autorizados pelo usuário — nenhum serviço do usuário foi reiniciado; só um servidor de teste isolado (porta 4411, `OPENCORP_HOME` temporário), já encerrado.
+- [x] Validar porta/API do OpenCorp — servidor de teste respondeu às rotas de motores e migração.
+- [x] Validar runtime selecionado por workspace — `/secretario/status` no teste arquitetural.
+- [x] Registrar PIDs/portas sem expor segredos — porta 4411 (teste), token descartável.
+- [x] Fazer smoke test web das páginas relacionadas — Configurações › Motores (banner, prévia, diagnóstico). "Teste funcional" só aparece para motor instalado; não exercitado com inferência real (consome cota).
+- [x] Criar relatório final — registro abaixo.
 
 ### Critérios de aceite
 
-- [ ] Todas as decisões D1–D6 estão implementadas.
-- [ ] Teste arquitetural definitivo aprovado.
-- [ ] Nenhuma regressão conhecida ficou sem registro.
-- [ ] Worktree contém apenas mudanças intencionais.
+- [x] Todas as decisões D1–D6 estão implementadas (D6: remoção do legado condicionada a P-11).
+- [x] Teste arquitetural definitivo aprovado.
+- [x] Nenhuma regressão conhecida ficou sem registro.
+- [x] Worktree contém apenas mudanças intencionais.
+
+### Registro da Etapa 15 — 26/09/2026
+
+- Correção encontrada pela validação: o `SessionManager` perdia a saída de processos muito rápidos (o consumo de stdout/stderr começava depois do fim do processo). O consumo agora começa logo após o spawn.
+- Teste arquitetural definitivo: `tests/architecture-opencode-down.test.ts` — `PATH` sem `opencode`; Secretário com Codex responde; workspace configurado para OpenCode falha explicitamente sem trocar de motor; job Claude Code conclui sem servidor residente; job OpenCode falha no preflight sem instalar nada.
+- Validações: `tsc` backend/frontend PASS; build PASS; `git diff --check` PASS; suíte completa 148 arquivos (146 PASS + 2 opt-in) — 1.484 testes PASS; órfãos 0.
+- E2E Playwright: 15 falhas (config.spec ×5, agentes-catalogo ×4, chat ×2, engine-accounts-limits ×2, engine-live-tokens-full ×2), idênticas na base `fcc5f2d` — preexistentes, registradas em P-12.
+- Documentação: README, `02-arquitetura`, `04-motores-e-modelos` (reescrito), `08-cli-referencia` (motores, `migrate-configs`, rotas de API, `test:real`).
+- Não executado: probes reais com inferência (P-01, P-08, P-09) — consomem cota e exigem login.
 
 ### Commit sugerido
 
@@ -1456,26 +1465,26 @@ O handoff deve ser salvo no repositório quando houver risco de interrupção pr
 
 O projeto só pode declarar concluída a migração multimotores quando:
 
-- [ ] `AgentRunner` e `ConversationRuntime` forem portas independentes.
-- [ ] Secretário não depender diretamente de OpenCode.
-- [ ] Pelo menos OpenCode e Codex passarem pela mesma suíte conversacional.
-- [ ] ACP estiver implementado e validado para os motores declarados compatíveis.
-- [ ] Todos os processos forem possuídos pelo `ProcessRegistry`.
-- [ ] Isolamento `[engineId, workspaceId]` estiver comprovado.
-- [ ] Idle timeout de 15 minutos estiver testado.
-- [ ] `SIGTERM → 5s → SIGKILL` estiver testado.
-- [ ] Instalação JIT estiver impossível no caminho de execução.
-- [ ] Instalações gerenciadas forem fixadas, verificadas e reversíveis.
-- [ ] Credenciais forem efêmeras e restritivas por workspace.
-- [ ] OAuth de terceiros não for extraído.
-- [ ] Catálogo e rotação forem soberanos do OpenCorp.
-- [ ] Nenhum motor desconhecido cair silenciosamente em OpenCode.
-- [ ] Testes de motor distinguirem saúde de inferência real.
-- [ ] Configurações legadas tiverem tradutor, migração e cronograma.
-- [ ] Suíte completa, builds e E2E estiverem verdes.
-- [ ] Não houver processos órfãos.
-- [ ] Documentação pública estiver coerente com o comportamento.
-- [ ] O teste arquitetural definitivo estiver aprovado.
+- [x] `AgentRunner` e `ConversationRuntime` forem portas independentes.
+- [x] Secretário não depender diretamente de OpenCode.
+- [x] Pelo menos OpenCode e Codex passarem pela mesma suíte conversacional (mais Copilot e MiMo; probe real do Codex em P-01).
+- [x] ACP estiver implementado e validado para os motores declarados compatíveis — handshake real PASS; conversa real pendente de login (P-08).
+- [x] Todos os processos forem possuídos pelo `ProcessRegistry`.
+- [x] Isolamento `[engineId, workspaceId]` estiver comprovado.
+- [x] Idle timeout de 15 minutos estiver testado.
+- [x] `SIGTERM → 5s → SIGKILL` estiver testado.
+- [x] Instalação JIT estiver impossível no caminho de execução.
+- [x] Instalações gerenciadas forem fixadas, verificadas e reversíveis.
+- [x] Credenciais forem efêmeras e restritivas por workspace.
+- [x] OAuth de terceiros não for extraído.
+- [x] Catálogo e rotação forem soberanos do OpenCorp.
+- [x] Nenhum motor desconhecido cair silenciosamente em OpenCode.
+- [x] Testes de motor distinguirem saúde de inferência real.
+- [x] Configurações legadas tiverem tradutor, migração e cronograma.
+- [ ] Suíte completa, builds e E2E estiverem verdes — suíte e builds verdes; E2E com 15 falhas preexistentes (P-12).
+- [x] Não houver processos órfãos.
+- [x] Documentação pública estiver coerente com o comportamento.
+- [x] O teste arquitetural definitivo estiver aprovado.
 
 ---
 
@@ -1486,7 +1495,7 @@ Registrar aqui apenas itens novos, com etapa de origem, impacto e decisão. Não
 | ID | Etapa de origem | Pendência | Impacto | Decisão |
 |---|---:|---|---|---|
 | P-01 | 8 | Probe real do Codex não executado | Capacidade verificada apenas com fake determinístico | Executar `OPENCORP_REAL_PROBES=codex OPENCORP_PROBE_CODEX_MODEL=<modelo> npm run test:real` quando o usuário autorizar o consumo de cota |
-| P-03 | 9 | `POST /api/motores/:id/desconectar` reescreve `runner.json` com `engine: "opencode"` | Fallback silencioso para OpenCode (viola D1) | Corrigir na Etapa 13/14, junto com a seleção de motor padrão |
+| P-03 | 9 | `POST /api/motores/:id/desconectar` reescreve `runner.json` com `engine: "opencode"` | Fallback silencioso para OpenCode (viola D1) | Mitigada na Etapa 14: grava em `settings.run_engine`, só troca quando o motor desconectado era o padrão e informa a troca na resposta (UI confirma antes). Escolha do substituto ainda fixa em `opencode` |
 | P-04 | 9 | Etapa 6 declarou autenticação local do OpenCode que não funcionava | Servidor OpenCode acessível sem senha por qualquer processo local | Corrigido na Etapa 9 (HTTP Basic verificado contra o binário real) |
 | P-05 | 10 | `tests/modelos-governance-e2e.test.ts` falhou 1× na suíte completa | Causa: `oc modelos` lia o catálogo do `opencode` instalado na máquina | Corrigido na Etapa 11 (`OPENCORP_HOME` + catálogo determinístico) |
 | P-07 | 11 | `ModelPicker` "testar modelo" chama `/api/motores/:id/test` para motores ≠ OpenCode | O teste do modelo verificava só o motor | Corrigido na Etapa 13 (inferência real com o modelo, com confirmação de custo) |
@@ -1496,6 +1505,8 @@ Registrar aqui apenas itens novos, com etapa de origem, impacto e decisão. Não
 | P-08 | 12 | Conversa real ACP não executada (Copilot e MiMo sem login no ambiente de verificação) | Streaming/ferramentas reais verificados só com fake fiel ao esquema | `OPENCORP_REAL_PROBES=copilot,mimo OPENCORP_PROBE_<MOTOR>_MODEL=<modelo> npm run test:real` com as contas autenticadas |
 | P-09 | 12 | Seleção de modelo do Copilot por `configOptions` não verificada | Conversa com modelo explícito no Copilot falha com `MODEL_INCOMPATIBLE` se o agente não expuser o seletor | Verificar com login; se necessário, iniciar o processo com `--model` |
 | P-02 | 8 | Sessões do adaptador Codex ficam em memória | Após reinício, a conversa é retomada via `thread/resume` pelo UUID; título/modelo da sessão se perdem | Aceito; persistência de metadados fica para a Etapa 13/14 se necessária |
+| P-12 | 15 | 15 testes E2E Playwright falham (config.spec, agentes-catalogo, chat, engine-accounts-limits, engine-live-tokens-full) | Falhas já presentes na base `fcc5f2d`; não são regressões desta migração | Corrigir em tarefa própria de estabilização do E2E |
+| P-13 | 15 | Sem suíte de acessibilidade para seleções/erros novos | Critério de acessibilidade da Etapa 15 não verificado automaticamente | Adicionar verificação (ex.: axe no Playwright) junto com P-12 |
 
 ---
 

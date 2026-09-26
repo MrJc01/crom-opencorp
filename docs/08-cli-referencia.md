@@ -23,6 +23,36 @@ opencorp settings path
 opencorp settings reset <chave> [--scope ...]
 ```
 
+## motores e migração (multimotores)
+
+```bash
+opencorp motores list [--json]      # motores, instalação, contas, padrão e cadeia de fallback
+opencorp motores set <id>           # grava settings.run_engine.default (nunca runner.json)
+opencorp motores test <id>          # saúde barata (sem inferência)
+
+opencorp migrate-configs            # dry-run: lista arquivos, campos e transformações
+opencorp migrate-configs --check    # exit 3 se houver migração pendente
+opencorp migrate-configs --apply    # backup (SHA-256) → validação → escrita atômica
+opencorp migrate-configs --rollback [backup-id]   # restaura byte a byte (padrão: último)
+opencorp migrate-configs --list-backups [--json] [--workspace <id>]
+```
+
+Exit codes do `migrate-configs`: 0 ok · 1 erro · 2 resultado inválido (nada alterado) · 3 pendente (`--check`) · 4 rollback falhou.
+
+API correspondente (Bearer token):
+
+| Rota | Função |
+|---|---|
+| `POST /api/motores/:id/test` | saúde multinível; corpo `{nivel, modelo, confirmarCusto, maxTokens, timeoutMs}`; níveis ≥ `inference` exigem `confirmarCusto: true` |
+| `POST /api/motores/:id/install` | instalação gerenciada explícita (artefato com SHA-256) |
+| `GET /modelos/catalogo` | catálogo com proveniência, motores compatíveis e probes |
+| `GET /api/config/migracao` | prévia da migração |
+| `POST /api/config/migracao/aplicar` | aplica; exige `{ "confirmar": true }` |
+| `POST /api/config/migracao/rollback` | restaura o último backup (ou `{ "backup": "<id>" }`) |
+| `GET /secretario/status?workspace=<id>` | motor resolvido do Secretário, origem e preflight |
+
+Probes reais (opt-in, consomem cota): `OPENCORP_REAL_PROBES=codex,copilot,mimo OPENCORP_PROBE_<MOTOR>_MODEL=<modelo> npm run test:real`.
+
 ## workspace
 
 ```bash

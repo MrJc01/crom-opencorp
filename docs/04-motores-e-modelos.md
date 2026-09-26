@@ -1,4 +1,4 @@
-# 04 — Guia de Motores e Modelos de IA (Dimensionamento xB)
+# 04 — Motores e Modelos de IA
 
 ## 1. Dimensionamento por Parâmetros (xB)
 
@@ -33,39 +33,90 @@ A auditoria identificou modelos que causam travamentos e comportamentos errátic
 
 ---
 
-## 3. Motores de Execução Conectados
+## 3. Arquitetura multimotores
 
-O OpenCorp conecta múltiplos motores através da pasta de binários e drivers em `src/core/engines/drivers/`:
+O OpenCorp não depende de um motor específico. Cada motor é um **adaptador** que implementa portas canônicas
+(`src/core/engines/ports.ts`):
 
-### A. Google Antigravity Engine (AGY)
-- **ID do Motor**: `antigravity`
-- **Binário**: `/home/j/.opencorp/bin/agy` ou `/home/j/.local/bin/agy`
-- **Modelos Suportados**: `google/gemini-2.5-flash`, `google/gemini-3.8-flash`, `google/gemini-2.5-pro`.
-- **Como Funciona**: Comunica-se nativamente com a API do Google AI Studio e infraestrutura DeepMind. Suporta skills em Markdown, subagentes e MCP.
-- **Configuração de Chave**:
-  Basta definir a variável de ambiente no sistema ou no `~/.bashrc`:
-  ```bash
-  export GEMINI_API_KEY="sua_chave_do_aistudio"
-  # ou
-  export GOOGLE_API_KEY="sua_chave_do_aistudio"
-  ```
+- `EngineAdapter` — instalação, autenticação, capacidades e saúde;
+- `AgentRunner` — execução one-shot (jobs, fluxos, agendador);
+- `ConversationRuntime` — conversa persistente (Secretário), com `respondApproval` escopado por workspace.
 
-### B. OpenCode Engine
-- **ID do Motor**: `opencode`
-- **Binário**: `/home/j/.opencorp/bin/opencode`
-- **Modelos Recomendados**:
-  - `opencode/nemotron-3-ultra-free` (Modelo de 550B parâmetros, ideal para raciocínio com cota gratuita).
-  - `opencode-go/glm-5.3-flash` (Excelente para respostas rápidas e estruturação).
-  - `openrouter/qwen/qwen3.8-27b:free` (Ótimo para redação de roteiros).
-  - `opencode/nemotron-3.5-lightning-free` (Alternativa rápida de fallback).
+Todos emitem os mesmos eventos `AgentEvent` (`run.started`, deltas de texto, ferramentas, aprovações,
+`run.completed`/`run.failed`). Processos residentes pertencem ao `ProcessRegistry`, um por
+`[engineId, workspaceId]`, encerrados após 15 min ociosos (`SIGTERM` → 5 s → `SIGKILL`).
 
-### C. OpenAI Codex CLI & GitHub Copilot CLI
-- **Codex (`codex`)**: Motor especializado em código (`~/.opencorp/bin/codex`).
-- **Copilot (`copilot`)**: Autenticado via token herdado do GitHub CLI (`gh auth status`).
+### Motores suportados
+
+| Motor | ID | Transporte | Conversa (Secretário) | Execução one-shot |
+| :--- | :--- | :--- | :---: | :---: |
+| OpenCode | `opencode` | `opencode serve` (HTTP + SSE, Basic auth, loopback) | ✅ | ✅ |
+| OpenAI Codex | `codex` | `codex app-server` (JSON-RPC stdio) | ✅ | ✅ |
+| GitHub Copilot | `copilot` | ACP v1 (`copilot --acp`) | ✅ | ✅ |
+| Xiaomi MiMo Code | `mimo` | ACP v1 (`mimo acp`) | ✅ | ✅ |
+| Claude Code | `claude-code` | CLI | — | ✅ |
+| Google Antigravity | `antigravity` | CLI | — | ✅ |
+| Cursor Agent | `cursor` | CLI | — | ✅ |
+| Crom-Agente | `crom-agente` | CLI | — | ✅ |
+| Aider | `aider` | CLI | — | ✅ |
+
+Motores sem runtime conversacional **não** podem ser escolhidos para o Secretário: a configuração é
+recusada com erro explícito.
+
+### Regras de operação (decisões D1–D6)
+
+1. **Sem fallback silencioso.** Motor configurado indisponível → erro explícito (`ENGINE_NOT_INSTALLED`,
+   `ENGINE_AUTH_REQUIRED`, `MODEL_INCOMPATIBLE`…). Nunca se cai em OpenCode sem estar configurado.
+2. **Resolução do binário:** `settings.engines[id].binary_path` → `PATH` → instalação gerenciada
+   (`~/.opencorp/engines/<id>/<versão>`, com SHA-256 verificado). Nada é instalado durante jobs ou chat;
+   instalar é uma ação explícita (UI ou `POST /api/motores/:id/install`).
+3. **Credenciais** passam por uma fachada de cofre e são injetadas de forma efêmera no processo; o OpenCorp não
+   lê arquivos internos de OAuth de CLIs de terceiros.
+4. **ACP** (Agent Client Protocol v1) é transporte de primeira classe: qualquer agente compatível entra
+   declarando um vendor em `src/core/engines/acp/vendors.ts`.
+
+### Configuração
+
+`~/.opencorp/settings.json`:
+
+```json
+{
+  "default_conversation_engine": "codex",
+  "run_engine": { "default": "claude-code", "timeout_min": 30, "fallback": ["codex"] },
+  "engines": {
+    "claude-code": { "binary_path": "/opt/claude/bin/claude" },
+    "codex": { "limits": { "rate_limit_rpm": 10 } }
+  }
+}
+```
+
+- `default_conversation_engine` — motor do Secretário; cada workspace pode sobrepor com
+  `conversationEngineOverride` em `.opencorp/config.json`.
+- `run_engine.default` — motor das execuções one-shot; `run_engine.fallback` é a **única** cadeia de troca de
+  motor permitida (vazia = nunca trocar).
+- O antigo `~/.opencorp/runner.json` ainda é lido, com aviso de depreciação, até a remoção descrita em
+  [`DEPRECACOES-MULTIMOTORES.md`](DEPRECACOES-MULTIMOTORES.md). Migre com `opencorp migrate-configs --apply`.
+
+### Saúde multinível
+
+`POST /api/motores/:id/test` (UI: "Diagnóstico rápido" / "Teste funcional") avalia, em ordem:
+`installed → authenticated → inference → streaming → tools → conversation → lifecycle`.
+O padrão para em `authenticated` (sem custo). Níveis a partir de `inference` consomem cota e exigem
+`{ "confirmarCusto": true, "modelo": "<id>" }`. "Instalado" nunca é reportado como "funcionando".
+
+### Catálogo e rotação
+
+- O catálogo (`GET /modelos/catalogo`) agrega fontes com **proveniência** (manifesto, CLI do motor, probes)
+  e indica em quais motores cada modelo é compatível.
+- Prefixos como `opencode/`, `codex/`, `claude-code/` fixam o motor; `openrouter/` e `mimo/` não.
+  Motor explícito + modelo de outro motor → `MODEL_INCOMPATIBLE` antes de qualquer spawn.
+- O roteador de fallback (`src/core/models/fallback-router.ts`) decide, e registra no log de auditoria:
+  rotacionar conta → próximo modelo da rotação → próximo motor (só com cadeia explícita e compatibilidade
+  comprovada) → parar.
 
 ---
 
-## 4. Filtragem de Modelos via CLI
+## 4. Consulta via CLI
 
 Para consultar e filtrar os modelos no OpenCorp:
 
@@ -83,4 +134,10 @@ oc modelos --min-b 14 --max-b 70
 
 # Ocultar modelos não recomendados
 oc modelos --recommended
+
+# Testar um motor (saúde barata, sem inferência)
+oc motores test codex
+
+# Migrar configuração legada (runner.json, campos antigos de agentes)
+oc migrate-configs --check
 ```

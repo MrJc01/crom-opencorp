@@ -368,15 +368,20 @@ O OpenCorp conta com um subsistema completo de **Observabilidade e Telemetria de
 
 ## 🧩 Arquitetura, Motores & Rotação de IA
 
-O OpenCorp oferece suporte a múltiplos motores de execução (harnesses) e um sistema resiliente em camadas de tolerância a falhas:
+O OpenCorp é **independente de motor**: agentes, fluxos e o Secretário falam com portas canônicas
+(`AgentRunner`, `ConversationRuntime`) e cada motor é um adaptador.
 
-* **OpenCode Engine:** Runner local isolado com suporte a MCP, ferramentas customizadas e histórico de sessões.
-* **Claude Code Engine:** Execução orquestrada com Claude.
-* **Antigravity Engine:** Integração nativa com o ecossistema Google Antigravity.
-* **Provedores de Inferência Direta:** OpenRouter, Google AI Studio, Anthropic e OpenAI.
-* **🔄 Sistema de Rotação Automática de IA:**
-  - **Rotação de Contas:** Se uma chave atinge rate-limit ou cota (429), o sistema rotaciona para a próxima conta de API disponível via `EngineAccountStore`.
-  - **Fallback Circular de Modelos:** Se um modelo cair, a requisição transita suavemente para o próximo da lista de contingência (ex: GLM → Gemini → Nemotron → Qwen) sem interromper a sessão do usuário.
+* **Conversa persistente (Secretário):** OpenCode (`opencode serve`), OpenAI Codex (`app-server`), GitHub Copilot e Xiaomi MiMo (via **ACP v1**).
+* **Execução one-shot:** todos os anteriores, mais Claude Code, Google Antigravity, Cursor Agent, Aider e Crom-Agente.
+* **Sem fallback silencioso:** motor configurado indisponível gera erro explícito; troca de motor só ocorre com cadeia explícita (`settings.run_engine.fallback`) e compatibilidade comprovada.
+* **Processos controlados:** um processo residente por motor × workspace, encerrado após 15 min ocioso; nenhuma instalação acontece durante jobs ou chat.
+* **Saúde multinível:** do "instalado" ao "conversa funcional", com confirmação antes de qualquer teste que consuma cota.
+* **🔄 Rotação auditável:** conta → próximo modelo → próximo motor (se permitido) → parar, com cada decisão registrada.
+
+Configurações antigas (`~/.opencorp/runner.json`, `harness:` em agentes) continuam sendo lidas com aviso.
+Para migrar: `opencorp migrate-configs --apply` (com backup e `--rollback`). Cronograma de remoção em
+[`docs/DEPRECACOES-MULTIMOTORES.md`](docs/DEPRECACOES-MULTIMOTORES.md). Detalhes em
+[`docs/04-motores-e-modelos.md`](docs/04-motores-e-modelos.md).
 
 ---
 
@@ -396,6 +401,9 @@ npx vitest run tests/workspace-isolation.test.ts
 
 # Executar a suíte completa de testes End-to-End no browser (Playwright)
 npm run test:e2e
+
+# Probes contra motores reais (opt-in; consomem cota)
+OPENCORP_REAL_PROBES=codex,copilot OPENCORP_PROBE_CODEX_MODEL=<modelo> npm run test:real
 ```
 
 ---
