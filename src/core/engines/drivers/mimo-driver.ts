@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { spawn } from "node:child_process";
 import { delimiter, join } from "node:path";
 import {
@@ -183,10 +184,7 @@ export class MimoDriver implements EngineDriver {
     return {
       binary: status.path || this.comandoPadrao,
       args,
-      env: {
-        ...(process.env as Record<string, string>),
-        ...(opts.envOverrides || {}),
-      },
+      env: await resolveEngineSpawnEnv(this.id, opts, { ...(opts.envOverrides || {}) }),
       cwd: opts.workspacePath,
     };
   }

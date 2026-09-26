@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import {
   safeExecFile as execFileAsync,
@@ -8,7 +9,7 @@ import {
   type EngineExecutionOptions,
   type EngineTokenUsage,
 } from "../types.js";
-import { resolveEngineCredentials, checkEngineAuthStatus } from "../credentials-bridge.js";
+import { resolveEngineCredentials, checkEngineAuthStatus, probeCliLogin } from "../credentials-bridge.js";
 
 export class ClaudeCodeDriver implements EngineDriver {
   id = "claude-code";
@@ -148,13 +149,10 @@ export class ClaudeCodeDriver implements EngineDriver {
     // Execução headless usando o modo print (-p) do Claude Code
     const args: string[] = ["-p", opts.prompt];
 
-    const creds = resolveEngineCredentials(opts.homeDir);
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      ...creds,
+    const env: Record<string, string> = await resolveEngineSpawnEnv(this.id, opts, {
       ANTHROPIC_DISABLE_TELEMETRY: "1",
       ...(opts.envOverrides || {}),
-    };
+    });
 
     return {
       binary: bin,
@@ -213,36 +211,20 @@ export class ClaudeCodeDriver implements EngineDriver {
       } catch {}
     }
 
-    // Checa sessão OAuth Claude Pro/Team
-    const claudeCreds = join(homeDir, ".claude", ".credentials.json");
-    if (existsSync(claudeCreds)) {
-      try {
-        const raw = readFileSync(claudeCreds, "utf8");
-        const j = JSON.parse(raw);
-        const oauth = j.claudeAiOauth;
-        const hasToken = Boolean(oauth?.accessToken || oauth?.refreshToken);
-        const expiresAt = oauth?.refreshTokenExpiresAt ? Number(oauth.refreshTokenExpiresAt) : 0;
-        const isExpired = expiresAt > 0 && expiresAt < Date.now();
-
-        if (hasToken && !isExpired) {
-          const daysLeft = Math.round((expiresAt - Date.now()) / 86400000);
-          return {
-            motorId: this.id,
-            motorName: this.name,
-            source: "oauth_session",
-            provedor: "Claude Pro/Team (OAuth CLI)",
-            tokensDisponiveis: "ilimitado",
-            statusCota: "normal",
-            mensagem: `Claude Code: Assinatura Pro/Team ativa via OAuth (~${daysLeft} dias restantes)`,
-            resetaEm: expiresAt > 0 ? new Date(expiresAt).toISOString() : undefined,
-            consultadoEm: now,
-            detalhes: {
-              oauth_expires_at: expiresAt,
-              has_access_token: Boolean(oauth?.accessToken),
-            },
-          };
-        }
-      } catch {}
+    // Sessão OAuth: verificada pelo comando oficial `claude auth status`,
+    // nunca lendo ~/.claude/.credentials.json (D4).
+    const sessao = probeCliLogin(this.id, homeDir);
+    if (sessao?.loggedIn) {
+      return {
+        motorId: this.id,
+        motorName: this.name,
+        source: "oauth_session",
+        provedor: "Claude (OAuth CLI)",
+        tokensDisponiveis: "ilimitado",
+        statusCota: "normal",
+        mensagem: `Claude Code: sessão ativa via ${sessao.method}${sessao.details ? ` (${sessao.details})` : ""}`,
+        consultadoEm: now,
+      };
     }
 
     return {

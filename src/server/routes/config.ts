@@ -10,6 +10,7 @@ import {
   engineRegistry,
   getEngineAuthInstructions,
   checkEngineAuthStatus,
+  logoutCliSession,
   EngineAccountStore,
   WebLoginOrchestrator,
 } from "../../core/engines/index.js";
@@ -632,6 +633,7 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
         authType?: "token" | "apiKey" | "deviceOAuth";
         tokenOuChave?: string;
         limits?: any;
+        workspaces?: string[];
       };
       if (!corpo.nome || corpo.nome.trim().length === 0) {
         enviar(res, 400, { erro: "Nome da conta é obrigatório" });
@@ -659,6 +661,20 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
     const contaId = decodeURIComponent(mLimitesConta[2]!);
     const corpo = (await lerCorpo(req)) as any;
     const atualizada = await accts.atualizarLimitesConta(contaId, corpo);
+    enviar(res, 200, { ok: true, conta: sanitizarContaEngine(atualizada) });
+    return true;
+  }
+
+  // PUT /api/motores/:id/contas/:contaId/workspaces — restringe a conta a workspaces
+  const mWorkspacesConta = /^\/api\/motores\/([^/]+)\/contas\/([^/]+)\/workspaces$/.exec(rota);
+  if (mWorkspacesConta && req.method === "PUT") {
+    const contaId = decodeURIComponent(mWorkspacesConta[2]!);
+    const corpo = (await lerCorpo(req)) as { workspaces?: unknown };
+    if (corpo.workspaces !== undefined && !Array.isArray(corpo.workspaces)) {
+      enviar(res, 400, { erro: "workspaces deve ser uma lista de IDs (vazia = todos os workspaces)" });
+      return true;
+    }
+    const atualizada = await accts.definirWorkspacesConta(contaId, (corpo.workspaces as string[] | undefined) ?? []);
     enviar(res, 200, { ok: true, conta: sanitizarContaEngine(atualizada) });
     return true;
   }
@@ -741,9 +757,21 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
   }
 
   // POST /api/motores/:id/desconectar
+  // Por padrão só altera a configuração do OpenCorp; a sessão do CLI externo
+  // (ex.: ~/.codex) é preservada. Encerrar a sessão externa exige
+  // `{ encerrarSessaoExterna: true, confirmacao: "<motorId>" }`.
   const mDesconectarMotor = /^\/api\/motores\/([^/]+)\/desconectar$/.exec(rota);
   if (mDesconectarMotor && req.method === "POST") {
     const motorId = decodeURIComponent(mDesconectarMotor[1]!);
+    const corpoDesc = (await lerCorpo(req).catch(() => ({}))) as { encerrarSessaoExterna?: boolean; confirmacao?: string };
+    let sessaoExterna: { ok: boolean; message: string } | undefined;
+    if (corpoDesc.encerrarSessaoExterna) {
+      sessaoExterna = logoutCliSession(motorId, home, String(corpoDesc.confirmacao ?? ""));
+      if (!sessaoExterna.ok) {
+        enviar(res, 400, { ok: false, motorId, erro: sessaoExterna.message });
+        return true;
+      }
+    }
     const rPath = join(home, ".opencorp", "runner.json");
     const novoRunner = {
       engine: "opencode",
@@ -751,7 +779,14 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
       timeout_min: 20,
     };
     await writeFileAtomic(rPath, `${JSON.stringify(novoRunner, null, 2)}\n`);
-    enviar(res, 200, { ok: true, motorId, desconectado: true, runner: novoRunner });
+    enviar(res, 200, {
+      ok: true,
+      motorId,
+      desconectado: true,
+      runner: novoRunner,
+      sessaoExternaPreservada: !sessaoExterna,
+      ...(sessaoExterna ? { sessaoExterna: sessaoExterna.message } : {}),
+    });
     return true;
   }
 

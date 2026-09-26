@@ -1,3 +1,4 @@
+import { fetchOpencode } from "../../core/contexts/execution/opencode-server.js";
 import { join } from "node:path";
 import { eventBus } from "../../core/shared/event-bus.js";
 import {
@@ -70,7 +71,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
       return;
     }
     try {
-      const res = await fetch(`http://127.0.0.1:${porta}/session/${sessaoId}/message`, { signal: AbortSignal.timeout(5000) });
+      const res = await fetchOpencode(`http://127.0.0.1:${porta}/session/${sessaoId}/message`, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) return;
       const msgs = (await res.json()) as Array<{
         info?: { id?: string; role?: string; agent?: string; time?: { created?: number; completed?: number } };
@@ -163,7 +164,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
     if (id.startsWith("ses_")) {
       try {
         const porta = await getPortaOpencode();
-        await fetch(`http://127.0.0.1:${porta}/session/${encodeURIComponent(id)}/abort`, { method: "POST" });
+        await fetchOpencode(`http://127.0.0.1:${porta}/session/${encodeURIComponent(id)}/abort`, { method: "POST" });
         cancelado = true;
       } catch { }
     } else {
@@ -536,8 +537,8 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
       const porta = await getPortaOpencode(true);
       const opencodeUrl = `http://127.0.0.1:${porta}/session`;
       const [resOpencode, resStatus] = await Promise.all([
-        fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) }),
-        fetch(`http://127.0.0.1:${porta}/session/status`, { signal: AbortSignal.timeout(3000) }).catch(() => null),
+        fetchOpencode(opencodeUrl, { signal: AbortSignal.timeout(5000) }),
+        fetchOpencode(`http://127.0.0.1:${porta}/session/status`, { signal: AbortSignal.timeout(3000) }).catch(() => null),
       ]);
       if (!resOpencode.ok) {
         enviar(res, 502, { erro: `opencode respondeu ${resOpencode.status}` });
@@ -673,8 +674,8 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
       const sessionId = decodeURIComponent(mMensagens[1]!);
       const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}/message`;
       const [resOpencode, resStatus] = await Promise.all([
-        fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) }),
-        fetch(`http://127.0.0.1:${porta}/session/status`, { signal: AbortSignal.timeout(3000) }).catch(() => null),
+        fetchOpencode(opencodeUrl, { signal: AbortSignal.timeout(5000) }),
+        fetchOpencode(`http://127.0.0.1:${porta}/session/status`, { signal: AbortSignal.timeout(3000) }).catch(() => null),
       ]);
       if (!resOpencode.ok) {
         enviar(res, resOpencode.status === 404 ? 404 : 502, {
@@ -771,7 +772,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
           const sessaoZumbi = isSessaoBusy && !temStreamAtivo && criadoEmMs > 0 && (agora - criadoEmMs > 45_000);
           if (sessaoZumbi) {
             isSessaoBusy = false;
-            void fetch(`http://127.0.0.1:${porta}/session/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }).catch(() => { });
+            void fetchOpencode(`http://127.0.0.1:${porta}/session/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }).catch(() => { });
           }
 
           const expirou = (!isSessaoBusy || sessaoZumbi) && !m.info?.time?.completed && criadoEmMs > 0 && (agora - criadoEmMs > 45_000);
@@ -961,7 +962,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
       const porta = await getPortaOpencode();
       const sessionId = decodeURIComponent(mSessaoDetalhe[1]!);
       const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}`;
-      const resOpencode = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
+      const resOpencode = await fetchOpencode(opencodeUrl, { signal: AbortSignal.timeout(5000) });
       if (!resOpencode.ok) {
         if (resOpencode.status === 404) {
           enviar(res, 404, { erro: "sessão não encontrada" });
@@ -1023,7 +1024,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
         const opencodeUrl = `http://127.0.0.1:${porta}/session/${sessionId}/message`;
         let resOp: Response;
         try {
-          resOp = await fetch(opencodeUrl, { signal: AbortSignal.timeout(5000) });
+          resOp = await fetchOpencode(opencodeUrl, { signal: AbortSignal.timeout(5000) });
         } catch {
           enviar(res, 502, { ok: false, erro: "Sessão não encontrada ou indisponível no upstream" });
           return true;
@@ -1096,7 +1097,7 @@ export async function handleSessionRoutes(ctx: RouteContext): Promise<boolean> {
       }
       if (removidos === 0 && idsParaRemover.length > 0) {
         try {
-          const truncRes = await fetch(`http://127.0.0.1:${porta}/session/${sessionId}/truncate`, {
+          const truncRes = await fetchOpencode(`http://127.0.0.1:${porta}/session/${sessionId}/truncate`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ manter_ate: manter }),

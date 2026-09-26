@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync } from "node:fs";
+import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import {
   safeExecFile as execFileAsync,
@@ -171,12 +172,9 @@ export class CursorDriver implements EngineDriver {
     // Execução headless do Cursor Agent (-p não-interativo, --force para aplicar edições)
     const args: string[] = ["-p", "--force", opts.prompt];
 
-    const creds = resolveEngineCredentials(opts.homeDir);
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      ...creds,
+    const env: Record<string, string> = await resolveEngineSpawnEnv(this.id, opts, {
       ...(opts.envOverrides || {}),
-    };
+    });
 
     return {
       binary: bin,

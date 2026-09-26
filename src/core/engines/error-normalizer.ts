@@ -1,3 +1,4 @@
+import { redactKnownSecrets } from "../credentials/credentials-store.js";
 import {
   EngineAuthRequiredError,
   EngineCapabilityUnavailableError,
@@ -22,7 +23,8 @@ export function normalizeEngineError(raw: unknown, options: ErrorNormalizationOp
 
   const engineId = options.engineId || "unknown";
   const err = raw as any;
-  const message = String(err?.message || err || options.defaultMessage || "Erro desconhecido do motor");
+  // Mensagens de fornecedor podem ecoar chaves (ex.: "invalid key sk-..."); nunca propagar.
+  const message = redactKnownSecrets(String(err?.message || err || options.defaultMessage || "Erro desconhecido do motor"));
   const lowerMessage = message.toLowerCase();
   const code = String(err?.code || "").toLowerCase();
 

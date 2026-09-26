@@ -1,3 +1,4 @@
+import { fetchOpencode } from "../../../core/contexts/execution/opencode-server.js";
 import {
   limparPrefixoWorkspace,
   SecretarioError,
@@ -195,7 +196,7 @@ export async function handleConversaRoutes(ctx: RouteContext): Promise<boolean> 
       let sessaoExiste = false;
       if (sessaoId) {
         try {
-          const checkRes = await fetch(`${baseUrl}/session/${encodeURIComponent(sessaoId)}`, {
+          const checkRes = await fetchOpencode(`${baseUrl}/session/${encodeURIComponent(sessaoId)}`, {
             signal: AbortSignal.timeout(3000),
           });
           if (checkRes.ok) sessaoExiste = true;
@@ -203,7 +204,7 @@ export async function handleConversaRoutes(ctx: RouteContext): Promise<boolean> 
       }
 
       if (!sessaoId || !sessaoExiste) {
-        const createRes = await fetch(`${baseUrl}/session`, {
+        const createRes = await fetchOpencode(`${baseUrl}/session`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -239,19 +240,19 @@ export async function handleConversaRoutes(ctx: RouteContext): Promise<boolean> 
         const modelPayload = modProvider && modId ? { providerID: modProvider, modelID: modId } : undefined;
 
         if (mIdx > 0) {
-          await fetch(`${baseUrl}/session/${sessaoId}/abort`, { method: "POST" }).catch(() => { });
+          await fetchOpencode(`${baseUrl}/session/${sessaoId}/abort`, { method: "POST" }).catch(() => { });
           await sleep(300);
           await trocarModeloEngine(baseUrl, sessaoId, mod);
           await sleep(150);
         }
 
-        const msgsAntes = (await fetch(`${baseUrl}/session/${sessaoId}/message`, { signal: AbortSignal.timeout(4000) })
+        const msgsAntes = (await fetchOpencode(`${baseUrl}/session/${sessaoId}/message`, { signal: AbortSignal.timeout(4000) })
           .then((r) => (r.ok ? r.json() : []))
           .catch(() => [])) as MensagemOc[];
         const idsAntes = new Set((Array.isArray(msgsAntes) ? msgsAntes : []).map((m) => m.info?.id).filter(Boolean));
 
         try {
-          const msgRes = await fetch(`${baseUrl}/session/${sessaoId}/message`, {
+          const msgRes = await fetchOpencode(`${baseUrl}/session/${sessaoId}/message`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
@@ -292,7 +293,7 @@ export async function handleConversaRoutes(ctx: RouteContext): Promise<boolean> 
         const inicio = Date.now();
         while (Date.now() - inicio < timeoutMs) {
           await sleep(2000);
-          const getRes = await fetch(`${baseUrl}/session/${sessaoId}/message`, { signal: AbortSignal.timeout(5000) });
+          const getRes = await fetchOpencode(`${baseUrl}/session/${sessaoId}/message`, { signal: AbortSignal.timeout(5000) });
           if (!getRes.ok) continue;
           const msgs = (await getRes.json()) as Array<{
             info?: { role?: string; time?: { completed?: number } };

@@ -57,7 +57,8 @@ export interface ProvedorInfo {
 }
 
 /**
- * Resolve todas as chaves de API conhecidas nos locais de configuração do OpenCorp e OpenCode.
+ * Resolve as chaves de API geridas pelo OpenCorp. Arquivos internos de CLIs de
+ * terceiros (ex.: `~/.local/share/opencode/auth.json`) não são lidos (D4).
  */
 export function obterChavesProvedores(homeDir?: string): Record<string, string> {
   const home = homeDir ?? opencorpHome();
@@ -65,7 +66,6 @@ export function obterChavesProvedores(homeDir?: string): Record<string, string> 
 
   const arquivosAuth = [
     join(home, ".opencorp", "opencode-data", "opencode", "auth.json"),
-    join(home, ".local", "share", "opencode", "auth.json"),
     join(home, ".opencorp", "opencode-home", ".opencode", "auth.json"),
   ];
 

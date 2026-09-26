@@ -4,7 +4,8 @@ export type EngineErrorCode =
   | "PREFLIGHT_BINARY_MISSING"
   | "ENGINE_AUTH_REQUIRED"
   | "MODEL_INCOMPATIBLE"
-  | "ENGINE_CAPABILITY_UNAVAILABLE";
+  | "ENGINE_CAPABILITY_UNAVAILABLE"
+  | "CREDENTIAL_SCOPE_DENIED";
 
 export interface EngineErrorOptions {
   engineId?: string;

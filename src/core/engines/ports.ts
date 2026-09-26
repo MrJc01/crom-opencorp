@@ -28,6 +28,12 @@ export interface EngineLoginInput {
 export interface EngineAuthenticator {
   readonly engineId: string;
   status(homeDir: string, accountId?: string): Promise<EngineAuthStatus>;
+  /**
+   * Sessão nativa do CLI verificada pelo comando oficial de status (ex.:
+   * `codex login status`), nunca por leitura de arquivos internos. `undefined`
+   * quando o motor não oferece verificação.
+   */
+  isLoggedIn?(homeDir: string): Promise<boolean | undefined>;
   login?(input: EngineLoginInput): Promise<{ success: boolean; message: string }>;
   logout?(accountId?: string): Promise<void>;
   fetchTokens?(
@@ -47,6 +53,8 @@ export interface AgentRunInput {
   homeDir: string;
   envOverrides?: Record<string, string>;
   timeoutMs?: number;
+  /** Conta explícita; falha antes do spawn se não autorizada para o workspace. */
+  accountId?: string;
 }
 
 export interface AgentRunner {

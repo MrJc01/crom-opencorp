@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, copyFileSync, chmodSync } from "node:fs";
+import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import { envOpencodeIsolado } from "../../contexts/execution/opencode-server.js";
 import {
@@ -208,10 +209,13 @@ export class OpencodeDriver implements EngineDriver {
     }
     args.push(opts.prompt);
 
-    const env = envOpencodeIsolado(opts.homeDir, opts.workspaceId, opts.workspacePath) as Record<string, string>;
-    if (opts.envOverrides) {
-      Object.assign(env, opts.envOverrides);
-    }
+    // Base isolada (XDG por workspace) sem segredos herdados + chaves permitidas ao OpenCode.
+    const env = await resolveEngineSpawnEnv(
+      this.id,
+      opts,
+      { ...(opts.envOverrides || {}) },
+      envOpencodeIsolado(opts.homeDir, opts.workspaceId, opts.workspacePath)
+    );
 
     return {
       binary: bin,

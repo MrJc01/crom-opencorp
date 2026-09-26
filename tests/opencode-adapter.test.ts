@@ -52,7 +52,7 @@ describe("ETAPA 6 — Adaptador OpenCode Completo", () => {
         const auth = req.headers.authorization;
 
         // Validação de autenticação local
-        if (expectedToken && auth !== `Bearer ${expectedToken}`) {
+        if (expectedToken && auth !== `Basic ${Buffer.from(`opencode:${expectedToken}`).toString("base64")}`) {
           res.writeHead(401, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Unauthorized" }));
           return;

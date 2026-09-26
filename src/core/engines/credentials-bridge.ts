@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 export interface EngineAuthStatus {
   authenticated: boolean;
@@ -11,284 +11,195 @@ export interface EngineAuthStatus {
 }
 
 /**
- * Lê e unifica credenciais de todas as fontes disponíveis na máquina do usuário:
- * 1. auth.json do OpenCorp (~/.opencorp/opencode-data/opencode/auth.json)
- * 2. auth.json do sistema (~/.local/share/opencode/auth.json)
- * 3. Token do GitHub CLI (gh auth token) para Copilot
- * 4. Sessão OAuth do Claude (~/.claude/.credentials.json)
- * 5. Variáveis de ambiente do host
+ * Chaves de provedor geridas pelo OpenCorp (painel "Chaves de API") mais o
+ * ambiente do host. Não lê arquivos internos de CLIs de terceiros nem extrai
+ * tokens de outras ferramentas (D4). Para montar o ambiente de um processo de
+ * motor use `CredentialsStore.resolveForSpawn`, que aplica a política por motor
+ * e workspace — esta função serve a diagnósticos e chamadas internas.
  */
 export function resolveEngineCredentials(homeDir: string): Record<string, string> {
   const env: Record<string, string> = {};
-
-  // 1. Chaves salvas no auth.json do OpenCorp ou do sistema
-  const pathsAuth = [
-    join(homeDir, ".opencorp", "opencode-data", "opencode", "auth.json"),
-    join(homeDir, ".local", "share", "opencode", "auth.json"),
-    join(homeDir, ".local", "share", "opencode", "auth.json.bak"),
-  ];
-
-  for (const authPath of pathsAuth) {
-    if (existsSync(authPath)) {
-      try {
-        const raw = readFileSync(authPath, "utf8");
-        const auth = JSON.parse(raw);
-        if (auth.openrouter?.key && !env.OPENROUTER_API_KEY) {
-          env.OPENROUTER_API_KEY = auth.openrouter.key;
-        }
-        if (auth.anthropic?.key && !env.ANTHROPIC_API_KEY) {
-          env.ANTHROPIC_API_KEY = auth.anthropic.key;
-        }
-        if (auth.openai?.key && !env.OPENAI_API_KEY) {
-          env.OPENAI_API_KEY = auth.openai.key;
-        }
-        if (auth.google?.key && !env.GEMINI_API_KEY) {
-          env.GEMINI_API_KEY = auth.google.key;
-        }
-      } catch {}
-    }
-  }
-
-  // 2. Token do GitHub CLI para o GitHub Copilot
-  if (!env.GITHUB_TOKEN && !process.env.GITHUB_TOKEN) {
+  const authPath = join(homeDir, ".opencorp", "opencode-data", "opencode", "auth.json");
+  if (existsSync(authPath)) {
     try {
-      const tok = execSync("gh auth token", { timeout: 2500, encoding: "utf8" }).trim();
-      if (tok && tok.startsWith("gh")) {
-        env.GITHUB_TOKEN = tok;
-        env.GH_TOKEN = tok;
-        env.COPILOT_GITHUB_TOKEN = tok;
-      }
+      const auth = JSON.parse(readFileSync(authPath, "utf8"));
+      if (auth.openrouter?.key) env.OPENROUTER_API_KEY = auth.openrouter.key;
+      if (auth.anthropic?.key) env.ANTHROPIC_API_KEY = auth.anthropic.key;
+      if (auth.openai?.key) env.OPENAI_API_KEY = auth.openai.key;
+      if (auth.google?.key) env.GEMINI_API_KEY = auth.google.key;
     } catch {}
   }
-
-  // 3. Repassa chaves do process.env se ainda não definidas
-  if (!env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY) {
-    env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  for (const name of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "CURSOR_API_KEY", "GEMINI_API_KEY", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"]) {
+    if (!env[name] && process.env[name]) env[name] = process.env[name]!;
   }
-  if (!env.OPENAI_API_KEY && process.env.OPENAI_API_KEY) {
-    env.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-  }
-  if (!env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY) {
-    env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-  }
-  if (!env.CURSOR_API_KEY && process.env.CURSOR_API_KEY) {
-    env.CURSOR_API_KEY = process.env.CURSOR_API_KEY;
-  }
-  if (!env.GEMINI_API_KEY && process.env.GEMINI_API_KEY) {
-    env.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-  }
-
   return env;
 }
 
+/** Contas do EngineAccountStore com chave, lidas sem expor valores. */
+function engineAccountWithKey(homeDir: string, engineId: string): { id: string; nome: string } | undefined {
+  const path = join(homeDir, ".opencorp", "engine-accounts.json");
+  if (!existsSync(path)) return undefined;
+  try {
+    const contas = JSON.parse(readFileSync(path, "utf8")) as Array<{ id: string; nome: string; motorId: string; ativa?: boolean; tokenOuChave?: string }>;
+    const conta = contas.find((c) => c.motorId === engineId && c.ativa && c.tokenOuChave);
+    return conta ? { id: conta.id, nome: conta.nome } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export interface CliLoginResult {
+  loggedIn: boolean;
+  method: string;
+  details?: string;
+}
+
+export type CommandRunner = (bin: string, args: string[], timeoutMs: number) => { code: number; stdout: string };
+
+const defaultCommandRunner: CommandRunner = (bin, args, timeoutMs) => {
+  try {
+    const stdout = execFileSync(bin, args, { timeout: timeoutMs, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return { code: 0, stdout };
+  } catch (error) {
+    const e = error as { status?: number | null; stdout?: string };
+    return { code: typeof e.status === "number" ? e.status : 1, stdout: String(e.stdout ?? "") };
+  }
+};
+
+let commandRunner: CommandRunner = defaultCommandRunner;
+const PROBE_CACHE_TTL_MS = 30_000;
+const probeCache = new Map<string, { at: number; result: CliLoginResult | undefined }>();
+
+/** Substitui o executor de comandos dos probes (testes). Retorna o anterior. */
+export function setCliLoginCommandRunner(runner: CommandRunner | undefined): CommandRunner {
+  const previous = commandRunner;
+  commandRunner = runner ?? defaultCommandRunner;
+  probeCache.clear();
+  return previous;
+}
+
+function managedOrPath(homeDir: string, name: string): string {
+  const managed = join(homeDir, ".opencorp", "bin", name);
+  return existsSync(managed) ? managed : name;
+}
+
 /**
- * Diagnóstico real de autenticação de cada agente (evita falsos positivos / "testes placebo")
+ * Verifica a sessão OAuth nativa de um CLI pelo comando oficial de status —
+ * nunca lendo os arquivos internos da ferramenta. Resultado em cache por 30 s.
+ * `undefined` significa que o motor não oferece um comando verificável.
+ */
+export function probeCliLogin(engineId: string, homeDir: string): CliLoginResult | undefined {
+  const key = `${engineId}::${homeDir}`;
+  const cached = probeCache.get(key);
+  if (cached && Date.now() - cached.at < PROBE_CACHE_TTL_MS) return cached.result;
+  const result = runCliLoginProbe(engineId, homeDir);
+  probeCache.set(key, { at: Date.now(), result });
+  return result;
+}
+
+function runCliLoginProbe(engineId: string, homeDir: string): CliLoginResult | undefined {
+  switch (engineId) {
+    case "claude-code": {
+      const { code, stdout } = commandRunner(managedOrPath(homeDir, "claude"), ["auth", "status", "--json"], 5000);
+      try {
+        const status = JSON.parse(stdout) as { loggedIn?: boolean; authMethod?: string; subscriptionType?: string };
+        return {
+          loggedIn: status.loggedIn === true,
+          method: status.loggedIn ? `claude auth (${status.authMethod ?? "oauth"})` : "claude auth status",
+          details: status.loggedIn ? status.subscriptionType : "Execute 'claude auth login'",
+        };
+      } catch {
+        return { loggedIn: false, method: "claude auth status", details: code === 0 ? "saída não reconhecida" : "comando indisponível" };
+      }
+    }
+    case "codex": {
+      const { code, stdout } = commandRunner(managedOrPath(homeDir, "codex"), ["login", "status"], 5000);
+      const text = stdout.toLowerCase();
+      const loggedIn = code === 0 && text.includes("logged in") && !text.includes("not logged in");
+      return { loggedIn, method: "codex login status", details: stdout.trim().split("\n")[0] || undefined };
+    }
+    case "cursor": {
+      const { stdout } = commandRunner(managedOrPath(homeDir, "agent"), ["status", "--format", "json"], 5000);
+      try {
+        const status = JSON.parse(stdout) as { isAuthenticated?: boolean; message?: string };
+        return { loggedIn: status.isAuthenticated === true, method: "agent status", details: status.message };
+      } catch {
+        return { loggedIn: false, method: "agent status", details: "comando indisponível" };
+      }
+    }
+    case "copilot": {
+      const { code } = commandRunner("gh", ["auth", "status"], 5000);
+      return { loggedIn: code === 0, method: "gh auth status", details: code === 0 ? "GitHub CLI autenticado" : "Execute 'gh auth login' ou 'copilot login'" };
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Diagnóstico de autenticação de cada motor. Considera, nesta ordem: conta
+ * ativa do OpenCorp, chaves geridas/ambiente e o comando oficial de status do
+ * CLI. Nunca lê tokens de arquivos internos de terceiros.
  */
 export function checkEngineAuthStatus(engineId: string, homeDir: string): EngineAuthStatus {
   const creds = resolveEngineCredentials(homeDir);
+  const conta = engineAccountWithKey(homeDir, engineId);
+  if (conta) {
+    return { authenticated: true, method: "Conta OpenCorp", account: conta.nome, accountId: conta.id, details: "Credencial da conta ativa" };
+  }
 
   switch (engineId) {
-    case "opencode": {
-      const hasKey = Boolean(creds.OPENROUTER_API_KEY || creds.ANTHROPIC_API_KEY || creds.OPENAI_API_KEY);
-      if (hasKey) {
-        return {
-          authenticated: true,
-          method: creds.OPENROUTER_API_KEY ? "OpenRouter BYOK" : "API Key",
-          details: creds.OPENROUTER_API_KEY ? "Chave OpenRouter ativa" : "Chave direta configurada",
-        };
-      }
-      return {
-        authenticated: false,
-        method: "Nenhum provedor autenticado",
-        details: "Adicione sua chave em Configurações > Chaves de API",
-      };
-    }
-
-    case "crom-agente": {
-      const hasKey = Boolean(creds.OPENROUTER_API_KEY || creds.OPENAI_API_KEY || creds.ANTHROPIC_API_KEY);
-      if (hasKey) {
-        return {
-          authenticated: true,
-          method: creds.OPENROUTER_API_KEY ? "OpenRouter (Universal)" : "API Key Direta",
-          details: "Autenticado para loop ReAct",
-        };
-      }
-      return {
-        authenticated: false,
-        method: "Chave de LLM ausente",
-        details: "Requer OPENROUTER_API_KEY ou OPENAI_API_KEY",
-      };
+    case "opencode":
+    case "crom-agente":
+    case "aider": {
+      const hasKey = Boolean(creds.OPENROUTER_API_KEY || creds.ANTHROPIC_API_KEY || creds.OPENAI_API_KEY || (engineId !== "crom-agente" && creds.GEMINI_API_KEY));
+      return hasKey
+        ? { authenticated: true, method: creds.OPENROUTER_API_KEY ? "OpenRouter BYOK" : "API Key", details: "Chave de provedor configurada no OpenCorp" }
+        : { authenticated: false, method: "Chave de LLM ausente", details: "Adicione uma chave em Configurações > Chaves de API" };
     }
 
     case "claude-code": {
-      // 1. Verifica OAuth em ~/.claude/.credentials.json com checagem real de validade
-      const claudeCreds = join(homeDir, ".claude", ".credentials.json");
-      if (existsSync(claudeCreds)) {
-        try {
-          const j = JSON.parse(readFileSync(claudeCreds, "utf8"));
-          const oauth = j.claudeAiOauth;
-          const hasTokens = Boolean(
-            (oauth?.accessToken && oauth.accessToken.trim() !== "") ||
-            (oauth?.refreshToken && oauth.refreshToken.trim() !== "")
-          );
-          const isExpired = oauth?.refreshTokenExpiresAt ? oauth.refreshTokenExpiresAt < Date.now() : true;
-          if (hasTokens && !isExpired) {
-            return {
-              authenticated: true,
-              method: "OAuth Claude Pro/Team",
-              details: "Sessão persistida e válida em ~/.claude",
-            };
-          }
-        } catch {}
-      }
-      // 2. Verifica ANTHROPIC_API_KEY
-      if (creds.ANTHROPIC_API_KEY) {
-        return {
-          authenticated: true,
-          method: "ANTHROPIC_API_KEY",
-          details: "Chave direta Anthropic ativa",
-        };
-      }
-      return {
-        authenticated: false,
-        method: "Sessão OAuth expirada / ausente",
-        details: "Execute 'claude login' no terminal ou configure ANTHROPIC_API_KEY",
-      };
-    }
-
-    case "copilot": {
-      if (creds.GITHUB_TOKEN || creds.COPILOT_GITHUB_TOKEN) {
-        return {
-          authenticated: true,
-          method: "GitHub Token / gh CLI",
-          details: "Autenticado via GitHub CLI (keyring)",
-        };
-      }
-      return {
-        authenticated: false,
-        method: "GitHub PAT ausente",
-        details: "Execute 'copilot login' ou 'gh auth login'",
-      };
-    }
-
-    case "cursor": {
-      if (creds.CURSOR_API_KEY) {
-        return {
-          authenticated: true,
-          method: "CURSOR_API_KEY",
-          details: "Chave de API do Cursor ativa",
-        };
-      }
-      // Checa se o CLI agent está logado no sistema
-      try {
-        const agentBin = join(homeDir, ".opencorp", "bin", "agent");
-        const binToRun = existsSync(agentBin) ? agentBin : "agent";
-        const out = execSync(`${binToRun} status`, { timeout: 2000, encoding: "utf8" });
-        if (out && !out.toLowerCase().includes("not logged in")) {
-          return {
-            authenticated: true,
-            method: "Conta Cursor (OAuth CLI)",
-            details: out.trim().split("\n")[0] || "Autenticado",
-          };
-        }
-      } catch {}
-
-      return {
-        authenticated: false,
-        method: "Requer Login ou CURSOR_API_KEY",
-        details: "Execute 'agent login' no terminal ou obtenha chave em cursor.com/settings",
-      };
+      if (creds.ANTHROPIC_API_KEY) return { authenticated: true, method: "ANTHROPIC_API_KEY", details: "Chave direta Anthropic ativa" };
+      const probe = probeCliLogin(engineId, homeDir)!;
+      return probe.loggedIn
+        ? { authenticated: true, method: probe.method, details: probe.details }
+        : { authenticated: false, method: "Sessão Claude ausente", details: "Execute 'claude auth login' no terminal ou configure ANTHROPIC_API_KEY" };
     }
 
     case "codex": {
-      if (creds.OPENAI_API_KEY) {
-        return {
-          authenticated: true,
-          method: "OPENAI_API_KEY",
-          details: "Chave da OpenAI ativa para sandbox",
-        };
-      }
-      // Checa se ~/.codex/auth.json existe ou se codex login status indica sessão ativa
-      const codexAuthPath = join(homeDir, ".codex", "auth.json");
-      if (existsSync(codexAuthPath)) {
-        try {
-          const raw = readFileSync(codexAuthPath, "utf8");
-          if (raw.length > 5) {
-            return {
-              authenticated: true,
-              method: "ChatGPT Device OAuth",
-              details: "Autenticado via ChatGPT Device Code (auth.json)",
-            };
-          }
-        } catch {}
-      }
-      try {
-        const codexBin = join(homeDir, ".opencorp", "bin", "codex");
-        const binToRun = existsSync(codexBin) ? codexBin : "codex";
-        const out = execSync(`${binToRun} login status 2>&1`, { timeout: 2000, encoding: "utf8" });
-        if (out && !out.toLowerCase().includes("not logged in") && out.toLowerCase().includes("logged in")) {
-          return {
-            authenticated: true,
-            method: "OpenAI Codex CLI Session",
-            details: out.trim().split("\n")[0] || "Autenticado",
-          };
-        }
-      } catch {}
-
-      return {
-        authenticated: false,
-        method: "Requer Login ou OPENAI_API_KEY",
-        details: "Execute 'codex login --device-auth' ou adicione OPENAI_API_KEY",
-      };
+      if (creds.OPENAI_API_KEY) return { authenticated: true, method: "OPENAI_API_KEY", details: "Chave da OpenAI ativa" };
+      const probe = probeCliLogin(engineId, homeDir)!;
+      return probe.loggedIn
+        ? { authenticated: true, method: probe.method, details: probe.details }
+        : { authenticated: false, method: "Requer Login ou OPENAI_API_KEY", details: "Execute 'codex login --device-auth' ou adicione OPENAI_API_KEY" };
     }
 
-    case "antigravity": {
-      if (creds.GEMINI_API_KEY || process.env.GEMINI_API_KEY) {
-        return {
-          authenticated: true,
-          method: "GEMINI_API_KEY",
-          details: "Google AI Studio autenticado",
-        };
-      }
-      return {
-        authenticated: true,
-        method: "Runtime do Sistema",
-        details: "Executando via agy CLI nativo",
-      };
+    case "cursor": {
+      if (creds.CURSOR_API_KEY) return { authenticated: true, method: "CURSOR_API_KEY", details: "Chave de API do Cursor ativa" };
+      const probe = probeCliLogin(engineId, homeDir)!;
+      return probe.loggedIn
+        ? { authenticated: true, method: "Conta Cursor (agent status)", details: probe.details }
+        : { authenticated: false, method: "Requer Login ou CURSOR_API_KEY", details: "Execute 'agent login' no terminal ou obtenha chave em cursor.com/settings" };
     }
 
-    case "aider": {
-      const hasKey = Boolean(
-        creds.OPENROUTER_API_KEY ||
-        creds.ANTHROPIC_API_KEY ||
-        creds.OPENAI_API_KEY ||
-        creds.GEMINI_API_KEY
-      );
-      return hasKey
-        ? {
-            authenticated: true,
-            method: "Provedor de LLM configurado",
-            details: "Aider pronto para usar as credenciais compartilhadas do OpenCorp",
-          }
-        : {
-            authenticated: false,
-            method: "Chave de LLM ausente",
-            details: "Configure OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY ou GEMINI_API_KEY",
-          };
+    case "copilot": {
+      if (creds.COPILOT_GITHUB_TOKEN || creds.GH_TOKEN || creds.GITHUB_TOKEN) return { authenticated: true, method: "Token GitHub no ambiente" };
+      const probe = probeCliLogin(engineId, homeDir)!;
+      return probe.loggedIn
+        ? { authenticated: true, method: probe.method, details: probe.details }
+        : { authenticated: false, method: "GitHub não autenticado", details: "Execute 'copilot login' ou 'gh auth login'" };
     }
+
+    case "antigravity":
+      return creds.GEMINI_API_KEY
+        ? { authenticated: true, method: "GEMINI_API_KEY", details: "Google AI Studio autenticado" }
+        : { authenticated: false, method: "Não verificável", details: "O agy não oferece comando de status de login. Configure GEMINI_API_KEY ou use o teste funcional do motor." };
 
     case "mimo":
-      return {
-        authenticated: true,
-        method: "Sem login obrigatório",
-        details: "O tier gratuito oficial não exige conta ou chave de API",
-      };
+      return { authenticated: true, method: "Sem login obrigatório", details: "O tier gratuito oficial não exige conta ou chave de API" };
 
     default:
-      return {
-        authenticated: true,
-        method: "Padrão",
-      };
+      return { authenticated: false, method: "Motor desconhecido", details: `Sem regra de autenticação para "${engineId}"` };
   }
 }
 
@@ -376,4 +287,28 @@ export function getEngineAuthInstructions(engineId: string): EngineAuthInstructi
         guideText: "Adicione sua chave OpenRouter ou provedor direto em Configurações > Chaves de API.",
       };
   }
+}
+
+/** Comando oficial de logout de cada CLI com sessão OAuth própria. */
+const CLI_LOGOUT_COMMANDS: Readonly<Record<string, { bin: string; args: string[] }>> = Object.freeze({
+  "claude-code": { bin: "claude", args: ["auth", "logout"] },
+  codex: { bin: "codex", args: ["logout"] },
+  cursor: { bin: "agent", args: ["logout"] },
+});
+
+/**
+ * Encerra a sessão OAuth nativa do CLI pelo comando oficial. Afeta dados fora
+ * do OpenCorp (a sessão do usuário no próprio CLI), por isso exige que o
+ * chamador passe `confirmacao` igual ao ID do motor. Copilot não é suportado:
+ * a sessão é do GitHub CLI, compartilhada com outras ferramentas.
+ */
+export function logoutCliSession(engineId: string, homeDir: string, confirmacao: string): { ok: boolean; message: string } {
+  const cmd = CLI_LOGOUT_COMMANDS[engineId];
+  if (!cmd) return { ok: false, message: `O motor "${engineId}" não tem sessão OAuth própria que o OpenCorp possa encerrar.` };
+  if (confirmacao !== engineId) return { ok: false, message: `Confirmação ausente: envie confirmacao="${engineId}" para encerrar a sessão do CLI.` };
+  const { code } = commandRunner(managedOrPath(homeDir, cmd.bin), cmd.args, 15_000);
+  probeCache.delete(`${engineId}::${homeDir}`);
+  return code === 0
+    ? { ok: true, message: `Sessão do CLI "${engineId}" encerrada pelo comando oficial.` }
+    : { ok: false, message: `O comando de logout do CLI "${engineId}" falhou (código ${code}).` };
 }

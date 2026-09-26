@@ -15,6 +15,7 @@ import { RegistryStore, type MetaRegistro } from "../../core/contexts/storage/re
 import { registrarBuiltins } from "../../core/contexts/orchestration/builtin-components.js";
 import { COMANDOS_AGENDA } from "./scheduler.js";
 import type { RouteContext } from "./types.js";
+import { fetchOpencode } from "../../core/contexts/execution/opencode-server.js";
 import { responderAprovacaoDoRuntime } from "./secretario/runtime-service.js";
 
 export interface DefinicaoRota {
@@ -270,12 +271,12 @@ export async function handleSystemRoutes(ctx: RouteContext): Promise<boolean> {
         const stOpencode = await opencodeServer.status();
         secretario = stOpencode.rodando === true;
         if (stOpencode.rodando && stOpencode.porta) {
-          const resStatus = await fetch(`http://127.0.0.1:${stOpencode.porta}/session/status`, { signal: AbortSignal.timeout(2000) });
+          const resStatus = await fetchOpencode(`http://127.0.0.1:${stOpencode.porta}/session/status`, { signal: AbortSignal.timeout(2000) });
           if (resStatus.ok) {
             const mapStatus = (await resStatus.json()) as Record<string, { type?: string }>;
             const ocupadaId = Object.keys(mapStatus).find((k) => mapStatus[k]?.type === "busy");
             if (ocupadaId) {
-              const resSess = await fetch(`http://127.0.0.1:${stOpencode.porta}/session/${encodeURIComponent(ocupadaId)}`, { signal: AbortSignal.timeout(2000) });
+              const resSess = await fetchOpencode(`http://127.0.0.1:${stOpencode.porta}/session/${encodeURIComponent(ocupadaId)}`, { signal: AbortSignal.timeout(2000) });
               if (resSess.ok) {
                 const sData = (await resSess.json()) as Record<string, any>;
                 secretarioExecutando = {

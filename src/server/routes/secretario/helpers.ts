@@ -1,3 +1,4 @@
+import { fetchOpencode } from "../../../core/contexts/execution/opencode-server.js";
 import { resolve, relative, isAbsolute, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { opencorpHome } from "../../../utils/paths.js";
@@ -58,13 +59,13 @@ export async function trocarModeloEngine(baseUrl: string, sessaoId: string, mode
   try {
     const { providerID, modelID } = parsearModelo(modeloCompleto);
     const [res1, res2] = await Promise.all([
-      fetch(`${baseUrl}/api/session/${encodeURIComponent(sessaoId)}/model`, {
+      fetchOpencode(`${baseUrl}/api/session/${encodeURIComponent(sessaoId)}/model`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ model: { id: modelID, providerID } }),
         signal: AbortSignal.timeout(5000),
       }).catch(() => null),
-      fetch(`${baseUrl}/session/${encodeURIComponent(sessaoId)}`, {
+      fetchOpencode(`${baseUrl}/session/${encodeURIComponent(sessaoId)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ model: { id: modelID, providerID } }),
@@ -277,8 +278,8 @@ export async function limparMensagensTentativaFalha(
   manterSeTiverTextoSubstancial: boolean = true,
 ): Promise<void> {
   try {
-    await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
-    const getRes = await fetch(`${baseUrlSessao}/message`, { signal: AbortSignal.timeout(4000) });
+    await fetchOpencode(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+    const getRes = await fetchOpencode(`${baseUrlSessao}/message`, { signal: AbortSignal.timeout(4000) });
     if (!getRes.ok) return;
     const msgs = (await getRes.json()) as MensagemOc[];
     if (!Array.isArray(msgs)) return;
@@ -298,7 +299,7 @@ export async function limparMensagensTentativaFalha(
 
     for (const m of novas) {
       if (m.info?.id) {
-        await fetch(`${baseUrlSessao}/message/${encodeURIComponent(m.info.id)}`, {
+        await fetchOpencode(`${baseUrlSessao}/message/${encodeURIComponent(m.info.id)}`, {
           method: "DELETE",
           signal: AbortSignal.timeout(3000),
         }).catch(() => {});

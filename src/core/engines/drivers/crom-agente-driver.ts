@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, copyFileSync, chmodSync } from "node:fs";
+import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import {
   safeExecFile as execFileAsync,
@@ -204,14 +205,11 @@ export class CromAgenteDriver implements EngineDriver {
       }
     }
 
-    const creds = resolveEngineCredentials(opts.homeDir);
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      ...creds,
+    const env: Record<string, string> = await resolveEngineSpawnEnv(this.id, opts, {
       CROM_WORKSPACE: opts.workspacePath,
       CROM_STORAGE_DIR: join(opts.workspacePath, ".crom"),
       ...(opts.envOverrides || {}),
-    };
+    });
 
     return {
       binary: bin,

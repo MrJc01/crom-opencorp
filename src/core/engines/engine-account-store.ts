@@ -25,6 +25,11 @@ export interface EngineAccount {
   tokenOuChave?: string;
   previewChave?: string;
   ativa: boolean;
+  /**
+   * Workspaces autorizados a usar esta conta. Ausente ou vazio = todos.
+   * Uma conta restrita nunca é injetada em processos de outros workspaces.
+   */
+  workspaces?: string[];
   criada_em: string;
   ultimo_uso?: string;
   limits: EngineAccountLimits;
@@ -97,6 +102,15 @@ export function mascararChave(chave?: string): string | undefined {
   return `${c.slice(0, 4)}...${c.slice(-4)}`;
 }
 
+function normalizarWorkspaces(workspaces?: string[]): string[] | undefined {
+  const lista = [...new Set((workspaces ?? []).map((w) => String(w).trim()).filter(Boolean))];
+  return lista.length > 0 ? lista : undefined;
+}
+
+function contaAutorizada(conta: EngineAccount, workspaceId: string): boolean {
+  return !conta.workspaces || conta.workspaces.length === 0 || conta.workspaces.includes(workspaceId);
+}
+
 export class EngineAccountStore {
   private readonly homeDir: string;
   private readonly filePath: string;
@@ -145,6 +159,7 @@ export class EngineAccountStore {
       authType?: "token" | "apiKey" | "deviceOAuth";
       tokenOuChave?: string;
       limits?: Partial<EngineAccountLimits>;
+      workspaces?: string[];
     },
   ): Promise<EngineAccount> {
     const contas = this.lerArquivoContas();
@@ -171,6 +186,7 @@ export class EngineAccountStore {
       tokenOuChave: dados.tokenOuChave?.trim() || undefined,
       previewChave: mascararChave(dados.tokenOuChave),
       ativa: primeiraConta,
+      ...(normalizarWorkspaces(dados.workspaces) ? { workspaces: normalizarWorkspaces(dados.workspaces) } : {}),
       criada_em: new Date().toISOString(),
       limits: {
         timeout_min: dados.limits?.timeout_min ?? padraoMotor.timeout_min,
@@ -232,14 +248,32 @@ export class EngineAccountStore {
     } catch {}
   }
 
-  public async rotacionarProximaConta(motorId: string): Promise<EngineAccount | null> {
+  /**
+   * Ativa a próxima conta do MESMO motor. Com `workspaceId`, considera apenas
+   * contas autorizadas para esse workspace — rotação nunca troca de motor nem
+   * atravessa a restrição de workspace.
+   */
+  public async rotacionarProximaConta(motorId: string, workspaceId?: string): Promise<EngineAccount | null> {
     const contas = this.lerArquivoContas().filter((c) => c.motorId === motorId);
-    if (contas.length <= 1) return null;
-    const idxAtiva = contas.findIndex((c) => c.ativa);
-    const proxIdx = idxAtiva >= 0 ? (idxAtiva + 1) % contas.length : 0;
-    const proxConta = contas[proxIdx]!;
+    const elegiveis = workspaceId ? contas.filter((c) => contaAutorizada(c, workspaceId)) : contas;
+    if (elegiveis.length === 0) return null;
+    const idxAtiva = elegiveis.findIndex((c) => c.ativa);
+    if (idxAtiva >= 0 && elegiveis.length === 1) return null;
+    const proxConta = elegiveis[idxAtiva >= 0 ? (idxAtiva + 1) % elegiveis.length : 0]!;
     await this.ativarConta(motorId, proxConta.id);
     return proxConta;
+  }
+
+  /** Define os workspaces autorizados de uma conta (vazio = todos). */
+  public async definirWorkspacesConta(contaId: string, workspaces: string[] | undefined): Promise<EngineAccount> {
+    const contas = this.lerArquivoContas();
+    const conta = contas.find((c) => c.id === contaId);
+    if (!conta) throw new Error(`Conta "${contaId}" não encontrada.`);
+    const normalizados = normalizarWorkspaces(workspaces);
+    if (normalizados) conta.workspaces = normalizados;
+    else delete conta.workspaces;
+    await this.salvarArquivoContas(contas);
+    return conta;
   }
 
   public async ativarConta(motorId: string, contaId: string): Promise<void> {

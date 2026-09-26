@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import {
   safeExecFile as execFileAsync,
@@ -175,12 +176,9 @@ export class CodexDriver implements EngineDriver {
     if (modelo.length > 0) args.push("-m", modelo);
     args.push(opts.prompt);
 
-    const creds = resolveEngineCredentials(opts.homeDir);
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      ...creds,
+    const env: Record<string, string> = await resolveEngineSpawnEnv(this.id, opts, {
       ...(opts.envOverrides || {}),
-    };
+    });
 
     return {
       binary: bin,

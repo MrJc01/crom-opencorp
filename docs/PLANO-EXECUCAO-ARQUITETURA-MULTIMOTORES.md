@@ -207,7 +207,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 6 | Adaptador OpenCode completo | ✅ Concluída | `feat(opencode): implement canonical runner and isolated conversation runtime` | 9 arquivos focados (114 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 7 | Secretário independente de OpenCode | ✅ Concluída | `refactor(secretary): decouple conversations from opencode server` | 10 arquivos focados (93 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 8 | Codex como segundo runtime | ✅ Concluída | `feat(codex): support persistent secretary conversations via app-server` | app-server + HITL + probe opt-in; 139 arquivos/1.327 testes, 2 TS e build PASS; órfãos 0→0 |
-| 9 | Vault e autenticação | ⬜ Pendente | — | — |
+| 9 | Vault e autenticação | ✅ Concluída | `feat(credentials): add scoped vault facade and ephemeral injection` | 13 testes de credenciais; 140 arquivos/1.340 testes; 2 TS PASS; OpenCode autenticado de fato |
 | 10 | Instalador gerenciado e preflight | ⬜ Pendente | — | — |
 | 11 | Saúde funcional e conformidade | ⬜ Pendente | — | — |
 | 12 | `AcpClientAdapter` | ⬜ Pendente | — | — |
@@ -874,34 +874,49 @@ feat(codex): support persistent secretary conversations
 
 ### Tarefas
 
-- [ ] Projetar `CredentialsStore` como fachada.
-- [ ] Reusar armazenamento seguro de `SecretsStore`.
-- [ ] Reusar metadados de `EngineAccountStore`.
-- [ ] Separar credencial de provedor da sessão OAuth do motor.
-- [ ] Adicionar restrições de workspace.
-- [ ] Resolver conta autorizada antes do spawn.
-- [ ] Injetar ambiente efêmero mínimo.
-- [ ] Redigir valores em logs, erros e telemetria.
-- [ ] Evitar persistir ambiente completo.
-- [ ] Implementar `EngineAuthenticator.isLoggedIn()`.
-- [ ] Remover leitura direta de tokens OAuth do Claude.
-- [ ] Auditar leitura direta de credenciais nos outros drivers.
-- [ ] Implementar desconexão sem apagar dados externos sem confirmação.
+- [x] Projetar `CredentialsStore` como fachada (`src/core/credentials/credentials-store.ts`).
+- [x] Reusar armazenamento seguro de `SecretsStore` (segredos de workspace e globais).
+- [x] Reusar metadados de `EngineAccountStore`.
+- [x] Separar credencial de provedor (`CredentialGrant`) da sessão OAuth do motor (`probeCliLogin`).
+- [x] Adicionar restrições de workspace (`EngineAccount.workspaces`, `PUT /api/motores/:id/contas/:contaId/workspaces`).
+- [x] Resolver conta autorizada antes do spawn (`CredentialScopeError`, código `CREDENTIAL_SCOPE_DENIED`).
+- [x] Injetar ambiente efêmero mínimo (`ENGINE_CREDENTIAL_VARS`; segredos conhecidos removidos do ambiente herdado).
+- [x] Redigir valores em logs, erros e telemetria (captura/log do `SessionManager` e `normalizeEngineError`).
+- [x] Evitar persistir ambiente completo (auditado: nenhum ponto serializa ou loga o `env` do processo).
+- [x] Implementar `EngineAuthenticator.isLoggedIn()`.
+- [x] Remover leitura direta de tokens OAuth do Claude (bridge e `ClaudeCodeDriver.fetchLiveTokens`).
+- [x] Auditar leitura direta de credenciais nos outros drivers.
+- [x] Implementar desconexão sem apagar dados externos sem confirmação.
 
 ### Testes
 
-- [ ] Workspace autorizado recebe credencial.
-- [ ] Workspace não autorizado falha antes do spawn.
-- [ ] Segredo nunca aparece em log/snapshot/erro.
-- [ ] OAuth é verificado por probe do CLI.
-- [ ] Rotação de conta respeita provedor, motor e workspace.
-- [ ] Ambiente é descartado após o processo.
+- [x] Workspace autorizado recebe credencial.
+- [x] Workspace não autorizado falha antes do spawn.
+- [x] Segredo nunca aparece em log/snapshot/erro.
+- [x] OAuth é verificado por probe do CLI.
+- [x] Rotação de conta respeita provedor, motor e workspace.
+- [x] Ambiente é descartado após o processo (resolução não escreve em disco nem altera `process.env`).
 
 ### Critérios de aceite
 
-- [ ] Nenhum driver extrai token de arquivo interno de terceiros.
-- [ ] Credenciais não vazam entre workspaces.
-- [ ] Contas e cotas não são confundidas com motores.
+- [x] Nenhum driver extrai token de arquivo interno de terceiros.
+- [x] Credenciais não vazam entre workspaces.
+- [x] Contas e cotas não são confundidas com motores.
+
+### Registro da Etapa 9 — 26/09/2026
+
+- Executor: Claude Code (Opus 5.5).
+- Precedência por variável: conta explícita/ativa autorizada → segredo do workspace → segredo global → chaves geridas pelo OpenCorp (painel "Chaves de API") → ambiente do host. Cada motor recebe apenas as variáveis de `ENGINE_CREDENTIAL_VARS` (ex.: Codex só `OPENAI_API_KEY`; MiMo nenhuma). Antes, todo motor herdava todas as chaves, inclusive `GITHUB_TOKEN` extraído do `gh`.
+- OAuth nativo verificado pelos comandos oficiais, conferidos nas versões instaladas: `claude auth status --json`, `codex login status` (0.153.4), `agent status --format json`, `gh auth status`. O AGY não oferece comando de status: sem `GEMINI_API_KEY` passa a aparecer como "Não verificável" em vez de "autenticado" fixo.
+- Auditoria de leitura direta de credenciais:
+  - removido: `~/.local/share/opencode/auth.json` (bridge, `llm-client`, bootstrap e merge por workspace do `opencode-server`); `~/.claude/.credentials.json` (bridge e driver Claude); `~/.codex/auth.json` (bridge); extração global de `gh auth token` para todos os motores;
+  - mantido e documentado: `gh auth token` somente para o Copilot quando não há outra fonte, e a importação explícita por clique em `WebLoginOrchestrator.conectarAutomatico` (consentimento do usuário, comando oficial);
+  - o `auth.json` do workspace do OpenCode agora é gravado com modo `0600`.
+- Verificado antes de remover a cópia do `auth.json` pessoal do OpenCode: o `auth.json` gerido pelo OpenCorp nesta máquina já continha todos os provedores do arquivo pessoal; nenhuma chave deixa de estar disponível.
+- **Correção de segurança do OpenCode (defeito da Etapa 6):** o adaptador definia `OPENCODE_SERVER_TOKEN`, variável que o `opencode serve` ignora; o servidor subia sem autenticação. Verificado empiricamente no opencode 1.18.32 em servidor temporário: sem credencial → 401, Bearer → 401, Basic `opencode:<senha>` → 200 com `OPENCODE_SERVER_PASSWORD`. Adaptador e `OpencodeServerManager` legado agora usam senha aleatória por instância e HTTP Basic (`fetchOpencode` injeta a autenticação em todas as chamadas do caminho legado (rotas do Secretário, sessões, sistema e `OpenCodeConversationDriver`)). A senha fica só no pidfile `0600`, nunca no log; órfão sem senha conhecida não é adotado. O fake `fake-opencode.mjs` passou a exigir a autenticação como o servidor real.
+- Desconexão: `POST /api/motores/:id/desconectar` preserva a sessão do CLI por padrão (`sessaoExternaPreservada: true`); encerrar a sessão externa exige `{ encerrarSessaoExterna: true, confirmacao: "<motorId>" }` e usa o logout oficial (`claude auth logout`, `codex logout`, `agent logout`). Copilot é recusado por compartilhar a sessão do GitHub CLI.
+- `adapter-compat` deixou de usar `checkHealth()` como status de autenticação (binário saudável ≠ autenticado).
+- Validações: `tests/credentials-store.test.ts` 13 PASS; `opencode-adapter`, `opencode-server` e testes do Secretário PASS com o fake exigindo autenticação; suíte completa 140 arquivos — 1.340 PASS, 2 skipped, 1 todo; TypeScript backend/frontend PASS.
 
 ### Commit sugerido
 
@@ -1408,6 +1423,8 @@ Registrar aqui apenas itens novos, com etapa de origem, impacto e decisão. Não
 | ID | Etapa de origem | Pendência | Impacto | Decisão |
 |---|---:|---|---|---|
 | P-01 | 8 | Probe real do Codex não executado | Capacidade verificada apenas com fake determinístico | Executar `OPENCORP_REAL_PROBES=codex OPENCORP_PROBE_CODEX_MODEL=<modelo> npm run test:real` quando o usuário autorizar o consumo de cota |
+| P-03 | 9 | `POST /api/motores/:id/desconectar` reescreve `runner.json` com `engine: "opencode"` | Fallback silencioso para OpenCode (viola D1) | Corrigir na Etapa 13/14, junto com a seleção de motor padrão |
+| P-04 | 9 | Etapa 6 declarou autenticação local do OpenCode que não funcionava | Servidor OpenCode acessível sem senha por qualquer processo local | Corrigido na Etapa 9 (HTTP Basic verificado contra o binário real) |
 | P-02 | 8 | Sessões do adaptador Codex ficam em memória | Após reinício, a conversa é retomada via `thread/resume` pelo UUID; título/modelo da sessão se perdem | Aceito; persistência de metadados fica para a Etapa 13/14 se necessária |
 
 ---

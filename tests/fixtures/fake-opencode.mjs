@@ -28,7 +28,17 @@ function generateId() {
   return `ses_${++sessionCounter}_${Date.now().toString(36)}`;
 }
 
+// Como o `opencode serve` real: com OPENCODE_SERVER_PASSWORD, exige HTTP Basic.
+const SENHA = process.env.OPENCODE_SERVER_PASSWORD;
+const USUARIO = process.env.OPENCODE_SERVER_USERNAME || "opencode";
+const AUTH_ESPERADA = SENHA ? `Basic ${Buffer.from(`${USUARIO}:${SENHA}`).toString("base64")}` : null;
+
 const server = createServer(async (req, res) => {
+  if (AUTH_ESPERADA && req.headers.authorization !== AUTH_ESPERADA) {
+    res.writeHead(401, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "unauthorized" }));
+    return;
+  }
   const url = parse(req.url ?? "/", true);
   const path = url.pathname ?? "/";
   const method = req.method ?? "GET";

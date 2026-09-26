@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { KNOWN_SECRET_ENV_VARS, redactSecrets } from "../../credentials/credentials-store.js";
 import { readFile } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import { basename, join } from "node:path";
@@ -955,17 +956,27 @@ export class SessionManager {
     let execEnv: Record<string, string>;
     let execCwd = ws.path;
 
-    const prep = await driver.prepareExecution({
-      workspaceId: ws.id,
-      workspacePath: ws.path,
-      sessionId: opcoes.session ?? id,
-      agentId: ag.frontmatter.id,
-      model: modeloEfetivo,
-      prompt: ordem,
-      homeDir: this.homeDir,
-      title: opcoes.title,
-      auto: true,
-    });
+    let prep: Awaited<ReturnType<typeof driver.prepareExecution>>;
+    try {
+      prep = await driver.prepareExecution({
+        workspaceId: ws.id,
+        workspacePath: ws.path,
+        sessionId: opcoes.session ?? id,
+        agentId: ag.frontmatter.id,
+        model: modeloEfetivo,
+        prompt: ordem,
+        homeDir: this.homeDir,
+        title: opcoes.title,
+        auto: true,
+      });
+    } catch (erro) {
+      // Ex.: CredentialScopeError — a credencial não é autorizada para este
+      // workspace. Falha antes do spawn, sem processo iniciado.
+      const falha = `não foi possível preparar o motor "${driver.id}": ${msg(erro)}`;
+      (registro as any).erro = falha;
+      await this.finalizar(ws, registro, ag.frontmatter, "falhou", null, Date.now() - inicio.getTime(), falha, "", null);
+      throw new SessionError(falha);
+    }
     runnerBin = prep.binary;
     args = prep.args;
     execEnv = prep.env;
@@ -982,6 +993,8 @@ export class SessionManager {
     }
 
     let child: ReturnType<typeof execa>;
+    // Valores das credenciais injetadas: nunca vão para captura, log ou stdout.
+    let segredosRun: string[] = [];
     try {
       // Resolve driver de execução (sandbox Bubblewrap, host ou container) e limites
       let binEfetivo = runnerBin;
@@ -1073,6 +1086,9 @@ export class SessionManager {
       const motorNome = (ag.frontmatter as { engine?: string } | undefined)?.engine || "opencode";
       await tokenBucketGlobal.adquirirToken(motorNome).catch(() => {});
 
+      segredosRun = Object.entries(envEfetivo)
+        .filter(([nome]) => KNOWN_SECRET_ENV_VARS.includes(nome))
+        .map(([, valor]) => valor);
       child = execa(binEfetivo, argsEfetivos, {
         cwd: cwdEfetivo,
         env: envEfetivo,
@@ -1103,7 +1119,8 @@ export class SessionManager {
       if (!stream) return;
       for await (const chunk of stream) {
         watchdog?.registrarAtividade();
-        const texto = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+        const bruto = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+        const texto = segredosRun.length > 0 ? redactSecrets(bruto, segredosRun) : bruto;
         captura.push(texto);
         logStream.write(texto);
         process.stdout.write(texto);
@@ -1604,7 +1621,7 @@ export class SessionManager {
             await acctStore.atualizarLimitesConta(ativa.id, { status_cota: "esgotado" });
           }
 
-          const proxConta = await acctStore.rotacionarProximaConta(motorId);
+          const proxConta = await acctStore.rotacionarProximaConta(motorId, ws.id);
           if (proxConta && proxConta.limits.status_cota !== "esgotado") {
             await acctStore.sincronizarAuth(motorId);
             const idRetry = gerarId("exec");

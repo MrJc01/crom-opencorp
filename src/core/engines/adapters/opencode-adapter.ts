@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { createServer } from "node:net";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, openSync } from "node:fs";
@@ -138,6 +139,8 @@ export class OpenCodeAdapter implements EngineAdapter {
       status: async (home: string): Promise<EngineAuthStatus> => {
         return checkEngineAuthStatus(this.engineId, home);
       },
+      // OpenCode usa chaves de provedor do OpenCorp; não há sessão OAuth nativa a verificar.
+      isLoggedIn: async () => undefined,
       fetchTokens: async (home: string, creds?: { tokenOuChave?: string; authType?: string }) => {
         return this.driver.fetchLiveTokens(home, creds);
       },
@@ -209,10 +212,12 @@ export class OpenCodeAdapter implements EngineAdapter {
     }
     args.push(input.prompt);
 
-    const env = envOpencodeIsolado(this.homeDir, input.workspaceId, input.workspacePath) as Record<string, string>;
-    if (input.envOverrides) {
-      Object.assign(env, input.envOverrides);
-    }
+    const env = await resolveEngineSpawnEnv(
+      this.engineId,
+      { homeDir: this.homeDir, workspaceId: input.workspaceId, workspacePath: input.workspacePath, accountId: input.accountId },
+      { ...(input.envOverrides || {}) },
+      envOpencodeIsolado(this.homeDir, input.workspaceId, input.workspacePath)
+    );
 
     const runId = input.runId || `run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const timestamp = new Date().toISOString();
@@ -477,8 +482,12 @@ export class OpenCodeAdapter implements EngineAdapter {
         const logDir = dirname(logPath);
         if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
 
-        const env = envOpencodeIsolado(this.homeDir, input.workspaceId, input.workspacePath) as Record<string, string>;
-        env.OPENCODE_SERVER_TOKEN = authToken;
+        const env = await resolveEngineSpawnEnv(
+          this.engineId,
+          { homeDir: this.homeDir, workspaceId: input.workspaceId, workspacePath: input.workspacePath },
+          { OPENCODE_SERVER_USERNAME: OPENCODE_SERVER_USERNAME, OPENCODE_SERVER_PASSWORD: authToken },
+          envOpencodeIsolado(this.homeDir, input.workspaceId, input.workspacePath)
+        );
 
         const options: SpawnOptions = {
           cwd: input.workspacePath,
@@ -519,7 +528,7 @@ export class OpenCodeAdapter implements EngineAdapter {
     const baseUrl = `http://127.0.0.1:${port}`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...openCodeServerAuthHeader(authToken),
     };
 
     // Cria a sessão remota no servidor
@@ -568,7 +577,7 @@ export class OpenCodeAdapter implements EngineAdapter {
     const authToken = meta?.authToken || "";
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...openCodeServerAuthHeader(authToken),
     };
 
     const runId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -718,7 +727,7 @@ export class OpenCodeAdapter implements EngineAdapter {
     const baseUrl = meta?.url || `http://127.0.0.1:${meta?.port ?? 4096}`;
     const authToken = meta?.authToken || "";
     const headers: Record<string, string> = {
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...openCodeServerAuthHeader(authToken),
     };
 
     try {
@@ -766,7 +775,7 @@ export class OpenCodeAdapter implements EngineAdapter {
     const authToken = meta?.authToken || "";
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...openCodeServerAuthHeader(authToken),
     };
 
     const res = await fetch(`${baseUrl}/session/${encodeURIComponent(ref.id)}/fork`, {
@@ -800,7 +809,7 @@ export class OpenCodeAdapter implements EngineAdapter {
     const baseUrl = meta?.url || `http://127.0.0.1:${meta?.port ?? 4096}`;
     const authToken = meta?.authToken || "";
     const headers: Record<string, string> = {
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...openCodeServerAuthHeader(authToken),
     };
 
     try {
@@ -821,4 +830,16 @@ export class OpenCodeAdapter implements EngineAdapter {
   public getSessionMeta(sessionId: string): ConversationSessionMeta | undefined {
     return this.activeConversations.get(sessionId);
   }
+}
+
+/**
+ * O `opencode serve` protege a API com HTTP Basic quando recebe
+ * `OPENCODE_SERVER_PASSWORD` (usuário padrão `opencode`). Verificado em
+ * opencode 1.18.32: sem credencial → 401, Bearer → 401, Basic → 200.
+ */
+export const OPENCODE_SERVER_USERNAME = "opencode";
+
+export function openCodeServerAuthHeader(password: string | undefined): Record<string, string> {
+  if (!password) return {};
+  return { Authorization: `Basic ${Buffer.from(`${OPENCODE_SERVER_USERNAME}:${password}`).toString("base64")}` };
 }

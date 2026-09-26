@@ -2,7 +2,8 @@ import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process"
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { opencorpHome } from "../../../utils/paths.js";
-import { checkEngineAuthStatus, resolveEngineCredentials } from "../credentials-bridge.js";
+import { checkEngineAuthStatus, probeCliLogin } from "../credentials-bridge.js";
+import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { CANONICAL_ENGINE_MANIFESTS, type EngineCapabilityManifest } from "../manifests.js";
 import { normalizeEngineError } from "../error-normalizer.js";
 import { CodexDriver } from "../drivers/codex-driver.js";
@@ -118,6 +119,7 @@ export class CodexAdapter implements EngineAdapter {
     this.authenticator = {
       engineId: this.engineId,
       status: options.authStatusProbe ?? (async (home: string): Promise<EngineAuthStatus> => checkEngineAuthStatus(this.engineId, home)),
+      isLoggedIn: async (home: string) => probeCliLogin(this.engineId, home)?.loggedIn,
       fetchTokens: (home: string, creds?: { tokenOuChave?: string; authType?: string }) =>
         this.driver.fetchLiveTokens(home, creds),
     };
@@ -156,11 +158,11 @@ export class CodexAdapter implements EngineAdapter {
       args: this.buildArgs(input, invocation),
       cwd: input.workspacePath,
       signal,
-      env: {
-        ...(process.env as Record<string, string>),
-        ...resolveEngineCredentials(input.homeDir || this.homeDir),
-        ...(input.envOverrides ?? {}),
-      },
+      env: await resolveEngineSpawnEnv(
+        this.engineId,
+        { homeDir: input.homeDir || this.homeDir, workspaceId: input.workspaceId, workspacePath: input.workspacePath, accountId: input.accountId },
+        { ...(input.envOverrides ?? {}) }
+      ),
     };
     if (this.customProcessLauncher) return this.customProcessLauncher(options);
 
@@ -402,10 +404,7 @@ export class CodexAdapter implements EngineAdapter {
     const client = new CodexAppServerClient({
       command,
       cwd: workspacePath,
-      env: {
-        ...(process.env as Record<string, string>),
-        ...resolveEngineCredentials(home),
-      },
+      env: await resolveEngineSpawnEnv(this.engineId, { homeDir: home, workspaceId, workspacePath }),
       launcher: this.appServerLauncher,
       clientVersion: OPENCORP_VERSION,
     });

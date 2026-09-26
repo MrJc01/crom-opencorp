@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync } from "node:fs";
+import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import {
   safeExecFile as execFileAsync,
@@ -147,10 +148,9 @@ export class AiderDriver implements EngineDriver {
     // Execução headless do Aider via --message e --yes-always (não-interativo)
     const args: string[] = ["--message", opts.prompt, "--yes-always", "--no-auto-commits"];
 
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
+    const env: Record<string, string> = await resolveEngineSpawnEnv(this.id, opts, {
       ...(opts.envOverrides || {}),
-    };
+    });
 
     return {
       binary: bin,

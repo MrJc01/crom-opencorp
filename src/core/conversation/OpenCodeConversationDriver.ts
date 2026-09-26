@@ -1,3 +1,4 @@
+import { fetchOpencode } from "../contexts/execution/opencode-server.js";
 import {
   type ConversationDriver,
   type ConversaStreamOpts,
@@ -24,7 +25,7 @@ export class OpenCodeConversationDriver implements ConversationDriver {
 
   async abortar(sessaoId: string): Promise<void> {
     try {
-      await fetch(`${this.baseUrl}/session/${encodeURIComponent(sessaoId)}/abort`, {
+      await fetchOpencode(`${this.baseUrl}/session/${encodeURIComponent(sessaoId)}/abort`, {
         method: "POST",
         signal: AbortSignal.timeout(3000),
       });
@@ -36,7 +37,7 @@ export class OpenCodeConversationDriver implements ConversationDriver {
     const { providerID, modelID } = parsearModelo(modelo || "opencode/nemotron-3-ultra-free");
     const modelPayload = providerID && modelID ? { providerID, modelID } : undefined;
 
-    const res = await fetch(`${this.baseUrl}/session/${encodeURIComponent(sessaoId)}/message`, {
+    const res = await fetchOpencode(`${this.baseUrl}/session/${encodeURIComponent(sessaoId)}/message`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -84,7 +85,7 @@ export class OpenCodeConversationDriver implements ConversationDriver {
       dados: { sessao_id: sessaoId, agente, modelo: modelo || "default", motor: "opencode" },
     });
 
-    const res = await fetch(`${this.baseUrl}/session/${encodeURIComponent(sessaoId)}/message`, {
+    const res = await fetchOpencode(`${this.baseUrl}/session/${encodeURIComponent(sessaoId)}/message`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({

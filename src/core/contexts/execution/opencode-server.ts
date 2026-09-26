@@ -1,5 +1,6 @@
+import { randomBytes } from "node:crypto";
 import { spawn, type SpawnOptions } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { opencorpHome, projectRoot } from "../../../utils/paths.js";
 import { eventBus } from "../../shared/event-bus.js";
@@ -14,6 +15,42 @@ export interface OpencodeServerInfo {
   pid: number;
   porta: number;
   iniciado_em: string;
+  /** Senha HTTP Basic do `opencode serve` (usuário `opencode`). Só no pidfile 0600. */
+  senha?: string;
+}
+
+/**
+ * Senhas dos servidores OpenCode geridos por este processo, por porta. Permite
+ * que `fetchOpencode` autentique chamadas feitas a partir de `baseUrl`.
+ */
+const senhasPorPorta = new Map<number, string>();
+
+function lembrarSenha(info: OpencodeServerInfo | null): void {
+  if (info?.porta && info.senha) senhasPorPorta.set(info.porta, info.senha);
+}
+
+function cabecalhoAuth(porta: number): Record<string, string> {
+  const senha = senhasPorPorta.get(porta);
+  return senha ? { Authorization: `Basic ${Buffer.from(`opencode:${senha}`).toString("base64")}` } : {};
+}
+
+/**
+ * `fetch` para o `opencode serve` gerido pelo OpenCorp em loopback: acrescenta
+ * a autenticação HTTP Basic do servidor da porta da URL.
+ */
+export function fetchOpencode(url: string, init: RequestInit = {}): Promise<Response> {
+  let porta = 0;
+  try {
+    const u = new URL(url);
+    if (u.hostname === "127.0.0.1" || u.hostname === "localhost") porta = Number(u.port);
+  } catch {
+    // URL inválida: fetch reportará o erro
+  }
+  const auth = porta ? cabecalhoAuth(porta) : {};
+  if (Object.keys(auth).length === 0) return fetch(url, init);
+  const headers = new Headers(init.headers);
+  for (const [k, v] of Object.entries(auth)) if (!headers.has(k)) headers.set(k, v);
+  return fetch(url, { ...init, headers });
 }
 
 export interface OpencodeServerStatus {
@@ -106,24 +143,6 @@ export function fundirAuth(
   return { ...(auth ?? {}), [provider]: { type: "api", key: key.trim() } };
 }
 
-/** auth.json do usuário → data global (bootstrap 1×; o gerenciamento normal é pelo painel) */
-function copiarAuthSeNovo(homeDir: string, dataHome: string): void {
-  const origem = join(homeDir, ".local", "share", "opencode", "auth.json");
-  const destino = join(dataHome, "opencode", "auth.json");
-  if (!existsSync(origem)) return;
-  try {
-    const ler = (p: string): Record<string, EntradaAuth> => {
-      try {
-        const parsed = JSON.parse(readFileSync(p, "utf8")) as Record<string, EntradaAuth>;
-        return parsed && typeof parsed === "object" ? parsed : {};
-      } catch { return {}; }
-    };
-    const mesclado = { ...ler(destino), ...ler(origem) };
-    mkdirSync(dirname(destino), { recursive: true });
-    writeFileSync(destino, `${JSON.stringify(mesclado, null, 2)}\n`);
-  } catch { /* best effort — opencode lida com auth ausente */ }
-}
-
 /** data-dir POR WORKSPACE: `~/.opencorp/opencode-data/workspaces/<id>/` — auth e
  *  sessões da empresa isolados das outras e do opencode pessoal do dono. */
 export function dirDadosWorkspace(homeDir: string, wsId: string): string {
@@ -137,8 +156,9 @@ export function authOverridesPathWorkspace(homeDir: string, wsId: string): strin
 }
 
 /** Prepara o auth.json do workspace: merge global ⊕ overrides do workspace
- *  (workspace vence por provedor; global é o fallback). Fonte inclui chaves
- *  do opencode do sistema e do opencorp. */
+ *  (workspace vence por provedor; global é o fallback). As fontes são apenas
+ *  arquivos geridos pelo OpenCorp — o auth.json pessoal do OpenCode
+ *  (`~/.local/share/opencode`) nunca é lido nem copiado (D4). */
 export function prepararAuthWorkspace(homeDir: string, wsId: string): string {
   const dir = join(dirDadosWorkspace(homeDir, wsId), "opencode");
   mkdirSync(dir, { recursive: true });
@@ -150,9 +170,9 @@ export function prepararAuthWorkspace(homeDir: string, wsId: string): string {
       return parsed && typeof parsed === "object" ? parsed : {};
     } catch { return {}; }
   };
-  const sistemaAuthPath = join(homeDir, ".local", "share", "opencode", "auth.json");
-  const mesclado = { ...ler(sistemaAuthPath), ...ler(authOpencodePath(homeDir)), ...ler(overridesPath) };
-  writeFileSync(authPath, `${JSON.stringify(mesclado, null, 2)}\n`);
+  const mesclado = { ...ler(authOpencodePath(homeDir)), ...ler(overridesPath) };
+  writeFileSync(authPath, `${JSON.stringify(mesclado, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(authPath, 0o600);
   return authPath;
 }
 
@@ -163,11 +183,7 @@ export function envOpencodeIsolado(homeDir: string, wsId?: string, wsPath?: stri
   const dataHome = wsId ? dirDadosWorkspace(homeDir, wsId) : dirOpencodeData(homeDir);
   mkdirSync(join(dataHome, "opencode"), { recursive: true });
   mkdirSync(join(configHome, "opencode"), { recursive: true });
-  if (wsId) {
-    prepararAuthWorkspace(homeDir, wsId);
-  } else {
-    copiarAuthSeNovo(homeDir, dataHome);
-  }
+  if (wsId) prepararAuthWorkspace(homeDir, wsId);
   return {
     ...process.env,
     OPENCORP_HOME: homeDir,
@@ -183,7 +199,9 @@ async function lerPidfile(homeDir: string): Promise<OpencodeServerInfo | null> {
   if (!existsSync(path)) return null;
   try {
     const content = readFileSync(path, "utf8");
-    return JSON.parse(content) as OpencodeServerInfo;
+    const info = JSON.parse(content) as OpencodeServerInfo;
+    lembrarSenha(info);
+    return info;
   } catch {
     return null;
   }
@@ -193,7 +211,9 @@ async function gravarPidfile(homeDir: string, info: OpencodeServerInfo): Promise
   const path = pidfilePath(homeDir);
   const dir = dirname(path);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(path, `${JSON.stringify(info, null, 2)}\n`);
+  writeFileSync(path, `${JSON.stringify(info, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
+  lembrarSenha(info);
 }
 
 async function removerPidfile(homeDir: string): Promise<void> {
@@ -212,8 +232,8 @@ async function esperarPortaResponder(porta: number, homeDir: string, timeoutMs =
   while (Date.now() - inicio < timeoutMs) {
     for (const url of urls) {
       try {
-        const res = await fetch(url, { method: "GET", signal: AbortSignal.timeout(2000) });
-        if (res.ok || res.status === 401 || res.status === 404) return;
+        const res = await fetchOpencode(url, { method: "GET", signal: AbortSignal.timeout(2000) });
+        if (res.ok || res.status === 404) return;
       } catch {
         // ignora e tenta próxima URL ou próximo ciclo
       }
@@ -245,9 +265,15 @@ async function adotarOrfaoSaudavel(homeDir: string): Promise<OpencodeServerInfo 
       const info = JSON.parse(linhas[i].slice(linhas[i].indexOf("{"))) as OpencodeServerInfo;
       if (!info.pid || !info.porta) continue;
       if (!(await processoVivo(info.pid))) break; // última ativa morreu — nada mais recente para adotar
+      // A senha nunca vai para o log. Sem ela o órfão não pode ser usado com
+      // segurança — não é adotado; um servidor novo e autenticado é iniciado.
+      if (!senhasPorPorta.has(info.porta)) {
+        console.warn(`[opencode-server] órfão PID ${info.pid} na porta ${info.porta} não adotado: credencial desconhecida`);
+        return null;
+      }
       try {
-        const res = await fetch(`http://127.0.0.1:${info.porta}/health`, { signal: AbortSignal.timeout(2000) });
-        if (res.ok || res.status === 401 || res.status === 404) return info;
+        const res = await fetchOpencode(`http://127.0.0.1:${info.porta}/health`, { signal: AbortSignal.timeout(2000) });
+        if (res.ok || res.status === 404) return { ...info, senha: senhasPorPorta.get(info.porta) };
       } catch {
         break; // pid vivo mas porta sem resposta — não adotar
       }
@@ -655,9 +681,11 @@ export class OpencodeServerManager {
     const agentes = await garantirAgentesSecretario(this.homeDir);
 
     const argv = ["serve", "--port", String(porta), "--hostname", "127.0.0.1"];
+    const senha = randomBytes(24).toString("base64url");
+    senhasPorPorta.set(porta, senha);
     const options: SpawnOptions = {
       cwd: opHome,
-      env: envOpencodeIsolado(this.homeDir),
+      env: { ...envOpencodeIsolado(this.homeDir), OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: senha },
       detached: true,
       // stdout/stderr do filho vão para o log (antes era "ignore" — boot quebrado não deixava rastro)
       stdio: ["ignore", openSync(logPath, "a"), openSync(logPath, "a")],
@@ -675,7 +703,7 @@ export class OpencodeServerManager {
       eventBus.emit("secretario.erro", { pid, porta, erro: err.message });
     });
 
-    const info: OpencodeServerInfo = { pid, porta, iniciado_em: new Date().toISOString() };
+    const info: OpencodeServerInfo = { pid, porta, iniciado_em: new Date().toISOString(), senha };
     if (pid <= 0) {
       // spawn nem chegou a criar processo — nada a esperar nem a matar
       await removerPidfile(this.homeDir);
@@ -708,7 +736,8 @@ export class OpencodeServerManager {
 
     // marca a instância como saudável no log (permite adoção se o pidfile se perder)
     try {
-      appendFileSync(logPath, `opencorp-ativa ${JSON.stringify(info)}\n`);
+      const { senha: _omitida, ...infoPublica } = info;
+      appendFileSync(logPath, `opencorp-ativa ${JSON.stringify(infoPublica)}\n`);
     } catch {
       /* log é best-effort */
     }
@@ -726,8 +755,8 @@ export class OpencodeServerManager {
       return { rodando: false, pid: null, porta: null };
     }
     try {
-      const res = await fetch(`http://127.0.0.1:${info.porta}/health`, { signal: AbortSignal.timeout(2000) });
-      if (!res.ok && res.status !== 401 && res.status !== 404) {
+      const res = await fetchOpencode(`http://127.0.0.1:${info.porta}/health`, { signal: AbortSignal.timeout(2000) });
+      if (!res.ok && res.status !== 404) {
         return { rodando: false, pid: info.pid, porta: info.porta };
       }
     } catch {

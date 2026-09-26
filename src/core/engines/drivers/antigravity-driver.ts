@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, copyFileSync, chmodSync } from "node:fs";
+import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import {
   safeExecFile as execFileAsync,
@@ -153,11 +154,10 @@ export class AntigravityDriver implements EngineDriver {
       args.push("--model", opts.model.trim());
     }
 
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
+    const env: Record<string, string> = await resolveEngineSpawnEnv(this.id, opts, {
       ANTIGRAVITY_WORKSPACE: opts.workspacePath,
       ...(opts.envOverrides || {}),
-    };
+    });
 
     return {
       binary: bin,

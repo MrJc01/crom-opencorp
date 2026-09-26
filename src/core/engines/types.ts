@@ -32,6 +32,8 @@ export interface EngineExecutionOptions {
   extraArgs?: string[];
   envOverrides?: Record<string, string>;
   timeoutMs?: number;
+  /** Conta explícita; falha antes do spawn se não autorizada para o workspace. */
+  accountId?: string;
 }
 
 export interface EngineDriver {

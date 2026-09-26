@@ -1,3 +1,4 @@
+import { fetchOpencode } from "../../../core/contexts/execution/opencode-server.js";
 import type { ServerResponse } from "node:http";
 import { opencorpHome } from "../../../utils/paths.js";
 import { eventBus } from "../../../core/shared/event-bus.js";
@@ -376,7 +377,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
           let sessaoExiste = false;
           if (sessaoId) {
             try {
-              const checkRes = await fetch(`${baseUrl}/session/${encodeURIComponent(sessaoId)}`, {
+              const checkRes = await fetchOpencode(`${baseUrl}/session/${encodeURIComponent(sessaoId)}`, {
                 signal: AbortSignal.timeout(3000),
               });
               if (checkRes.ok) sessaoExiste = true;
@@ -384,7 +385,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
           }
 
           if (!sessaoId || !sessaoExiste) {
-            const createRes = await fetch(`${baseUrl}/session`, {
+            const createRes = await fetchOpencode(`${baseUrl}/session`, {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({
@@ -441,7 +442,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
           const baseUrlSessao = `${baseUrl}/session/${sessaoId}`;
           const listarMensagens = async (): Promise<MensagemOc[] | null> => {
             try {
-              const getRes = await fetch(`${baseUrlSessao}/message`, { signal: AbortSignal.timeout(5000) });
+              const getRes = await fetchOpencode(`${baseUrlSessao}/message`, { signal: AbortSignal.timeout(5000) });
               if (!getRes.ok) return null;
               const msgs = (await getRes.json()) as MensagemOc[];
               return Array.isArray(msgs) ? msgs : null;
@@ -472,7 +473,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
                 timersGraceAbort.delete(sessaoId);
                 const streamAtual = streamsSecretarioAtivos.get(sessaoId);
                 if (!concluida && (!streamAtual || streamAtual.res.destroyed || streamAtual.res.writableEnded)) {
-                  void fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
+                  void fetchOpencode(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => {});
                 }
               }, 25_000);
               timersGraceAbort.set(sessaoId, t);
@@ -504,7 +505,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
                 modelo: modeloAtual,
               });
 
-              await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
+              await fetchOpencode(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
               await sleep(350);
               await trocarModeloEngine(baseUrl, sessaoId, modeloAtual);
               await sleep(200);
@@ -533,7 +534,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
 
             let postConcluido = false;
             let postErro: string | null = null;
-            void fetch(`${baseUrlSessao}/message`, {
+            void fetchOpencode(`${baseUrlSessao}/message`, {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({
@@ -568,21 +569,21 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
             while (Date.now() - inicioTentativa < tentativaTimeoutMs) {
               await sleep(700);
               if (!emSegundoPlano && (res.destroyed || res.writableEnded)) {
-                void fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
+                void fetchOpencode(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
                 liberarStreamSecretario(sessaoId, res);
                 return;
               }
 
               if (!postErro) {
                 try {
-                  const statusRes = await fetch(`${baseUrl}/session/status`, { signal: AbortSignal.timeout(2000) });
+                  const statusRes = await fetchOpencode(`${baseUrl}/session/status`, { signal: AbortSignal.timeout(2000) });
                   if (statusRes.ok) {
                     const statusMap = (await statusRes.json()) as Record<string, any>;
                     const sessStatus = statusMap[sessaoId];
                     if (sessStatus?.type === "retry") {
                       const msgRetry = sessStatus.message || sessStatus.action?.message || "limite de cota atingido";
                       postErro = `motor status retry: ${msgRetry}`;
-                      await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
+                      await fetchOpencode(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
                     }
                   }
                 } catch { }
@@ -592,9 +593,9 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
                 if (modeloAtual.startsWith("opencode-go/") && postErro.includes("limit")) {
                   try {
                     const acctStore = new EngineAccountStore({ homeDir: home });
-                    const proxConta = await acctStore.rotacionarProximaConta("opencode-go");
+                    const proxConta = await acctStore.rotacionarProximaConta("opencode-go", ws.id);
                     if (proxConta) {
-                      await fetch(`${baseUrl}/abort`, { method: "POST" }).catch(() => { });
+                      await fetchOpencode(`${baseUrl}/abort`, { method: "POST" }).catch(() => { });
                       await sleep(500);
                     }
                   } catch { }
@@ -615,7 +616,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
                   }
                   break;
                 } else {
-                  await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
+                  await fetchOpencode(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
                   await limparMensagensTentativaFalha(baseUrlSessao, idsMensagensAntesTentativa, false);
                   sse("erro", { erro: `Falha ao conectar com o modelo (${postErro}). Todos os modelos de contingência foram tentados sem sucesso.`, sessao_id: sessaoId });
                   eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });
@@ -640,7 +641,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
                   const errObj = (msgComErro.info as any).error;
                   const desc = errObj?.data?.message || errObj?.message || errObj?.name || "erro na chamada de API do modelo";
                   postErro = `erro no modelo: ${desc}`;
-                  await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
+                  await fetchOpencode(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
                   continue;
                 }
 
@@ -696,14 +697,14 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
                     if (vazioDesde === null) vazioDesde = Date.now();
                     else if (Date.now() - vazioDesde > 20_000) {
                       postErro = `modelo ${modeloAtual} não gerou resposta após 20s`;
-                      await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
+                      await fetchOpencode(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
                     }
                   }
                 } else {
                   if (vazioDesde === null) vazioDesde = Date.now();
                   else if (Date.now() - vazioDesde > 20_000) {
                     postErro = `modelo ${modeloAtual} não iniciou após 20s`;
-                    await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
+                    await fetchOpencode(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
                   }
                 }
               }
@@ -725,7 +726,7 @@ export async function handleStreamRoutes(ctx: RouteContext): Promise<boolean> {
 
           if (!concluida) {
             res.off("close", onClientClose);
-            await fetch(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
+            await fetchOpencode(`${baseUrlSessao}/abort`, { method: "POST" }).catch(() => { });
             await limparMensagensTentativaFalha(baseUrlSessao, idsBaseInicial, false);
             sse("erro", { erro: "Todos os modelos candidatos esgotaram timeout ou falharam. Tente novamente em instantes.", sessao_id: sessaoId });
             eventBus.emit("secretario.mensagem", { sessao_id: sessaoId, fase: "erro" });

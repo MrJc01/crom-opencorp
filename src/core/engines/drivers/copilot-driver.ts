@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync } from "node:fs";
+import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import {
   safeExecFile as execFileAsync,
@@ -151,12 +152,9 @@ export class CopilotDriver implements EngineDriver {
       args.push("--model", opts.model.trim());
     }
 
-    const creds = resolveEngineCredentials(opts.homeDir);
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      ...creds,
+    const env: Record<string, string> = await resolveEngineSpawnEnv(this.id, opts, {
       ...(opts.envOverrides || {}),
-    };
+    });
 
     return {
       binary: bin,
