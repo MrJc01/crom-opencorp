@@ -23,3 +23,4 @@ export * from "./adapters/opencode-adapter.js";
 export * from "./adapters/codex-adapter.js";
 export * from "./adapters/codex-app-server-client.js";
 export * from "./conversation-probe.js";
+export * from "./installer/index.js";

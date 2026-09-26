@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
+import { binaryOrPreflight } from "../installer/binary-resolver.js";
 import { createServer } from "node:net";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, openSync } from "node:fs";
@@ -198,7 +199,13 @@ export class OpenCodeAdapter implements EngineAdapter {
    * Executa tarefa one-shot via CLI estruturado do OpenCode
    */
   private async *executeOneShot(input: AgentRunInput, externalSignal?: AbortSignal): AsyncIterable<AgentEvent> {
-    const bin = this.binPath || (await this.installer.status(this.homeDir)).path || "opencode";
+    let bin: string;
+    try {
+      bin = this.binPath || binaryOrPreflight(this.engineId, await this.installer.status(this.homeDir));
+    } catch (error) {
+      yield { type: "run.failed", runId: input.runId || `run-${Date.now()}`, error: normalizeEngineError(error, { engineId: this.engineId }), timestamp: new Date().toISOString() };
+      return;
+    }
     const args: string[] = ["run", "--format", "json"];
 
     if (input.model) {
@@ -477,7 +484,7 @@ export class OpenCodeAdapter implements EngineAdapter {
         });
         childPid = custom.pid;
       } else {
-        const bin = this.binPath || (await this.installer.status(this.homeDir)).path || "opencode";
+        const bin = this.binPath || binaryOrPreflight(this.engineId, await this.installer.status(this.homeDir));
         const logPath = join(this.homeDir, "logs", `opencode-${input.workspaceId}.log`);
         const logDir = dirname(logPath);
         if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });

@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
+import { installManagedEngine } from "../installer/managed-installer.js";
+import { binaryOrPreflight, resolveEngineBinary } from "../installer/binary-resolver.js";
 import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
-import { spawn } from "node:child_process";
+
 import { delimiter, join } from "node:path";
 import {
   safeExecFile as execFileAsync,
@@ -10,8 +12,6 @@ import {
   type EngineInstallStatus,
   type EngineTokenUsage,
 } from "../types.js";
-
-const INSTALL_COMMAND = "curl -fsSL https://mimo.xiaomi.com/install | bash";
 
 export class MimoDriver implements EngineDriver {
   id = "mimo";
@@ -47,6 +47,11 @@ export class MimoDriver implements EngineDriver {
   }
 
   async isInstalled(homeDir: string): Promise<EngineInstallStatus> {
+    // Precedência D3: settings.binary_path → PATH → gerenciada → detecção legada.
+    return resolveEngineBinary(this.id, { homeDir, legacyDetect: () => this.detectarInstalacaoLegada(homeDir) });
+  }
+
+  private async detectarInstalacaoLegada(homeDir: string): Promise<EngineInstallStatus> {
     for (const candidate of [...new Set(this.candidatePaths(homeDir))]) {
       if (!existsSync(candidate)) continue;
 
@@ -81,48 +86,9 @@ export class MimoDriver implements EngineDriver {
     homeDir: string,
     onProgress?: (msg: string) => void,
   ): Promise<{ success: boolean; path: string; version: string; log: string }> {
-    onProgress?.("Instalando Xiaomi MiMo Code com o script oficial...");
-
-    const logParts: string[] = [];
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn("bash", ["-c", INSTALL_COMMAND], {
-        env: { ...process.env, HOME: homeDir },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      const timeout = setTimeout(() => {
-        child.kill("SIGTERM");
-        reject(new Error("A instalação do MiMo excedeu o limite de 120 segundos"));
-      }, 120000);
-
-      const capture = (chunk: Buffer) => {
-        const text = chunk.toString();
-        logParts.push(text);
-        onProgress?.(text.trimEnd());
-      };
-      child.stdout.on("data", capture);
-      child.stderr.on("data", capture);
-      child.once("error", (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      });
-      child.once("close", (code) => {
-        clearTimeout(timeout);
-        if (code === 0) resolve();
-        else reject(new Error(`O instalador oficial do MiMo encerrou com código ${code ?? "desconhecido"}\n${logParts.join("")}`));
-      });
-    });
-
-    const status = await this.isInstalled(homeDir);
-    if (!status.installed || !status.path) {
-      throw new Error("Instalação concluída, mas o binário mimo não foi encontrado no PATH, em ~/.mimo/bin ou em ~/.mimocode/bin");
-    }
-
-    return {
-      success: true,
-      path: status.path,
-      version: status.version || "detectado",
-      log: `Xiaomi MiMo Code instalado com sucesso em ${status.path}\n${logParts.join("")}`,
-    };
+    // Somente instalação gerenciada com artefato fixado e SHA-256 aprovado;
+    // sem artefato aprovado, falha com instruções de instalação manual.
+    return installManagedEngine(this.id, homeDir, onProgress);
   }
 
   async checkHealth(homeDir: string): Promise<EngineHealth & {
@@ -168,7 +134,7 @@ export class MimoDriver implements EngineDriver {
   }
 
   getAuthInstructions(): string {
-    return "O Xiaomi MiMo Code não exige chave de API nem login obrigatório no plano gratuito padrão. Execute curl -fsSL https://mimo.xiaomi.com/install | bash no terminal para provisionar o binário.";
+    return "O Xiaomi MiMo Code não exige chave de API nem login obrigatório no plano gratuito padrão. Instale o binário pelo método oficial em https://mimo.xiaomi.com.";
   }
 
   async prepareExecution(opts: EngineExecutionOptions): Promise<{
@@ -182,7 +148,7 @@ export class MimoDriver implements EngineDriver {
     if (opts.model?.trim()) args.push("--model", opts.model.trim());
     args.push(opts.prompt);
     return {
-      binary: status.path || this.comandoPadrao,
+      binary: binaryOrPreflight(this.id, status),
       args,
       env: await resolveEngineSpawnEnv(this.id, opts, { ...(opts.envOverrides || {}) }),
       cwd: opts.workspacePath,

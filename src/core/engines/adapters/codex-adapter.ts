@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { opencorpHome } from "../../../utils/paths.js";
 import { checkEngineAuthStatus, probeCliLogin } from "../credentials-bridge.js";
 import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
+import { binaryOrPreflight } from "../installer/binary-resolver.js";
 import { CANONICAL_ENGINE_MANIFESTS, type EngineCapabilityManifest } from "../manifests.js";
 import { normalizeEngineError } from "../error-normalizer.js";
 import { CodexDriver } from "../drivers/codex-driver.js";
@@ -150,8 +151,7 @@ export class CodexAdapter implements EngineAdapter {
   private async launch(input: AgentRunInput, invocation: CodexInvocation, signal?: AbortSignal) {
     let bin = this.binPath;
     if (!this.customProcessLauncher && (!bin || bin === "codex")) {
-      const status = await this.installer.status(input.homeDir || this.homeDir);
-      bin = status.path || "codex";
+      bin = binaryOrPreflight(this.engineId, await this.installer.status(input.homeDir || this.homeDir));
     }
     const options: CodexLaunchOptions = {
       command: bin,
@@ -397,8 +397,7 @@ export class CodexAdapter implements EngineAdapter {
     const home = homeDir || this.homeDir;
     let command = this.binPath;
     if (!this.appServerLauncher && (!command || command === "codex")) {
-      const status = await this.installer.status(home);
-      command = status.path || "codex";
+      command = binaryOrPreflight(this.engineId, await this.installer.status(home));
     }
     const auth = await this.authenticator.status(home).catch(() => ({ authenticated: false }));
     const client = new CodexAppServerClient({

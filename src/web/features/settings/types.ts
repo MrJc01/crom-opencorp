@@ -49,6 +49,12 @@ export interface MotorInfo {
     method?: string;
     details?: string;
   };
+  /** Instalação gerenciada disponível só para artefatos fixados com SHA-256 aprovado. */
+  instalacaoGerenciada?: {
+    suportada: boolean;
+    versao?: string | null;
+    instrucoes?: string | null;
+  };
   health?: {
     healthy: boolean;
     statusText?: string;

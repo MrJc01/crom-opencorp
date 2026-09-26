@@ -183,7 +183,7 @@ export const TabEngines: FC<TabEnginesProps> = ({
   const instalarMotor = async (motorId: string) => {
     setInstalandoMotor(motorId);
     try {
-      showToast(`Iniciando instalação isolada de "${motorId}"...`, "aviso");
+      showToast(`Instalando versão fixada e verificada de "${motorId}"...`, "aviso");
       const res = await client.http.post<any>(`/api/motores/${encodeURIComponent(motorId)}/install`, {});
       if (!res?.ok && res?.erro) {
         throw new Error(res.erro || "Falha na instalação do motor");
@@ -498,20 +498,20 @@ export const TabEngines: FC<TabEnginesProps> = ({
 
                 <div className="flex items-center gap-2 flex-wrap shrink-0">
                   {/* Se o motor não estiver instalado, botão destacado para instalar */}
-                  {!motorAtual.installed && motorAtual.id !== "mimo" && (
+                  {!motorAtual.installed && motorAtual.instalacaoGerenciada?.suportada && (
                     <button
                       type="button"
                       disabled={instalandoMotor === motorAtual.id}
                       onClick={() => instalarMotor(motorAtual.id)}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-                      title="Instalar binário deste motor isolado em ~/.opencorp/bin"
+                      title={`Instala a versão fixada ${motorAtual.instalacaoGerenciada?.versao ?? ""}, verificada por SHA-256, em ~/.opencorp/engines`}
                     >
                       {instalandoMotor === motorAtual.id ? (
                         <Loader2 size={13} className="animate-spin" />
                       ) : (
                         <Download size={13} />
                       )}
-                      <span>{motorAtual.id === "mimo" ? "Instalar via Script" : "Instalar Motor"}</span>
+                      <span>Instalar {motorAtual.instalacaoGerenciada?.versao ? `v${motorAtual.instalacaoGerenciada.versao}` : "Motor"}</span>
                     </button>
                   )}
 
@@ -586,26 +586,31 @@ export const TabEngines: FC<TabEnginesProps> = ({
 
               {/* Banner informativo de status do motor */}
               {!motorAtual.installed && motorAtual.id !== "mimo" && (
-                <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-amber-800/40 bg-amber-950/20 text-xs text-amber-200">
+                <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-amber-800/40 bg-amber-950/20 text-xs text-amber-200" role="status">
                   <div className="flex items-center gap-2">
-                    <AlertCircle size={15} className="shrink-0 text-amber-400" />
+                    <AlertCircle size={15} className="shrink-0 text-amber-400" aria-hidden="true" />
                     <span>
-                      O binário isolado de <strong>{motorAtual.name}</strong> não está instalado em <code className="font-mono text-[11px] bg-amber-950/60 px-1 py-0.5 rounded">~/.opencorp/bin/</code>.
+                      O binário de <strong>{motorAtual.name}</strong> não foi encontrado (settings, PATH ou instalação gerenciada).{" "}
+                      {motorAtual.instalacaoGerenciada?.suportada
+                        ? "Há uma versão verificada disponível para instalação gerenciada."
+                        : motorAtual.instalacaoGerenciada?.instrucoes || "Instalação gerenciada não suportada para este motor."}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    disabled={instalandoMotor === motorAtual.id}
-                    onClick={() => instalarMotor(motorAtual.id)}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] shrink-0 transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    {instalandoMotor === motorAtual.id ? (
-                      <Loader2 size={12} className="animate-spin" />
-                    ) : (
-                      <Download size={12} />
-                    )}
-                    <span>Instalar Agora</span>
-                  </button>
+                  {motorAtual.instalacaoGerenciada?.suportada && (
+                    <button
+                      type="button"
+                      disabled={instalandoMotor === motorAtual.id}
+                      onClick={() => instalarMotor(motorAtual.id)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] shrink-0 transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {instalandoMotor === motorAtual.id ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <Download size={12} />
+                      )}
+                      <span>Instalar agora</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -617,19 +622,10 @@ export const TabEngines: FC<TabEnginesProps> = ({
                       <div>
                         <span className="font-semibold block">MiMo Code ainda não está instalado</span>
                         <span className="text-[11px] text-amber-200/80">
-                          A detecção verifica o PATH, <code>~/.mimo/bin/mimo</code> e <code>~/.mimocode/bin/mimo</code>.
+                          A detecção verifica o PATH, <code>~/.mimo/bin/mimo</code> e <code>~/.mimocode/bin/mimo</code>. O OpenCorp não executa scripts de instalação: rode o comando oficial abaixo no seu terminal.
                         </span>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      disabled={instalandoMotor === motorAtual.id}
-                      onClick={() => instalarMotor(motorAtual.id)}
-                      className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] shrink-0 transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      {instalandoMotor === motorAtual.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                      <span>Instalar via Script Oficial</span>
-                    </button>
                   </div>
                   <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-[11px] text-emerald-400">
                     <code className="select-all overflow-x-auto">$ {comandoInstalacaoMimo}</code>

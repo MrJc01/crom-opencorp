@@ -11,6 +11,10 @@ import {
   getEngineAuthInstructions,
   checkEngineAuthStatus,
   logoutCliSession,
+  ManagedEngineInstaller,
+  ManagedInstallUnsupportedError,
+  MANUAL_INSTALL_INSTRUCTIONS,
+  resolveEngineBinary,
   EngineAccountStore,
   WebLoginOrchestrator,
 } from "../../core/engines/index.js";
@@ -460,12 +464,19 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
 
     const checkHealth = rota.includes("/status") || url.searchParams.get("checkHealth") === "true";
     const rawMotores = await engineRegistry.listSummaries(home, checkHealth);
+    const instaladorGerenciado = new ManagedEngineInstaller({ homeDir: home });
     const motores = rawMotores.map((m) => {
       const authStatus = checkEngineAuthStatus(m.id, home);
+      const artefato = instaladorGerenciado.artifactFor(m.id);
       return {
         ...m,
         ativo: m.id === (runnerAtual.engine || "opencode"),
         authStatus,
+        instalacaoGerenciada: {
+          suportada: Boolean(artefato),
+          versao: artefato?.version ?? null,
+          instrucoes: artefato ? null : MANUAL_INSTALL_INSTRUCTIONS[m.id] ?? null,
+        },
       };
     });
 
@@ -698,11 +709,53 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
       enviar(res, 404, { erro: `Motor "${motorId}" não encontrado` });
       return true;
     }
+    // Somente instalação gerenciada (artefato fixado + SHA-256 aprovado).
+    // Ação explícita do usuário; jobs e chats nunca chegam aqui.
     try {
       const result = await driver.install(home);
-      enviar(res, 200, { ok: true, motorId, ...result });
+      const provenance = new ManagedEngineInstaller({ homeDir: home }).provenance(motorId);
+      enviar(res, 200, { ok: true, motorId, ...result, provenance });
     } catch (err: any) {
-      enviar(res, 500, { erro: err?.message || String(err) });
+      if (err instanceof ManagedInstallUnsupportedError) {
+        enviar(res, 409, { ok: false, motorId, suportada: false, erro: err.message, instrucoes: err.details?.manualInstructions });
+      } else {
+        enviar(res, 500, { ok: false, motorId, erro: err?.message || String(err), etapa: err?.details?.stage });
+      }
+    }
+    return true;
+  }
+
+  // GET /api/motores/:id/instalacao — origem do binário e proveniência
+  const mInstalacao = /^\/api\/motores\/([^/]+)\/instalacao$/.exec(rota);
+  if (mInstalacao && req.method === "GET") {
+    const motorId = decodeURIComponent(mInstalacao[1]!);
+    const installer = new ManagedEngineInstaller({ homeDir: home });
+    const artefato = installer.artifactFor(motorId);
+    const binario = await resolveEngineBinary(motorId, { homeDir: home });
+    enviar(res, 200, {
+      ok: true,
+      motorId,
+      binario: { instalado: binario.installed, caminho: binario.path, versao: binario.version, origem: binario.source ?? null, detalhes: binario.details },
+      gerenciada: {
+        suportada: Boolean(artefato),
+        versaoAprovada: artefato?.version ?? null,
+        origem: artefato?.source ?? null,
+        ativa: installer.provenance(motorId) ?? null,
+        instrucoesManuais: artefato ? null : MANUAL_INSTALL_INSTRUCTIONS[motorId] ?? null,
+      },
+    });
+    return true;
+  }
+
+  // POST /api/motores/:id/rollback — reativa a versão gerenciada anterior
+  const mRollback = /^\/api\/motores\/([^/]+)\/rollback$/.exec(rota);
+  if (mRollback && req.method === "POST") {
+    const motorId = decodeURIComponent(mRollback[1]!);
+    try {
+      const r = new ManagedEngineInstaller({ homeDir: home }).rollback(motorId);
+      enviar(res, 200, { ok: true, ...r });
+    } catch (err: any) {
+      enviar(res, 409, { ok: false, motorId, erro: err?.message || String(err) });
     }
     return true;
   }

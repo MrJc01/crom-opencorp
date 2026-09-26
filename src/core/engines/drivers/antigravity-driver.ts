@@ -1,4 +1,6 @@
-import { existsSync, mkdirSync, copyFileSync, chmodSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { installManagedEngine } from "../installer/managed-installer.js";
+import { binaryOrPreflight, resolveEngineBinary } from "../installer/binary-resolver.js";
 import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import {
@@ -30,6 +32,11 @@ export class AntigravityDriver implements EngineDriver {
   ];
 
   async isInstalled(homeDir: string): Promise<EngineInstallStatus> {
+    // Precedência D3: settings.binary_path → PATH → gerenciada → detecção legada.
+    return resolveEngineBinary(this.id, { homeDir, legacyDetect: () => this.detectarInstalacaoLegada(homeDir) });
+  }
+
+  private async detectarInstalacaoLegada(homeDir: string): Promise<EngineInstallStatus> {
     const managedBin = join(homeDir, ".opencorp", "bin", "agy");
     if (existsSync(managedBin)) {
       try {
@@ -83,37 +90,9 @@ export class AntigravityDriver implements EngineDriver {
     homeDir: string,
     onProgress?: (msg: string) => void,
   ): Promise<{ success: boolean; path: string; version: string; log: string }> {
-    const binDir = join(homeDir, ".opencorp", "bin");
-    mkdirSync(binDir, { recursive: true });
-    const target = join(binDir, "agy");
-
-    onProgress?.("Buscando instalação do Antigravity CLI (agy)...");
-    const candidatos = [
-      "/usr/local/bin/agy",
-      "/usr/bin/agy",
-      join(homeDir, ".local", "bin", "agy"),
-      join(homeDir, ".antigravity", "bin", "agy"),
-    ];
-
-    for (const c of candidatos) {
-      if (existsSync(c)) {
-        onProgress?.(`Copiando e isolando executável de ${c} para ${target}...`);
-        copyFileSync(c, target);
-        chmodSync(target, 0o755);
-        const { stdout } = await execFileAsync(target, ["--version"], { timeout: 3000 }).catch(() => ({ stdout: "v2.0" }));
-        return {
-          success: true,
-          path: target,
-          version: stdout.trim(),
-          log: `Antigravity CLI isolado em ${target}`,
-        };
-      }
-    }
-
-    throw new Error(
-      "Antigravity CLI (agy) não encontrado. Instale o binário oficial e tente novamente; " +
-        "o OpenCorp não substitui AGY por outro motor.",
-    );
+    // Somente instalação gerenciada com artefato fixado e SHA-256 aprovado;
+    // sem artefato aprovado, falha com instruções de instalação manual.
+    return installManagedEngine(this.id, homeDir, onProgress);
   }
 
   async checkHealth(homeDir: string): Promise<EngineHealth> {
@@ -147,7 +126,7 @@ export class AntigravityDriver implements EngineDriver {
     cwd: string;
   }> {
     const status = await this.isInstalled(opts.homeDir);
-    const bin = status.path || "agy";
+    const bin = binaryOrPreflight(this.id, status);
 
     const args: string[] = ["-p", opts.prompt, "--dangerously-skip-permissions"];
     if (opts.model && opts.model.trim()) {

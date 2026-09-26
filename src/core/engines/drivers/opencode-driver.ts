@@ -1,4 +1,6 @@
-import { existsSync, mkdirSync, copyFileSync, chmodSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { installManagedEngine } from "../installer/managed-installer.js";
+import { binaryOrPreflight, resolveEngineBinary } from "../installer/binary-resolver.js";
 import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import { envOpencodeIsolado } from "../../contexts/execution/opencode-server.js";
@@ -26,6 +28,11 @@ export class OpencodeDriver implements EngineDriver {
   ];
 
   async isInstalled(homeDir: string): Promise<EngineInstallStatus> {
+    // Precedência D3: settings.binary_path → PATH → gerenciada → detecção legada.
+    return resolveEngineBinary(this.id, { homeDir, legacyDetect: () => this.detectarInstalacaoLegada(homeDir) });
+  }
+
+  private async detectarInstalacaoLegada(homeDir: string): Promise<EngineInstallStatus> {
     const managedBin = join(homeDir, ".opencorp", "bin", "opencode");
     if (existsSync(managedBin)) {
       try {
@@ -79,71 +86,9 @@ export class OpencodeDriver implements EngineDriver {
     homeDir: string,
     onProgress?: (msg: string) => void,
   ): Promise<{ success: boolean; path: string; version: string; log: string }> {
-    const binDir = join(homeDir, ".opencorp", "bin");
-    mkdirSync(binDir, { recursive: true });
-    const target = join(binDir, "opencode");
-
-    onProgress?.("Procurando fontes do binário opencode...");
-    const candidatos = [
-      join(homeDir, ".opencode", "bin", "opencode"),
-      "/usr/local/bin/opencode",
-      "/usr/bin/opencode",
-    ];
-
-    for (const c of candidatos) {
-      if (existsSync(c)) {
-        onProgress?.(`Copiando e isolando binário de ${c} para ${target}...`);
-        copyFileSync(c, target);
-        chmodSync(target, 0o755);
-        const { stdout } = await execFileAsync(target, ["--version"], { timeout: 3000 }).catch(() => ({ stdout: "1.18.x" }));
-        const ver = stdout.trim();
-        return {
-          success: true,
-          path: target,
-          version: ver,
-          log: `Binário OpenCode isolado com sucesso em ${target} (${ver})`,
-        };
-      }
-    }
-
-    // Se não houver no sistema, tenta baixar via instalador oficial para ~/.opencorp/bin
-    onProgress?.("Baixando opencode via script oficial...");
-    try {
-      await execFileAsync("sh", ["-c", `curl -fsSL https://opencode.ai/install.sh | BINDIR="${binDir}" bash`], {
-        timeout: 60000,
-      });
-      if (existsSync(target)) {
-        chmodSync(target, 0o755);
-        const { stdout } = await execFileAsync(target, ["--version"], { timeout: 3000 }).catch(() => ({ stdout: "1.x" }));
-        return {
-          success: true,
-          path: target,
-          version: stdout.trim(),
-          log: `Download e instalação concluídos com sucesso em ${target}`,
-        };
-      }
-    } catch (err: any) {
-      // Fallback: npm install se curl falhar
-      onProgress?.("Tentando instalação via npm...");
-      try {
-        await execFileAsync("npm", ["install", "-g", "--prefix", join(homeDir, ".opencorp"), "opencode-ai"], {
-          timeout: 60000,
-        });
-        const npmBin = join(homeDir, ".opencorp", "bin", "opencode");
-        if (existsSync(npmBin)) {
-          return {
-            success: true,
-            path: npmBin,
-            version: "v1.x",
-            log: `Instalado via npm com sucesso em ${npmBin}`,
-          };
-        }
-      } catch (npmErr: any) {
-        throw new Error(`Falha ao instalar OpenCode: ${err?.message || err} / ${npmErr?.message || npmErr}`);
-      }
-    }
-
-    throw new Error("Não foi possível localizar ou instalar o binário do OpenCode.");
+    // Somente instalação gerenciada com artefato fixado e SHA-256 aprovado;
+    // sem artefato aprovado, falha com instruções de instalação manual.
+    return installManagedEngine(this.id, homeDir, onProgress);
   }
 
   async checkHealth(homeDir: string): Promise<EngineHealth> {
@@ -183,7 +128,7 @@ export class OpencodeDriver implements EngineDriver {
     cwd: string;
   }> {
     const status = await this.isInstalled(opts.homeDir);
-    const bin = status.path || "opencode";
+    const bin = binaryOrPreflight(this.id, status);
     const args: string[] = ["run"];
 
     if (opts.auto !== false) {

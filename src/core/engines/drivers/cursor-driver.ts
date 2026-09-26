@@ -1,4 +1,6 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { installManagedEngine } from "../installer/managed-installer.js";
+import { binaryOrPreflight, resolveEngineBinary } from "../installer/binary-resolver.js";
 import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import {
@@ -25,6 +27,11 @@ export class CursorDriver implements EngineDriver {
   ];
 
   async isInstalled(homeDir: string): Promise<EngineInstallStatus> {
+    // Precedência D3: settings.binary_path → PATH → gerenciada → detecção legada.
+    return resolveEngineBinary(this.id, { homeDir, legacyDetect: () => this.detectarInstalacaoLegada(homeDir) });
+  }
+
+  private async detectarInstalacaoLegada(homeDir: string): Promise<EngineInstallStatus> {
     const managedBin = join(homeDir, ".opencorp", "bin", "cursor-agent");
     const managedBinAlt = join(homeDir, ".opencorp", "bin", "agent");
     if (existsSync(managedBin)) {
@@ -91,43 +98,9 @@ export class CursorDriver implements EngineDriver {
     homeDir: string,
     onProgress?: (msg: string) => void,
   ): Promise<{ success: boolean; path: string; version: string; log: string }> {
-    const binDir = join(homeDir, ".opencorp", "bin");
-    mkdirSync(binDir, { recursive: true });
-    const target = join(binDir, "agent");
-
-    onProgress?.("Baixando e instalando Cursor Agent CLI...");
-    try {
-      const { stdout } = await execFileAsync(
-        "bash",
-        ["-c", "curl -fsSL https://cursor.com/install | bash"],
-        { timeout: 120000 },
-      );
-
-      const localBin = join(homeDir, ".local", "bin", "agent");
-      if (existsSync(localBin)) {
-        try {
-          const { symlinkSync, unlinkSync } = await import("node:fs");
-          if (existsSync(target)) unlinkSync(target);
-          symlinkSync(localBin, target);
-          const altTarget = join(binDir, "cursor-agent");
-          if (existsSync(altTarget)) unlinkSync(altTarget);
-          symlinkSync(localBin, altTarget);
-        } catch {}
-
-        const { stdout: verOut } = await execFileAsync(target, ["--version"], { timeout: 3000 }).catch(() => ({
-          stdout: "2026.x",
-        }));
-        return {
-          success: true,
-          path: target,
-          version: verOut.trim(),
-          log: `Cursor Agent CLI instalado com sucesso em ${target}\n${stdout}`,
-        };
-      }
-      throw new Error(`Binário não encontrado em ${localBin} após instalação`);
-    } catch (err: any) {
-      throw new Error(`Falha ao instalar Cursor CLI: ${err?.message || err}`);
-    }
+    // Somente instalação gerenciada com artefato fixado e SHA-256 aprovado;
+    // sem artefato aprovado, falha com instruções de instalação manual.
+    return installManagedEngine(this.id, homeDir, onProgress);
   }
 
   async checkHealth(homeDir: string): Promise<EngineHealth> {
@@ -167,7 +140,7 @@ export class CursorDriver implements EngineDriver {
     cwd: string;
   }> {
     const status = await this.isInstalled(opts.homeDir);
-    const bin = status.path || "agent";
+    const bin = binaryOrPreflight(this.id, status);
 
     // Execução headless do Cursor Agent (-p não-interativo, --force para aplicar edições)
     const args: string[] = ["-p", "--force", opts.prompt];

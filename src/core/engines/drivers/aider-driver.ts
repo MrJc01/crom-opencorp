@@ -1,4 +1,6 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { installManagedEngine } from "../installer/managed-installer.js";
+import { binaryOrPreflight, resolveEngineBinary } from "../installer/binary-resolver.js";
 import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import {
@@ -25,6 +27,11 @@ export class AiderDriver implements EngineDriver {
   ];
 
   async isInstalled(homeDir: string): Promise<EngineInstallStatus> {
+    // Precedência D3: settings.binary_path → PATH → gerenciada → detecção legada.
+    return resolveEngineBinary(this.id, { homeDir, legacyDetect: () => this.detectarInstalacaoLegada(homeDir) });
+  }
+
+  private async detectarInstalacaoLegada(homeDir: string): Promise<EngineInstallStatus> {
     const managedBin = join(homeDir, ".opencorp", "bin", "aider");
     if (existsSync(managedBin)) {
       try {
@@ -77,39 +84,9 @@ export class AiderDriver implements EngineDriver {
     homeDir: string,
     onProgress?: (msg: string) => void,
   ): Promise<{ success: boolean; path: string; version: string; log: string }> {
-    const binDir = join(homeDir, ".opencorp", "bin");
-    mkdirSync(binDir, { recursive: true });
-    const target = join(binDir, "aider");
-
-    onProgress?.("Instalando Aider via python3 / pipx em ~/.opencorp/bin...");
-    try {
-      const { stdout } = await execFileAsync(
-        "pipx",
-        ["install", "--force", "aider-chat", "--install-dir", binDir],
-        { timeout: 120000 },
-      ).catch(async () => {
-        return await execFileAsync(
-          "python3",
-          ["-m", "pip", "install", "--target", join(homeDir, ".opencorp", "lib", "aider"), "aider-chat"],
-          { timeout: 120000 },
-        );
-      });
-
-      if (existsSync(target)) {
-        const { stdout: verOut } = await execFileAsync(target, ["--version"], { timeout: 3000 }).catch(() => ({
-          stdout: "1.x",
-        }));
-        return {
-          success: true,
-          path: target,
-          version: verOut.trim(),
-          log: `Aider instalado com sucesso em ${target}\n${stdout}`,
-        };
-      }
-      throw new Error(`Binário não encontrado em ${target}`);
-    } catch (err: any) {
-      throw new Error(`Falha ao instalar Aider: ${err?.message || err}`);
-    }
+    // Somente instalação gerenciada com artefato fixado e SHA-256 aprovado;
+    // sem artefato aprovado, falha com instruções de instalação manual.
+    return installManagedEngine(this.id, homeDir, onProgress);
   }
 
   async checkHealth(homeDir: string): Promise<EngineHealth> {
@@ -143,7 +120,7 @@ export class AiderDriver implements EngineDriver {
     cwd: string;
   }> {
     const status = await this.isInstalled(opts.homeDir);
-    const bin = status.path || "aider";
+    const bin = binaryOrPreflight(this.id, status);
 
     // Execução headless do Aider via --message e --yes-always (não-interativo)
     const args: string[] = ["--message", opts.prompt, "--yes-always", "--no-auto-commits"];

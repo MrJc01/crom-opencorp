@@ -208,7 +208,7 @@ Atualizar esta tabela após cada etapa. Não marcar “concluída” apenas porq
 | 7 | Secretário independente de OpenCode | ✅ Concluída | `refactor(secretary): decouple conversations from opencode server` | 10 arquivos focados (93 testes PASS); 2 compilações TS PASS; build PASS; órfãos 0→0 |
 | 8 | Codex como segundo runtime | ✅ Concluída | `feat(codex): support persistent secretary conversations via app-server` | app-server + HITL + probe opt-in; 139 arquivos/1.327 testes, 2 TS e build PASS; órfãos 0→0 |
 | 9 | Vault e autenticação | ✅ Concluída | `feat(credentials): add scoped vault facade and ephemeral injection` | 13 testes de credenciais; 140 arquivos/1.340 testes; 2 TS PASS; OpenCode autenticado de fato |
-| 10 | Instalador gerenciado e preflight | ⬜ Pendente | — | — |
+| 10 | Instalador gerenciado e preflight | ✅ Concluída | `feat(engines): add deterministic binary resolution and verified managed installs` | 13 testes de instalação; 141 arquivos/1.352 testes; 2 TS e build PASS |
 | 11 | Saúde funcional e conformidade | ⬜ Pendente | — | — |
 | 12 | `AcpClientAdapter` | ⬜ Pendente | — | — |
 | 13 | Catálogo e rotação soberanos | ⬜ Pendente | — | — |
@@ -932,37 +932,47 @@ feat(credentials): add scoped vault facade and ephemeral injection
 
 ### Tarefas
 
-- [ ] Criar `EngineBinaryResolver` com a precedência aprovada.
-- [ ] Criar manifesto de versões aprovadas.
-- [ ] Definir URL/origem e SHA-256 por plataforma.
-- [ ] Implementar download para diretório temporário.
-- [ ] Validar checksum antes de executar/copiar.
-- [ ] Validar permissões e formato do artefato.
-- [ ] Instalar em staging.
-- [ ] Executar probe de versão/saúde.
-- [ ] Ativar por rename/symlink atômico.
-- [ ] Registrar proveniência.
-- [ ] Implementar rollback.
-- [ ] Recusar artefato sem checksum aprovado.
-- [ ] Remover `curl | bash` dos caminhos gerenciados.
-- [ ] Fazer jobs/chats chamarem somente preflight, nunca install.
-- [ ] Manter instalação como ação explícita da UI/API/CLI.
+- [x] Criar `EngineBinaryResolver` com a precedência aprovada (`src/core/engines/installer/binary-resolver.ts`).
+- [x] Criar manifesto de versões aprovadas (`installer/approved-artifacts.ts`).
+- [x] Definir URL/origem e SHA-256 por plataforma.
+- [x] Implementar download para diretório temporário (`~/.opencorp/engines/.staging/`).
+- [x] Validar checksum antes de executar/copiar.
+- [x] Validar permissões e formato do artefato (membro regular, sem `..`/absoluto, ELF/Mach-O, `0755`).
+- [x] Instalar em staging.
+- [x] Executar probe de versão/saúde.
+- [x] Ativar por rename/symlink atômico (`<id>/current → <versão>`).
+- [x] Registrar proveniência (`provenance.json`, `history.json`).
+- [x] Implementar rollback (`POST /api/motores/:id/rollback`).
+- [x] Recusar artefato sem checksum aprovado.
+- [x] Remover `curl | bash` dos caminhos gerenciados.
+- [x] Fazer jobs/chats chamarem somente preflight, nunca install.
+- [x] Manter instalação como ação explícita da UI/API/CLI.
 
 ### Testes
 
-- [ ] Caminho explícito vence `PATH`.
-- [ ] `PATH` vence instalação gerenciada.
-- [ ] Ausência retorna `PREFLIGHT_BINARY_MISSING`.
-- [ ] Checksum inválido não ativa artefato.
-- [ ] Probe falho faz rollback.
-- [ ] Interrupção durante staging preserva versão corrente.
-- [ ] Chat/job não invoca instalador.
+- [x] Caminho explícito vence `PATH`.
+- [x] `PATH` vence instalação gerenciada.
+- [x] Ausência retorna `PREFLIGHT_BINARY_MISSING`.
+- [x] Checksum inválido não ativa artefato.
+- [x] Probe falho faz rollback.
+- [x] Interrupção durante staging preserva versão corrente.
+- [x] Chat/job não invoca instalador.
 
 ### Critérios de aceite
 
-- [ ] Instalações são auditáveis e reversíveis.
-- [ ] Nenhuma execução instala software implicitamente.
-- [ ] Motores sem artefato verificável aparecem como instalação gerenciada não suportada.
+- [x] Instalações são auditáveis e reversíveis.
+- [x] Nenhuma execução instala software implicitamente.
+- [x] Motores sem artefato verificável aparecem como instalação gerenciada não suportada.
+
+### Registro da Etapa 10 — 26/09/2026
+
+- Executor: Claude Code (Opus 5.5).
+- Precedência: `settings.engines[id].binary_path` (se inválido, falha sem cair para outra fonte) → `PATH` → `~/.opencorp/engines/<id>/current/bin/` → detecção legada do driver (`~/.opencorp/bin`, diretórios comuns), mantida só como último recurso para instalações antigas. `settings.engines[id].binary_path` existia no schema desde a Etapa 2, mas nada o lia.
+- Artefatos aprovados, com o SHA-256 publicado pelo GitHub para cada asset de release (conferido em 26/09/2026): Codex `rust-v0.157.1` (linux-x64, linux-arm64, darwin-x64, darwin-arm64) e OpenCode `v1.18.32` (linux-x64, linux-arm64). A estrutura interna dos tarballs linux-x64 foi conferida lendo só o início do stream (`codex-x86_64-unknown-linux-musl` e `opencode` na raiz). Claude Code, Cursor, Copilot, AGY, Aider, MiMo e Crom Agente aparecem como "instalação gerenciada não suportada", com a instrução oficial de instalação manual.
+- Todos os `install()` dos drivers delegam ao `ManagedEngineInstaller`; os instaladores antigos (`curl | bash`, `npm -g`, cópia de binário local com caminho fixo `/home/j/...`) foram removidos. `prepareExecution` e os adaptadores lançam `PREFLIGHT_BINARY_MISSING` em vez de tentar executar um nome solto como `"codex"`.
+- API: `POST /api/motores/:id/install` (409 com instruções quando não suportado), `GET /api/motores/:id/instalacao` (origem do binário, versão aprovada e proveniência), `POST /api/motores/:id/rollback`. A lista de motores expõe `instalacaoGerenciada`; a UI só oferece o botão quando há artefato verificado. O comando do MiMo continua visível para o usuário copiar e rodar por conta própria.
+- Resolução real nesta máquina após a mudança: OpenCode, Claude, Cursor, AGY, Crom Agente e MiMo vêm do `PATH`; Codex e Copilot, da detecção legada `~/.opencorp/bin`; Aider não está instalado.
+- Validações: `tests/managed-installer.test.ts` 13 PASS (tarballs reais gerados no teste; downloader e probe injetados); teste arquitetural confirma que só a rota `/install`, os adaptadores e o instalador chamam `install()` e que não há `curl | sh` em `src/core`/`src/server`; suíte completa 141 arquivos — 1.352 PASS, 1 falha intermitente em `modelos-governance-e2e` (passou 2/2 isolado; registrada em P-05); TypeScript backend/frontend PASS; build PASS; órfãos 0.
 
 ### Commits sugeridos
 
@@ -1425,6 +1435,8 @@ Registrar aqui apenas itens novos, com etapa de origem, impacto e decisão. Não
 | P-01 | 8 | Probe real do Codex não executado | Capacidade verificada apenas com fake determinístico | Executar `OPENCORP_REAL_PROBES=codex OPENCORP_PROBE_CODEX_MODEL=<modelo> npm run test:real` quando o usuário autorizar o consumo de cota |
 | P-03 | 9 | `POST /api/motores/:id/desconectar` reescreve `runner.json` com `engine: "opencode"` | Fallback silencioso para OpenCode (viola D1) | Corrigir na Etapa 13/14, junto com a seleção de motor padrão |
 | P-04 | 9 | Etapa 6 declarou autenticação local do OpenCode que não funcionava | Servidor OpenCode acessível sem senha por qualquer processo local | Corrigido na Etapa 9 (HTTP Basic verificado contra o binário real) |
+| P-05 | 10 | `tests/modelos-governance-e2e.test.ts` falhou 1× na suíte completa | Intermitente sob carga (passou 2/2 isolado) | Observar na Etapa 15; investigar se repetir |
+| P-06 | 10 | Artefatos aprovados limitados a Codex e OpenCode | Demais motores dependem de instalação manual | Adicionar entradas apenas com SHA-256 publicado pelo fornecedor |
 | P-02 | 8 | Sessões do adaptador Codex ficam em memória | Após reinício, a conversa é retomada via `thread/resume` pelo UUID; título/modelo da sessão se perdem | Aceito; persistência de metadados fica para a Etapa 13/14 se necessária |
 
 ---

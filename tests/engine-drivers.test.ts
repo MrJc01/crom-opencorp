@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -57,7 +58,9 @@ describe("EngineRegistry & Multi-Engine Drivers", () => {
 
   it("não instala um wrapper AGY que executa outro motor", async () => {
     const agy = engineRegistry.get("antigravity")!;
-    await expect(agy.install(tempHome)).rejects.toThrow(/não substitui AGY por outro motor/);
+    // Sem artefato verificado, a instalação é recusada — nunca um wrapper para outro motor.
+    await expect(agy.install(tempHome)).rejects.toThrow(/Instalação gerenciada não suportada/);
+    expect(existsSync(join(tempHome, ".opencorp", "bin", "agy"))).toBe(false);
   });
 
   it("deve listar summaries com status de instalação e isolamento", async () => {

@@ -1,4 +1,6 @@
-import { existsSync, mkdirSync, copyFileSync, chmodSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { installManagedEngine } from "../installer/managed-installer.js";
+import { binaryOrPreflight, resolveEngineBinary } from "../installer/binary-resolver.js";
 import { resolveEngineSpawnEnv } from "../../credentials/credentials-store.js";
 import { join } from "node:path";
 import {
@@ -25,6 +27,11 @@ export class CromAgenteDriver implements EngineDriver {
   ];
 
   async isInstalled(homeDir: string): Promise<EngineInstallStatus> {
+    // Precedência D3: settings.binary_path → PATH → gerenciada → detecção legada.
+    return resolveEngineBinary(this.id, { homeDir, legacyDetect: () => this.detectarInstalacaoLegada(homeDir) });
+  }
+
+  private async detectarInstalacaoLegada(homeDir: string): Promise<EngineInstallStatus> {
     const managedBin = join(homeDir, ".opencorp", "bin", "crom-agente");
     if (existsSync(managedBin)) {
       try {
@@ -79,59 +86,9 @@ export class CromAgenteDriver implements EngineDriver {
     homeDir: string,
     onProgress?: (msg: string) => void,
   ): Promise<{ success: boolean; path: string; version: string; log: string }> {
-    const binDir = join(homeDir, ".opencorp", "bin");
-    mkdirSync(binDir, { recursive: true });
-    const target = join(binDir, "crom-agente");
-
-    onProgress?.("Verificando binário existente do crom-agente...");
-    const candidatos = [
-      "/home/j/Documentos/GitHub/crom-agente/crom-agente",
-      join(homeDir, "Documentos", "GitHub", "crom-agente", "crom-agente"),
-    ];
-
-    for (const c of candidatos) {
-      if (existsSync(c)) {
-        onProgress?.(`Copiando binário de ${c} para ${target}...`);
-        copyFileSync(c, target);
-        chmodSync(target, 0o755);
-        const { stdout } = await execFileAsync(target, ["version"], { timeout: 3000 }).catch(() => ({ stdout: "dev" }));
-        const ver = stdout.trim();
-        return {
-          success: true,
-          path: target,
-          version: ver,
-          log: `Binário crom-agente instalado com sucesso em ${target} (${ver})`,
-        };
-      }
-    }
-
-    // Se o binário não estiver compilado, compila usando Go se o repo estiver presente
-    const repoSrc = "/home/j/Documentos/GitHub/crom-agente";
-    if (existsSync(repoSrc)) {
-      onProgress?.("Compilando crom-agente a partir do código fonte Go...");
-      try {
-        await execFileAsync("go", ["build", "-o", target, "./cmd/crom-agente"], {
-          cwd: repoSrc,
-          timeout: 120000,
-        });
-        if (existsSync(target)) {
-          chmodSync(target, 0o755);
-          const { stdout } = await execFileAsync(target, ["version"], { timeout: 3000 }).catch(() => ({ stdout: "dev" }));
-          return {
-            success: true,
-            path: target,
-            version: stdout.trim(),
-            log: `crom-agente compilado e instalado com sucesso em ${target}`,
-          };
-        }
-      } catch (err: any) {
-        throw new Error(`Falha ao compilar crom-agente com Go: ${err?.message || err}`);
-      }
-    }
-
-    throw new Error(
-      "Não foi possível localizar o binário ou código-fonte do crom-agente para instalação.",
-    );
+    // Somente instalação gerenciada com artefato fixado e SHA-256 aprovado;
+    // sem artefato aprovado, falha com instruções de instalação manual.
+    return installManagedEngine(this.id, homeDir, onProgress);
   }
 
   async checkHealth(homeDir: string): Promise<EngineHealth> {
@@ -175,7 +132,7 @@ export class CromAgenteDriver implements EngineDriver {
     cwd: string;
   }> {
     const status = await this.isInstalled(opts.homeDir);
-    const bin = status.path || "crom-agente";
+    const bin = binaryOrPreflight(this.id, status);
 
     const args: string[] = [
       "run",
